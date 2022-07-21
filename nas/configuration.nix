@@ -27,6 +27,9 @@
     config.boot.kernelPackages.r8168
   ];
 
+  # power
+  powerManagement.cpuFreqGovernor = "ondemand";
+
   networking.hostName = "nas"; # Define your hostname.
   networking.hostId = "d523969b"; # Define your hostname.
   networking.useDHCP = false;
@@ -36,9 +39,6 @@
   # ];
   networking.interfaces.enp0s20u7.ipv4.addresses = [
     { address = "10.99.99.1"; prefixLength = 24; }
-  ];
-  networking.interfaces.enp0s20u1.ipv4.addresses = [
-    {address = "10.9.9.1"; prefixLength = 24;}
   ];
   services.zerotierone.enable = true;
   services.zerotierone.joinNetworks = [

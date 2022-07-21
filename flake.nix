@@ -26,7 +26,8 @@
 
       apps."${system}" = {
         deploy = pkgs.writeScriptBin "deploy" ''
-          nixos-rebuild --target-host root@rhauer.duckdns.org --flake .#nas switch
+          host=root@rhauer.duckdns.org
+          nixos-rebuild --target-host $host --build-host $host --flake .#nas switch
         '';
       };
     };
