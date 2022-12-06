@@ -2,13 +2,16 @@
 # your system.  Help is available in the configuration.nix(5) man page
 # and in the NixOS manual (accessible by running ‘nixos-help’).
 
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, pkgs-unstable, ... }:
 
 {
   imports =
     [ # Include the results of the hardware scan.
       ./hardware-configuration.nix
       ./users.nix
+      ./age.nix
+      ./monit
+      ../roles/sshuttle-server
     ];
 
   nixpkgs.config.allowUnfreePredicate = pkg: builtins.elem (lib.getName pkg) [
@@ -25,14 +28,27 @@
   boot.blacklistedKernelModules = [ "r8169" ];
   boot.extraModulePackages = [
     config.boot.kernelPackages.r8168
+    # config.boot.kernelPackages.rtl8821au
+    config.boot.kernelPackages.rtl88x2bu
+    # BrosTrend wifi stick
+    # (pkgs-unstable.linuxPackages.rtl8812au.override {
+    #   kernel = config.boot.kernelPackages.kernel;
+    # })
   ];
 
   # power
   powerManagement.cpuFreqGovernor = "ondemand";
 
+  # wifi
+  networking.wireless.enable = true;
+  networking.wireless.networks.Parasit_5G.psk = "@PW@";
+  networking.wireless.networks.Parasit_5G.priority = 10;
+  networking.wireless.networks.Parasit.psk = "@PW@";
+  networking.wireless.environmentFile = config.age.secrets.wifi-parasit.path;
+
   networking.hostName = "nas"; # Define your hostname.
   networking.hostId = "d523969b"; # Define your hostname.
-  networking.useDHCP = false;
+  networking.useDHCP = true;
   networking.interfaces.enp3s0.useDHCP = true;
   # networking.interfaces.enp3s0.ipv4.addresses = [
   #   { address = "192.168.178.2"; prefixLength = 24; }
@@ -128,10 +144,12 @@
       zfs
     ];
     preStart = ''
-      set -e
-      cat /run/passwd_enc >/dev/null
-      passwd=$(cat /run/passwd_enc) \
-      || passwd=$(ssh root@10.99.99.2 cat /tmp/passwd_enc)
+      set -ex
+      if ! cat /run/passwd_enc >/dev/null; then
+        passwd=$(ssh root@10.99.99.2 cat /tmp/passwd_enc)
+      else
+        passwd=$(cat /run/passwd_enc)
+      fi
       enc_datasets="pool11/enc rpool/enc"
       for ds in $enc_datasets; do
         echo $passwd | zfs load-key $ds && echo "key loaded successfully"
