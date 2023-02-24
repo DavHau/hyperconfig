@@ -10,7 +10,10 @@
       ./hardware-configuration.nix
       ./users.nix
       ./samba.nix
+      ../deployment.nix
     ];
+
+  deployAddress = "10.241.225.42";
 
   nixpkgs.config.allowUnfreePredicate = pkg: builtins.elem (lib.getName pkg) [
     "zerotierone"
