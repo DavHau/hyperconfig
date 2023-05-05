@@ -1,4 +1,5 @@
 { self, lib, inputs, ... }: let
+  l = lib // builtins;
   system = "x86_64-linux";
   nixosSystem = inputs.nixpkgs.lib.nixosSystem;
   pkgs-unstable = import inputs.nixpkgs-unstable.legacyPackages.${system};
@@ -8,20 +9,34 @@
   defaultModules = [
     inputs.agenix.nixosModules.age
   ];
-in {
-  flake = {
-    nixosConfigurations.nas = nixosSystem {
-      inherit specialArgs system;
-      modules = defaultModules ++ [
-        (self + /nas/configuration.nix)
-      ];
-    };
+  # collect all nixos module which define hosts, prefixed with `host-`.
+  hostModules' =
+    l.filterAttrs (name: module: l.hasPrefix "host-" name) self.modules.nixos;
 
-    nixosConfigurations.manu-nas = nixosSystem {
-      inherit specialArgs system;
-      modules = defaultModules ++ [
-        (self + /manu-nas/configuration.nix)
-      ];
-    };
-  };
+  # remove the `host-` prefix for the configuration names;
+  hostModules = l.flip l.mapAttrs' hostModules'
+    (name: module: {name = l.removePrefix "host-" name; value = module;});
+
+in {
+  flake.nixosConfigurations = l.flip l.mapAttrs hostModules (name: module:
+    nixosSystem {
+      inherit specialArgs;
+      modules = defaultModules ++ [module];
+    }
+  );
+  # flake = {
+  #   nixosConfigurations.nas = nixosSystem {
+  #     inherit specialArgs system;
+  #     modules = defaultModules ++ [
+  #       (self + /nas/configuration.nix)
+  #     ];
+  #   };
+
+  #   nixosConfigurations.manu-nas = nixosSystem {
+  #     inherit specialArgs system;
+  #     modules = defaultModules ++ [
+  #       (self + /manu-nas/configuration.nix)
+  #     ];
+  #   };
+  # };
 }

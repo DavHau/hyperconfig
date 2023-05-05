@@ -11,11 +11,13 @@
       ./users.nix
       ./age.nix
       ./monit
-      ../nix/modules/nixos/role-sshuttle-server
+      ../role-sshuttle-server
       ../deployment.nix
     ];
 
   deployAddress = "rhauer.duckdns.org";
+
+  nixpkgs.hostPlatform = "x86_64-linux";
 
   nixpkgs.config.allowUnfreePredicate = pkg: builtins.elem (lib.getName pkg) [
     "zerotierone"
