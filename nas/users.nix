@@ -20,16 +20,25 @@ in
       home = "${home}/guest";
     };
 
+    # restic backup user
+    # users
+    backup = {
+      isNormalUser = true;
+      extraGroups = [];
+      home = "${home}/backup";
+      openssh.authorizedKeys.keys = config.users.users.root.openssh.authorizedKeys.keys ++ [
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE34Y0sKbX62j9OW3s0UBgx4TEp5cZGmpG4CN3sjddxG root@grmpf-nix"
+      ];
+    };
+
     # users
     david = {
       isNormalUser = true;
       extraGroups = [ "wheel" ];
       home = "${home}/david";
       openssh.authorizedKeys.keys = config.users.users.root.openssh.authorizedKeys.keys ++ [
-        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE34Y0sKbX62j9OW3s0UBgx4TEp5cZGmpG4CN3sjddxG root@grmpf-nix"
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDuhpzDHBPvn8nv8RH1MRomDOaXyP4GziQm7r3MZ1Syk grmpf"
       ];
-      hashedPassword =
-        "$6$lOG0YKCp6YiW$Wb755rf4oWTwlBqfKZHgq5b5NN3M2TwOGovVI/gP8p27wI0NcneGKCn6LqK61UCdSIJ/0nohKSLTSBpJBqjSh/";
     };
 
     # manu = {
