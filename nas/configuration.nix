@@ -11,7 +11,7 @@
       ./users.nix
       ./age.nix
       ./monit
-      ../roles/sshuttle-server
+      ../nix/modules/nixos/sshuttle-server
       ../deployment.nix
     ];
 
