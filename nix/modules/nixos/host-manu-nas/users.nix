@@ -18,6 +18,7 @@ in
         "$6$hiNroqxtkx.i/iPZ$wzRqI7bV15gIyAJPGBM1NNoUfVUcysdEhUVnU5KEkrF4fkJG1zVikixT6BGcz7xoPPOaqTKoedZLOF/5sOOAq.";
       openssh.authorizedKeys.keys = [
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDuhpzDHBPvn8nv8RH1MRomDOaXyP4GziQm7r3MZ1Syk grmpf"
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUPqwy1ToPHzd5bG8TLqp26PkzA8HUeA3p4l34El80V root@nas"
       ];
       extraGroups = ["manu"];
     };

@@ -23,6 +23,8 @@
       fsType = "vfat";
     };
 
+  nixpkgs.hostPlatform = "x86_64-linux";
+
   swapDevices = [ ];
 
   # Enables DHCP on each ethernet and wireless interface. In case of scripted networking
