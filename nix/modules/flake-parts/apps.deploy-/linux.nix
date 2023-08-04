@@ -17,6 +17,16 @@
         ])}:$PATH"
         set -x
 
+        # if --local is passed, execute nixos-rebuild locally with --target host set to the remote host
+        if [[ "''${1:-}" == "--local" ]]; then
+          shift
+          nixos-rebuild \
+            -j4 \
+            --target-host root@"${hostName}" \
+            switch --flake ".#${attrName}"
+          exit 0
+        fi
+
         rsync -r --delete --exclude .git \
           ${self}/ root@${hostName}:/tmp/deploy-flake
 
