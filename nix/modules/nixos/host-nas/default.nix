@@ -13,6 +13,7 @@
       ./monit
       ../role-sshuttle-server
       ../deployment.nix
+      ../role-parasit.nix
     ];
 
   deployAddress = "rhauer.duckdns.org";
@@ -43,13 +44,6 @@
 
   # power
   powerManagement.cpuFreqGovernor = "ondemand";
-
-  # wifi
-  networking.wireless.enable = true;
-  networking.wireless.networks.Parasit_5G.psk = "@PW@";
-  networking.wireless.networks.Parasit_5G.priority = 10;
-  networking.wireless.networks.Parasit.psk = "@PW@";
-  networking.wireless.environmentFile = config.age.secrets.wifi-parasit.path;
 
   networking.hostName = "nas"; # Define your hostname.
   networking.hostId = "d523969b"; # Define your hostname.
@@ -82,6 +76,7 @@
     (pkgs.writeScriptBin
       "enter-password"
       (builtins.readFile ./enter-password.sh))
+    borgbackup
     htop
     vim
   ];

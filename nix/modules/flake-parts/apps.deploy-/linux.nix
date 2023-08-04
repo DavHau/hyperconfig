@@ -17,7 +17,8 @@
         ])}:$PATH"
         set -x
 
-        rsync -r --delete ${self}/ root@${hostName}:/tmp/deploy-flake
+        rsync -r --delete --exclude .git \
+          ${self}/ root@${hostName}:/tmp/deploy-flake
 
         ssh root@${hostName} nixos-rebuild \
           -j4 \

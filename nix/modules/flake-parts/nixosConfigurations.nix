@@ -2,7 +2,7 @@
   l = lib // builtins;
   system = "x86_64-linux";
   nixosSystem = inputs.nixpkgs.lib.nixosSystem;
-  pkgs-unstable = import inputs.nixpkgs-unstable.legacyPackages.${system};
+  pkgs-unstable = inputs.nixpkgs-unstable.legacyPackages.${system};
   specialArgs = {
     inherit pkgs-unstable;
   };
@@ -21,22 +21,10 @@ in {
   flake.nixosConfigurations = l.flip l.mapAttrs hostModules (name: module:
     nixosSystem {
       inherit specialArgs;
-      modules = defaultModules ++ [module];
+      modules =
+        defaultModules
+        ++ [module]
+        ++[{networking.hostName = name;}];
     }
   );
-  # flake = {
-  #   nixosConfigurations.nas = nixosSystem {
-  #     inherit specialArgs system;
-  #     modules = defaultModules ++ [
-  #       (self + /nas/configuration.nix)
-  #     ];
-  #   };
-
-  #   nixosConfigurations.manu-nas = nixosSystem {
-  #     inherit specialArgs system;
-  #     modules = defaultModules ++ [
-  #       (self + /manu-nas/configuration.nix)
-  #     ];
-  #   };
-  # };
 }
