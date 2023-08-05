@@ -21,7 +21,7 @@
       ];
 
       imports = [
-        ./nix/modules/flake-parts/all-modules.nix
+        ./modules/flake-parts/all-modules.nix
       ];
     };
 }
