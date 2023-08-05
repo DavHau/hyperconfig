@@ -9,7 +9,7 @@
     };
     agenix.url = "github:ryantm/agenix/0.13.0";
     devshell.url = "github:numtide/devshell";
-    nixpkgs.url = "nixpkgs/nixos-22.11";
+    nixpkgs.url = "nixpkgs/nixos-23.05";
     nixpkgs-unstable.url = "nixpkgs/nixos-unstable";
   };
 
