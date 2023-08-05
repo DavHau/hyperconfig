@@ -11,6 +11,7 @@
       ./users.nix
       ./age.nix
       ./monit
+      ./sync-from-manu.nix
       ../role-sshuttle-server
       ../deployment.nix
       ../role-parasit.nix
@@ -33,9 +34,9 @@
   # WOL doesn't work if r8169 used
   boot.blacklistedKernelModules = [ "r8169" ];
   boot.extraModulePackages = [
-    config.boot.kernelPackages.r8168
+    # config.boot.kernelPackages.r8168
     # config.boot.kernelPackages.rtl8821au
-    config.boot.kernelPackages.rtl88x2bu
+    # config.boot.kernelPackages.rtl88x2bu
     # BrosTrend wifi stick
     # (pkgs-unstable.linuxPackages.rtl8812au.override {
     #   kernel = config.boot.kernelPackages.kernel;
