@@ -17,13 +17,47 @@
         ])}:$PATH"
         set -x
 
+        POSITIONAL_ARGS=()
+
+        while [[ $# -gt 0 ]]; do
+          case $1 in
+            -e|--extension)
+              EXTENSION="$2"
+              shift # past argument
+              shift # past value
+              ;;
+            -s|--searchpath)
+              SEARCHPATH="$2"
+              shift # past argument
+              shift # past value
+              ;;
+            --local)
+              local=YES
+              shift # past argument
+              ;;
+            -*|--*)
+              echo "Unknown option $1"
+              exit 1
+              ;;
+            *)
+              POSITIONAL_ARGS+=("$1") # save positional arg
+              shift # past argument
+              ;;
+          esac
+        done
+
+        set -- "''${POSITIONAL_ARGS[@]}" # restore positional parameters
+
+        mode="''${POSITIONAL_ARGS[0]:-switch}"
+
         # if --local is passed, execute nixos-rebuild locally with --target host set to the remote host
-        if [[ "''${1:-}" == "--local" ]]; then
+        if [[ "''${local:-}" == "YES" ]]; then
           shift
           nixos-rebuild \
             -j4 \
             --target-host root@"${hostName}" \
-            switch --flake ".#${attrName}"
+            --flake ".#${attrName}" \
+            ''${mode:-switch}
           exit 0
         fi
 
@@ -32,7 +66,8 @@
 
         ssh root@${hostName} nixos-rebuild \
           -j4 \
-          switch --flake /tmp/deploy-flake#'"${attrName}"'
+          --flake /tmp/deploy-flake#'"${attrName}"' \
+          ''${mode:-switch}
       '';
 
     mkLinuxDeployApp = attrName: config:
