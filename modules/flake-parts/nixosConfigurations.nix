@@ -4,12 +4,12 @@
   nixosSystem = inputs.nixpkgs.lib.nixosSystem;
   pkgs-unstable = inputs.nixpkgs-unstable.legacyPackages.${system};
   specialArgs = {
-    inherit pkgs-unstable;
+    inherit inputs pkgs-unstable;
   };
   defaultModules = [
     inputs.agenix.nixosModules.age
   ];
-  # collect all nixos module which define hosts, prefixed with `host-`.
+  # collect all nixos modules which define hosts, prefixed with `host-`.
   hostModules' =
     l.filterAttrs (name: module: l.hasPrefix "host-" name) self.modules.nixos;
 
