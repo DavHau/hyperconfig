@@ -3,6 +3,7 @@
     devShells.default = inputs.devshell.legacyPackages.${system}.mkShell {
       packages = [
         inputs.agenix.packages.${system}.agenix
+        inputs.clan-core.packages.${system}.default
       ];
       env = [
         {name="EDITOR"; value="vim";}
