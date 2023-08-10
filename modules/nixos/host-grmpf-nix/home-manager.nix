@@ -57,33 +57,33 @@ in {
       '';
     };
 
-  programs.vscode.mutableExtensionsDir = false;
-  programs.vscode = {
-    enable = true;
-    package = pkgs.vscode;
-    extensions = with pkgs.vscode-extensions; [
-      jnoortheen.nix-ide
-      editorconfig.editorconfig
-      davidanson.vscode-markdownlint
-      timonwong.shellcheck
-      eamodio.gitlens
-      ms-vscode.cpptools
-      jock.svg
-      streetsidesoftware.code-spell-checker
-      bungcip.better-toml
-      ms-python.python
-      mkhl.direnv
-      github.copilot
-      ms-python.vscode-pylance
-      ms-vsliveshare.vsliveshare
-      # arrterian.nix-env-selector
-      # arrterian.nix-env-selector
-      # serayuzgur.crates
-      # tamasfe.even-better-toml
-      # coenraads.bracket-pair-colorizer-2
-      # esbenp.prettier-vscode
-      # emmanuelbeziat.vscode-great-icons
-    ];
+    programs.vscode.mutableExtensionsDir = false;
+    programs.vscode = {
+      enable = true;
+      package = pkgs.vscode;
+      extensions = with pkgs.vscode-extensions; [
+        jnoortheen.nix-ide
+        editorconfig.editorconfig
+        davidanson.vscode-markdownlint
+        timonwong.shellcheck
+        eamodio.gitlens
+        ms-vscode.cpptools
+        jock.svg
+        streetsidesoftware.code-spell-checker
+        bungcip.better-toml
+        ms-python.python
+        mkhl.direnv
+        github.copilot
+        ms-python.vscode-pylance
+        ms-vsliveshare.vsliveshare
+        # arrterian.nix-env-selector
+        # arrterian.nix-env-selector
+        # serayuzgur.crates
+        # tamasfe.even-better-toml
+        # coenraads.bracket-pair-colorizer-2
+        # esbenp.prettier-vscode
+        # emmanuelbeziat.vscode-great-icons
+      ];
 
       userSettings = {
         "files.autoSave" = "onFocusChange";
