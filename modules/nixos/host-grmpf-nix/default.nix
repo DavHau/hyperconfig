@@ -26,6 +26,7 @@ in
       ./clan-secrets.nix
       ./nixpkgs.nix
       ./nix-lazy.nix
+      ./rbw.nix
     ];
 
   # NIX settings
@@ -198,8 +199,8 @@ in
     # boot.kernelPackages = pkgs.linuxPackages_5_4;
 
   # FILESYSTEMS
-    boot.tmpOnTmpfs = true;
-    boot.tmpOnTmpfsSize = "80%";
+    boot.tmp.useTmpfs = true;
+    boot.tmp.tmpfsSize = "80%";
     boot.supportedFilesystems = [ "ntfs" "exfat" "zfs" "apfs" ];
     boot.initrd.supportedFilesystems = ["zfs"];
     # required by zfs
@@ -232,8 +233,8 @@ in
 
   # ssh server
   #services.openssh.enable = true;
-  services.openssh.passwordAuthentication = false;
-  services.openssh.kbdInteractiveAuthentication = false;
+  services.openssh.settings.PasswordAuthentication = false;
+  services.openssh.settings.KbdInteractiveAuthentication = false;
 
 # BLUETOOTH
   hardware.bluetooth.enable = true;
