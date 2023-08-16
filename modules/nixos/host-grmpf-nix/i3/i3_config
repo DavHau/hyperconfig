@@ -18,6 +18,9 @@ set $super Mod4
 
 set $mod Mod4
 
+# lock screen
+bindsym Control+Mod1+l exec i3lock -c 000000
+
 # Start XDG autostart .desktop files using dex. See also
 # https://wiki.archlinux.org/index.php/XDG_Autostart
 exec --no-startup-id dex --autostart --environment i3
@@ -27,7 +30,7 @@ exec --no-startup-id dex --autostart --environment i3
 # or left-clicking anywhere into the window while holding the floating modifier.
 tiling_drag modifier titlebar
 
-bindsym $mod+d exec --no-startup-id dmenu_run
+# bindsym $mod+d exec --no-stfartup-id dmenu_run
 # A more modern dmenu replacement is rofi:
 # bindcode $mod+40 exec "rofi -modi drun,run -show drun"
 # There also is i3-dmenu-desktop which only displays applications shipping a
@@ -208,7 +211,6 @@ bar {
 # custom keybinds
 # bindsym $control+$alt+Right workspace next
 # bindsym $control+$alt+Left workspace prev
-bindsym $control+$alt+l exec i3lock
 
 # Sreen brightness controls
 bindsym XF86MonBrightnessUp exec bash -c "[ $(brightnessctl g) -lt 1000 ] && brightnessctl s +1% || brightnessctl s +3%" # increase screen brightness
