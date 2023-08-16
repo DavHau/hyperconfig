@@ -1,12 +1,8 @@
 { self, lib, inputs, ... }: {
   perSystem = { config, self', inputs', pkgs, system, ... }: {
-    devShells.default = inputs.devshell.legacyPackages.${system}.mkShell {
+    devShells.default = pkgs.mkShell {
       packages = [
         inputs.agenix.packages.${system}.agenix
-        inputs.clan-core.packages.${system}.default
-      ];
-      env = [
-        {name="EDITOR"; value="vim";}
       ];
     };
   };
