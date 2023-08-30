@@ -27,7 +27,7 @@ in
       ./nixpkgs.nix
       ./nix-lazy.nix
       ./rbw.nix
-    ];
+  ];
 
   # NIX settings
   nix.package = inputs.nix.packages.x86_64-linux.default;
@@ -102,7 +102,7 @@ in
       # system analysis
       baobab bmon btop nix-top s-tui pciutils powertop usbutils lsof dstat latencytop sysprof filelight nvme-cli
       # nix tools
-      comma nix-prefetch-git nixos-generators nix-tree nix-diff cntr
+      comma nix-output-monitor nix-prefetch-git nixos-generators nix-tree nix-diff cntr
       inputs.nil.packages.x86_64-linux.nil
       # fs tools
       sshfs-fuse ranger mc
