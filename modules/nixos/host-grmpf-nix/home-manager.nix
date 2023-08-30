@@ -134,6 +134,7 @@ in {
         pack.compression = 0;
         # core.editor = "codium";
         init.defaultBranch = "main";
+        rebase.autoStash = true;
       };
       aliases = {
         cl = "clone";
