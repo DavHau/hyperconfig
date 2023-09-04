@@ -2,7 +2,7 @@
 # your system.  Help is available in the configuration.nix(5) man page
 # and in the NixOS manual (accessible by running ‘nixos-help’).
 
-{ lib, config, pkgs, ... }:
+{ lib, inputs, config, pkgs, ... }:
 
 {
   imports =
@@ -11,6 +11,9 @@
       ./users.nix
       ./samba.nix
       ../deployment.nix
+      inputs.disko.nixosModules.disko
+      ./disko-config.nix
+      ./disko-installer.nix
     ];
 
   deployAddress = "10.241.225.42";
@@ -19,7 +22,7 @@
     "zerotierone"
   ];
 
-  fileSystems."/raid".device = "/dev/md127";
+  # fileSystems."/raid".device = "/dev/md127";
   fileSystems."/var/log".fsType = "tmpfs";
 
   # raid
@@ -34,7 +37,8 @@
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
 
-  networking.hostName = "manu-nas"; # Define your hostname.
+  networking.hostName = "manu-nas";
+  networking.hostId = "19795521";
 
   services.zerotierone.enable = true;
   services.zerotierone.joinNetworks = [
@@ -43,6 +47,6 @@
 
   # Enable the OpenSSH daemon.
   services.openssh.enable = true;
-  system.stateVersion = "22.05"; # Did you read the comment?
+  system.stateVersion = lib.mkForce "22.05"; # Did you read the comment?
 
 }
