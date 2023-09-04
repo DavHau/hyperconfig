@@ -40,6 +40,6 @@
   services.zerotierone.enable = true;
   services.zerotierone.joinNetworks = [
     "af415e486f4514ce" # home
-    # "12ac4a1e71b04480" # manu
+    "12ac4a1e71b04480" # manu
   ];
 }

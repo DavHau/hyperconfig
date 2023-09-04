@@ -106,7 +106,7 @@ in
       inputs.nil.packages.x86_64-linux.nil
       # fs tools
       sshfs-fuse ranger mc
-      # virtualization
+      # virtualisation
       podman-compose vagrant arion qemu docker-compose
       # cloud stuff
       google-cloud-sdk
@@ -298,6 +298,7 @@ in
 
   virtualisation.docker.enable = true;
   virtualisation.podman.enable = true;
+  virtualisation.waydroid.enable = true;
   # virtualisation.podman.dockerSocket.enable = true;
   virtualisation.podman.extraPackages = [ pkgs.zfs ];
   systemd.services.podman.serviceConfig = {
