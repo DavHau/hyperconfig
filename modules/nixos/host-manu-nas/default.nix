@@ -13,7 +13,6 @@
       ../deployment.nix
       inputs.disko.nixosModules.disko
       ./disko-config.nix
-      ./disko-installer.nix
     ];
 
   deployAddress = "10.241.225.42";
@@ -29,9 +28,6 @@
   # boot.initrd.services.swraid.enable = true;
   # boot.initrd.services.swraid.mdadmConf =
   #   config.environment.etc."mdadm.conf".text;
-  environment.etc."mdadm.conf".text = ''
-    ARRAY /dev/md/omv-manu:raid01 metadata=1.2 name=omv-manu:raid01 UUID=a862555a:12582ddd:09fadcb9:36c42614
-  '';
 
   # Use the systemd-boot EFI boot loader.
   boot.loader.systemd-boot.enable = true;

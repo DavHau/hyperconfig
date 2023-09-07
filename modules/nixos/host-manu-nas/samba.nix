@@ -39,6 +39,8 @@
       #   "force user" = "manu";
       #   "force group" = "users";
       # };
+      # mount via:
+      #   sudo mount -t cifs -o user=manu //10.241.225.42/manu /mnt/1
       manu = {
         path = "/raid/manu";
         browseable = "yes";

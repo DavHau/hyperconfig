@@ -201,7 +201,7 @@ in
   # FILESYSTEMS
     boot.tmp.useTmpfs = true;
     boot.tmp.tmpfsSize = "80%";
-    boot.supportedFilesystems = [ "ntfs" "exfat" "zfs" "apfs" ];
+    boot.supportedFilesystems = [ "ntfs" "exfat" "zfs" "apfs" "cifs" "smb" ];
     boot.initrd.supportedFilesystems = ["zfs"];
     # required by zfs
     networking.hostId = "5eb1bf28";
