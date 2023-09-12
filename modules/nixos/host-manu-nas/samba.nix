@@ -51,6 +51,11 @@
         # requires setting a password via `smbpasswd -a`
         "force user" = "manu";
         "force group" = "users";
+        # Apple fixes for SMB
+        #   Fixes: The operation can't be complete because the item XXX is in use.
+        "fruit:aapl" = "yes";
+        "fruit:time machine" = "yes";
+        "vfs objects" = "catia fruit streams_xattr";
       };
     };
   };
