@@ -23,11 +23,12 @@ in
       ./printing.nix
       ./nix-registry.nix
       ./low-battery-power-off.nix
-      ./clan-secrets.nix
       ./nixpkgs.nix
       ./nix-lazy.nix
       ./rbw.nix
   ];
+
+  sops.age.keyFile = "/var/lib/sops-nix/key.txt";
 
   # NIX settings
   nix.package = inputs.nix.packages.x86_64-linux.default;
@@ -88,7 +89,7 @@ in
   environment.systemPackages = with pkgs; [
   # cmdline tools
       # default tools
-      wget vim killall file pv gptfdisk screen gnumake python3 jq fx exa
+      wget vim killall file pv gptfdisk screen gnumake python3 jq fx eza
       # version control
       git gti gitg github-cli tig ghq h github-cli lazygit git-absorb
       # search

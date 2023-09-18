@@ -2,7 +2,8 @@
   perSystem = { config, self', inputs', pkgs, system, ... }: {
     devShells.default = pkgs.mkShell {
       packages = [
-        inputs.agenix.packages.${system}.agenix
+        inputs'.clan-core.packages.clan-cli
+        inputs'.agenix.packages.agenix
       ];
     };
   };

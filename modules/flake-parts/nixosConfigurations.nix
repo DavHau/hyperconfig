@@ -18,6 +18,7 @@
     (name: module: {name = l.removePrefix "host-" name; value = module;});
 
 in {
+
   # flake.nixosConfigurations = l.flip l.mapAttrs hostModules (name: module:
   #   nixosSystem {
   #     inherit specialArgs;
@@ -28,14 +29,13 @@ in {
   #   }
   # );
   flake.nixosConfigurations = inputs.clan-core.lib.buildClan {
-    directory = ./.;
+    directory = self;
     inherit specialArgs;
     machines = {
       grmpf-nix = {
         nixpkgs.hostPlatform = "x86_64-linux";
         imports = [
           ../nixos/host-grmpf-nix
-          {foo.bar = self;}
         ];
       };
     };

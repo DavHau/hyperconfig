@@ -9,10 +9,10 @@
     };
     agenix.url = "github:ryantm/agenix/0.13.0";
     devshell.url = "github:numtide/devshell";
-    nixpkgs.url = "nixpkgs/nixos-23.05";
-    nixpkgs-unstable.url = "nixpkgs/nixos-unstable";
+    nixpkgs.url = "nixpkgs/nixos-unstable";
+    nixpkgs-unstable.follows = "nixpkgs";
 
-    home-manager.url = "github:nix-community/home-manager/release-23.05";
+    home-manager.url = "github:nix-community/home-manager";
     home-manager.inputs.nixpkgs.follows = "nixpkgs-unstable";
 
     nil.url = "github:oxalica/nil";

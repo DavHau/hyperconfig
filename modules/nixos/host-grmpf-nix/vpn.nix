@@ -8,6 +8,8 @@
   services.mullvad-vpn.enable = true;
   networking.firewall.checkReversePath = "loose";
 
+  # sops.secrets.vpn-genesis-preshared-key = {} ;
+
   networking.wireguard.interfaces = {
     # "wg0" is the network interface name. You can name the interface arbitrarily.
     # wg0 = {
