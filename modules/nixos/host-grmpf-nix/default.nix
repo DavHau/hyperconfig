@@ -254,8 +254,8 @@ in
    hardware.pulseaudio.package = pkgs.pulseaudioFull;
    hardware.pulseaudio.extraModules = [ pkgs.pulseaudio-modules-bt ];
   services.pipewire.enable = true;
-  systemd.user.services.pipewire.wantedBy = ["graphical-session.target"];
-  systemd.user.services.pipewire.partOf = ["graphical-session.target"];
+  # systemd.user.services.pipewire.wantedBy = ["graphical-session.target"];
+  # systemd.user.services.pipewire.partOf = ["graphical-session.target"];
   services.pipewire.alsa.enable = true;
   services.pipewire.pulse.enable = true;
   services.pipewire.jack.enable = true;
