@@ -255,14 +255,13 @@ in
    hardware.pulseaudio.package = pkgs.pulseaudioFull;
    hardware.pulseaudio.extraModules = [ pkgs.pulseaudio-modules-bt ];
   services.pipewire.enable = true;
-  # systemd.user.services.pipewire.wantedBy = ["graphical-session.target"];
-  # systemd.user.services.pipewire.partOf = ["graphical-session.target"];
   services.pipewire.alsa.enable = true;
   services.pipewire.pulse.enable = true;
   services.pipewire.jack.enable = true;
+  services.pipewire.socketActivation = false;
   services.gnome.gnome-keyring.enable = true;
   services.hardware.bolt.enable = true;
-  #security.rtkit.enable = true;
+  # security.rtkit.enable = true;
 
 # VIDEO
   services.xserver.videoDrivers = [ "displaylink" "modesetting" ];
