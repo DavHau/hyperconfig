@@ -1,5 +1,5 @@
 {
   age.secrets = {
-    monit-gmail.file = ../../../../secrets/monit-gmail;
+    monit-gmail.file = ../../../secrets/monit-gmail;
   };
 }

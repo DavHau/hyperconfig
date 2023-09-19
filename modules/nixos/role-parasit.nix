@@ -10,6 +10,6 @@
   networking.wireless.environmentFile = config.age.secrets.wifi-parasit.path;
 
   age.secrets = {
-    wifi-parasit.file = ../../../secrets/wifi-parasit.age;
+    wifi-parasit.file = ../../secrets/wifi-parasit.age;
   };
 }

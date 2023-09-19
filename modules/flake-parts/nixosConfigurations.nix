@@ -31,13 +31,12 @@ in {
   flake.nixosConfigurations = inputs.clan-core.lib.buildClan {
     directory = self;
     inherit specialArgs;
-    machines = {
-      grmpf-nix = {
-        nixpkgs.hostPlatform = "x86_64-linux";
-        imports = [
-          ../nixos/host-grmpf-nix
-        ];
-      };
-    };
+    machines = l.flip l.mapAttrs hostModules (name: module: {
+      nixpkgs.hostPlatform = "x86_64-linux";
+      imports =
+        defaultModules
+        ++ [module]
+        ++[{networking.hostName = name;}];
+    });
   };
 }
