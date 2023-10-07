@@ -5,6 +5,7 @@ in
 {
   imports =
     [
+      ../etc-hosts.nix
       inputs.home-manager.nixosModule
       inputs.retiolum.nixosModules.retiolum
       ./hardware-configuration.nix
@@ -269,7 +270,7 @@ in
   # security.rtkit.enable = true;
 
 # VIDEO
-  services.xserver.videoDrivers = [ "displaylink" "modesetting" ];
+  services.xserver.videoDrivers = [ "modesetting" ];
 
 # DESKTOP (GUI)
   # Enable the X11 windowing system.
@@ -359,12 +360,6 @@ in
   # networking.networkmanager.insertNameservers = [
   #   "8.8.8.8"
   # ];
-
-  # hosts
-  networking.extraHosts = ''
-    127.0.0.1       localhost
-  '';
-
 
   # This value determines the NixOS release with which your system is to be
   # compatible, in order to avoid breaking some software such as database

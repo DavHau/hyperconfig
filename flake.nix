@@ -9,7 +9,7 @@
     };
     agenix.url = "github:ryantm/agenix/0.13.0";
     devshell.url = "github:numtide/devshell";
-    nixpkgs.url = "nixpkgs/nixos-unstable";
+    nixpkgs.url = "nixpkgs/nixpkgs-unstable";
     nixpkgs-unstable.follows = "nixpkgs";
 
     home-manager.url = "github:nix-community/home-manager";
@@ -26,6 +26,7 @@
     clan-core.inputs.nixpkgs.follows = "nixpkgs";
 
     sops-nix.url = "github:Mic92/sops-nix";
+    sops-nix.inputs.nixpkgs.follows = "nixpkgs";
 
     disko.url = "github:nix-community/disko";
     disko.inputs.nixpkgs.follows = "nixpkgs";
