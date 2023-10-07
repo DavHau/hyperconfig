@@ -159,7 +159,7 @@ in
       # 3d tools
         freecad
       # IDEs and text editors
-        jetbrains.pycharm-community atom
+        jetbrains.pycharm-community
       # messengers
         tdesktop element-desktop
       # torrent
