@@ -28,7 +28,7 @@ in {
   #       ++[{networking.hostName = name;}];
   #   }
   # );
-  flake.nixosConfigurations = inputs.clan-core.lib.buildClan {
+  flake.nixosConfigurations = (inputs.clan-core.lib.buildClan {
     directory = self;
     inherit specialArgs;
     machines = l.flip l.mapAttrs hostModules (name: module: {
@@ -38,5 +38,5 @@ in {
         ++ [module]
         ++[{networking.hostName = name;}];
     });
-  };
+  }).nixosConfigurations;
 }

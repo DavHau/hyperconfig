@@ -17,7 +17,7 @@
 
     nil.url = "github:oxalica/nil";
 
-    nix.url = "github:nixos/nix/2.17.0";
+    nix.url = "github:nixos/nix/2.18.1";
     nix-lazy.url = "github:edolstra/nix/lazy-trees";
 
     retiolum.url = "github:mic92/retiolum";
@@ -32,6 +32,9 @@
 
     nixos-images.url = "github:nix-community/nixos-images";
     nixos-images.flake = false;
+
+    envfs.url = "github:Mic92/envfs";
+    envfs.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = inputs@{ flake-parts, ... }:

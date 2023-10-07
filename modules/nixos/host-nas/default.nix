@@ -32,15 +32,19 @@
 
   # kernel
   # WOL doesn't work if r8169 used
-  boot.blacklistedKernelModules = [ "r8169" ];
+  # boot.blacklistedKernelModules = [ "r8169" ];
   boot.extraModulePackages = [
+    # needed for gigabit ethernet adapter, since r8169 is disabled above
+    # TODO: currently broken, but could be updated in nixpkgs
     # config.boot.kernelPackages.r8168
+
+
     # config.boot.kernelPackages.rtl8821au
     # config.boot.kernelPackages.rtl88x2bu
     # BrosTrend wifi stick
-    # (pkgs-unstable.linuxPackages.rtl8812au.override {
-    #   kernel = config.boot.kernelPackages.kernel;
-    # })
+    (pkgs-unstable.linuxPackages.rtl8812au.override {
+      kernel = config.boot.kernelPackages.kernel;
+    })
   ];
 
   # power
@@ -49,7 +53,7 @@
   networking.hostName = "nas"; # Define your hostname.
   networking.hostId = "d523969b"; # Define your hostname.
   networking.useDHCP = true;
-  networking.interfaces.enp3s0.useDHCP = true;
+  # networking.interfaces.enp3s0.useDHCP = true;
   # networking.interfaces.enp3s0.ipv4.addresses = [
   #   { address = "192.168.178.2"; prefixLength = 24; }
   # ];
@@ -69,7 +73,7 @@
 
   # banning
   # fail2nix enables sshd module by default
-  services.fail2ban.enable = true;
+  # services.fail2ban.enable = true;
 
   # mDNS
   services.avahi.enable = true;

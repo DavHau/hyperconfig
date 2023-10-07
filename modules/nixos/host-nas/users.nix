@@ -10,6 +10,7 @@ in
       openssh.authorizedKeys.keys = [
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDuhpzDHBPvn8nv8RH1MRomDOaXyP4GziQm7r3MZ1Syk grmpf"
       ];
+      hashedPassword = "$6$0e8VNHlEiYMZiVMi$ouKAFUMdvrGrGeV/i7DhQgx16uu7RajCgj/aeQgm24ATlNcZPCF5lml8BoTFWzikZID2lIGaG.lVkvXXBklTK1";
     };
 
     # guest

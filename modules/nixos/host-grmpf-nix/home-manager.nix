@@ -129,7 +129,7 @@ in {
       enable = true;
       userName = "DavHau";
       userEmail = "hsngrmpf+github@gmail.com";
-      delta.enable = true;
+      difftastic.enable = true;
       extraConfig = {
         pack.compression = 0;
         # core.editor = "codium";
