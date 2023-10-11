@@ -254,20 +254,19 @@ in
 
 # AUDIO
   sound.enable = true;
-  hardware.pulseaudio.enable = false;
-  # bluetooth audio
-  hardware.pulseaudio.package = pkgs.pulseaudioFull;
-  hardware.pulseaudio.extraModules = [ pkgs.pulseaudio-modules-bt ];
   services.pipewire.enable = true;
   services.pipewire.alsa.enable = true;
   services.pipewire.pulse.enable = true;
   services.pipewire.jack.enable = true;
+  services.gnome.gnome-keyring.enable = true;
   services.pipewire.socketActivation = false;
   systemd.user.services.pipewire.wantedBy = ["graphical-session.target"];
-  systemd.user.services.pipewire.partOf = ["graphical-session.target"];
-  services.gnome.gnome-keyring.enable = true;
-  services.hardware.bolt.enable = true;
+  systemd.user.services.pipewire-pulse.wantedBy = ["pipewire.service"];
+  # systemd.user.services.pipewire.wantedBy = ["graphical-session.target"];
   # security.rtkit.enable = true;
+  # services.pipewire.systemWide = true;
+
+  services.hardware.bolt.enable = true;
 
 # VIDEO
   services.xserver.videoDrivers = [ "modesetting" ];

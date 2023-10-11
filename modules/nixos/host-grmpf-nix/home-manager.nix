@@ -76,6 +76,8 @@ in {
         github.copilot
         ms-python.vscode-pylance
         ms-vsliveshare.vsliveshare
+        ms-vscode.cpptools
+        ms-vscode.cmake-tools
         # arrterian.nix-env-selector
         # arrterian.nix-env-selector
         # serayuzgur.crates

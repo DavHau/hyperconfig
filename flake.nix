@@ -17,7 +17,7 @@
 
     nil.url = "github:oxalica/nil";
 
-    nix.url = "github:nixos/nix/2.18.1";
+    nix.url = "github:nixos/nix/2.17.1";
     nix-lazy.url = "github:edolstra/nix/lazy-trees";
 
     retiolum.url = "github:mic92/retiolum";
