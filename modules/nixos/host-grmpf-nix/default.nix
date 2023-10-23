@@ -28,6 +28,7 @@ in
       ./nix-lazy.nix
       ./rbw.nix
       ./envfs.nix
+      ./devenv.nix
   ];
 
   sops.age.keyFile = "/var/lib/sops-nix/key.txt";
