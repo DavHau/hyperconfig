@@ -74,6 +74,7 @@ in {
         ms-python.python
         mkhl.direnv
         github.copilot
+        github.copilot-chat
         ms-python.vscode-pylance
         ms-vsliveshare.vsliveshare
         ms-vscode.cpptools
@@ -133,7 +134,7 @@ in {
       userEmail = "hsngrmpf+github@gmail.com";
       difftastic.enable = true;
       extraConfig = {
-        pack.compression = 0;
+        # pack.compression = 0;
         # core.editor = "codium";
         init.defaultBranch = "main";
         rebase.autoStash = true;

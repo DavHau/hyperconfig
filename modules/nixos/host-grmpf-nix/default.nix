@@ -29,6 +29,7 @@ in
       ./rbw.nix
       ./envfs.nix
       ./devenv.nix
+      ./blueberry.nix
   ];
 
   sops.age.keyFile = "/var/lib/sops-nix/key.txt";
