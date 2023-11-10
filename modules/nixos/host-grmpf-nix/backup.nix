@@ -32,6 +32,7 @@ in {
     user = "root";
     doInit = false;
     repo = "backup@192.168.194.2:/pool11/enc/data/home/backup/notebook";
+    environment.BORG_RELOCATED_REPO_ACCESS_IS_OK = "y";
     encryption.mode = "repokey";
     encryption.passCommand =
       ''ssh backup@192.168.194.2 'cat pw.txt' '';
