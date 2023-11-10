@@ -30,6 +30,7 @@ in
       ./envfs.nix
       ./devenv.nix
       ./blueberry.nix
+      ./nix-heuristic-gc.nix
   ];
 
   sops.age.keyFile = "/var/lib/sops-nix/key.txt";
@@ -143,7 +144,7 @@ in
       ark # archive viewer/extractor
       # chia # blockchain
       httpie # make http requests
-      kazam # screen recorder
+      flameshot kazam # screen shot + recoding
       psensor # watch Sensors
       libreoffice # office
       gparted # partitioning

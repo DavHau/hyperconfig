@@ -39,6 +39,9 @@
 
     devenv.url = "github:cachix/devenv";
     devenv.inputs.nixpkgs.follows = "nixpkgs";
+
+    nix-heuristic-gc.url = "github:risicle/nix-heuristic-gc";
+    nix-heuristic-gc.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = inputs@{ flake-parts, ... }:

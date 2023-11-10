@@ -13,6 +13,7 @@
       "vscode-extension-github-copilot"
       "vscode-extension-github-copilot-chat"
       "vscode-extension-MS-python-vscode-pylance"
+      "vscode-extension-ms-python-vscode-pylance"
       "vscode-extension-ms-vsliveshare-vsliveshare"
       "zerotierone"
     ];
