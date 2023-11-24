@@ -42,6 +42,9 @@
 
     nix-heuristic-gc.url = "github:risicle/nix-heuristic-gc";
     nix-heuristic-gc.inputs.nixpkgs.follows = "nixpkgs";
+
+    srvos.url = "github:nix-community/srvos";
+    srvos.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = inputs@{ flake-parts, ... }:
