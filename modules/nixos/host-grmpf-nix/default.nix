@@ -159,7 +159,7 @@ in
       # media viewer
         vlc okular gwenview
       # graphical tools
-        gimp spectacle inkscape
+        gimp spectacle inkscape darktable
       # 3d tools
         freecad
       # IDEs and text editors

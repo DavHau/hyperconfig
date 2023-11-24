@@ -79,6 +79,10 @@ in {
         ms-vsliveshare.vsliveshare
         ms-vscode.cpptools
         ms-vscode.cmake-tools
+        bradlc.vscode-tailwindcss
+        dbaeumer.vscode-eslint
+        esbenp.prettier-vscode
+        denoland.vscode-deno
         # arrterian.nix-env-selector
         # arrterian.nix-env-selector
         # serayuzgur.crates
@@ -112,6 +116,9 @@ in {
         "magit.code-path" = "codium";
         "nix.enableLanguageServer" = true;
         "nix.serverPath" = "nil";
+
+        # deno
+        "deno.enable" = true;
       };
 
       keybindings = [

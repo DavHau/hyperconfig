@@ -24,6 +24,10 @@
     "/home/*/**/GPUCache"  # electron
     "/home/*/temp"
     "/home/*/VirtualBox VMs"
+
+    # filter out nix dev-shell builds
+    "/home/**/*.o"
+    "/home/**/nix/outputs"
   ];
 
 in {
