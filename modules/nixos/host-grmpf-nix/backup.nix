@@ -28,6 +28,10 @@
     # filter out nix dev-shell builds
     "/home/**/*.o"
     "/home/**/nix/outputs"
+
+    # invokeai models
+    "/home/**/invokeai/models"
+    "/home/**/.ollama"
   ];
 
 in {

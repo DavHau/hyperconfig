@@ -83,6 +83,8 @@ in {
         dbaeumer.vscode-eslint
         esbenp.prettier-vscode
         denoland.vscode-deno
+        justusadam.language-haskell
+        haskell.haskell
         # arrterian.nix-env-selector
         # arrterian.nix-env-selector
         # serayuzgur.crates

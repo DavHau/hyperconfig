@@ -32,6 +32,7 @@ in {
   flake.nixosConfigurations = (inputs.clan-core.lib.buildClan {
     directory = self;
     inherit specialArgs;
+    clanName = "grmpf";
     machines = l.flip l.mapAttrs hostModules (name: module: {
       nixpkgs.hostPlatform = "x86_64-linux";
       imports =

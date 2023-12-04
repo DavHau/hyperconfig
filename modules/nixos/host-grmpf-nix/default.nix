@@ -31,6 +31,8 @@ in
       ./devenv.nix
       ./blueberry.nix
       ./nix-heuristic-gc.nix
+      ./ollama.nix
+
   ];
 
   sops.age.keyFile = "/var/lib/sops-nix/key.txt";
@@ -134,10 +136,12 @@ in
       appimage-run
       # clan
       inputs.clan-core.packages.x86_64-linux.clan-cli
+      # AI
+      ollama
 
   # GUI tools
       arandr  # configure monitors
-      blender  # graphics software0
+      blender  # graphics software
       ferdium  # all chat apps in one program
       blueberry  # maage bluetooth devices
       kcalc # calculator
