@@ -29,7 +29,7 @@ in {
   #       ++[{networking.hostName = name;}];
   #   }
   # );
-  flake.nixosConfigurations = (inputs.clan-core.lib.buildClan {
+  flake = inputs.clan-core.lib.buildClan {
     directory = self;
     inherit specialArgs;
     clanName = "grmpf";
@@ -40,5 +40,5 @@ in {
         ++ [module]
         ++[{networking.hostName = name;}];
     });
-  }).nixosConfigurations;
+  };
 }

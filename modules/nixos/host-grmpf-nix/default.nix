@@ -5,6 +5,7 @@ in
 {
   imports =
     [
+      ../common.nix
       ../etc-hosts.nix
       inputs.home-manager.nixosModule
       inputs.retiolum.nixosModules.retiolum
