@@ -45,6 +45,14 @@ in
     "nixpkgs=${pkgs.path}"
   ];
   nix.settings.max-jobs = 40;
+  nix.settings.auto-allocate-uids = true;
+  nix.settings.system-features = [
+    "kvm"
+    "nixos-test"
+    "benchmark"
+    "big-parallel"
+    "uid-range"
+  ];
   nix.nrBuildUsers = 100;
   nix.settings.trusted-users = [ "root" "grmpf" ];
   nix.settings.substituters = [
@@ -67,7 +75,7 @@ in
     http2 = true
     http-connections = 200
     builders-use-substitutes = true
-    experimental-features = nix-command flakes ca-derivations impure-derivations recursive-nix
+    experimental-features = nix-command flakes ca-derivations impure-derivations recursive-nix auto-allocate-uids cgroups
     keep-outputs = true
     keep-derivations = true
     log-lines = 25
@@ -191,7 +199,7 @@ in
   programs.sysdig.enable = true;
   services.usbmuxd.enable = true;
   services.udisks2.enable = true;
-  # programs.starship.enable = true;
+  programs.starship.enable = true;
   # services.nscd.enableNsncd = true;
 
   # block middle click paste
@@ -344,8 +352,15 @@ in
 
 
 # FIREWALL
-  networking.firewall.allowedTCPPorts = [ 631 655 ];
-  networking.firewall.allowedUDPPorts = [ 26000 631 655 ];
+  networking.firewall.allowedTCPPorts = [
+    # 631 655
+  ];
+  networking.firewall.allowedUDPPorts = [
+    # 26000
+    # 631
+    # 655
+    6881  # deluge
+  ];
   networking.firewall.allowPing = true;
   boot.kernelModules = [ "br_netfilter" "xboxdrv" ];
   boot.kernel.sysctl = {

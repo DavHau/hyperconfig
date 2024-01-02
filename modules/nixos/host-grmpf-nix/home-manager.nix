@@ -112,6 +112,7 @@ in {
         # "editor.formatOnSave" = true;
         # "editor.formatOnPaste" = true;
         "breadcrumbs.enabled" = true;
+        "terminal.integrated.scrollback" = 10000;
         # git
         "git.confirmSync" = false;
         "git.autofetch" = false;
