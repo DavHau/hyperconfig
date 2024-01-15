@@ -85,6 +85,8 @@ in {
         denoland.vscode-deno
         justusadam.language-haskell
         haskell.haskell
+        rust-lang.rust-analyzer
+        vscodevim.vim
         # arrterian.nix-env-selector
         # arrterian.nix-env-selector
         # serayuzgur.crates
@@ -119,9 +121,13 @@ in {
         "magit.code-path" = "codium";
         "nix.enableLanguageServer" = true;
         "nix.serverPath" = "nil";
+        "rust-analyzer.check.command" = "clippy";
 
         # deno
         "deno.enable" = true;
+
+        # vim
+        "vim.useCtrlKeys" = false;
       };
 
       keybindings = [

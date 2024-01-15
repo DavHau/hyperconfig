@@ -33,7 +33,6 @@ in
       ./blueberry.nix
       ./nix-heuristic-gc.nix
       ./ollama.nix
-
   ];
 
   sops.age.keyFile = "/var/lib/sops-nix/key.txt";
@@ -120,7 +119,7 @@ in
       baobab bmon btop nix-top s-tui pciutils powertop usbutils lsof dstat latencytop sysprof filelight nvme-cli
       # nix tools
       comma nix-output-monitor nix-prefetch-git nixos-generators nix-tree nix-diff cntr
-      inputs.nil.packages.x86_64-linux.nil
+      inputs.nil.packages.x86_64-linux.nil nix-init
       # fs tools
       sshfs-fuse ranger mc
       # virtualisation
@@ -195,12 +194,13 @@ in
   programs.wireshark.enable = true;
   hardware.ledger.enable = true;
   services.fwupd.enable = true;
-  services.smokeping.enable = true;
+  # services.smokeping.enable = true;
   programs.sysdig.enable = true;
   services.usbmuxd.enable = true;
   services.udisks2.enable = true;
   programs.starship.enable = true;
   # services.nscd.enableNsncd = true;
+  # services.unifi.enable = true;
 
   # block middle click paste
   systemd.services.xmousepasteblock = {
@@ -294,6 +294,10 @@ in
   services.xserver.layout = "us";
   services.xserver.xkbVariant = "altgr-intl";
   services.xserver.xkbOptions = "eurosign:e";
+  services.xserver.displayManager.sessionCommands = ''
+    ${pkgs.flameshot}/bin/flameshot &
+    ${pkgs.blueberry}/bin/blueberry-tray &
+  '';
 
   # services.xserver.xautolock = {
   #   enable = true;

@@ -9,7 +9,8 @@
     };
     agenix.url = "github:ryantm/agenix/0.13.0";
     devshell.url = "github:numtide/devshell";
-    nixpkgs.url = "git+https://github.com/DavHau/nixpkgs.git?ref=dave";
+    # nixpkgs.url = "git+https://github.com/DavHau/nixpkgs.git?ref=dave";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     nixpkgs-unstable.follows = "nixpkgs";
 
     home-manager.url = "github:nix-community/home-manager";

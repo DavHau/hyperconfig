@@ -43,5 +43,6 @@
   services.zerotierone.joinNetworks = [
     "af415e486f4514ce" # home
     "12ac4a1e71b04480" # manu
+    "7c31a21e86f9a75c" # lassulus
   ];
 }
