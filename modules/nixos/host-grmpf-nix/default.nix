@@ -35,6 +35,10 @@ in
       ./ollama.nix
   ];
 
+  home-manager.users.grmpf.imports = [
+    ./vscode.nix
+  ];
+
   sops.age.keyFile = "/var/lib/sops-nix/key.txt";
 
   # NIX settings
