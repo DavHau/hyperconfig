@@ -25,19 +25,19 @@
     #   ];
     # };
 
-    wg1 = {
-      ips = [ "10.254.1.3/32" ];
-      privateKeyFile = "/home/grmpf/wireguard-keys/genesis";
-      peers = [# For a client configuration, one peer entry for the server will suffice.
-        {
-          publicKey = "nk7vdKuuGaMLorJCP5yh13WnaNl9urdzKaus+1GMTnE=";
-          presharedKeyFile = config.sops.secrets.vpn-genesis-preshared-key.path;
-          allowedIPs = [ "10.254.1.1/32" "10.254.0.0/24" "10.254.2.0/24" ];
-          endpoint = "34.174.161.245:59990";
-          persistentKeepalive = 25;
-        }
-      ];
-    };
+    # wg1 = {
+    #   ips = [ "10.254.1.3/32" ];
+    #   privateKeyFile = "/home/grmpf/wireguard-keys/genesis";
+    #   peers = [# For a client configuration, one peer entry for the server will suffice.
+    #     {
+    #       publicKey = "nk7vdKuuGaMLorJCP5yh13WnaNl9urdzKaus+1GMTnE=";
+    #       presharedKeyFile = config.sops.secrets.vpn-genesis-preshared-key.path;
+    #       allowedIPs = [ "10.254.1.1/32" "10.254.0.0/24" "10.254.2.0/24" ];
+    #       endpoint = "34.174.161.245:59990";
+    #       persistentKeepalive = 25;
+    #     }
+    #   ];
+    # };
   };
   services.zerotierone.enable = true;
   services.zerotierone.joinNetworks = [

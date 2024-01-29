@@ -53,7 +53,7 @@ in
     "uid-range"
   ];
   nix.nrBuildUsers = 100;
-  nix.settings.trusted-users = [ "root" "grmpf" ];
+  nix.settings.trusted-users = [ "root" ];
   nix.settings.substituters = [
     "https://cache.nixos.org/"
     "https://nix-community.cachix.org"
@@ -181,7 +181,7 @@ in
       # torrent
         deluge
       # gaming
-        openra
+        moonlight-qt
       # VPN
         mullvad-vpn protonvpn-gui
       # wallets
