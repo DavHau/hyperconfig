@@ -1,7 +1,4 @@
-{ config, pkgs, lib, ... }: let
-  l = lib // builtins;
-in {
-
+{ config, pkgs, lib, ... }: {
   home.activation.boforeCheckLinkTargets = {
     after = [];
     before = [ "checkLinkTargets" ];

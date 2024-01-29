@@ -1,11 +1,9 @@
-{ config, pkgs, lib, ... }: let
-  l = lib // builtins;
-in {
+{ pkgs, lib, ... }: {
 
   home-manager.useGlobalPkgs = true;
   home-manager.useUserPackages = true;
 
-  home-manager.users.grmpf = rec {
+  home-manager.users.grmpf = {
     home.stateVersion = "22.11";
     # ich hab kein dunst
     services.dunst.enable = true;
