@@ -33,10 +33,7 @@ in
       ./blueberry.nix
       ./nix-heuristic-gc.nix
       ./ollama.nix
-  ];
-
-  home-manager.users.grmpf.imports = [
-    ./vscode.nix
+      ./fonts.nix
   ];
 
   sops.age.keyFile = "/var/lib/sops-nix/key.txt";
@@ -98,7 +95,6 @@ in
   systemd.services.nix-daemon.environment.SSH_AUTH_SOCK = "/run/user/1000/ssh-agent";
   # nix.distributedBuilds = true;
 
-  environment.sessionVariables.TERMINAL = [ "alacritty" ];
   environment.sessionVariables.TERM = [ "xterm-256color" ];
   environment.variables = {
     SSH_AUTH_SOCK = "/run/user/1000/ssh-agent";

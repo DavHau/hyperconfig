@@ -1,27 +1,27 @@
 { config, pkgs, lib, ... }: {
-  home.activation.boforeCheckLinkTargets = {
-    after = [];
-    before = [ "checkLinkTargets" ];
-    data = ''
-      for userDir in /home/grmpf/.config/{VSCodium,Code}/User; do
-        rm -rf $userDir/settings.json
-      done
-    '';
-  };
+  # home.activation.boforeCheckLinkTargets = {
+  #   after = [];
+  #   before = [ "checkLinkTargets" ];
+  #   data = ''
+  #     for userDir in /home/grmpf/.config/{VSCodium,Code}/User; do
+  #       rm -rf $userDir/settings.json
+  #     done
+  #   '';
+  # };
 
-  home.activation.afterWriteBoundary = {
-    after = [ "writeBoundary" ];
-    before = [];
-    data = ''
-      for userDir in /home/grmpf/.config/{VSCodium,Code}/User; do
-        rm -rf $userDir/settings.json
-        cat \
-          ${(pkgs.formats.json {}).generate "blabla"
-            config.programs.vscode.userSettings} \
-          > $userDir/settings.json
-      done
-    '';
-  };
+  # home.activation.afterWriteBoundary = {
+  #   after = [ "writeBoundary" ];
+  #   before = [];
+  #   data = ''
+  #     for userDir in /home/grmpf/.config/{VSCodium,Code}/User; do
+  #       rm -rf $userDir/settings.json
+  #       cat \
+  #         ${(pkgs.formats.json {}).generate "blabla"
+  #           config.programs.vscode.userSettings} \
+  #         > $userDir/settings.json
+  #     done
+  #   '';
+  # };
 
   programs.vscode.mutableExtensionsDir = false;
   programs.vscode = {
@@ -94,6 +94,9 @@
 
       # vim
       "vim.useCtrlKeys" = false;
+
+      # sticky scroll
+      "notebook.stickyScroll.enabled" = true;
     };
 
     keybindings = [

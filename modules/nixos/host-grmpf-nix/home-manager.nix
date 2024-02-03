@@ -4,6 +4,9 @@
   home-manager.useUserPackages = true;
 
   home-manager.users.grmpf = {
+    imports = [
+      ./vscode.nix
+    ];
     home.stateVersion = "22.11";
     # ich hab kein dunst
     services.dunst.enable = true;
@@ -21,7 +24,8 @@
 
     programs.alacritty.enable = true;
     programs.alacritty.settings = {
-      font.size = 5.5;
+      font.size = 10;
+      font.normal.family = "FIraCode Nerd Font";
     };
     programs.alacritty.package = pkgs.alacritty;
 
