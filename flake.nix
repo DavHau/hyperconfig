@@ -3,12 +3,12 @@
 
   inputs = {
     flake-parts.url = "github:hercules-ci/flake-parts";
+    flake-parts.inputs.nixpkgs-lib.follows = "nixpkgs";
     flake-compat = {
       url = "github:edolstra/flake-compat";
       flake = false;
     };
     agenix.url = "github:ryantm/agenix/0.13.0";
-    devshell.url = "github:numtide/devshell";
     # nixpkgs.url = "git+https://github.com/DavHau/nixpkgs.git?ref=dave";
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     nixpkgs-unstable.follows = "nixpkgs";
