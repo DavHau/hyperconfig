@@ -9,7 +9,7 @@
       attrName,
       hostName,
     }:
-      pkgs.writeScript "deploy-${hostName}" ''
+      pkgs.writeShellScript "deploy-${hostName}" ''
         set -Eeuo pipefail
         export PATH="${lib.makeBinPath (with pkgs; [
           nix

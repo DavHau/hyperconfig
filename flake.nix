@@ -18,7 +18,7 @@
 
     nil.url = "github:oxalica/nil";
 
-    nix.url = "github:nixos/nix/2.19.2";
+    nix.url = "https://flakehub.com/f/NixOS/nix/*.tar.gz";
     nix-lazy.url = "github:edolstra/nix/lazy-trees";
 
     retiolum.url = "github:mic92/retiolum";
@@ -46,6 +46,9 @@
 
     srvos.url = "github:nix-community/srvos";
     srvos.inputs.nixpkgs.follows = "nixpkgs";
+
+    nether.url = "github:Lassulus/nether";
+    nether.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = inputs@{ flake-parts, ... }:
