@@ -18,6 +18,10 @@
     ];
 
   deployAddress = "rhauer.duckdns.org";
+  clan.networking.targetHost = "root@nas";
+
+  documentation.nixos.enable = false;
+  documentation.man.enable = false;
 
   nixpkgs.hostPlatform = "x86_64-linux";
 
@@ -132,6 +136,9 @@
 
   systemd.services.automount = {
     description = "Automount Encrypted Dataset";
+    requires = [
+      "network-online.target"
+    ];
     after = [
       "network-online.target"
     ];
