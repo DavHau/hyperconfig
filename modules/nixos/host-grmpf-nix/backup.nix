@@ -31,7 +31,7 @@
 
     # invokeai models
     "/home/**/invokeai/models"
-    "/home/**/.ollama"
+    "/home/*/.ollama"
   ];
 
 in {

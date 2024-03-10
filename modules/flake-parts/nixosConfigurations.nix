@@ -4,7 +4,7 @@
   nixosSystem = inputs.nixpkgs.lib.nixosSystem;
   pkgs-unstable = inputs.nixpkgs-unstable.legacyPackages.${system};
   specialArgs = {
-    inherit inputs pkgs-unstable;
+    inherit inputs pkgs-unstable self;
   };
   defaultModules = [
     inputs.agenix.nixosModules.age

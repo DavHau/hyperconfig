@@ -36,7 +36,10 @@ in
       ./fonts.nix
       ./gocr.nix
       ./nether.nix
+      ./mycelium.nix
   ];
+
+  clan.networking.targetHost = "root@localhost";
 
   sops.age.keyFile = "/var/lib/sops-nix/key.txt";
 
@@ -56,7 +59,7 @@ in
     "uid-range"
   ];
   nix.nrBuildUsers = 100;
-  nix.settings.trusted-users = [ "root" ];
+  nix.settings.trusted-users = [ "root" "grmpf" ];
   nix.settings.substituters = [
     "https://cache.nixos.org/"
     "https://nix-community.cachix.org"
@@ -253,6 +256,18 @@ in
   # List services that you want to enable:
   programs.ssh.startAgent = true;
   programs.ssh.agentTimeout = "1h";
+  programs.ssh.extraConfig = ''
+    # AddKeysToAgent yes
+
+    Host *
+        ServerAliveInterval 240
+
+    Host *
+      # ControlMaster auto
+      # ControlPath ~/.ssh/sockets/%r@%h-%p
+      # ControlPersist 600
+      Compression yes
+  '';
   programs.mtr.enable = true;
 
   # ssh server
@@ -294,13 +309,17 @@ in
   # Enable the X11 windowing system.
   services.xserver.enable = true;
   services.xserver.libinput.enable = true;
-  services.xserver.layout = "us";
-  services.xserver.xkbVariant = "altgr-intl";
-  services.xserver.xkbOptions = "eurosign:e";
+  services.xserver.xkb.layout = "us";
+  services.xserver.xkb.variant = "altgr-intl";
+  services.xserver.xkb.options = "eurosign:e";
   services.xserver.displayManager.sessionCommands = ''
     ${pkgs.flameshot}/bin/flameshot &
     ${pkgs.blueberry}/bin/blueberry-tray &
   '';
+  #services.xserver.deviceSection = ''
+  #  Driver "amdgpu
+  #  Option "TearFree" "true"
+  #'';
 
   # services.xserver.xautolock = {
   #   enable = true;

@@ -8,6 +8,7 @@
       "steam-runtime"
       "steam-run"
       "teamspeak-client"
+      "teamviewer"
       "vscode"
       "vscode-extension-ms-vscode-cpptools"
       "vscode-extension-github-copilot"

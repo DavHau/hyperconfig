@@ -49,6 +49,9 @@
 
     nether.url = "github:Lassulus/nether";
     nether.inputs.nixpkgs.follows = "nixpkgs";
+
+    lassulus.url = "github:Lassulus/superconfig";
+    lassulus.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = inputs@{ flake-parts, ... }:

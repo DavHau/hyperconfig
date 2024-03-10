@@ -53,6 +53,7 @@
       haskell.haskell
       rust-lang.rust-analyzer
       vscodevim.vim
+      ms-toolsai.jupyter
       # arrterian.nix-env-selector
       # arrterian.nix-env-selector
       # serayuzgur.crates
@@ -70,7 +71,7 @@
       "update.mode" = "none"; # updates are done by nix
       "explorer.confirmDelete" = false;
       "editor.tabSize" = 2;
-      "editor.rulers" = [ 80 120 ];
+      "editor.rulers" = [ 80 88 120 ];
       # "editor.fontSize" = 20;
       "editor.lineNumbers" = "interval";
       "editor.cursorBlinking" = "solid";
@@ -97,6 +98,10 @@
 
       # sticky scroll
       "notebook.stickyScroll.enabled" = true;
+      "editor.stickyScroll.enabled" = true;
+
+      # spell checking everywhere
+      "cSpell.checkOnlyEnabledFileTypes" = false;
     };
 
     keybindings = [
