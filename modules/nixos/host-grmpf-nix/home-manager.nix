@@ -24,8 +24,8 @@
 
     programs.alacritty.enable = true;
     programs.alacritty.settings = {
-      font.size = 10;
-      font.normal.family = "FIraCode Nerd Font";
+      font.size = 8;
+      font.normal.family = "FiraCode Nerd Font";
     };
     programs.alacritty.package = pkgs.alacritty;
 
