@@ -35,8 +35,13 @@
   ];
 
 in {
+  # don't backup on battery
+  systemd.services.borgbackup-job-laptop.serviceConfig.ExecCondition =
+    ''grep -vq Discharging /sys/class/power_supply/BAT0/status'';
+
   services.borgbackup.jobs.laptop = {
     inherit exclude;
+    environment.BORG_HOST_ID = "nas";
     user = "root";
     doInit = false;
     repo = "backup@192.168.194.2:/pool11/enc/data/home/backup/notebook";
