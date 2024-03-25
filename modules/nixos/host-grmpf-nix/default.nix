@@ -41,7 +41,8 @@ in
 
   clan.networking.targetHost = "root@localhost";
 
-  sops.age.keyFile = "/var/lib/sops-nix/key.txt";
+  # set by default via clan
+  # sops.age.keyFile = "/home/grmpf/.config/sops/age/keys.txt";
 
   # NIX settings
   nix.package = inputs.nix.packages.x86_64-linux.default;

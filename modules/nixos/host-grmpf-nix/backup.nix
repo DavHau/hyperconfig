@@ -32,6 +32,9 @@
     # invokeai models
     "/home/**/invokeai/models"
     "/home/*/.ollama"
+
+    # openai models (manually specified via CLI args)
+    "/home/*/.local/share/openai/"
   ];
 
 in {

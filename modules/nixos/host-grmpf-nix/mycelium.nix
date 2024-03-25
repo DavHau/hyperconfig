@@ -50,6 +50,7 @@ in
         (lib.getExe inputs.lassulus.packages.${pkgs.system}.mycelium)
         "--tun-name myc"
         "--peers" peers
+        "--key-file" config.clanCore.secrets.mycelium.secrets."mycelium_key".path
       ]);
       Restart = "always";
       RestartSec = 2;
