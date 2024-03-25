@@ -57,5 +57,13 @@ in
       hashedPassword =
         "$6$UMtBZdjDiCKHVih$xVMYP5dumKyXrgmrEnQApFxKhvgc.94FBjUGqQ1G35pNUaRqGaMdCZS9cCnOZVaZc0CjI7rmyLsrWeRroCSzv/";
     };
+
+    stefan = {
+      isNormalUser = true;
+      home = "${home}/stefan";
+      openssh.authorizedKeys.keys = config.users.users.root.openssh.authorizedKeys.keys;
+      hashedPassword =
+        "$6$5KMQrSTCmWRg9.uz$mcBTYGJGUUQSxnCxt4rt/hNVKnXF5npbvQ97PokzqD1v/29.pPWy12XuIgntbJ3x1u8ydqSYQ5wnbcQc4yCR/1";
+    };
   };
 }

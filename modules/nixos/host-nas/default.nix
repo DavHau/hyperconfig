@@ -2,7 +2,7 @@
 # your system.  Help is available in the configuration.nix(5) man page
 # and in the NixOS manual (accessible by running ‘nixos-help’).
 
-{ config, lib, pkgs, pkgs-unstable, ... }:
+{ config, lib, pkgs, pkgs-unstable, inputs, ... }:
 
 {
   imports =
@@ -15,6 +15,7 @@
       ../role-sshuttle-server
       ../deployment.nix
       ../role-parasit.nix
+      inputs.srvos.nixosModules.server
     ];
 
   deployAddress = "rhauer.duckdns.org";
@@ -88,6 +89,7 @@
       (builtins.readFile ./enter-password.sh))
     borgbackup
     htop
+    screen
     vim
   ];
 
