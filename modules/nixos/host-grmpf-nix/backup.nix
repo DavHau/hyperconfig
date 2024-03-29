@@ -1,4 +1,4 @@
-{config, lib, ...}: let
+{config, lib, pkgs, ...}: let
   exclude = [
     "/home/**/cache/"
     "/home/*/.cabal"
@@ -33,14 +33,14 @@
     "/home/**/invokeai/models"
     "/home/*/.ollama"
 
-    # openai models (manually specified via CLI args)
-    "/home/*/.local/share/openai/"
+    # localai models (manually specified via CLI args)
+    "/home/*/.local/share/localai/"
   ];
 
 in {
   # don't backup on battery
   systemd.services.borgbackup-job-laptop.serviceConfig.ExecCondition =
-    ''grep -vq Discharging /sys/class/power_supply/BAT0/status'';
+    ''${pkgs.gnugrep}/bin/grep -vq Discharging /sys/class/power_supply/BAT0/status'';
 
   services.borgbackup.jobs.laptop = {
     inherit exclude;

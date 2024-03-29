@@ -61,9 +61,11 @@ in
     stefan = {
       isNormalUser = true;
       home = "${home}/stefan";
-      openssh.authorizedKeys.keys = config.users.users.root.openssh.authorizedKeys.keys;
-      hashedPassword =
-        "$6$5KMQrSTCmWRg9.uz$mcBTYGJGUUQSxnCxt4rt/hNVKnXF5npbvQ97PokzqD1v/29.pPWy12XuIgntbJ3x1u8ydqSYQ5wnbcQc4yCR/1";
+      openssh.authorizedKeys.keys =
+        config.users.users.root.openssh.authorizedKeys.keys
+        ++ [
+          "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA5PxR4yPCXBhL15II41hBF8V0d9D4ZRmICa3u09nNe8 hauer@MatebookX"
+        ];
     };
   };
 }

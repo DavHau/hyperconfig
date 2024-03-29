@@ -27,7 +27,7 @@ in
       ./low-battery-power-off.nix
       ./nixpkgs.nix
       ./nix-lazy.nix
-      ./rbw.nix
+      ./bitwarden.nix
       ./envfs.nix
       ./devenv.nix
       ./blueberry.nix
@@ -342,7 +342,7 @@ in
 
 # VIRTUALIZATOIN
   # qemu
-  boot.binfmt.emulatedSystems = [ "aarch64-linux" "armv7l-linux" ];
+  boot.binfmt.emulatedSystems = [ "aarch64-linux" "armv7l-linux" "riscv64-linux" ];
 
   virtualisation.docker.enable = true;
   virtualisation.podman.enable = true;
