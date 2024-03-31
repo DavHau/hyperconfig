@@ -7,6 +7,7 @@
 {
   imports =
     [ # Include the results of the hardware scan.
+      inputs.srvos.nixosModules.server
       ./hardware-configuration.nix
       ./users.nix
       ./age.nix
@@ -15,7 +16,7 @@
       ../role-sshuttle-server
       ../deployment.nix
       ../role-parasit.nix
-      inputs.srvos.nixosModules.server
+      ./voicinator.nix
     ];
 
   deployAddress = "rhauer.duckdns.org";
