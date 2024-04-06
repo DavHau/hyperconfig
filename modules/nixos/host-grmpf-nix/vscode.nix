@@ -54,6 +54,14 @@
       rust-lang.rust-analyzer
       vscodevim.vim
       ms-toolsai.jupyter
+      (pkgs.vscode-utils.buildVscodeMarketplaceExtension {
+        mktplcRef = {
+          name = "markdowntable";
+          publisher = "TakumiI";
+          version = "0.11.0";
+          sha256 = "sha256-kn5aLRaxxacQMvtTp20IdTuiuc6xNU3QO2XbXnzSf7o=";
+        };
+      })
       # arrterian.nix-env-selector
       # arrterian.nix-env-selector
       # serayuzgur.crates
