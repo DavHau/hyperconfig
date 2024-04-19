@@ -9,6 +9,7 @@
       "steam-run"
       "teamspeak-client"
       "teamviewer"
+      "vagrant"
       "vscode"
       "vscode-extension-ms-vscode-cpptools"
       "vscode-extension-github-copilot"

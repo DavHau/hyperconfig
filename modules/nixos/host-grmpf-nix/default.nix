@@ -13,14 +13,13 @@ in
       ./vpn.nix
       ./home-manager.nix
       ./fish.nix
-      ./htop.nix
       ./dnscrypt.nix
       ./backup.nix
       ./retiolum.nix
       ./amdgpu.nix
-      ./opengl.nix
+      # ./opengl.nix
       ./i3
-      ./cura.nix  # slicer for 3d printing
+      # ./cura.nix  # slicer for 3d printing
       ./tplink-archer-t2u-nano.nix
       ./printing.nix
       ./nix-registry.nix
@@ -29,14 +28,19 @@ in
       ./nix-lazy.nix
       ./bitwarden.nix
       ./envfs.nix
-      ./devenv.nix
+      # ./devenv.nix
       ./blueberry.nix
       ./nix-heuristic-gc.nix
       ./ollama.nix
       ./fonts.nix
       ./gocr.nix
       ./nether.nix
-      ./mycelium.nix
+      # ./mycelium.nix
+      # ./vagrant.nix
+  ];
+
+  home-manager.users.grmpf.imports = [
+    ../../home-manager/htop
   ];
 
   clan.networking.targetHost = "root@localhost";
@@ -116,7 +120,7 @@ in
       git gti gitg github-cli tig ghq h github-cli lazygit git-absorb
       # search
       ripgrep nix-index
-      # dafult tools crazy editions
+      # dafault tools crazy editions
       bat fd sl
       # network tools
       iodine macchanger mosh nmap sipcalc sshpass sshuttle traceroute wireguard-tools
@@ -128,9 +132,9 @@ in
       comma nix-output-monitor nix-prefetch-git nixos-generators nix-tree nix-diff cntr
       inputs.nil.packages.x86_64-linux.nil nix-init
       # fs tools
-      sshfs-fuse ranger mc
+      sshfs-fuse ranger mc fcp
       # virtualisation
-      podman-compose vagrant arion qemu docker-compose
+      podman-compose arion qemu docker-compose
       # cloud stuff
       google-cloud-sdk
       # penetration tools
@@ -141,12 +145,8 @@ in
       udiskie # automatically mount stuff
       # formatters
       alejandra
-      # haskell
-      ghc
       # rust
       cargo rustc gcc
-      # backups
-      restic
       # appimage
       appimage-run
       # clan
@@ -156,7 +156,7 @@ in
 
   # GUI tools
       arandr  # configure monitors
-      blender  # graphics software
+      # blender  # graphics software
       ferdium  # all chat apps in one program
       blueberry  # maage bluetooth devices
       kcalc # calculator
@@ -164,25 +164,24 @@ in
       # chia # blockchain
       httpie # make http requests
       flameshot kazam # screen shot + recoding
-      psensor # watch Sensors
+      # psensor # watch Sensors
       libreoffice # office
       gparted # partitioning
-      sqlitebrowser # browser for sqlite
+      # sqlitebrowser # browser for sqlite
       pavucontrol # audio settings
       pulseaudio
       wireshark
       # file manager
-        dolphin filezilla gnome3.nautilus xfce.thunar gnome.eog pcmanfm
+        filezilla gnome3.nautilus xfce.thunar gnome.eog pcmanfm
       # browser
         firefox chromium
       # media viewer
-        vlc okular gwenview
+        vlc okular
       # graphical tools
-        gimp spectacle inkscape darktable
+        gimp inkscape
+        # darktable
       # 3d tools
-        freecad
-      # IDEs and text editors
-        jetbrains.pycharm-community
+        # freecad
       # messengers
         tdesktop element-desktop
       # torrent
@@ -353,8 +352,8 @@ in
     ExecStart = [ "" "${config.virtualisation.podman.package}/bin/podman --storage-driver zfs $LOGGING system service" ];
   };
 # virtualbox
-  virtualisation.virtualbox.host.enable = true;
-  users.extraGroups.vboxusers.members = [ "grmpf" ];
+  # virtualisation.virtualbox.host.enable = true;
+  # users.extraGroups.vboxusers.members = [ "grmpf" ];
   #virtualisation.virtualbox.host.enableExtensionPack = true;
 
   #libvirtd

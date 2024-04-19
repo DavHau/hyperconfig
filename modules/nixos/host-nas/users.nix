@@ -19,7 +19,7 @@ in
       home = "${home}/guest";
     };
 
-    # restic backup user
+    # backup user
     # users
     backup = {
       isNormalUser = true;

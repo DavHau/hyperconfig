@@ -18,7 +18,7 @@
 
     nil.url = "github:oxalica/nil";
 
-    nix.url = "https://flakehub.com/f/NixOS/nix/*.tar.gz";
+    nix.url = "https://flakehub.com/f/NixOS/nix/2.20.*.tar.gz";
     nix-lazy.url = "github:edolstra/nix/lazy-trees";
 
     retiolum.url = "github:mic92/retiolum";
