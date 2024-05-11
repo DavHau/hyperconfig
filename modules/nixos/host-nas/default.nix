@@ -17,6 +17,7 @@
       ../deployment.nix
       ../role-parasit.nix
       ./voicinator.nix
+      ./stefan.nix
     ];
 
   deployAddress = "rhauer.duckdns.org";

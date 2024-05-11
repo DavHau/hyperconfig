@@ -24,6 +24,7 @@
     "/home/*/**/GPUCache"  # electron
     "/home/*/temp"
     "/home/*/VirtualBox VMs"
+    "/home/*/.local/share/clan/"
 
     # filter out nix dev-shell builds
     "/home/**/*.o"
