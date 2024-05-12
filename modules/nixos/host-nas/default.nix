@@ -9,18 +9,19 @@
     [ # Include the results of the hardware scan.
       inputs.srvos.nixosModules.server
       inputs.srvos.nixosModules.mixins-systemd-boot
-      ./hardware-configuration.nix
-      ./users.nix
-      ./age.nix
-      ./monit
-      ./sync-from-manu.nix
-      ../role-sshuttle-server
+      ../monitoring.nix
       ../deployment.nix
       ../role-parasit.nix
-      ./voicinator.nix
-      ./stefan.nix
+      ../role-sshuttle-server
+      ./age.nix
+      ./automount
+      ./hardware-configuration.nix
+      ./monit
       ./smokeping.nix
-      ./monitoring.nix
+      ./stefan.nix
+      ./sync-from-manu.nix
+      ./users.nix
+      ./voicinator.nix
     ];
 
   deployAddress = "rhauer.duckdns.org";
@@ -89,9 +90,6 @@
   services.avahi.enable = true;
 
   environment.systemPackages = with pkgs; [
-    (pkgs.writeScriptBin
-      "enter-password"
-      (builtins.readFile ./enter-password.sh))
     borgbackup
     htop
     screen
@@ -139,44 +137,6 @@
       #   "force group" = "groupname";
       # };
     };
-  };
-
-  systemd.services.automount = {
-    description = "Automount Encrypted Dataset";
-    requires = [
-      "network-online.target"
-    ];
-    after = [
-      "network-online.target"
-    ];
-    before = [
-      # "nfs-server.service"
-    ];
-    wantedBy = [
-      "multi-user.target"
-    ];
-    serviceConfig = {
-      Type = "simple";
-      ExecStart = "${pkgs.coreutils}/bin/true";
-    };
-    path = with pkgs; [
-      openssh
-      zfs
-    ];
-    preStart = ''
-      set -ex
-      if ! cat /run/passwd_enc >/dev/null; then
-        passwd=$(ssh root@10.99.99.2 cat /tmp/passwd_enc)
-      else
-        passwd=$(cat /run/passwd_enc)
-      fi
-      enc_datasets="pool11/enc rpool/enc"
-      for ds in $enc_datasets; do
-        echo $passwd | zfs load-key $ds && echo "key loaded successfully"
-      done
-      zfs mount -a && echo "all datasets mounted successfully"
-      exit $?
-    '';
   };
 
   # Open ports in the firewall.
