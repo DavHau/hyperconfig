@@ -20,6 +20,7 @@
       ./voicinator.nix
       ./stefan.nix
       ./smokeping.nix
+      ./monitoring.nix
     ];
 
   deployAddress = "rhauer.duckdns.org";
