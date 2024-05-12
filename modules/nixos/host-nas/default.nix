@@ -8,6 +8,7 @@
   imports =
     [ # Include the results of the hardware scan.
       inputs.srvos.nixosModules.server
+      inputs.srvos.nixosModules.mixins-systemd-boot
       ./hardware-configuration.nix
       ./users.nix
       ./age.nix
@@ -18,6 +19,7 @@
       ../role-parasit.nix
       ./voicinator.nix
       ./stefan.nix
+      ./smokeping.nix
     ];
 
   deployAddress = "rhauer.duckdns.org";
