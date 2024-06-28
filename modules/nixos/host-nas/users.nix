@@ -3,6 +3,13 @@ let
   home = "/pool11/enc/data/home";
 in
 {
+  security.pam.services.sshd.unixAuth = lib.mkForce true;
+  services.openssh.extraConfig = ''
+    Match User roman
+    PasswordAuthentication yes
+    Match all
+    PasswordAuthentication no
+  '';
   users.mutableUsers = false;
   users.users = {
     # root
@@ -53,9 +60,10 @@ in
     roman = {
       isNormalUser = true;
       home = "${home}/roman";
-      openssh.authorizedKeys.keys = config.users.users.root.openssh.authorizedKeys.keys;
+      openssh.authorizedKeys.keys =
+        config.users.users.root.openssh.authorizedKeys.keys;
       hashedPassword =
-        "$6$UMtBZdjDiCKHVih$xVMYP5dumKyXrgmrEnQApFxKhvgc.94FBjUGqQ1G35pNUaRqGaMdCZS9cCnOZVaZc0CjI7rmyLsrWeRroCSzv/";
+        "$6$bE21GV8zsI0XywUq$avIpNZP2J5hCrQhkCOkpsPjjoSkQOUsNQAQa4ajCYAgDTLbAL7PK6bPuOR3Zw1lV3YvrxTaqHKc/HpYtC4sM/1";
     };
 
     stefan = {

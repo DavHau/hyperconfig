@@ -13,6 +13,7 @@
       ../deployment.nix
       ../role-parasit.nix
       ../role-sshuttle-server
+      ../role-iodine/default.nix
       ./age.nix
       ./automount
       ./hardware-configuration.nix
@@ -22,6 +23,9 @@
       ./sync-from-manu.nix
       ./users.nix
       ./voicinator.nix
+      ./reverse-proxy.nix
+      ./dyndns.nix
+
     ];
 
   deployAddress = "rhauer.duckdns.org";
@@ -61,6 +65,8 @@
   # power
   powerManagement.cpuFreqGovernor = "ondemand";
 
+  virtualisation.docker.enable = true;
+
   networking.hostName = "nas"; # Define your hostname.
   networking.hostId = "d523969b"; # Define your hostname.
   networking.useDHCP = true;
@@ -75,11 +81,12 @@
   services.zerotierone.joinNetworks = [
     "af415e486f4514ce"  # home
     "12ac4a1e71b04480"  # manu
+    "363c67c55a553deb"  # papa
   ];
 
   # Enable the OpenSSH daemon.
   services.openssh.enable = true;
-  services.openssh.settings.PasswordAuthentication = false;
+  services.openssh.settings.PasswordAuthentication = lib.mkForce null;
   programs.mosh.enable = true;
 
   # banning

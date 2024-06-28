@@ -1,6 +1,7 @@
 {config, lib, pkgs, ...}: let
   secret = config.clanCore.facts.services.voicinator.secret;
-  tokenPath = config.sops.secrets.nas-voicinator-telegram-token.path;
+  telegram-token = config.sops.secrets.nas-voicinator-telegram-token.path;
+  openai-api-key = config.sops.secrets.openai-api-key.path;
 in {
   clanCore.facts.services.voicinator = {
     generator.script = ''
@@ -19,7 +20,12 @@ in {
       StateDirectory = "voicinator";
       RuntimeDirectory = "voicinator";
       CacheDirectory = "voicinator";
-      LoadCredential = "telegram-bot-token:${tokenPath}";
+      LoadCredential = [
+        "telegram_token:${telegram-token}"
+        "gpt-api-key:${openai-api-key}"
+      ];
+      Restart = "always";
+      RuntimeMaxSec = "12h";
     };
     path = [
       pkgs.coreutils
@@ -38,7 +44,6 @@ in {
         git -C $STATE_DIRECTORY pull
       fi
       cd $RUNTIME_DIRECTORY
-      export TELEGRAM_BOT_TOKEN=$(cat $CREDENTIALS_DIRECTORY/telegram-bot-token)
       echo "loading devShell of flake $STATE_DIRECTORY"
       nix develop $(realpath $STATE_DIRECTORY) -L -c python -u -c "print('hello')"
       nix develop $(realpath $STATE_DIRECTORY) -L -c python -u $STATE_DIRECTORY/telegram_bot.py
