@@ -18,16 +18,13 @@
 
     nil.url = "github:oxalica/nil";
 
-    nix.url = "https://flakehub.com/f/NixOS/nix/2.20.*.tar.gz";
+    nix.url = "https://flakehub.com/f/NixOS/nix/2.23.*.tar.gz";
     nix-lazy.url = "github:edolstra/nix/lazy-trees";
 
     retiolum.url = "github:mic92/retiolum";
 
     clan-core.url = "git+https://git.clan.lol/clan/clan-core";
     clan-core.inputs.nixpkgs.follows = "nixpkgs";
-
-    sops-nix.url = "github:Mic92/sops-nix";
-    sops-nix.inputs.nixpkgs.follows = "nixpkgs";
 
     disko.url = "github:nix-community/disko";
     disko.inputs.nixpkgs.follows = "nixpkgs";
