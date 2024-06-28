@@ -41,7 +41,8 @@
       mkhl.direnv
       github.copilot
       github.copilot-chat
-      ms-python.vscode-pylance
+      # ms-python.vscode-pylance
+      ms-pyright.pyright
       ms-vsliveshare.vsliveshare
       ms-vscode.cpptools
       ms-vscode.cmake-tools

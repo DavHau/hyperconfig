@@ -5,10 +5,9 @@
   inputs,
   ...
 }: let
-  l = lib // builtins;
   nixLazy = inputs.nix-lazy.packages.x86_64-linux.nix;
   nix-lazy-bin = pkgs.writeScriptBin "nix-lazy" ''
-    ${nixLazy}/bin/nix "$@"
+    exec ${nixLazy}/bin/nix "$@"
   '';
 in {
   environment.systemPackages = [

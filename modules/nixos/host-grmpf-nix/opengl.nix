@@ -12,6 +12,7 @@
     extraPackages = with pkgs; [
       rocm-opencl-runtime
       rocm-opencl-icd
+      # intel-compute-runtime
     ];
   };
 }

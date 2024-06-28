@@ -14,10 +14,11 @@
       "vscode-extension-ms-vscode-cpptools"
       "vscode-extension-github-copilot"
       "vscode-extension-github-copilot-chat"
-      "vscode-extension-MS-python-vscode-pylance"
-      "vscode-extension-ms-python-vscode-pylance"
+      # "vscode-extension-MS-python-vscode-pylance"
+      # "vscode-extension-ms-python-vscode-pylance"
       "vscode-extension-ms-vsliveshare-vsliveshare"
       "zerotierone"
+      "Oracle_VM_VirtualBox_Extension_Pack"
     ];
   };
 

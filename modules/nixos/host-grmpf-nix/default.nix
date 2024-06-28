@@ -13,11 +13,11 @@ in
       ./vpn.nix
       ./home-manager.nix
       ./fish.nix
-      ./dnscrypt.nix
+      # ./dnscrypt.nix
       ./backup.nix
       ./retiolum.nix
       ./amdgpu.nix
-      # ./opengl.nix
+      ./opengl.nix
       ./i3
       # ./cura.nix  # slicer for 3d printing
       ./tplink-archer-t2u-nano.nix
@@ -34,9 +34,11 @@ in
       ./ollama.nix
       ./fonts.nix
       ./gocr.nix
+      ./ocr
       ./nether.nix
       # ./mycelium.nix
       # ./vagrant.nix
+      ./iodine-client.nix
   ];
 
   home-manager.users.grmpf.imports = [
@@ -120,7 +122,7 @@ in
       git gti gitg github-cli tig ghq h github-cli lazygit git-absorb
       # search
       ripgrep nix-index
-      # dafault tools crazy editions
+      # default tools crazy editions
       bat fd sl
       # network tools
       iodine macchanger mosh nmap sipcalc sshpass sshuttle traceroute wireguard-tools
@@ -153,6 +155,8 @@ in
       inputs.clan-core.packages.x86_64-linux.clan-cli
       # AI
       ollama
+      # python
+      ruff
 
   # GUI tools
       arandr  # configure monitors
@@ -192,6 +196,8 @@ in
         mullvad-vpn protonvpn-gui
       # wallets
         ledger-live-desktop
+      # VMs
+      quickemu quickgui
   ];
   programs.vim.defaultEditor = true;
   programs.nm-applet.enable = true;
@@ -204,7 +210,7 @@ in
   programs.sysdig.enable = true;
   services.usbmuxd.enable = true;
   services.udisks2.enable = true;
-  programs.starship.enable = true;
+  # programs.starship.enable = true;
   # services.nscd.enableNsncd = true;
   # services.unifi.enable = true;
 
@@ -228,7 +234,7 @@ in
   # FILESYSTEMS
     boot.tmp.useTmpfs = true;
     boot.tmp.tmpfsSize = "80%";
-    boot.supportedFilesystems = [ "ntfs" "exfat" "zfs" "apfs" "cifs" "smb" ];
+    boot.supportedFilesystems = [ "ntfs-3g" "exfat" "zfs" "apfs" "cifs" "smb" ];
     boot.initrd.supportedFilesystems = ["zfs"];
     # required by zfs
     networking.hostId = "5eb1bf28";
@@ -307,8 +313,8 @@ in
 
 # DESKTOP (GUI)
   # Enable the X11 windowing system.
+  services.libinput.enable = true;
   services.xserver.enable = true;
-  services.xserver.libinput.enable = true;
   services.xserver.xkb.layout = "us";
   services.xserver.xkb.variant = "altgr-intl";
   services.xserver.xkb.options = "eurosign:e";
@@ -354,7 +360,8 @@ in
 # virtualbox
   # virtualisation.virtualbox.host.enable = true;
   # users.extraGroups.vboxusers.members = [ "grmpf" ];
-  #virtualisation.virtualbox.host.enableExtensionPack = true;
+
+  # virtualisation.virtualbox.host.enableExtensionPack = true;
 
   #libvirtd
   virtualisation.libvirtd.enable = true;
@@ -388,6 +395,7 @@ in
     6881  # deluge
   ];
   networking.firewall.allowPing = true;
+  networking.firewall.enable = false;
   boot.kernelModules = [ "br_netfilter" "xboxdrv" ];
   boot.kernel.sysctl = {
     # See https://wiki.libvirt.org/page/Net.bridge.bridge-nf-call_and_sysctl.conf for background information
@@ -399,10 +407,6 @@ in
   networking.hostName = "grmpf-nix"; # Define your hostname.
   networking.domain = "grmpf";
   networking.networkmanager.enable = true;
-  networking.nameservers = [
-    "127.0.0.1"
-    "::1"
-  ];
   networking.dhcpcd.extraConfig = "nohook resolv.conf";
   networking.networkmanager.dns = lib.mkForce "none";
   # networking.networkmanager.insertNameservers = [
