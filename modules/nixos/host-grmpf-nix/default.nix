@@ -88,8 +88,6 @@ in
     http-connections = 200
     builders-use-substitutes = true
     experimental-features = nix-command flakes ca-derivations impure-derivations recursive-nix auto-allocate-uids cgroups
-    keep-outputs = true
-    keep-derivations = true
     log-lines = 25
     min-free = ${l.toString (10*1000*1000*1000)}
     max-free = ${l.toString (20*1000*1000*1000)}
@@ -129,7 +127,7 @@ in
       # compression tools
       lz4 pxz zip unzip
       # system analysis
-      baobab bmon btop nix-top s-tui pciutils powertop usbutils lsof dstat latencytop sysprof filelight nvme-cli
+      baobab bmon btop s-tui pciutils powertop usbutils lsof dstat latencytop sysprof filelight nvme-cli
       # nix tools
       comma nix-output-monitor nix-prefetch-git nixos-generators nix-tree nix-diff cntr
       inputs.nil.packages.x86_64-linux.nil nix-init
@@ -395,7 +393,7 @@ in
     6881  # deluge
   ];
   networking.firewall.allowPing = true;
-  networking.firewall.enable = false;
+  networking.firewall.enable = true;
   boot.kernelModules = [ "br_netfilter" "xboxdrv" ];
   boot.kernel.sysctl = {
     # See https://wiki.libvirt.org/page/Net.bridge.bridge-nf-call_and_sysctl.conf for background information

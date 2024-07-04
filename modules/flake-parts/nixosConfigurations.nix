@@ -32,9 +32,9 @@ in {
   flake = inputs.clan-core.lib.buildClan {
     directory = self;
     inherit specialArgs;
-    clanName = "grmpf";
+    meta.name = "grmpf";
     machines = l.flip l.mapAttrs hostModules (name: module: {
-      nixpkgs.hostPlatform = "x86_64-linux";
+      nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
       imports =
         defaultModules
         ++ [module]
