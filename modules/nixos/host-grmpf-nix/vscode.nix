@@ -123,6 +123,10 @@
         when = "editorFocus";}
       { command = "github.copilot.acceptCursorPanelSolution";
         key = "Ctrl+Shift+/";}
+      {
+        command = "git.commitAmend";
+        key = "Ctrl+G Ctrl+A";
+      }
     ];
   };
 }
