@@ -11,8 +11,8 @@
       ./users.nix
       ./samba.nix
       ../deployment.nix
-      inputs.disko.nixosModules.disko
       ./disko-config.nix
+      inputs.nixos-generators.nixosModules.all-formats
     ];
 
   deployAddress = "10.241.225.42";
@@ -35,14 +35,21 @@
 
   networking.hostName = "manu-nas";
   networking.hostId = "19795521";
+  networking.useDHCP = true;
 
   services.zerotierone.enable = true;
   services.zerotierone.joinNetworks = [
     "12ac4a1e71b04480"
   ];
 
+  # nixos-generators specific config
+  formatConfigs.sd-x86_64 = {
+    disabledModules = [./hardware-configuration.nix];
+    boot.initrd.availableKernelModules = ["usb_storage"];
+    boot.loader.systemd-boot.enable = lib.mkForce false;
+  };
+
   # Enable the OpenSSH daemon.
   services.openssh.enable = true;
   system.stateVersion = lib.mkForce "22.05"; # Did you read the comment?
-
 }

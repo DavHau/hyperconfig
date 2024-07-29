@@ -25,7 +25,7 @@
       ./voicinator.nix
       ./reverse-proxy.nix
       ./dyndns.nix
-
+      ./file-browser-roman.nix
     ];
 
   deployAddress = "rhauer.duckdns.org";
