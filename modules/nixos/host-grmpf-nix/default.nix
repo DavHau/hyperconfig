@@ -196,6 +196,8 @@ in
         ledger-live-desktop
       # VMs
       quickemu quickgui
+      # edit PDF files
+      xournal
   ];
   programs.vim.defaultEditor = true;
   programs.nm-applet.enable = true;
