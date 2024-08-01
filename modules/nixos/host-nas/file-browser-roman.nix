@@ -1,20 +1,12 @@
 {config, lib, pkgs, ...}: {
 
-  # manage password via clan secrets
-  clan.core.facts.services.filebrowser-roman = {
-    secret.filebrowser-roman = {};
-    generator.prompt = "Type in the password for the filebrowser user roman";
-    generator.script = ''
-      ${pkgs.apacheHttpd}/bin/htpasswd -5cb $secrets/filebrowser-roman roman $prompt_value
-    '';
-  };
-  sops.secrets."${config.clan.core.machineName}-filebrowser-roman".owner = "nginx";
-
   services.nginx.enable = true;
   services.nginx.virtualHosts."daten.bruch-bu.de" = {
     forceSSL = true;
     enableACME = true;
-    basicAuthFile = config.clan.core.facts.services.filebrowser-roman.secret.filebrowser-roman.path;
+    basicAuthFile = pkgs.writeText "filebrowser-auth" ''
+      roman:${config.users.users.roman.hashedPassword}
+    '';
     locations."/" = {
       proxyPass = "http://127.0.0.1:8567";
       proxyWebsockets = true;
