@@ -1,9 +1,11 @@
 {
-  networking.domain = "davhau.com";
+  networking.domain = "davhau.com"; # needed for smokeping
   networking.firewall.allowedTCPPorts = [80];
+  services.nginx.virtualHosts.smokeping.forceSSL = true;
+  services.nginx.virtualHosts.smokeping.enableACME = true;
   services.smokeping.enable = true;
   services.smokeping.webService = true;
-  services.smokeping.host = null;
+  services.smokeping.host = "smokeping.bruch-bu.de";
   services.smokeping.targetConfig = ''
     probe = FPing
     menu = Top
