@@ -1,4 +1,16 @@
-{lib, pkgs, ...}: {
+{lib, pkgs, config, ...}: {
+  systemd.services.smbpasswd = {
+    description = "Set samba password for manu";
+    wantedBy = [ "multi-user.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${pkgs.writeText "smbpasswd" ''
+        passwd="$(cat ${config.clan.core.vars.generators.user-password-manu.files.password.path})"
+        ${pkgs.samba}/bin/smbpasswd -x manu || :
+        echo -e "$passwd\n$passwd" | ${pkgs.samba}/bin/smbpasswd -s -a manu
+      ''}";
+    };
+  };
   services.samba-wsdd.enable = true; # make shares visible for windows 10 clients
   services.samba.openFirewall = true;
   networking.firewall.allowedTCPPorts = [

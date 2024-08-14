@@ -3,6 +3,16 @@ let
   home = "/pool11/enc/data/home";
 in
 {
+  clan.core.vars.generators.user-password-manu = {
+    files.password.secret = true;
+    files.hash.secret = true;
+    prompts.user-password-manu.type = "hidden";
+    runtimeInputs = [ pkgs.mkpasswd ];
+    script = ''
+      cat $prompts/user-password-manu > $out/password
+      mkpasswd -m sha-512 $(cat $prompts/user-password-manu) > $out/hash
+    '';
+  };
   users.mutableUsers = false;
   users.users = {
     root = {
