@@ -20,7 +20,7 @@
       ./monit
       ./smokeping.nix
       ./stefan.nix
-      ./sync-from-manu.nix
+      # ./sync-from-manu.nix
       ./users.nix
       ./voicinator.nix
       ./reverse-proxy.nix
