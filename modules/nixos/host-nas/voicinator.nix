@@ -38,10 +38,12 @@ in {
       MODEL_SIZE = "medium";
     };
     script = ''
+      set -x
       if [ ! -d $STATE_DIRECTORY/.git ]; then
-        git -C $STATE_DIRECTORY clone https://github.com/DavHau/voicinator
+        git -C $STATE_DIRECTORY clone https://github.com/shoutingcatana/voicinator
       else
-        git -C $STATE_DIRECTORY pull
+        git -C $STATE_DIRECTORY fetch
+        git -C $STATE_DIRECTORY reset --hard origin/main
       fi
       cd $RUNTIME_DIRECTORY
       echo "loading devShell of flake $STATE_DIRECTORY"
