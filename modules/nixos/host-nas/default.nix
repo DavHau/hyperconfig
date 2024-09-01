@@ -14,10 +14,8 @@
       ../role-parasit.nix
       ../role-sshuttle-server
       ../role-iodine/default.nix
-      ./age.nix
       ./automount
       ./hardware-configuration.nix
-      ./monit
       ./smokeping.nix
       ./stefan.nix
       # ./sync-from-manu.nix
