@@ -15,9 +15,12 @@
   systemd.services.filebrowser = {
     description = "Filebrowser";
     wantedBy = ["multi-user.target"];
-    after = ["network-online.target"];
+    after = ["network-online.target" "automount.service"];
     wants = ["network-online.target"];
-    serviceConfig.User = config.users.users.roman.name;
+    serviceConfig = {
+      User = config.users.users.roman.name;
+      Restart = "always";
+    };
     path = [
       pkgs.getent
     ];
