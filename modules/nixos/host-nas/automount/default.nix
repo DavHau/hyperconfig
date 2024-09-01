@@ -21,7 +21,7 @@
     ];
     script = ''
       set -e
-      passwd=$(curl -su admin:$(cat ${config.sops.secrets.tasmota-pw.path}) "http://192.168.178.21/cm?cmnd=var16" | jq '.Var16' -r)
+      passwd=$(curl -su admin:$(cat ${config.sops.secrets.tasmota-pw.path}) "http://192.168.20.31/cm?cmnd=var16" | jq '.Var16' -r)
       for ds in pool11/enc rpool/enc; do
         echo $passwd | zfs load-key $ds && echo "key loaded successfully for $ds"
       done
