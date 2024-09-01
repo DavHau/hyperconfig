@@ -7,6 +7,7 @@ in
     [
       ../common.nix
       ../etc-hosts.nix
+      ../nix-development.nix
       inputs.home-manager.nixosModule
       inputs.retiolum.nixosModules.retiolum
       ./hardware-configuration.nix
