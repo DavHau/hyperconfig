@@ -1,0 +1,5 @@
+{
+  "deployed": true,
+  "secret": true,
+  "store": "sops"
+}
