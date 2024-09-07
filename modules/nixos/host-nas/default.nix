@@ -17,7 +17,6 @@
       ./automount
       ./hardware-configuration.nix
       ./smokeping.nix
-      ./stefan.nix
       # ./sync-from-manu.nix
       ./users.nix
       ./voicinator.nix

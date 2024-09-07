@@ -4,6 +4,35 @@ let
 in
 {
   security.pam.services.sshd.unixAuth = lib.mkForce true;
+  # this is needed for any of the custom sudo rules to take effect at all
+  security.sudo.execWheelOnly = lib.mkForce false;
+  security.sudo.extraRules = [
+    {
+      users = [ "stefen" ];
+      commands = [
+        {
+          command = "${pkgs.systemd}/bin/systemctl stop voicinator";
+          options = [ "NOPASSWD"];
+        }
+        {
+          command = "${pkgs.systemd}/bin/systemctl start voicinator";
+          options = [ "NOPASSWD"];
+        }
+        {
+          command = "${pkgs.systemd}/bin/systemctl restart voicinator";
+          options = [ "SETENV" "NOPASSWD"];
+        }
+        {
+          command = "${pkgs.systemd}/bin/systemctl status voicinator";
+          options = [ "NOPASSWD"];
+        }
+        {
+          command = "${pkgs.systemd}/bin/journalctl -fu voicinator";
+          options = [ "NOPASSWD"];
+        }
+      ];
+    }
+  ];
   services.openssh.extraConfig = ''
     Match User roman
     PasswordAuthentication yes
@@ -16,6 +45,7 @@ in
     root = {
       openssh.authorizedKeys.keys = [
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDuhpzDHBPvn8nv8RH1MRomDOaXyP4GziQm7r3MZ1Syk grmpf"
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUPqwy1ToPHzd5bG8TLqp26PkzA8HUeA3p4l34El80V root@nas"
       ];
       hashedPassword = "$6$0e8VNHlEiYMZiVMi$ouKAFUMdvrGrGeV/i7DhQgx16uu7RajCgj/aeQgm24ATlNcZPCF5lml8BoTFWzikZID2lIGaG.lVkvXXBklTK1";
     };
@@ -73,6 +103,8 @@ in
         config.users.users.root.openssh.authorizedKeys.keys
         ++ [
           "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA5PxR4yPCXBhL15II41hBF8V0d9D4ZRmICa3u09nNe8 hauer@MatebookX"
+          "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO/PPzetdVPjZhFumovpMO8Wc3BP05bBEbrg+C0iMhDo stefan-thinkpad"
+          "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDuhpzDHBPvn8nv8RH1MRomDOaXyP4GziQm7r3MZ1Syk grmpf"
         ];
     };
   };

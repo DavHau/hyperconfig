@@ -28,7 +28,6 @@
     script = ''
       set -e
       ipv4=$(curl -4 --silent --fail ifconfig.co)
-      ipv6=$(curl -6 --silent --fail ifconfig.co)
       curl https://porkbun.com/api/json/v3/dns/editByNameType/bruch-bu.de/A/casa -d "
         {
           \"apikey\": \"$(cat ${config.clan.core.vars.generators.porkbun.files.apikey.path})\",
@@ -36,6 +35,7 @@
           \"content\": \"$ipv4\"
         }
       "
+      ipv6=$(curl -6 --silent --fail ifconfig.co)
       curl https://porkbun.com/api/json/v3/dns/editByNameType/bruch-bu.de/AAAA/casa -d "
         {
           \"apikey\": \"$(cat ${config.clan.core.vars.generators.porkbun.files.apikey.path})\",
