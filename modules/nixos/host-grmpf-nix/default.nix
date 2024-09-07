@@ -133,7 +133,7 @@ in
       comma nix-output-monitor nix-prefetch-git nixos-generators nix-tree nix-diff cntr
       inputs.nil.packages.x86_64-linux.nil nix-init
       # fs tools
-      sshfs-fuse ranger mc fcp
+      sshfs-fuse ranger mc
       # virtualisation
       podman-compose arion qemu docker-compose
       # cloud stuff
@@ -156,6 +156,8 @@ in
       ollama
       # python
       ruff
+      # show community maintained examples for linux commands
+      cheat
 
   # GUI tools
       arandr  # configure monitors
@@ -196,7 +198,7 @@ in
       # wallets
         ledger-live-desktop
       # VMs
-      quickemu quickgui
+      quickemu
       # edit PDF files
       xournal
   ];
@@ -294,7 +296,6 @@ in
   # '';
 
 # AUDIO
-  sound.enable = true;
   services.pipewire.enable = true;
   services.pipewire.alsa.enable = true;
   services.pipewire.pulse.enable = true;
