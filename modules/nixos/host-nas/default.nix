@@ -14,6 +14,7 @@
       ../role-parasit.nix
       ../role-sshuttle-server
       ../role-iodine/default.nix
+      ../dyndns-porkbun.nix
       ./automount
       ./hardware-configuration.nix
       ./smokeping.nix
@@ -21,7 +22,6 @@
       ./users.nix
       ./voicinator.nix
       ./reverse-proxy.nix
-      ./dyndns.nix
       ./file-browser-roman.nix
     ];
 
@@ -98,6 +98,14 @@
     htop
     screen
     vim
+  ];
+
+  # dyndns
+  services.porkbun.ipv4Entries = [
+    "bruch-bu.de/A/casa"
+  ];
+  services.porkbun.ipv6Entries = [
+    "bruch-bu.de/AAAA/casa"
   ];
 
   # samba

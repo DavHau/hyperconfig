@@ -99,6 +99,7 @@ in
     stefan = {
       isNormalUser = true;
       home = "${home}/stefan";
+      hashedPassword = "$6$lpdN2hE618bKcPTa$iwUiZEddqZaf4PqllsPplDdz8mRDMM8IYz.42cpyfJKxK66OGlRPVnyBrFYthJovj6s3TbtajjBPDAjy3kI.H.";
       openssh.authorizedKeys.keys =
         config.users.users.root.openssh.authorizedKeys.keys
         ++ [
