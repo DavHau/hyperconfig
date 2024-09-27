@@ -17,4 +17,9 @@
   };
 
   services.openssh.enable = true;
+
+  services.zerotierone.enable = lib.mkDefault true;
+  services.zerotierone.joinNetworks = [
+    "af415e486f4514ce" # home
+  ];
 }
