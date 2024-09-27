@@ -1,13 +1,12 @@
-{config, lib, pkgs, modulesPath, inputs, ...}:
+{lib, pkgs, self, ...}:
 let
-  defaultDisk = import ./default-disk.nix {
+  machine = self.nixosConfigurations.stefan-vm;
+  defaultDisk = import (pkgs.path + "/nixos/lib/make-disk-image.nix") {
     inherit lib;
-    pkgs = import pkgs.path {
-      system = "x86_64-linux";
-      config.allowUnfreePredicate = pkg: builtins.elem (lib.getName pkg) [
-        "zerotierone"
-      ];
-    };
+    inherit (machine) config;
+    inherit pkgs;
+    diskSize = "50000";
+    format = "qcow2";
   };
 in
 {
@@ -26,6 +25,7 @@ in
       pkgs.qemu
     ];
     script = ''
+      set -e
       cd $STATE_DIRECTORY
       diskFile=${defaultDisk}/nixos.*
       imgName="$(basename $diskFile)"
@@ -35,7 +35,8 @@ in
       fi;
       qemu-kvm \
         -nographic \
-        -m 1024 \
+        -m 8192 \
+        -smp 4 \
         -drive file="$imgName",if=virtio \
         -net nic,model=virtio \
         -net user,hostfwd=tcp::3333-:22

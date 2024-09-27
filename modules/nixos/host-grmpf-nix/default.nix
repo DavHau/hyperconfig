@@ -8,6 +8,7 @@ in
       ../common.nix
       ../etc-hosts.nix
       ../nix-development.nix
+      inputs.srvos.nixosModules.desktop
       inputs.home-manager.nixosModule
       inputs.retiolum.nixosModules.retiolum
       ./hardware-configuration.nix

@@ -3,6 +3,10 @@ let
   home = "/pool11/enc/data/home";
 in
 {
+  imports = [
+    ../users/stefan.nix
+  ];
+
   security.pam.services.sshd.unixAuth = lib.mkForce true;
   # this is needed for any of the custom sudo rules to take effect at all
   security.sudo.execWheelOnly = lib.mkForce false;
@@ -97,15 +101,9 @@ in
     };
 
     stefan = {
-      isNormalUser = true;
       home = "${home}/stefan";
-      hashedPassword = "$6$lpdN2hE618bKcPTa$iwUiZEddqZaf4PqllsPplDdz8mRDMM8IYz.42cpyfJKxK66OGlRPVnyBrFYthJovj6s3TbtajjBPDAjy3kI.H.";
       openssh.authorizedKeys.keys =
-        config.users.users.root.openssh.authorizedKeys.keys
-        ++ [
-          "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA5PxR4yPCXBhL15II41hBF8V0d9D4ZRmICa3u09nNe8 hauer@MatebookX"
-          "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO/PPzetdVPjZhFumovpMO8Wc3BP05bBEbrg+C0iMhDo stefan-thinkpad"
-        ];
+        config.users.users.root.openssh.authorizedKeys.keys;
     };
   };
 }

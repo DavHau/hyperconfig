@@ -20,10 +20,9 @@
       ./smokeping.nix
       # ./sync-from-manu.nix
       ./users.nix
-      ./voicinator.nix
       ./reverse-proxy.nix
       ./file-browser-roman.nix
-      ./stefan-vm/default.nix
+      ../host-stefan-vm/host-module.nix
     ];
 
   deployAddress = "rhauer.duckdns.org";
