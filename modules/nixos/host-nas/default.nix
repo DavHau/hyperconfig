@@ -23,6 +23,7 @@
       ./voicinator.nix
       ./reverse-proxy.nix
       ./file-browser-roman.nix
+      ./stefan-vm/default.nix
     ];
 
   deployAddress = "rhauer.duckdns.org";
