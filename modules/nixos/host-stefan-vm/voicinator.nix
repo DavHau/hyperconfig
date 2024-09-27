@@ -12,7 +12,7 @@ in {
     wants = [ "network-online.target" ];
     after = [ "network-online.target" ];
     serviceConfig = {
-      DynamicUser = "true";
+      User = "stefan";
       StateDirectory = "voicinator";
       RuntimeDirectory = "voicinator";
       CacheDirectory = "voicinator";
