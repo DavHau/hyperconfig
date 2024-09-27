@@ -8,7 +8,6 @@
   };
   defaultModules = [
     inputs.agenix.nixosModules.age
-    inputs.srvos.nixosModules.desktop
   ];
   # collect all nixos modules which define hosts, prefixed with `host-`.
   hostModules' =
