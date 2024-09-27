@@ -3,6 +3,7 @@
     inputs.nixos-generators.nixosModules.all-formats
     ../common.nix
     ../dyndns-porkbun.nix
+    ../monitoring.nix
     ./hardware-configuration.nix
     ./reverse-proxy.nix
   ];
