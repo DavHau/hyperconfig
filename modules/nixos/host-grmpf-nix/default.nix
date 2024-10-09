@@ -47,7 +47,7 @@ in
     ../../home-manager/htop
   ];
 
-  clan.networking.targetHost = "root@localhost";
+  clan.core.networking.targetHost = "root@localhost";
 
   # set by default via clan
   # sops.age.keyFile = "/home/grmpf/.config/sops/age/keys.txt";
@@ -178,7 +178,7 @@ in
       pulseaudio
       wireshark
       # file manager
-        filezilla gnome3.nautilus xfce.thunar gnome.eog pcmanfm
+        filezilla nautilus xfce.thunar eog pcmanfm
       # browser
         firefox chromium
       # media viewer
@@ -203,6 +203,7 @@ in
       # edit PDF files
       xournal
   ];
+  programs.vim.enable = true;
   programs.vim.defaultEditor = true;
   programs.nm-applet.enable = true;
   programs.adb.enable = true;
@@ -370,10 +371,6 @@ in
   virtualisation.libvirtd.enable = true;
   users.extraUsers.grmpf.extraGroups = [ "libvirtd" "podman" ];
   /* networking.firewall.checkReversePath = false; */
-
-# gaming
-  hardware.opengl.driSupport32Bit = true;
-  hardware.pulseaudio.support32Bit = true;
 
 # shell aliases
   environment.shellAliases = {
