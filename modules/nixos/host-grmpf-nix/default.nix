@@ -318,6 +318,7 @@ in
 # DESKTOP (GUI)
   # Enable the X11 windowing system.
   services.libinput.enable = true;
+  services.libinput.mouse.clickMethod = "clickfinger";
   services.xserver.enable = true;
   services.xserver.xkb.layout = "us";
   services.xserver.xkb.variant = "altgr-intl";
