@@ -22,24 +22,41 @@
   services.samba = {
     enable = true;
     securityType = "user";
-    extraConfig = ''
-      workgroup = WORKGROUP
-      server string = smbnix
-      netbios name = smbnix
-      security = user
-      #use sendfile = yes
-      #max protocol = smb2
-      # note: localhost is the ipv6 localhost ::1
-      hosts allow = 192.168.178. 10.241. 127.0.0.1 localhost
-      hosts deny = 0.0.0.0/0
-      # guest account = guest
-      # map to guest = bad user
+    # extraConfig = ''
+    #   workgroup = WORKGROUP
+    #   server string = smbnix
+    #   netbios name = smbnix
+    #   security = user
+    #   #use sendfile = yes
+    #   #max protocol = smb2
+    #   # note: localhost is the ipv6 localhost ::1
+    #   hosts allow = 192.168.178. 10.241. 127.0.0.1 localhost
+    #   hosts deny = 0.0.0.0/0
+    #   # guest account = guest
+    #   # map to guest = bad user
 
+    #   # ensures that smb user will be mapped to unix user
+    #   username map = ${pkgs.writeText "smbusers" ''
+    #     manu = manu
+    #   ''}
+    # '';
+    settings = {
+      workgroup = "WORKGROUP";
+      "server string" = "smbnix";
+      "netbios name" = "smbnix";
+      "security" = "user";
+      # "use sendfile" = "yes";
+      # "max protocol" = "smb2";
+      # note: localhost is the ipv6 localhost ::1
+      "hosts allow" = "192.168.178. 10.241. 127.0.0.1 localhost";
+      "hosts deny" = "0.0.0.0/0";
+      # "guest account" = "guest";
+      # "map to guest" = "bad user";
       # ensures that smb user will be mapped to unix user
-      username map = ${pkgs.writeText "smbusers" ''
+      "username map" = "${pkgs.writeText "smbusers" ''
         manu = manu
-      ''}
-    '';
+      ''}";
+    };
     shares = {
       # public = {
       #   path = "/test2";
