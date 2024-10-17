@@ -108,49 +108,6 @@
     "bruch-bu.de/AAAA/casa"
   ];
 
-  # samba
-  services.samba-wsdd.enable = true;
-  services.samba = {
-    enable = true;
-    openFirewall = true;
-    securityType = "user";
-    extraConfig = ''
-      workgroup = WORKGROUP
-      server string = smbnix
-      netbios name = smbnix
-      security = user
-      #use sendfile = yes
-      #max protocol = smb2
-      hosts allow = 192.168.178.0/24  localhost
-      hosts deny = 0.0.0.0/0
-      guest account = guest
-      map to guest = bad user
-    '';
-    shares = {
-      public = {
-        path = config.users.users.guest.home;
-        browseable = "yes";
-        "read only" = "no";
-        "guest ok" = "yes";
-        "create mask" = "0644";
-        "directory mask" = "0755";
-        "force user" = "guest";
-        # "force group" = "guest";
-      };
-      # private = {
-      #   path = "/mnt/Shares/Private";
-      #   browseable = "yes";
-      #   "read only" = "no";
-      #   "guest ok" = "no";
-
-      #   "create mask" = "0644";
-      #   "directory mask" = "0755";
-      #   "force user" = "username";
-      #   "force group" = "groupname";
-      # };
-    };
-  };
-
   # Open ports in the firewall.
   # networking.firewall.allowedTCPPorts = [ ... ];
   # networking.firewall.allowedUDPPorts = [ ... ];
