@@ -11,5 +11,6 @@
     "7c31a21e86f9a75c" # lassulus
     "363c67c55a553deb" # papa
     "a0cbf4b62a5113d8" # thaiger sprint
+    "9bee8941b53da940" # edge city
   ];
 }
