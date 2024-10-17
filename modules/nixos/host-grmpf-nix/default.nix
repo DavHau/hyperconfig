@@ -202,6 +202,8 @@ in
       quickemu
       # edit PDF files
       xournal
+      # games
+      xonotic
   ];
   programs.vim.enable = true;
   programs.vim.defaultEditor = true;
