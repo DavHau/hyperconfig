@@ -39,7 +39,7 @@
 
   services.zerotierone.enable = true;
   services.zerotierone.joinNetworks = [
-    "12ac4a1e71b04480"
+    "af415e486f4514ce"
   ];
 
   # nixos-generators specific config
