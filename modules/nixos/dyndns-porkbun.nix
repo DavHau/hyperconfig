@@ -43,7 +43,7 @@ in
       script = lib.optionalString (cfg.ipv4Entries != []) ''
         ipv4=$(curl -4 --silent --fail ifconfig.co)
         for entry in ${toString cfg.ipv4Entries}; do
-          curl "https://porkbun.com/api/json/v3/dns/editByNameType/''${entry}" -d "
+          curl "https://api.porkbun.com/api/json/v3/dns/editByNameType/''${entry}" -d "
             {
               \"apikey\": \"$(cat ${config.clan.core.vars.generators.porkbun.files.apikey.path})\",
               \"secretapikey\": \"$(cat ${config.clan.core.vars.generators.porkbun.files.secretkey.path})\",
@@ -55,7 +55,7 @@ in
       + lib.optionalString (cfg.ipv6Entries != []) ''
         ipv6=$(curl -6 --silent --fail ifconfig.co)
         for entry in ${toString cfg.ipv6Entries}; do
-          curl "https://porkbun.com/api/json/v3/dns/editByNameType/''${entry}" -d "
+          curl "https://api.porkbun.com/api/json/v3/dns/editByNameType/''${entry}" -d "
             {
               \"apikey\": \"$(cat ${config.clan.core.vars.generators.porkbun.files.apikey.path})\",
               \"secretapikey\": \"$(cat ${config.clan.core.vars.generators.porkbun.files.secretkey.path})\",
