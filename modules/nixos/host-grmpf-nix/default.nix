@@ -43,6 +43,8 @@ in
       ./iodine-client.nix
   ];
 
+  services.tailscale.enable = true;
+
   home-manager.users.grmpf.imports = [
     ../../home-manager/htop
   ];
