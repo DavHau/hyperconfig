@@ -21,7 +21,4 @@
   clan.core.networking.buildHost = "grmpf@localhost";
   boot.loader.grub.enable = false;
   boot.loader.generic-extlinux-compatible.enable = true;
-  services.porkbun.ipv4Entries = [
-    "bruch-bu.de/A/playa"
-  ];
 }
