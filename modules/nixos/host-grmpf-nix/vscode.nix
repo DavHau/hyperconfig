@@ -125,7 +125,7 @@
         key = "Ctrl+Shift+/";}
       {
         command = "git.commitAmend";
-        key = "Ctrl+G Ctrl+A";
+        key = "ctrl+alt+c ctrl+alt+a";
       }
     ];
   };
