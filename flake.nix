@@ -8,7 +8,6 @@
       url = "github:edolstra/flake-compat";
       flake = false;
     };
-    agenix.url = "github:ryantm/agenix/0.13.0";
     nixpkgs.url = "github:nixos/nixpkgs";
     # nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     nixpkgs-unstable.follows = "nixpkgs";
@@ -42,7 +41,7 @@
     devenv.inputs.nixpkgs.follows = "nixpkgs";
 
     nix-heuristic-gc.url = "github:risicle/nix-heuristic-gc";
-    nix-heuristic-gc.inputs.nixpkgs.follows = "nixpkgs";
+    # nix-heuristic-gc.inputs.nixpkgs.follows = "nixpkgs";
 
     srvos.url = "github:nix-community/srvos";
     srvos.inputs.nixpkgs.follows = "nixpkgs";
@@ -52,6 +51,8 @@
 
     lassulus.url = "github:Lassulus/superconfig";
     lassulus.inputs.nixpkgs.follows = "nixpkgs";
+
+    hyprspace.url = "github:hyprspace/hyprspace";
   };
 
   outputs = inputs@{ flake-parts, ... }:
