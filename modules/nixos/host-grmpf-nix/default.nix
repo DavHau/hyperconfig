@@ -1,4 +1,4 @@
-{ config, pkgs, lib, inputs, ... }:
+{ config, pkgs, lib, inputs, self, ... }:
 let
   l = lib // builtins;
 in
@@ -8,6 +8,7 @@ in
       ../common.nix
       ../etc-hosts.nix
       ../nix-development.nix
+      ../hyprspace
       inputs.srvos.nixosModules.desktop
       inputs.home-manager.nixosModule
       inputs.retiolum.nixosModules.retiolum
@@ -41,6 +42,10 @@ in
       # ./mycelium.nix
       # ./vagrant.nix
       ./iodine-client.nix
+  ];
+
+  services.hyprspace.settings.peers = [
+    { id = self.nixosConfigurations.nas.config.clan.core.vars.generators.hyprspace.files.peer-id.value; }
   ];
 
   services.tailscale.enable = true;

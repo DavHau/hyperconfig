@@ -2,7 +2,7 @@
 # your system.  Help is available in the configuration.nix(5) man page
 # and in the NixOS manual (accessible by running ‘nixos-help’).
 
-{ config, lib, pkgs, pkgs-unstable, inputs, ... }:
+{ config, lib, pkgs, pkgs-unstable, inputs, self, ... }:
 
 {
   imports =
@@ -15,6 +15,7 @@
       ../role-sshuttle-server
       ../role-iodine/default.nix
       ../dyndns-porkbun.nix
+      ../hyprspace
       ./automount
       ./hardware-configuration.nix
       ./smokeping.nix
@@ -24,6 +25,10 @@
       ./file-browser-roman.nix
       ../host-stefan-vm/host-module.nix
     ];
+
+  services.hyprspace.settings.peers = [
+    { id = self.nixosConfigurations.grmpf-nix.config.clan.core.vars.generators.hyprspace.files.peer-id.value; }
+  ];
 
   deployAddress = "rhauer.duckdns.org";
   clan.networking.targetHost = "root@nas";
