@@ -6,9 +6,7 @@
   specialArgs = {
     inherit inputs pkgs-unstable self;
   };
-  defaultModules = [
-    inputs.agenix.nixosModules.age
-  ];
+  defaultModules = [ ];
   # collect all nixos modules which define hosts, prefixed with `host-`.
   hostModules' =
     l.filterAttrs (name: module: l.hasPrefix "host-" name) self.modules.nixos;

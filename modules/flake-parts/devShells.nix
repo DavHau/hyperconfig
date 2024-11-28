@@ -3,7 +3,6 @@
     devShells.default = pkgs.mkShell {
       packages = [
         inputs'.clan-core.packages.clan-cli
-        inputs'.agenix.packages.agenix
       ];
     };
   };

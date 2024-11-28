@@ -45,6 +45,7 @@
         # pack.compression = 0;
         # core.editor = "codium";
         init.defaultBranch = "main";
+        pull.rebase = true;
         rebase.autoStash = true;
       };
       aliases = {

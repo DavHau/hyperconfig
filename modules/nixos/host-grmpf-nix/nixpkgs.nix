@@ -7,6 +7,7 @@
       "steam-original"
       "steam-runtime"
       "steam-run"
+      "steam-unwrapped"
       "teamspeak-client"
       "teamviewer"
       "vagrant"
