@@ -6,9 +6,9 @@
   ...
 }: {
   imports = [
-    ../common.nix
-    # ../role-parasit.nix
-    ../role-flixbus.nix
+   ../../modules/nixos/common.nix
+    #../../modules/nixos/role-parasit.nix
+   ../../modules/nixos/role-flixbus.nix
   ];
   deployAddress = "192.168.178.4";
   # nixpkgs.hostPlatform = "aarch64-linux";

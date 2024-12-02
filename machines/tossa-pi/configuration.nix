@@ -1,9 +1,9 @@
 {config, lib, inputs, ...}: {
   imports = [
     inputs.nixos-generators.nixosModules.all-formats
-    ../common.nix
-    ../dyndns-porkbun.nix
-    ../monitoring.nix
+   ../../modules/nixos/common.nix
+   ../../modules/nixos/dyndns-porkbun.nix
+   ../../modules/nixos/monitoring.nix
     ./hardware-configuration.nix
     ./reverse-proxy.nix
   ];
