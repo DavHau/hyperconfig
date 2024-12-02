@@ -1,14 +1,17 @@
 {config, lib, inputs, ...}: {
   imports = [
     inputs.nixos-generators.nixosModules.all-formats
-    ../../modules/nixos/common.nix
-    ../../modules/nixos/dyndns-porkbun.nix
-    ../../modules/nixos/monitoring.nix
+
+   ../../modules/nixos/common.nix
+   ../../modules/nixos/dyndns-porkbun.nix
+   ../../modules/nixos/monitoring.nix
     ./hardware-configuration.nix
     ./reverse-proxy.nix
   ];
+  services.nginx.enable = true;
   nixpkgs.hostPlatform = "aarch64-linux";
   networking.wireless.enable = true;
+  users.users.root.password = "hello";
   networking.useDHCP = true;
   formatConfigs.sd-aarch64 = {
     disabledModules = [

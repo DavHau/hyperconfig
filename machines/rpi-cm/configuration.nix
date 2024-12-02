@@ -1,7 +1,7 @@
 {lib, config, inputs, ...}: {
   imports = [
     inputs.nixos-generators.nixosModules.all-formats
-    ../common.nix
+   ../../modules/nixos/common.nix
   ];
   services.home-assistant.enable = true;
   services.home-assistant.config = {
