@@ -6,9 +6,9 @@
 }:
 {
   imports = [
-    ../common.nix
+   ../../modules/nixos/common.nix
     ./voicinator.nix
-    ../users/stefan.nix
+   ../../modules/nixos/users/stefan.nix
   ];
 
   clan.core.networking.targetHost = "root@192.168.194.5";
