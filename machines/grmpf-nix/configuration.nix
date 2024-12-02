@@ -5,10 +5,10 @@ in
 {
   imports =
     [
-      ../common.nix
-      ../etc-hosts.nix
-      ../nix-development.nix
-      ../hyprspace
+     ../../modules/nixos/common.nix
+     ../../modules/nixos/etc-hosts.nix
+     ../../modules/nixos/nix-development.nix
+     ../../modules/nixos/hyprspace
       inputs.srvos.nixosModules.desktop
       inputs.home-manager.nixosModule
       inputs.retiolum.nixosModules.retiolum
@@ -51,7 +51,7 @@ in
   services.tailscale.enable = true;
 
   home-manager.users.grmpf.imports = [
-    ../../home-manager/htop
+    ../../modules/home-manager/htop
   ];
 
   clan.core.networking.targetHost = "root@localhost";
