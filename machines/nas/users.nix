@@ -4,7 +4,7 @@ let
 in
 {
   imports = [
-    ../users/stefan.nix
+    ../../modules/nixos/users/stefan.nix
   ];
 
   security.pam.services.sshd.unixAuth = lib.mkForce true;
