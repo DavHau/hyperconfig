@@ -9,13 +9,13 @@
     [ # Include the results of the hardware scan.
       inputs.srvos.nixosModules.server
       inputs.srvos.nixosModules.mixins-systemd-boot
-      ../monitoring.nix
-      ../deployment.nix
-      ../role-parasit.nix
-      ../role-sshuttle-server
-      ../role-iodine/default.nix
-      ../dyndns-porkbun.nix
-      ../hyprspace
+      ../../modules/nixos/monitoring.nix
+      ../../modules/nixos/deployment.nix
+      ../../modules/nixos/role-parasit.nix
+      ../../modules/nixos/role-sshuttle-server
+      ../../modules/nixos/role-iodine/default.nix
+      ../../modules/nixos/dyndns-porkbun.nix
+      ../../modules/nixos/hyprspace
       ./automount
       ./hardware-configuration.nix
       ./smokeping.nix
@@ -23,7 +23,7 @@
       ./users.nix
       ./reverse-proxy.nix
       ./file-browser-roman.nix
-      ../host-stefan-vm/host-module.nix
+      ../../modules/nixos/host-stefan-vm/host-module.nix
     ];
 
   services.hyprspace.settings.peers = [
