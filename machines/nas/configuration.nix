@@ -23,7 +23,7 @@
       ./users.nix
       ./reverse-proxy.nix
       ./file-browser-roman.nix
-      ../../modules/nixos/host-stefan-vm/host-module.nix
+      ../stefan-vm/host-module.nix
     ];
 
   services.hyprspace.settings.peers = [
