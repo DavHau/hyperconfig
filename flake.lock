@@ -57,13 +57,10 @@
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1731598675,
-        "narHash": "sha256-JwaZ4PwN+7NsNqE0IJQvsyzXjqZYhIhRRyQm0t6by4k=",
-        "ref": "refs/heads/main",
-        "rev": "50ea7ac91a61456fdc53076f087b4775c9301a20",
-        "revCount": 4718,
-        "type": "git",
-        "url": "https://git.clan.lol/clan/clan-core"
+        "lastModified": 1733133721,
+        "narHash": "sha256-joi/ImpnJp4DPPePbpLuoKCaUBXUFx1e8bSmUGPO478=",
+        "path": "/home/grmpf/synced/projects/clan/clan-core",
+        "type": "path"
       },
       "original": {
         "type": "git",
@@ -1527,6 +1524,22 @@
         "type": "github"
       }
     },
+    "nixpkgs-stable": {
+      "locked": {
+        "lastModified": 1733107608,
+        "narHash": "sha256-jdX4KeRP2J1Rj7IRWK5xZFvxr8yjw+PQnCc8n2XclVA=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "c1c8d3d0b640adbb35a416e5cf8fbaf2186924d0",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "release-24.05",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
     "nixpkgs_2": {
       "locked": {
         "lastModified": 1717432640,
@@ -1823,9 +1836,7 @@
           "clan-core",
           "nixpkgs"
         ],
-        "nixpkgs-stable": [
-          "clan-core"
-        ]
+        "nixpkgs-stable": "nixpkgs-stable"
       },
       "locked": {
         "lastModified": 1731213149,

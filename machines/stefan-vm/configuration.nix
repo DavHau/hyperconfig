@@ -11,6 +11,8 @@
    ../../modules/nixos/users/stefan.nix
   ];
 
+  nixpkgs.hostPlatform = "x86_64-linux";
+
   clan.core.networking.targetHost = "root@192.168.194.5";
   clan.core.networking.buildHost = "grmpf@localhost";
 
