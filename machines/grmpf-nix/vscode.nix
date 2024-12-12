@@ -46,13 +46,13 @@
       ms-vsliveshare.vsliveshare
       ms-vscode.cpptools
       ms-vscode.cmake-tools
-      bradlc.vscode-tailwindcss
+      # bradlc.vscode-tailwindcss
       dbaeumer.vscode-eslint
       esbenp.prettier-vscode
-      denoland.vscode-deno
-      justusadam.language-haskell
-      haskell.haskell
-      rust-lang.rust-analyzer
+      # denoland.vscode-deno
+      # justusadam.language-haskell
+      # haskell.haskell
+      # rust-lang.rust-analyzer
       vscodevim.vim
       ms-toolsai.jupyter
       (pkgs.vscode-utils.buildVscodeMarketplaceExtension {

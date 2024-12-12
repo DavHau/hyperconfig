@@ -136,7 +136,7 @@ in
       # compression tools
       lz4 pxz zip unzip
       # system analysis
-      baobab bmon btop s-tui pciutils powertop usbutils lsof dstat latencytop sysprof filelight nvme-cli
+      baobab bmon btop s-tui pciutils powertop usbutils lsof dstat sysprof filelight nvme-cli
       # nix tools
       comma nix-output-monitor nix-prefetch-git nixos-generators nix-tree nix-diff cntr
       inputs.nil.packages.x86_64-linux.nil nix-init
@@ -170,7 +170,6 @@ in
   # GUI tools
       arandr  # configure monitors
       # blender  # graphics software
-      ferdium  # all chat apps in one program
       blueberry  # maage bluetooth devices
       kcalc # calculator
       ark # archive viewer/extractor
@@ -182,10 +181,9 @@ in
       gparted # partitioning
       # sqlitebrowser # browser for sqlite
       pavucontrol # audio settings
-      pulseaudio
       wireshark
       # file manager
-        filezilla nautilus xfce.thunar eog pcmanfm
+        filezilla nautilus eog
       # browser
         firefox chromium
       # media viewer
@@ -196,7 +194,7 @@ in
       # 3d tools
         # freecad
       # messengers
-        tdesktop element-desktop
+        ferdium  # all chat apps in one program
       # torrent
         deluge
       # gaming
@@ -208,7 +206,7 @@ in
       # VMs
       quickemu
       # edit PDF files
-      xournal
+      xournalpp
       # games
       xonotic
   ];

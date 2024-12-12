@@ -8,7 +8,7 @@
       url = "github:edolstra/flake-compat";
       flake = false;
     };
-    nixpkgs.url = "github:nixos/nixpkgs";
+    nixpkgs.url = "git+https://github.com/nixos/nixpkgs?&shallow=1";
     # nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     nixpkgs-unstable.follows = "nixpkgs";
 
