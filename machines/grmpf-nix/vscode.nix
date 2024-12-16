@@ -28,33 +28,32 @@
     enable = true;
     package = pkgs.vscode;
     extensions = with pkgs.vscode-extensions; [
+      mkhl.direnv
       jnoortheen.nix-ide
       editorconfig.editorconfig
       davidanson.vscode-markdownlint
       timonwong.shellcheck
       eamodio.gitlens
-      ms-vscode.cpptools
-      jock.svg
       streetsidesoftware.code-spell-checker
       bungcip.better-toml
       ms-python.python
-      mkhl.direnv
       github.copilot
       github.copilot-chat
-      # ms-python.vscode-pylance
       ms-pyright.pyright
-      ms-vsliveshare.vsliveshare
       ms-vscode.cpptools
       ms-vscode.cmake-tools
-      # bradlc.vscode-tailwindcss
       dbaeumer.vscode-eslint
       esbenp.prettier-vscode
+      vscodevim.vim
+      # ms-python.vscode-pylance
+      # ms-vsliveshare.vsliveshare
+      # bradlc.vscode-tailwindcss
+      # jock.svg
       # denoland.vscode-deno
       # justusadam.language-haskell
       # haskell.haskell
       # rust-lang.rust-analyzer
-      vscodevim.vim
-      ms-toolsai.jupyter
+      # ms-toolsai.jupyter
       (pkgs.vscode-utils.buildVscodeMarketplaceExtension {
         mktplcRef = {
           name = "markdowntable";
