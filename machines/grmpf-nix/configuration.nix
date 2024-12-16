@@ -38,7 +38,7 @@ in
       ./fonts.nix
       ./gocr.nix
       ./ocr
-      ./nether.nix
+      # ./nether.nix
       # ./mycelium.nix
       # ./vagrant.nix
       ./iodine-client.nix

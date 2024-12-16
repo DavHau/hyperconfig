@@ -37,22 +37,26 @@
     envfs.url = "github:Mic92/envfs";
     envfs.inputs.nixpkgs.follows = "nixpkgs";
 
-    devenv.url = "github:cachix/devenv";
-    devenv.inputs.nixpkgs.follows = "nixpkgs";
+    # devenv.url = "github:cachix/devenv";
+    # devenv.inputs.nixpkgs.follows = "nixpkgs";
 
     nix-heuristic-gc.url = "github:risicle/nix-heuristic-gc";
-    # nix-heuristic-gc.inputs.nixpkgs.follows = "nixpkgs";
+    nix-heuristic-gc.inputs.nixpkgs.follows = "nixpkgs";
 
     srvos.url = "github:nix-community/srvos";
     srvos.inputs.nixpkgs.follows = "nixpkgs";
 
-    nether.url = "github:Lassulus/nether";
-    nether.inputs.nixpkgs.follows = "nixpkgs";
+    # nether.url = "github:Lassulus/nether";
+    # nether.inputs.nixpkgs.follows = "nixpkgs";
 
-    lassulus.url = "github:Lassulus/superconfig";
-    lassulus.inputs.nixpkgs.follows = "nixpkgs";
+    # lassulus.url = "github:Lassulus/superconfig";
+    # lassulus.inputs.nixpkgs.follows = "nixpkgs";
 
     hyprspace.url = "github:hyprspace/hyprspace";
+    hyprspace.inputs.nixpkgs.follows = "nixpkgs";
+
+    raspberry-pi-nix.url = "git+https://github.com/nix-community/raspberry-pi-nix?shallow=1&rev=03886d127eb212b5195c2f2665414426fbb550c5";
+    raspberry-pi-nix.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = inputs@{ flake-parts, ... }:
