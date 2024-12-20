@@ -1,20 +1,30 @@
 {config, lib, inputs, ...}: {
   imports = [
-    inputs.nixos-generators.nixosModules.all-formats
+    inputs.raspberry-pi-nix.nixosModules.raspberry-pi
+    inputs.raspberry-pi-nix.nixosModules.sd-image
+    (inputs.clan-core + "/clanModules/wifi/roles/default.nix")
     ../../modules/nixos/common.nix
     ../../modules/nixos/monitoring.nix
-    ../../modules/nixos/role-flixbus.nix
+    ./home-assistant.nix
+  ];
+
+  disabledModules = [
     ./hardware-configuration.nix
   ];
-  nixpkgs.hostPlatform = "aarch64-linux";
-  networking.useDHCP = true;
-  formatConfigs.sd-aarch64 = {
-    disabledModules = [
-      ./hardware-configuration.nix
-    ];
-  };
-  # clan.core.networking.targetHost = "root@192.168.10.21";
+
+  raspberry-pi-nix.board = "bcm2712";
+  raspberry-pi-nix.kernel-build-system = "x86_64-linux";
+  systemd.tpm2.enable = false;
+  boot.initrd.systemd.tpm2.enable = false;
+  raspberry-pi-nix.uboot.enable = false;
+  boot.initrd.systemd.enable = false;
+
+  # clan.core.networking.targetHost= "root@[${config.clan.core.facts.services.zerotier.public.zerotier-ip.value}]";
+  clan.core.networking.targetHost= "root@cm-pi.local";
   clan.core.networking.buildHost = "grmpf@localhost";
-  boot.loader.grub.enable = false;
-  boot.loader.generic-extlinux-compatible.enable = true;
+
+  nixpkgs.hostPlatform = "aarch64-linux";
+
+  # clan.wifi.networks.cm-home.enable = true;
+  clan.wifi.networks.phone.enable = true;
 }

@@ -2,15 +2,27 @@
   l = lib // builtins;
   system = "x86_64-linux";
   pkgs-unstable = inputs.nixpkgs-unstable.legacyPackages.${system};
-  specialArgs = {
-    inherit inputs pkgs-unstable self;
-  };
+
+  allSystems = [ "x86_64-linux" "aarch64-linux" ];
+
+  pkgsCross = lib.genAttrs allSystems (
+    buildSystem:
+      lib.genAttrs allSystems (
+        crossSystem:
+          import inputs.nixpkgs {
+            inherit crossSystem;
+            system = buildSystem;
+          }
+      )
+  );
 
 in {
   flake = inputs.clan-core.lib.buildClan {
     directory = self;
-    inherit specialArgs;
-    # meta.name = "DavClan";
+      specialArgs = {
+        inherit inputs pkgs-unstable pkgsCross self;
+      };
+    meta.name = "DavClan";
     inventory.services.zerotier.zt-home = {
       roles.peer.tags = [ "all" ];
       roles.controller.machines = [ "nas" ];
