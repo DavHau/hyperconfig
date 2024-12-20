@@ -5,9 +5,9 @@
   inputs,
   ...
 }: let
-  nixLazy = inputs.nix-multi.packages.x86_64-linux.nix;
+  nix = inputs.nix-multi.packages.x86_64-linux.nix;
   nix-multi-bin = pkgs.writeScriptBin "nix-multi" ''
-    exec ${nixLazy}/bin/nix "$@"
+    exec ${nix}/bin/nix "$@"
   '';
 in {
   environment.systemPackages = [
