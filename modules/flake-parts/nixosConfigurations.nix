@@ -21,6 +21,14 @@ in {
         inherit inputs pkgsCross self;
       };
     meta.name = "DavClan";
+
+    # add machines to their hosts
+    inventory.services.importer.base = {
+      roles.default.tags = ["all"];
+      roles.default.extraModules = [
+        inputs.clan-core.clanModules.static-hosts
+      ];
+    };
     inventory.services.zerotier.zt-home = {
       roles.peer.tags = [ "all" ];
       roles.controller.machines = [ "nas" ];
