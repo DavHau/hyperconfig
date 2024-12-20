@@ -29,11 +29,12 @@ in
       ./low-battery-power-off.nix
       ./nixpkgs.nix
       ./nix-lazy.nix
+      ./nix-multi.nix
       ./bitwarden.nix
       ./envfs.nix
       # ./devenv.nix
       ./blueberry.nix
-      ./nix-heuristic-gc.nix
+      # ./nix-heuristic-gc.nix
       ./ollama.nix
       ./fonts.nix
       ./gocr.nix
@@ -182,6 +183,8 @@ in
       # sqlitebrowser # browser for sqlite
       pavucontrol # audio settings
       wireshark
+      # editors
+        zed
       # file manager
         filezilla nautilus eog
       # browser

@@ -20,7 +20,7 @@
 
     nix.url = "https://flakehub.com/f/NixOS/nix/2.23.*.tar.gz";
     nix-lazy.url = "github:edolstra/nix/lazy-trees";
-    nix-multi.url = "git+https://github.com/DeterminateSystems/nix?&ref=multithreaded-eval&shallow=1";
+    nix-multi.url = "git+https://github.com/DeterminateSystems/nix-src?&ref=multithreaded-eval&shallow=1";
 
     retiolum.url = "github:mic92/retiolum";
 
