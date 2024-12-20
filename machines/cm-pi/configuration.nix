@@ -21,7 +21,7 @@
 
   # clan.core.networking.targetHost= "root@[${config.clan.core.facts.services.zerotier.public.zerotier-ip.value}]";
   clan.core.networking.targetHost= "root@cm-pi.local";
-  clan.core.networking.buildHost = "grmpf@localhost";
+  # clan.core.networking.buildHost = "grmpf@localhost";
 
   nixpkgs.hostPlatform = "aarch64-linux";
 
