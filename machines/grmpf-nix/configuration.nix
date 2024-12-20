@@ -5,10 +5,11 @@ in
 {
   imports =
     [
-     ../../modules/nixos/common.nix
-     ../../modules/nixos/etc-hosts.nix
-     ../../modules/nixos/nix-development.nix
-     ../../modules/nixos/hyprspace
+      ../../modules/nixos/common.nix
+      ../../modules/nixos/etc-hosts.nix
+      ../../modules/nixos/nix-development.nix
+      ../../modules/nixos/hyprspace
+      ../../modules/nixos/nrb
       inputs.srvos.nixosModules.desktop
       inputs.home-manager.nixosModule
       inputs.retiolum.nixosModules.retiolum
