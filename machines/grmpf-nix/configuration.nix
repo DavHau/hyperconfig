@@ -97,7 +97,7 @@ in
     http2 = true
     http-connections = 200
     builders-use-substitutes = true
-    experimental-features = nix-command flakes ca-derivations impure-derivations recursive-nix auto-allocate-uids cgroups
+    experimental-features = nix-command flakes impure-derivations recursive-nix auto-allocate-uids cgroups
     log-lines = 25
     min-free = ${l.toString (10*1000*1000*1000)}
     max-free = ${l.toString (20*1000*1000*1000)}

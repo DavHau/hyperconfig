@@ -2,7 +2,7 @@
 # your system.  Help is available in the configuration.nix(5) man page
 # and in the NixOS manual (accessible by running ‘nixos-help’).
 
-{ config, lib, pkgs, pkgs-unstable, inputs, self, ... }:
+{ config, lib, pkgs, inputs, self, ... }:
 
 {
   imports =
@@ -31,7 +31,7 @@
   ];
 
   deployAddress = "rhauer.duckdns.org";
-  clan.networking.targetHost = "root@nas";
+  clan.core.networking.targetHost = "root@nas";
 
   documentation.nixos.enable = false;
   documentation.man.enable = false;
@@ -59,7 +59,7 @@
     # config.boot.kernelPackages.rtl8821au
     # config.boot.kernelPackages.rtl88x2bu
     # BrosTrend wifi stick
-    (pkgs-unstable.linuxPackages.rtl8812au.override {
+    (pkgs.linuxPackages.rtl8812au.override {
       kernel = config.boot.kernelPackages.kernel;
     })
   ];

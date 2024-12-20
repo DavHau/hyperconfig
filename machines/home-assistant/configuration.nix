@@ -2,7 +2,6 @@
   config,
   lib,
   pkgs,
-  pkgs-unstable,
   ...
 }: {
   imports = [
@@ -12,7 +11,6 @@
   ];
   deployAddress = "192.168.178.4";
   # nixpkgs.hostPlatform = "aarch64-linux";
-  nixpkgs.pkgs = pkgs-unstable;
   boot.loader.raspberryPi = {
     enable = true;
     version = 4;
