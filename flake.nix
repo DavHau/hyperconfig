@@ -8,12 +8,10 @@
       url = "github:edolstra/flake-compat";
       flake = false;
     };
-    nixpkgs.url = "git+https://github.com/nixos/nixpkgs?&shallow=1";
-    # nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
-    nixpkgs-unstable.follows = "nixpkgs";
+    nixpkgs.url = "git+https://github.com/nixos/nixpkgs?&ref=nixos-unstable&shallow=1";
 
     home-manager.url = "github:nix-community/home-manager";
-    home-manager.inputs.nixpkgs.follows = "nixpkgs-unstable";
+    home-manager.inputs.nixpkgs.follows = "nixpkgs";
 
     nixos-generators.url = "github:nix-community/nixos-generators";
     nixos-generators.inputs.nixpkgs.follows = "nixpkgs";
@@ -22,6 +20,7 @@
 
     nix.url = "https://flakehub.com/f/NixOS/nix/2.23.*.tar.gz";
     nix-lazy.url = "github:edolstra/nix/lazy-trees";
+    nix-multi.url = "git+https://github.com/DeterminateSystems/nix?&ref=multithreaded-eval&shallow=1";
 
     retiolum.url = "github:mic92/retiolum";
 

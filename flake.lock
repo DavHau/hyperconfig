@@ -331,7 +331,7 @@
     "home-manager": {
       "inputs": {
         "nixpkgs": [
-          "nixpkgs-unstable"
+          "nixpkgs"
         ]
       },
       "locked": {
@@ -688,15 +688,16 @@
     },
     "nixpkgs_4": {
       "locked": {
-        "lastModified": 1734618636,
-        "narHash": "sha256-DpD1tnxrD+uN62FEDEzpqFzPYbYeIXs2JPHpVdACwow=",
-        "ref": "refs/heads/master",
-        "rev": "0e4e4c0b73c7fc5872baabd47656238a0dbdccba",
+        "lastModified": 1734424634,
+        "narHash": "sha256-cHar1vqHOOyC7f1+tVycPoWTfKIaqkoe1Q6TnKzuti4=",
+        "ref": "nixos-unstable",
+        "rev": "d3c42f187194c26d9f0309a8ecc469d6c878ce33",
         "shallow": true,
         "type": "git",
         "url": "https://github.com/nixos/nixpkgs"
       },
       "original": {
+        "ref": "nixos-unstable",
         "shallow": true,
         "type": "git",
         "url": "https://github.com/nixos/nixpkgs"
@@ -828,9 +829,6 @@
         "nixos-generators": "nixos-generators",
         "nixos-images": "nixos-images",
         "nixpkgs": "nixpkgs_4",
-        "nixpkgs-unstable": [
-          "nixpkgs"
-        ],
         "raspberry-pi-nix": "raspberry-pi-nix",
         "retiolum": "retiolum",
         "srvos": "srvos"

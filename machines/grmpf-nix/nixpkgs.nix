@@ -22,29 +22,4 @@
       "Oracle_VM_VirtualBox_Extension_Pack"
     ];
   };
-
-  nixpkgs.overlays = [
-    (curr: prev: let
-      nixpkgsUnstable = import inputs.nixpkgs-unstable {
-        config = config.nixpkgs.config;
-        system = curr.system;
-      };
-    in
-      (lib.genAttrs
-        [
-          "alejandra"
-          "comma"
-          "cura"
-          "jetbrains"
-          "ledger-live-desktop"
-          "nix-direnv"
-          "nix-tree"
-          "steam"
-          "tdesktop"
-          "znapzend"
-          "vscode-extensions"
-          "ferdium"
-        ]
-        (pname: nixpkgsUnstable."${pname}")))
-  ];
 }

@@ -1,8 +1,6 @@
 { self, lib, inputs, ... }: let
   l = lib // builtins;
   system = "x86_64-linux";
-  pkgs-unstable = inputs.nixpkgs-unstable.legacyPackages.${system};
-
   allSystems = [ "x86_64-linux" "aarch64-linux" ];
 
   pkgsCross = lib.genAttrs allSystems (
@@ -20,7 +18,7 @@ in {
   flake = inputs.clan-core.lib.buildClan {
     directory = self;
       specialArgs = {
-        inherit inputs pkgs-unstable pkgsCross self;
+        inherit inputs pkgsCross self;
       };
     meta.name = "DavClan";
     inventory.services.zerotier.zt-home = {
