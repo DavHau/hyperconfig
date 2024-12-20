@@ -28,23 +28,32 @@
     enable = true;
     package = pkgs.vscode;
     extensions = with pkgs.vscode-extensions; [
-      mkhl.direnv
       jnoortheen.nix-ide
-      editorconfig.editorconfig
-      davidanson.vscode-markdownlint
-      timonwong.shellcheck
-      eamodio.gitlens
-      streetsidesoftware.code-spell-checker
-      bungcip.better-toml
-      ms-python.python
-      github.copilot
-      github.copilot-chat
       ms-pyright.pyright
-      ms-vscode.cpptools
-      ms-vscode.cmake-tools
-      dbaeumer.vscode-eslint
-      esbenp.prettier-vscode
-      vscodevim.vim
+      # mkhl.direnv
+      # editorconfig.editorconfig
+      # davidanson.vscode-markdownlint
+      # timonwong.shellcheck
+      # eamodio.gitlens
+      # streetsidesoftware.code-spell-checker
+      # bungcip.better-toml
+      # ms-python.python
+      # github.copilot
+      # github.copilot-chat
+      # ms-vscode.cpptools
+      # ms-vscode.cmake-tools
+      # dbaeumer.vscode-eslint
+      # esbenp.prettier-vscode
+      # vscodevim.vim
+      # (pkgs.vscode-utils.buildVscodeMarketplaceExtension {
+      #   mktplcRef = {
+      #     name = "markdowntable";
+      #     publisher = "TakumiI";
+      #     version = "0.11.0";
+      #     sha256 = "sha256-kn5aLRaxxacQMvtTp20IdTuiuc6xNU3QO2XbXnzSf7o=";
+      #   };
+      # })
+
       # ms-python.vscode-pylance
       # ms-vsliveshare.vsliveshare
       # bradlc.vscode-tailwindcss
@@ -54,14 +63,6 @@
       # haskell.haskell
       # rust-lang.rust-analyzer
       # ms-toolsai.jupyter
-      (pkgs.vscode-utils.buildVscodeMarketplaceExtension {
-        mktplcRef = {
-          name = "markdowntable";
-          publisher = "TakumiI";
-          version = "0.11.0";
-          sha256 = "sha256-kn5aLRaxxacQMvtTp20IdTuiuc6xNU3QO2XbXnzSf7o=";
-        };
-      })
       # arrterian.nix-env-selector
       # arrterian.nix-env-selector
       # serayuzgur.crates
