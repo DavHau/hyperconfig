@@ -1,0 +1,5 @@
+substitutions:
+  name: aircon_bed_room
+  friendly_name: Aircon Bed Room
+
+<<: !include aircon_common.yaml

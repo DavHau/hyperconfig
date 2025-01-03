@@ -30,16 +30,16 @@
     extensions = with pkgs.vscode-extensions; [
       jnoortheen.nix-ide
       ms-pyright.pyright
+      eamodio.gitlens
+      github.copilot
+      github.copilot-chat
       # mkhl.direnv
       # editorconfig.editorconfig
       # davidanson.vscode-markdownlint
       # timonwong.shellcheck
-      # eamodio.gitlens
       # streetsidesoftware.code-spell-checker
       # bungcip.better-toml
       # ms-python.python
-      # github.copilot
-      # github.copilot-chat
       # ms-vscode.cpptools
       # ms-vscode.cmake-tools
       # dbaeumer.vscode-eslint

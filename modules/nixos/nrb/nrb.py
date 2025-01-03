@@ -27,13 +27,18 @@ def parse_args():
     return parser.parse_args()
 
 
+def nix():
+    nix = os.environ.get("NIX")
+    return nix if nix else "nix"
+
+
 def main():
     args = parse_args()
     # call nix eval to get the drv path
     print("evaluating drvPath")
     drv_path = sp.run(
         [
-            "nix",
+            nix(),
             "eval",
             "--raw",
             f"{args.attribute}.drvPath",
@@ -45,7 +50,7 @@ def main():
     # get outPath by calling nix show-derivation
     show_drv = sp.run(
         [
-            "nix",
+            nix(),
             "derivation",
             "show",
             f"{drv_path}^*",
@@ -60,7 +65,7 @@ def main():
     print(f"building {args.attribute} on {args.build_host}")
     sp.run(
         [
-            "nix",
+            nix(),
             "build",
             "--store",
             f"ssh-ng://{args.build_host}",
@@ -74,7 +79,7 @@ def main():
     print(f"copying {args.attribute} from {args.build_host}")
     sp.run(
         [
-            "nix",
+            nix(),
             "copy",
             "--no-check-sigs",
             "--from",

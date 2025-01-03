@@ -46,6 +46,8 @@ in
       ./iodine-client.nix
   ];
 
+  zramSwap.enable = true;
+
   services.hyprspace.settings.peers = [
     { id = self.nixosConfigurations.nas.config.clan.core.vars.generators.hyprspace.files.peer-id.value; }
   ];
@@ -141,7 +143,7 @@ in
       baobab bmon btop s-tui pciutils powertop usbutils lsof dstat sysprof filelight nvme-cli
       # nix tools
       comma nix-output-monitor nix-prefetch-git nixos-generators nix-tree nix-diff cntr
-      inputs.nil.packages.x86_64-linux.nil nix-init
+      inputs.nil.packages.x86_64-linux.nil nix-init nix-fast-build
       # fs tools
       sshfs-fuse ranger mc
       # virtualisation

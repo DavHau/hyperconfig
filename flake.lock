@@ -685,6 +685,21 @@
         "type": "github"
       }
     },
+    "nixos-hardware": {
+      "locked": {
+        "lastModified": 1735388221,
+        "narHash": "sha256-e5IOgjQf0SZcFCEV/gMGrsI0gCJyqOKShBQU0iiM3Kg=",
+        "owner": "nixos",
+        "repo": "nixos-hardware",
+        "rev": "7c674c6734f61157e321db595dbfcd8523e04e19",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nixos",
+        "repo": "nixos-hardware",
+        "type": "github"
+      }
+    },
     "nixos-images": {
       "flake": false,
       "locked": {
@@ -847,19 +862,19 @@
     },
     "nixpkgs_5": {
       "locked": {
-        "lastModified": 1734424634,
-        "narHash": "sha256-cHar1vqHOOyC7f1+tVycPoWTfKIaqkoe1Q6TnKzuti4=",
-        "ref": "nixos-unstable",
-        "rev": "d3c42f187194c26d9f0309a8ecc469d6c878ce33",
+        "lastModified": 1735815044,
+        "narHash": "sha256-C+P41CCwFA1l+xA+EX+Gk2HaU4sbRThVlJgTKsgXooc=",
+        "ref": "dave",
+        "rev": "ed2eeb93bfd8454ffe450bc451295be3aa047ebe",
         "shallow": true,
         "type": "git",
-        "url": "https://github.com/nixos/nixpkgs"
+        "url": "https://github.com/davhau/nixpkgs"
       },
       "original": {
-        "ref": "nixos-unstable",
+        "ref": "dave",
         "shallow": true,
         "type": "git",
-        "url": "https://github.com/nixos/nixpkgs"
+        "url": "https://github.com/davhau/nixpkgs"
       }
     },
     "pre-commit-hooks": {
@@ -987,6 +1002,7 @@
         "nix-lazy": "nix-lazy",
         "nix-multi": "nix-multi",
         "nixos-generators": "nixos-generators",
+        "nixos-hardware": "nixos-hardware",
         "nixos-images": "nixos-images",
         "nixpkgs": "nixpkgs_5",
         "raspberry-pi-nix": "raspberry-pi-nix",
