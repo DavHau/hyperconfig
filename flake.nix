@@ -57,8 +57,8 @@
     hyprspace.url = "github:hyprspace/hyprspace";
     hyprspace.inputs.nixpkgs.follows = "nixpkgs";
 
-    raspberry-pi-nix.url = "git+https://github.com/nix-community/raspberry-pi-nix?shallow=1&rev=03886d127eb212b5195c2f2665414426fbb550c5";
-    raspberry-pi-nix.inputs.nixpkgs.follows = "nixpkgs";
+    nixvim.url = "github:nix-community/nixvim";
+    nixvim.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = inputs@{ flake-parts, ... }:
