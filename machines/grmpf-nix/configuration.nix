@@ -187,7 +187,7 @@ in
       pavucontrol # audio settings
       wireshark
       # editors
-        zed
+        zed self.packages.${system}.nixvim
       # file manager
         filezilla nautilus eog
       # browser
