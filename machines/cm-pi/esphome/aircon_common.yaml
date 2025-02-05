@@ -41,17 +41,34 @@ climate:
     vertical_default: up
     min_temperature: 16
     max_temperature: 31
-    receiver_id: rcvr
+    # receiver_id: rcvr
 
 remote_transmitter:
   pin:
     number: GPIO4
   carrier_duty_percent: 50%
 
-remote_receiver:
-  id: rcvr
-  pin:
-    number: GPIO5
-    inverted: true
-  dump: all
+# remote_receiver:
+#   id: rcvr
+#   pin:
+#     number: GPIO5
+#     inverted: true
+#   dump: all
+
+# report wifi signal strength
+sensor:
+  - platform: wifi_signal # Reports the WiFi signal strength/RSSI in dB
+    name: "WiFi Signal dB"
+    id: wifi_signal_db
+    update_interval: 60s
+    entity_category: "diagnostic"
+
+  - platform: copy # Reports the WiFi signal strength in %
+    source_id: wifi_signal_db
+    name: "WiFi Signal Percent"
+    filters:
+      - lambda: return min(max(2 * (x + 100.0), 0.0), 100.0);
+    unit_of_measurement: "Signal %"
+    entity_category: "diagnostic"
+    device_class: ""
 

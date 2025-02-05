@@ -1,4 +1,4 @@
-{config, lib, ...}: {
+{config, lib, pkgs, ...}: {
   # allow access to zigbee antenna
   services.udev.extraRules = ''
     ENV{DEVNAME}=="/dev/ttyACM0", owner="hass"
@@ -32,6 +32,7 @@
       bluetooth-auto-recovery
       bluetooth-data-tools
       cached-ipaddress
+      cronsim
       dbus-fast
       fnv-hash-fast
       go2rtc-client
@@ -43,7 +44,7 @@
       home-assistant-intents
       ifaddr
       mutagen
-      numpy_1
+      numpy
       pillow
       psutil-home-assistant
       pymicro-vad
