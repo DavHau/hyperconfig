@@ -61,7 +61,7 @@
     nixvim.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = inputs@{ flake-parts, ... }:
+  outputs = inputs@{ flake-parts, self, ... }:
     flake-parts.lib.mkFlake { inherit inputs; } {
 
       systems = [
@@ -71,5 +71,12 @@
       imports = [
         ./modules/flake-parts/all-modules.nix
       ];
+
+      flake.inputs = inputs;
+
+      flake.checks.x86_64-linux = {
+        grmpf-nix = self.nixosConfigurations.grmpf-nix.config.system.build.toplevel;
+        cm-pi = self.nixosConfigurations.cm-pi.config.system.build.toplevel;
+      };
     };
 }
