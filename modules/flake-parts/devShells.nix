@@ -4,7 +4,7 @@
       packages = [
         inputs'.clan-core.packages.clan-cli
         # pkgs.esphome
-        inputs'.nix-multi.packages.nix
+        # inputs'.nix-multi.packages.nix
       ];
     };
   };

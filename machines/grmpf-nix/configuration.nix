@@ -8,8 +8,9 @@ in
       ../../modules/nixos/common.nix
       ../../modules/nixos/etc-hosts.nix
       ../../modules/nixos/nix-development.nix
-      ../../modules/nixos/hyprspace
+      # ../../modules/nixos/hyprspace
       ../../modules/nixos/nrb
+      ../../modules/nixos/nix-caches.nix
       inputs.srvos.nixosModules.desktop
       inputs.home-manager.nixosModule
       inputs.retiolum.nixosModules.retiolum
@@ -48,9 +49,9 @@ in
 
   zramSwap.enable = true;
 
-  services.hyprspace.settings.peers = [
-    { id = self.nixosConfigurations.nas.config.clan.core.vars.generators.hyprspace.files.peer-id.value; }
-  ];
+  # services.hyprspace.settings.peers = [
+  #   { id = self.nixosConfigurations.nas.config.clan.core.vars.generators.hyprspace.files.peer-id.value; }
+  # ];
 
   services.tailscale.enable = true;
 
@@ -140,7 +141,7 @@ in
       # compression tools
       lz4 pxz zip unzip
       # system analysis
-      baobab bmon btop s-tui pciutils powertop usbutils lsof dstat sysprof filelight nvme-cli
+      baobab bmon btop s-tui pciutils powertop usbutils lsof dool sysprof filelight nvme-cli
       # nix tools
       comma nix-output-monitor nix-prefetch-git nixos-generators nix-tree nix-diff cntr
       inputs.nil.packages.x86_64-linux.nil nix-init nix-fast-build
@@ -170,6 +171,8 @@ in
       ruff
       # show community maintained examples for linux commands
       cheat
+      # man
+      man-pages
 
   # GUI tools
       arandr  # configure monitors
