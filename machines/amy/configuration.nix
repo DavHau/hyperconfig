@@ -47,6 +47,7 @@ in
       # ./iodine-client.nix
       ./disko.nix
       ./udev.nix
+      ./sway
   ];
 
   nixpkgs.hostPlatform = "x86_64-linux";
