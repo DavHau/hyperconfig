@@ -8,8 +8,8 @@
       url = "github:edolstra/flake-compat";
       flake = false;
     };
-    # nixpkgs.url = "git+https://github.com/nixos/nixpkgs?&ref=nixos-unstable&shallow=1";
-    nixpkgs.url = "git+https://github.com/davhau/nixpkgs?&ref=dave&shallow=1";
+    nixpkgs.url = "git+https://github.com/nixos/nixpkgs?&ref=nixos-unstable&shallow=1";
+    # nixpkgs.url = "git+https://github.com/davhau/nixpkgs?&ref=dave&shallow=1";
 
     home-manager.url = "github:nix-community/home-manager";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";

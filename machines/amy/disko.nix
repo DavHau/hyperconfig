@@ -33,7 +33,7 @@
         type = "zpool";
         rootFsOptions = {
           mountpoint = "none";
-          compression = "zstd";
+          compression = "zstd-1";
           acltype = "posixacl";
           xattr = "sa";
           "com.sun:auto-snapshot" = "true";
@@ -43,7 +43,6 @@
           "root" = {
             type = "zfs_fs";
             options = {
-              mountpoint = "/";
               encryption = "aes-256-gcm";
               keyformat = "passphrase";
               #keylocation = "file:///tmp/secret.key";

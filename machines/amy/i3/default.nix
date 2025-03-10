@@ -5,13 +5,6 @@
   ...
 }: {
   # services.xserver.displayManager.defaultSession = "none+i3";
-  services.xserver.displayManager.session = [
-    {
-      manage = "desktop";
-      name = "i3";
-      start = "${pkgs.i3}/bin/i3";
-    }
-  ];
   # services.xserver.displayManager.lightdm.enable = true;
   services.xserver.desktopManager.xterm.enable = false;
   services.xserver.windowManager.i3 = {

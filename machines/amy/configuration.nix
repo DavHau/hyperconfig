@@ -46,6 +46,7 @@ in
       # ./vagrant.nix
       # ./iodine-client.nix
       ./disko.nix
+      ./udev.nix
   ];
 
   nixpkgs.hostPlatform = "x86_64-linux";
@@ -64,7 +65,7 @@ in
     ../../modules/home-manager/htop
   ];
 
-  clan.core.networking.targetHost = "root@192.168.3.83";
+  clan.core.networking.targetHost = "root@localhost";
 
   # set by default via clan
   # sops.age.keyFile = "/home/grmpf/.config/sops/age/keys.txt";
@@ -146,7 +147,7 @@ in
       # compression tools
       lz4 pxz zip unzip
       # system analysis
-      baobab bmon btop s-tui pciutils powertop usbutils lsof dool sysprof filelight nvme-cli
+      baobab bmon btop s-tui pciutils powertop usbutils lsof dool sysprof nvme-cli
       # nix tools
       comma nix-output-monitor nix-prefetch-git nixos-generators nix-tree nix-diff cntr
       inputs.nil.packages.x86_64-linux.nil nix-init nix-fast-build
@@ -183,9 +184,8 @@ in
       arandr  # configure monitors
       # blender  # graphics software
       blueberry  # maage bluetooth devices
-      kcalc # calculator
-      ark # archive viewer/extractor
-      # chia # blockchain
+      # ark # archive viewer/extractor
+      # kcalc  # claculator
       httpie # make http requests
       flameshot kazam # screen shot + recoding
       # psensor # watch Sensors
@@ -201,7 +201,7 @@ in
       # browser
         firefox chromium
       # media viewer
-        vlc okular
+        vlc
       # graphical tools
         gimp inkscape
         # darktable
@@ -275,7 +275,7 @@ in
     START_CHARGE_THRESH_BAT0 = 80;
     CPU_SCALING_MAX_FREQ_ON_BAT = 800000;
     CPU_SCALING_MAX_FREQ_ON_AC = 9999999;
-    CPU_MAX_PERF_ON_BAT=20;
+    CPU_MAX_PERF_ON_BAT=40;
   };
 
   # BORING STUFF.
@@ -367,7 +367,7 @@ in
     hashedPassword = "$6$.Op44MVHQ3qw$YwbFuIrs37BiAScgJSXAIcTxLjFL4ziejub.VBj.Xt41Pm3C8QilLjI2yW6R2lit1RnLydmTwDqzuQa/WUlor.";
     openssh.authorizedKeys.keys = [ "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDuhpzDHBPvn8nv8RH1MRomDOaXyP4GziQm7r3MZ1Syk grmpf@grmpf-ThinkPad-T460p" ];
     # wheel enables ‘sudo’ for the user.
-    extraGroups = [ "wheel" "networkmanager" "audio" "ledger" "plugdev" ];
+    extraGroups = [ "wheel" "networkmanager" "audio" "ledger" "plugdev" "dialout" ];
     # shell = pkgs.fish;
   };
 

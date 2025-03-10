@@ -3,7 +3,7 @@
     after = [];
     before = [ "checkLinkTargets" ];
     data = ''
-      for userDir in /home/grmpf/.config/{VSCodium,Code}/User; do
+      for userDir in /home/grmpf/.config/Code/User; do
         rm -rf $userDir/settings.json
       done
     '';
@@ -13,7 +13,7 @@
     after = [ "writeBoundary" ];
     before = [];
     data = ''
-      for userDir in /home/grmpf/.config/{VSCodium,Code}/User; do
+      for userDir in /home/grmpf/.config/Code/User; do
         rm -rf $userDir/settings.json
         cat \
           ${(pkgs.formats.json {}).generate "blabla"
@@ -33,6 +33,7 @@
       eamodio.gitlens
       github.copilot
       github.copilot-chat
+      tomoki1207.pdf
       # mkhl.direnv
       # editorconfig.editorconfig
       # davidanson.vscode-markdownlint
@@ -41,6 +42,7 @@
       # bungcip.better-toml
       # ms-python.python
       # ms-vscode.cpptools
+      llvm-vs-code-extensions.vscode-clangd
       # ms-vscode.cmake-tools
       # dbaeumer.vscode-eslint
       # esbenp.prettier-vscode
