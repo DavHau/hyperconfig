@@ -97,11 +97,11 @@
         "treefmt-nix": "treefmt-nix_2"
       },
       "locked": {
-        "lastModified": 1729588101,
-        "narHash": "sha256-cU03PTbxdiRkUCV13Lo3Z2jdqRqz8WhPuhzujadO6nk=",
+        "lastModified": 1740439402,
+        "narHash": "sha256-IjOlrC7PMDHFmTN4MqF4sVcV+wKUMrz9erKReh7WtNQ=",
         "owner": "Mic92",
         "repo": "envfs",
-        "rev": "2b6934ea38fa77bd5a97ba8f0be4ba8540e0e773",
+        "rev": "841f2147deb763da97684ca9b89a1b32e435cd83",
         "type": "github"
       },
       "original": {
@@ -1020,19 +1020,19 @@
     },
     "nixpkgs_5": {
       "locked": {
-        "lastModified": 1740695751,
-        "narHash": "sha256-D+R+kFxy1KsheiIzkkx/6L63wEHBYX21OIwlFV8JvDs=",
-        "ref": "nixos-unstable",
-        "rev": "6313551cd05425cd5b3e63fe47dbc324eabb15e4",
-        "shallow": true,
+        "lastModified": 1741678724,
+        "narHash": "sha256-vKt8KIND7c5IsJEZOvzBrt4atq+d1M5snOlmkbWx42o=",
+        "ref": "refs/heads/dave",
+        "rev": "9d0ab14fefa2864e852863072064c2dcbdd90bba",
+        "revCount": 764839,
         "type": "git",
-        "url": "https://github.com/nixos/nixpkgs"
+        "url": "file:///home/grmpf/projects/github/nixpkgs"
       },
       "original": {
-        "ref": "nixos-unstable",
+        "ref": "dave",
         "shallow": true,
         "type": "git",
-        "url": "https://github.com/nixos/nixpkgs"
+        "url": "https://github.com/davhau/nixpkgs"
       }
     },
     "nixvim": {

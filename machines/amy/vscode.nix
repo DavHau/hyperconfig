@@ -34,6 +34,7 @@
       github.copilot
       github.copilot-chat
       tomoki1207.pdf
+      ms-vscode.cmake-tools
       # mkhl.direnv
       # editorconfig.editorconfig
       # davidanson.vscode-markdownlint
@@ -43,7 +44,6 @@
       # ms-python.python
       # ms-vscode.cpptools
       llvm-vs-code-extensions.vscode-clangd
-      # ms-vscode.cmake-tools
       # dbaeumer.vscode-eslint
       # esbenp.prettier-vscode
       # vscodevim.vim

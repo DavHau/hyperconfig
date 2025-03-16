@@ -23,7 +23,6 @@ in
       ./retiolum.nix
       ./amdgpu.nix
       ./opengl.nix
-      ./i3
       # ./cura.nix  # slicer for 3d printing
       # ./tplink-archer-t2u-nano.nix
       ./printing.nix
@@ -184,11 +183,11 @@ in
   # GUI tools
       arandr  # configure monitors
       # blender  # graphics software
-      blueberry  # maage bluetooth devices
+      blueberry  # manage bluetooth devices
       # ark # archive viewer/extractor
       # kcalc  # claculator
       httpie # make http requests
-      flameshot kazam # screen shot + recoding
+      (flameshot.override {enableWlrSupport = true; enableMonochromeIcon = true;}) # screen shot + recoding
       # psensor # watch Sensors
       libreoffice # office
       gparted # partitioning
@@ -225,6 +224,7 @@ in
       # games
       xonotic
   ];
+  programs.nix-ld.enable = true;
   programs.vim.enable = true;
   programs.vim.defaultEditor = true;
   programs.nm-applet.enable = true;

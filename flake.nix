@@ -8,8 +8,8 @@
       url = "github:edolstra/flake-compat";
       flake = false;
     };
-    nixpkgs.url = "git+https://github.com/nixos/nixpkgs?&ref=nixos-unstable&shallow=1";
-    # nixpkgs.url = "git+https://github.com/davhau/nixpkgs?&ref=dave&shallow=1";
+    # nixpkgs.url = "git+https://github.com/nixos/nixpkgs?&ref=nixos-unstable&shallow=1";
+    nixpkgs.url = "git+https://github.com/davhau/nixpkgs?&ref=dave&shallow=1";
 
     home-manager.url = "github:nix-community/home-manager";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
@@ -75,6 +75,7 @@
       flake.inputs = inputs;
 
       flake.checks.x86_64-linux = {
+        amy = self.nixosConfigurations.amy.config.system.build.toplevel;
         grmpf-nix = self.nixosConfigurations.grmpf-nix.config.system.build.toplevel;
         cm-pi = self.nixosConfigurations.cm-pi.config.system.build.toplevel;
       };
