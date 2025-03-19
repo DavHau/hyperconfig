@@ -187,7 +187,7 @@ in
       # ark # archive viewer/extractor
       # kcalc  # claculator
       httpie # make http requests
-      (flameshot.override {enableWlrSupport = true; enableMonochromeIcon = true;}) # screen shot + recoding
+      flameshot # screen shot + recoding
       # psensor # watch Sensors
       libreoffice # office
       gparted # partitioning
@@ -237,6 +237,7 @@ in
   programs.sysdig.enable = true;
   services.usbmuxd.enable = true;
   services.udisks2.enable = true;
+  services.localtimed.enable = true;
   # programs.starship.enable = true;
   # services.nscd.enableNsncd = true;
   # services.unifi.enable = true;
@@ -248,7 +249,6 @@ in
 
   # Set your time zone.
   # time.timeZone = "Europe/Berlin";
-  services.tzupdate.enable = true;
 
   # BOOTLOADER
     boot.loader.systemd-boot.enable = true;
@@ -269,7 +269,7 @@ in
   # TLP
   services.tlp.enable = true;
   services.tlp.settings = {
-    CPU_SCALING_GOVERNOR_ON_AC = "ondemand";
+    CPU_SCALING_GOVERNOR_ON_AC = "powersave";
     CPU_SCALING_GOVERNOR_ON_BAT = "powersave";
     CPU_MAX_PERF_ON_AC = 100;
     STOP_CHARGE_THRESH_BAT0 = 90;

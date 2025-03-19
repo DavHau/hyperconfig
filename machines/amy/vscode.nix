@@ -35,15 +35,15 @@
       github.copilot-chat
       tomoki1207.pdf
       ms-vscode.cmake-tools
+      streetsidesoftware.code-spell-checker
+      llvm-vs-code-extensions.vscode-clangd
       # mkhl.direnv
       # editorconfig.editorconfig
       # davidanson.vscode-markdownlint
       # timonwong.shellcheck
-      # streetsidesoftware.code-spell-checker
       # bungcip.better-toml
       # ms-python.python
       # ms-vscode.cpptools
-      llvm-vs-code-extensions.vscode-clangd
       # dbaeumer.vscode-eslint
       # esbenp.prettier-vscode
       # vscodevim.vim
