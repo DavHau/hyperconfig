@@ -9,7 +9,7 @@
       pkgs.rsync
     ];
     script = ''
-      rsync manu@10.241.225.42:/raid/manu/ /pool11/enc/data/home/manu/manuel/manuel \
+      rsync manu@10.241.225.42:/raid/manu/ /pool11/enc/data/home/manu/manuel/current \
         -a \
         --verbose \
         --compress --compress-choice=zstd --compress-level=1 \
