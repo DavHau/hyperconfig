@@ -81,15 +81,13 @@ in
       ];
     };
 
-    # manu = {
-    #   isNormalUser = true;
-    #   extraGroups = [ "wheel" ];
-    #   home = "${home}/manu";
-    #   openssh.authorizedKeys.keys = config.users.users.root.openssh.authorizedKeys.keys;
-    #   # SjbdXJPp7rGkFK6N
-    #   hashedPassword =
-    #     "$6$cSaQUHG9$AmiUTz6Dx4yKslHlm0ROr7hZXeV/3/LfRsSsKaaVeQbN3nAC6WFbJkjJBtKHOk703FUfyIX2LaNH6vmzTwpDU0";
-    # };
+    manu = {
+      isNormalUser = true;
+      home = "${home}/manu";
+      openssh.authorizedKeys.keys = config.users.users.root.openssh.authorizedKeys.keys;
+      hashedPassword =
+        "$6$6/w4nx2ohs04F9vB$MOfFSA55VSINKbI5WohG.FrgN5XnrwoIgdM4hXghz3NW7yAjEPHWZ25zb0W6wX//qRSfROLyAmX8wdoM7zQcP/";
+    };
 
     roman = {
       isNormalUser = true;
