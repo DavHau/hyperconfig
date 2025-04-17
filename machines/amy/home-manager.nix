@@ -24,7 +24,7 @@
 
     programs.alacritty.enable = true;
     programs.alacritty.settings = {
-      font.size = 8;
+      font.size = 14;
       font.normal.family = "FiraCode Nerd Font";
     };
     programs.alacritty.package = pkgs.alacritty;
@@ -47,6 +47,7 @@
         init.defaultBranch = "main";
         pull.rebase = true;
         rebase.autoStash = true;
+        git.commit.autoWrapCommitMessage = false;
       };
       aliases = {
         cl = "clone";

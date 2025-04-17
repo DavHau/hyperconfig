@@ -1,6 +1,8 @@
 {pkgs, ...}: ''
-# enable touchpad tab to click
+# set wallpaper
 output * bg ${pkgs.nixos-artwork.wallpapers.simple-dark-gray.gnomeFilePath} fill
+
+# enable touchpad tab to click
 input * {
     xkb_layout us
     xkb_variant altgr-intl
@@ -23,11 +25,14 @@ input "type:touchpad" {
 # display scaling
 Output 'BOE NE135A1M-NY1 Unknown' scale 1.5
 
-bindsym Control+Mod1+l exec swaylock
+# nerd font
+font "FiraCode Nerd Font" Medium 11
 
+bindsym Control+Mod1+l exec swaylock
+set $term alacritty
+
+exec ${pkgs.waybar}/bin/waybar --config ${import ./waybar.jsonc.nix {inherit pkgs;}} &
 exec ${pkgs.flameshot}/bin/flameshot &
 exec ${pkgs.blueberry}/bin/blueberry-tray &
-exec ${pkgs.waybar}/bin/waybar --config ${./waybar.jsonc} &
 
-set $term ${pkgs.alacritty}/bin/alacritty
 ''
