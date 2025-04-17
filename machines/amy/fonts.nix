@@ -1,6 +1,3 @@
-{pkgs, ...}: {
-  fonts.packages = [
-    pkgs.nerd-fonts.fira-code
-    pkgs.nerd-fonts.droid-sans-mono
-  ];
+{pkgs, lib, ...}: {
+  fonts.packages = builtins.filter lib.attrsets.isDerivation (builtins.attrValues pkgs.nerd-fonts);
 }

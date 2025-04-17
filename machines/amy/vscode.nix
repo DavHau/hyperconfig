@@ -34,9 +34,11 @@
       github.copilot
       github.copilot-chat
       tomoki1207.pdf
-      ms-vscode.cmake-tools
+      twxs.cmake
       streetsidesoftware.code-spell-checker
-      llvm-vs-code-extensions.vscode-clangd
+      # ms-vscode.cmake-tools
+      # llvm-vs-code-extensions.vscode-clangd
+      # ms-vscode-remote.remote-containers
       # mkhl.direnv
       # editorconfig.editorconfig
       # davidanson.vscode-markdownlint
@@ -113,6 +115,11 @@
 
       # spell checking everywhere
       "cSpell.checkOnlyEnabledFileTypes" = false;
+
+      # font
+      "editor.fontFamily" = "FiraCode Nerd Font, monospace";
+      "editor.fontLigatures" = true;
+      "workbench.iconTheme" = "material-icon-theme";
     };
 
     keybindings = [
