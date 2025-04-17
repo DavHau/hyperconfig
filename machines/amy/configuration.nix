@@ -179,6 +179,10 @@ in
       cheat
       # man
       man-pages
+      # serial console for hardware debugging
+      minicom
+      # AI
+      # aider-chat-full
 
   # GUI tools
       arandr  # configure monitors
@@ -224,7 +228,7 @@ in
       # games
       xonotic
   ];
-  programs.nix-ld.enable = true;
+  # programs.nix-ld.enable = true;
   programs.vim.enable = true;
   programs.vim.defaultEditor = true;
   programs.nm-applet.enable = true;
@@ -238,6 +242,7 @@ in
   services.usbmuxd.enable = true;
   services.udisks2.enable = true;
   services.localtimed.enable = true;
+  services.geoclue2.enable = true;
   # programs.starship.enable = true;
   # services.nscd.enableNsncd = true;
   # services.unifi.enable = true;
@@ -256,7 +261,6 @@ in
 
   # KERNEL
     boot.initrd.availableKernelModules = [ "ahci" "sdhci_pci" ];
-    # boot.kernelPackages = pkgs.linuxPackages_5_4;
 
   # FILESYSTEMS
     boot.tmp.useTmpfs = true;
@@ -370,6 +374,7 @@ in
     # wheel enables ‘sudo’ for the user.
     extraGroups = [ "wheel" "networkmanager" "audio" "ledger" "plugdev" "dialout" ];
     # shell = pkgs.fish;
+    autoSubUidGidRange = true;
   };
 
 # VIRTUALIZATOIN
@@ -377,6 +382,7 @@ in
   boot.binfmt.emulatedSystems = [ "aarch64-linux" "armv7l-linux" "riscv64-linux" ];
 
   virtualisation.docker.enable = true;
+  virtualisation.docker.rootless.enable = true;
   virtualisation.podman.enable = true;
   virtualisation.waydroid.enable = true;
   # virtualisation.podman.dockerSocket.enable = true;
@@ -398,7 +404,7 @@ in
 # shell aliases
   environment.shellAliases = {
     dco = "sudo docker-compose";
-    docker = "sudo docker";
+    # docker = "sudo docker";
     arion = "sudo arion";
     ssh = "env TERM=xterm-color ssh";
     nix-buildr = ''nix-build --builders "ssh://root@168.119.226.152 x86_64-linux,aarch64-linux - 100 1 big-parallel,benchmark"'';

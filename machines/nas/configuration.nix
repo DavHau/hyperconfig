@@ -26,9 +26,9 @@
       ../stefan-vm/host-module.nix
     ];
 
-  services.hyprspace.settings.peers = [
-    { id = self.nixosConfigurations.grmpf-nix.config.clan.core.vars.generators.hyprspace.files.peer-id.value; }
-  ];
+  # services.hyprspace.settings.peers = [
+  #   { id = self.nixosConfigurations.grmpf-nix.config.clan.core.vars.generators.hyprspace.files.peer-id.value; }
+  # ];
 
   deployAddress = "rhauer.duckdns.org";
   clan.core.networking.targetHost = "root@nas";

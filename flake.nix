@@ -21,7 +21,7 @@
 
     nil.url = "github:oxalica/nil";
 
-    nix.url = "https://flakehub.com/f/NixOS/nix/2.23.*.tar.gz";
+    nix.url = "https://flakehub.com/f/NixOS/nix/2.*.*.tar.gz";
     nix-lazy.url = "github:edolstra/nix/lazy-trees";
     nix-multi.url = "git+https://github.com/DeterminateSystems/nix-src?&ref=multithreaded-eval&shallow=1";
 
