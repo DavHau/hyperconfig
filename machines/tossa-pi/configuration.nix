@@ -1,6 +1,5 @@
 {config, lib, inputs, ...}: {
   imports = [
-    inputs.nixos-generators.nixosModules.all-formats
     ../../modules/nixos/common.nix
     ../../modules/nixos/dyndns-porkbun.nix
     ../../modules/nixos/monitoring.nix
@@ -10,7 +9,7 @@
   nixpkgs.hostPlatform = "aarch64-linux";
   networking.wireless.enable = true;
   networking.useDHCP = true;
-  formatConfigs.sd-aarch64 = {
+  image.modules.sd-card = {
     disabledModules = [
       ./hardware-configuration.nix
     ];
