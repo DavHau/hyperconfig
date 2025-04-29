@@ -16,7 +16,7 @@
 
 in {
   flake = inputs.clan-core.lib.buildClan {
-    directory = self;
+    inherit self;
       specialArgs = {
         inherit inputs pkgsCross self;
       };
