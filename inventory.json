@@ -1,0 +1,15 @@
+{
+  "machines": {
+    "amy": {
+      "name": "amy",
+      "tags": [
+        "all",
+        "nixos"
+      ],
+      "description": "hello",
+      "deploy": {
+        "targetHost": null
+      }
+    }
+  }
+}
