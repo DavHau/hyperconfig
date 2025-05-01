@@ -326,6 +326,7 @@ in
 # AUDIO
   services.pipewire.enable = true;
   services.pipewire.alsa.enable = true;
+  services.pipewire.alsa.support32Bit = lib.mkForce false;
   services.pipewire.pulse.enable = true;
   services.pipewire.jack.enable = true;
   services.gnome.gnome-keyring.enable = true;
