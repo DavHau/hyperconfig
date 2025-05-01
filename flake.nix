@@ -76,7 +76,6 @@
 
       flake.checks.x86_64-linux = {
         amy = self.nixosConfigurations.amy.config.system.build.toplevel;
-        grmpf-nix = self.nixosConfigurations.grmpf-nix.config.system.build.toplevel;
         cm-pi = self.nixosConfigurations.cm-pi.config.system.build.toplevel;
       };
     };
