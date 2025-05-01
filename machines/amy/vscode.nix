@@ -36,6 +36,7 @@
       tomoki1207.pdf
       twxs.cmake
       streetsidesoftware.code-spell-checker
+      ms-python.python
       # ms-vscode.cmake-tools
       # llvm-vs-code-extensions.vscode-clangd
       # ms-vscode-remote.remote-containers
@@ -44,7 +45,6 @@
       # davidanson.vscode-markdownlint
       # timonwong.shellcheck
       # bungcip.better-toml
-      # ms-python.python
       # ms-vscode.cpptools
       # dbaeumer.vscode-eslint
       # esbenp.prettier-vscode
