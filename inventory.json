@@ -6,7 +6,7 @@
         "all",
         "nixos"
       ],
-      "description": "hello",
+      "description": "my laptop",
       "deploy": {
         "targetHost": null
       }
