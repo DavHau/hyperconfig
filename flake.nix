@@ -77,6 +77,7 @@
       flake.checks.x86_64-linux = {
         amy = self.nixosConfigurations.amy.config.system.build.toplevel;
         cm-pi = self.nixosConfigurations.cm-pi.config.system.build.toplevel;
+        nas = self.nixosConfigurations.nas.config.system.build.toplevel;
       };
     };
 }
