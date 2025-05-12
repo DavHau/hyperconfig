@@ -16,6 +16,7 @@
       ../../modules/nixos/role-iodine/default.nix
       ../../modules/nixos/dyndns-porkbun.nix
       ../../modules/nixos/hyprspace
+      ../../modules/nixos/nix-caches.nix
       ./automount
       ./hardware-configuration.nix
       ./smokeping.nix
