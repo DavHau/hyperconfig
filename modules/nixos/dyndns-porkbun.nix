@@ -22,7 +22,9 @@ in
     clan.core.vars.generators.porkbun = {
       share = true;
       prompts.apikey.type = "hidden";
+      prompts.apikey.persist = true;
       prompts.secretkey.type = "hidden";
+      prompts.secretkey.persist = true;
     };
     systemd.timers.porkbun-dyndns = {
       description = "Update porkbun dynamic dns";
