@@ -10,6 +10,13 @@
       "deploy": {
         "targetHost": null
       }
+    },
+    "foo": {
+      "name": "foo",
+      "description": "foo",
+      "tags": [
+        "all"
+      ]
     }
   }
 }
