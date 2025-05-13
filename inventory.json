@@ -33,8 +33,12 @@
       "name": "test",
       "description": "test",
       "tags": [
-        "all"
-      ]
+        "all",
+        "nixos"
+      ],
+      "deploy": {
+        "targetHost": "localhost:22001"
+      }
     }
   }
 }
