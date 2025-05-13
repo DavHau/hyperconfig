@@ -17,6 +17,17 @@
       "tags": [
         "all"
       ]
+    },
+    "cm-pi": {
+      "name": "cm-pi",
+      "description": null,
+      "tags": [
+        "all",
+        "nixos"
+      ],
+      "deploy": {
+        "targetHost": "localhost:22001"
+      }
     }
   }
 }
