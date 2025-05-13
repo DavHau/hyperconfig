@@ -28,6 +28,13 @@
       "deploy": {
         "targetHost": "localhost:22001"
       }
+    },
+    "test": {
+      "name": "test",
+      "description": "test",
+      "tags": [
+        "all"
+      ]
     }
   }
 }
