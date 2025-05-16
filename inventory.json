@@ -39,6 +39,11 @@
       "deploy": {
         "targetHost": "localhost:22001"
       }
+    },
+    "bam": {
+      "name": "bam",
+      "tags": [],
+      "deploy": {}
     }
   }
 }
