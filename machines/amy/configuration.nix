@@ -112,16 +112,16 @@ in
     min-free = ${l.toString (10*1000*1000*1000)}
     max-free = ${l.toString (20*1000*1000*1000)}
   '';
-  /* nix.buildMachines = [ {
-    hostName = "steam";
+  nix.buildMachines = [ {
+    hostName = "bam";
     # if the builder supports building for multiple architectures,
     # replace the previous line by, e.g.,
-    systems = [ "x86_64-linux" "aarch64-linux" "armv7l-linux" ];
+    systems = [ "x86_64-linux" ];
     maxJobs = 40;
     speedFactor = 20;
     supportedFeatures = [ "nixos-test" "benchmark" "big-parallel" "kvm" ];
     mandatoryFeatures = [ ];
-  }] ; */
+  }];
   systemd.services.nix-daemon.environment.SSH_AUTH_SOCK = "/run/user/1000/ssh-agent";
   # nix.distributedBuilds = true;
 
