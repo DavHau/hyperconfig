@@ -10,7 +10,6 @@
       ./hardware-configuration.nix
       ./users.nix
       ./samba.nix
-     ../../modules/nixos/deployment.nix
       ./disko-config.nix
       inputs.nixos-generators.nixosModules.all-formats
     ];

@@ -10,7 +10,6 @@
       inputs.srvos.nixosModules.server
       inputs.srvos.nixosModules.mixins-systemd-boot
       ../../modules/nixos/monitoring.nix
-      ../../modules/nixos/deployment.nix
       ../../modules/nixos/role-parasit.nix
       ../../modules/nixos/role-sshuttle-server
       ../../modules/nixos/role-iodine/default.nix

@@ -4,7 +4,6 @@
   ...
 }: {
   imports = [
-    ./deployment.nix
     ./nix-caches.nix
   ];
   users.mutableUsers = false;
