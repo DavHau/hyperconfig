@@ -1,7 +1,7 @@
 {
   imports = [
-
+    ../../modules/nixos/common.nix
+    ./disk.nix
   ];
-
-  # New machine!
+  nixpkgs.hostPlatform = "x86_64-linux";
 }
