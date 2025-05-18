@@ -1,0 +1,375 @@
+stock:
+
+7-Zip [64] 17.05 : Copyright (c) 1999-2021 Igor Pavlov : 2017-08-28
+p7zip Version 17.05 (locale=en_US.UTF-8,Utf16=on,HugeFiles=on,64 bits,32 CPUs x64)
+
+x64
+CPU Freq: - - - - - - - - -
+
+RAM size:   47212 MB,  # CPU hardware threads:  32
+RAM usage:   7060 MB,  # Benchmark threads:     32
+
+                       Compressing  |                  Decompressing
+Dict     Speed Usage    R/U Rating  |      Speed Usage    R/U Rating
+         KiB/s     %   MIPS   MIPS  |      KiB/s     %   MIPS   MIPS
+
+22:     162395  3034   5207 157978  |    1814134  3134   4936 154707
+23:     143853  2925   5011 146569  |    1777334  3136   4904 153795
+24:     137702  2929   5054 148058  |    1732610  3136   4850 152076
+25:     131355  2952   5082 149976  |    1688409  3139   4787 150257
+----------------------------------  | ------------------------------
+Avr:            2960   5089 150645  |             3136   4869 152709
+Tot:            3048   4979 151677
+
+
+# zstd -b
+ 3#Lorem ipsum       :  10000000 ->   2983345 (x3.352),  473.6 MB/s  2491.5 MB/s
+
+
+---------------------------------
+# Memory at 8000: (only expo on)
+
+linux compile:
+real	14m23.158s
+user	375m27.085s
+sys	24m18.367s
+
+# 7z b
+
+7-Zip [64] 17.05 : Copyright (c) 1999-2021 Igor Pavlov : 2017-08-28
+p7zip Version 17.05 (locale=en_US.UTF-8,Utf16=on,HugeFiles=on,64 bits,32 CPUs x64)
+
+x64
+CPU Freq: - - - - - - - - -
+
+RAM size:   47211 MB,  # CPU hardware threads:  32
+RAM usage:   7060 MB,  # Benchmark threads:     32
+
+                       Compressing  |                  Decompressing
+Dict     Speed Usage    R/U Rating  |      Speed Usage    R/U Rating
+         KiB/s     %   MIPS   MIPS  |      KiB/s     %   MIPS   MIPS
+
+22:     178943  3020   5764 174076  |    1787745  3114   4896 152457
+23:     160974  2935   5589 164014  |    1750924  3108   4875 151510
+24:     154431  2921   5685 166045  |    1710137  3103   4837 150104
+25:     148793  2957   5745 169886  |    1677576  3117   4790 149293
+----------------------------------  | ------------------------------
+Avr:            2958   5696 168505  |             3111   4849 150841
+Tot:            3034   5273 159673
+
+
+-------------------------------------
+# PBO on, expo on (8000) (unstable)
+
+## 7z b
+
+7-Zip [64] 17.05 : Copyright (c) 1999-2021 Igor Pavlov : 2017-08-28
+p7zip Version 17.05 (locale=en_US.UTF-8,Utf16=on,HugeFiles=on,64 bits,32 CPUs x64)
+
+x64
+CPU Freq: - - - - - - - - -
+
+RAM size:   47211 MB,  # CPU hardware threads:  32
+RAM usage:   7060 MB,  # Benchmark threads:     32
+
+                       Compressing  |                  Decompressing
+Dict     Speed Usage    R/U Rating  |      Speed Usage    R/U Rating
+         KiB/s     %   MIPS   MIPS  |      KiB/s     %   MIPS   MIPS
+
+22:     181985  3034   5835 177036  |    1819707  3102   5003 155183
+23:     165679  2969   5686 168807  |    1795146  3117   4983 155336
+24:     158780  2972   5744 170721  |    1760680  3124   4947 154540
+25:     151554  2990   5787 173039  |    1719233  3128   4892 153000
+----------------------------------  | ------------------------------
+Avr:            2991   5763 172401  |             3118   4956 154515
+Tot:            3055   5360 163458
+
+## zstd -b
+ 3#Lorem ipsum       :  10000000 ->   2983345 (x3.352),  496.7 MB/s  2521.3 MB/s
+
+----------------------------------------
+# PBO on, RAM on Hynix profile, scalar 10x
+
+## time nix build nixpkgs/nixos-unstable#linux --rebuild -L
+real	10m17.609s
+user	241m6.914s
+sys	27m4.485s
+
+## zstd -b
+ 3#Lorem ipsum       :  10000000 ->   2983345 (x3.352),  473.8 MB/s  2503.4 MB/s
+
+## 7z b
+
+7-Zip [64] 17.05 : Copyright (c) 1999-2021 Igor Pavlov : 2017-08-28
+p7zip Version 17.05 (locale=en_US.UTF-8,Utf16=on,HugeFiles=on,64 bits,32 CPUs x64)
+
+x64
+CPU Freq: - - - - - - - - -
+
+RAM size:   47211 MB,  # CPU hardware threads:  32
+RAM usage:   7060 MB,  # Benchmark threads:     32
+
+                       Compressing  |                  Decompressing
+Dict     Speed Usage    R/U Rating  |      Speed Usage    R/U Rating
+         KiB/s     %   MIPS   MIPS  |      KiB/s     %   MIPS   MIPS
+
+22:     175459  3031   5632 170687  |    1856820  3123   5071 158348
+23:     156293  2921   5451 159244  |    1818888  3122   5041 157391
+24:     149207  2922   5491 160428  |    1782282  3128   5001 156436
+25:     142388  2944   5522 162574  |    1734653  3123   4943 154373
+----------------------------------  | ------------------------------
+Avr:            2954   5524 163233  |             3124   5014 156637
+Tot:            3039   5269 159935
+
+
+----------------------------------------------
+# PBO on, RAM on Hynix profile, scalar 10x, + 200 Mhz, CCD0 -10, CCD1 -5
+
+## zstd -b
+ 3#Lorem ipsum       :  10000000 ->   2983345 (x3.352),  485.2 MB/s  2525.6 MB/s
+
+
+## time nix build nixpkgs/nixos-unstable#linux --rebuild -L
+real	10m17.067s
+user	241m23.245s
+sys	26m54.484s
+
+## 7z b
+
+7-Zip [64] 17.05 : Copyright (c) 1999-2021 Igor Pavlov : 2017-08-28
+p7zip Version 17.05 (locale=en_US.UTF-8,Utf16=on,HugeFiles=on,64 bits,32 CPUs x64)
+
+x64
+CPU Freq: - - - - - - - - -
+
+RAM size:   47211 MB,  # CPU hardware threads:  32
+RAM usage:   7060 MB,  # Benchmark threads:     32
+
+                       Compressing  |                  Decompressing
+Dict     Speed Usage    R/U Rating  |      Speed Usage    R/U Rating
+         KiB/s     %   MIPS   MIPS  |      KiB/s     %   MIPS   MIPS
+
+22:     176366  3049   5628 171570  |    1856652  3110   5091 158333
+23:     156955  2928   5461 159919  |    1817082  3103   5067 157234
+24:     149721  2924   5505 160981  |    1781513  3110   5028 156369
+25:     143147  2949   5542 163440  |    1732718  3105   4967 154200
+----------------------------------  | ------------------------------
+Avr:            2963   5534 163977  |             3107   5038 156534
+Tot:            3035   5286 160256
+
+
+--------------------------------------
+# RAM 6000 30-36-36-76
+
+## time nix build nixpkgs/nixos-unstable#linux --rebuild -L
+real	9m56.828s
+user	233m25.023s
+sys	24m42.394s
+
+## zstd -b
+ 3#Lorem ipsum       :  10000000 ->   2983345 (x3.352),  480.7 MB/s  2514.7 MB/s
+
+## 7z b
+
+7-Zip [64] 17.05 : Copyright (c) 1999-2021 Igor Pavlov : 2017-08-28
+p7zip Version 17.05 (locale=en_US.UTF-8,Utf16=on,HugeFiles=on,64 bits,32 CPUs x64)
+
+x64
+CPU Freq: - - - - - - - - -
+
+RAM size:   47211 MB,  # CPU hardware threads:  32
+RAM usage:   7060 MB,  # Benchmark threads:     32
+
+                       Compressing  |                  Decompressing
+Dict     Speed Usage    R/U Rating  |      Speed Usage    R/U Rating
+         KiB/s     %   MIPS   MIPS  |      KiB/s     %   MIPS   MIPS
+
+22:     187318  3057   5960 182223  |    1860152  3126   5075 158632
+23:     166589  2939   5776 169734  |    1824594  3123   5056 157884
+24:     159169  2929   5844 171139  |    1789340  3127   5023 157056
+25:     152087  2950   5886 173647  |    1745835  3122   4977 155368
+----------------------------------  | ------------------------------
+Avr:            2969   5866 174186  |             3124   5033 157235
+Tot:            3047   5450 165710
+
+
+--------------------------------------
+# RAM 6000 28-36-36-72
+
+## time nix build nixpkgs/nixos-unstable#linux --rebuild -L
+real	9m55.711s
+user	233m8.921s
+sys	24m35.783s
+
+## zstd -b
+ 3#Lorem ipsum       :  10000000 ->   2983345 (x3.352),  477.4 MB/s  2513.0 MB/s
+
+## 7z b
+
+7-Zip [64] 17.05 : Copyright (c) 1999-2021 Igor Pavlov : 2017-08-28
+p7zip Version 17.05 (locale=en_US.UTF-8,Utf16=on,HugeFiles=on,64 bits,32 CPUs x64)
+
+x64
+CPU Freq: - - - - - - - - -
+
+RAM size:   47211 MB,  # CPU hardware threads:  32
+RAM usage:   7060 MB,  # Benchmark threads:     32
+
+                       Compressing  |                  Decompressing
+Dict     Speed Usage    R/U Rating  |      Speed Usage    R/U Rating
+         KiB/s     %   MIPS   MIPS  |      KiB/s     %   MIPS   MIPS
+
+22:     186147  3032   5973 181085  |    1859560  3122   5080 158581
+23:     167196  2943   5788 170353  |    1826840  3124   5061 158079
+24:     159540  2930   5854 171538  |    1792644  3126   5034 157346
+25:     152303  2948   5899 173894  |    1749986  3120   4992 155737
+----------------------------------  | ------------------------------
+Avr:            2963   5878 174218  |             3123   5042 157436
+Tot:            3043   5460 165827
+
+
+----------------------------------
+# RAM 6000 26-36-36-72
+
+## time nix build nixpkgs/nixos-unstable#linux --rebuild -L
+real	9m55.497s
+user	233m37.871s
+sys	24m13.572s
+
+## with cooler mounted w. offset
+real	9m46.890s
+user	229m19.967s
+sys	24m5.794s
+
+## with undervolting -10/-5
+real	9m43.900s
+user	227m56.118s
+sys	24m8.718s
+
+## zstd -b
+ 3#Lorem ipsum       :  10000000 ->   2983345 (x3.352),  482.9 MB/s  2547.2 MB/s
+
+## 7z b
+
+7-Zip [64] 17.05 : Copyright (c) 1999-2021 Igor Pavlov : 2017-08-28
+p7zip Version 17.05 (locale=en_US.UTF-8,Utf16=on,HugeFiles=on,64 bits,32 CPUs x64)
+
+x64
+CPU Freq: - - - - - - - - -
+
+RAM size:   47211 MB,  # CPU hardware threads:  32
+RAM usage:   7060 MB,  # Benchmark threads:     32
+
+                       Compressing  |                  Decompressing
+Dict     Speed Usage    R/U Rating  |      Speed Usage    R/U Rating
+         KiB/s     %   MIPS   MIPS  |      KiB/s     %   MIPS   MIPS
+
+22:     187483  3036   6007 182384  |    1859529  3117   5088 158579
+23:     167045  2929   5811 170199  |    1831965  3128   5068 158522
+24:     160926  2940   5885 173029  |    1794788  3127   5038 157534
+25:     152404  2927   5945 174009  |    1586727  2832   4986 141208
+----------------------------------  | ------------------------------
+Avr:            2958   5912 174905  |             3051   5045 153961
+Tot:            3005   5478 164433
+
+
+-------------------------------------
+# 6400 32-38-38-86
+
+## time nix build nixpkgs/nixos-unstable#linux --rebuild -L
+real	9m56.490s
+user	233m12.772s
+sys	24m59.523s
+
+## zstd -b
+ 3#Lorem ipsum       :  10000000 ->   2983345 (x3.352),  483.9 MB/s  2539.0 MB/s
+
+## 7z b
+
+7-Zip [64] 17.05 : Copyright (c) 1999-2021 Igor Pavlov : 2017-08-28
+p7zip Version 17.05 (locale=en_US.UTF-8,Utf16=on,HugeFiles=on,64 bits,32 CPUs x64)
+
+x64
+CPU Freq: - - - 64000000 - - - - -
+
+RAM size:   47211 MB,  # CPU hardware threads:  32
+RAM usage:   7060 MB,  # Benchmark threads:     32
+
+                       Compressing  |                  Decompressing
+Dict     Speed Usage    R/U Rating  |      Speed Usage    R/U Rating
+         KiB/s     %   MIPS   MIPS  |      KiB/s     %   MIPS   MIPS
+
+22:     187330  3051   5973 182235  |    1862664  3124   5086 158846
+23:     166837  2934   5795 169987  |    1827408  3120   5068 158128
+24:     160936  2941   5883 173039  |    1789802  3121   5035 157096
+25:     154506  2972   5936 176409  |    1752405  3127   4988 155952
+----------------------------------  | ------------------------------
+Avr:            2974   5897 175418  |             3123   5044 157506
+Tot:            3049   5470 166462
+
+
+-------------------------------------
+# 8000 stock
+
+## time nix build nixpkgs/nixos-unstable#linux --rebuild -L
+real	10m5.147s
+user	236m41.557s
+sys	25m28.619s
+
+## 7z b
+
+7-Zip [64] 17.05 : Copyright (c) 1999-2021 Igor Pavlov : 2017-08-28
+p7zip Version 17.05 (locale=en_US.UTF-8,Utf16=on,HugeFiles=on,64 bits,32 CPUs x64)
+
+x64
+CPU Freq: - - - - - - - - -
+
+RAM size:   47211 MB,  # CPU hardware threads:  32
+RAM usage:   7060 MB,  # Benchmark threads:     32
+
+                       Compressing  |                  Decompressing
+Dict     Speed Usage    R/U Rating  |      Speed Usage    R/U Rating
+         KiB/s     %   MIPS   MIPS  |      KiB/s     %   MIPS   MIPS
+
+22:     183080  3041   5856 178101  |    1851724  3122   5059 157913
+23:     164467  2950   5680 167573  |    1817679  3121   5039 157286
+24:     156848  2940   5736 168644  |    1781041  3128   4998 156327
+25:     150589  2973   5784 171937  |    1737231  3128   4942 154602
+----------------------------------  | ------------------------------
+Avr:            2976   5764 171564  |             3125   5010 156532
+Tot:            3050   5387 164048
+
+## zstd -b
+ 3#Lorem ipsum       :  10000000 ->   2983345 (x3.352),  480.2 MB/s  2528.5 MB/s
+
+
+-----------------------------------------
+# 8000 (try it out 2. entry) (unstable)
+
+## time nix build nixpkgs/nixos-unstable#linux --rebuild -L
+real	9m51.474s
+user	231m33.719s
+sys	24m17.548s
+
+## 7z b
+
+7-Zip [64] 17.05 : Copyright (c) 1999-2021 Igor Pavlov : 2017-08-28
+p7zip Version 17.05 (locale=en_US.UTF-8,Utf16=on,HugeFiles=on,64 bits,32 CPUs x64)
+
+x64
+CPU Freq: - - - 64000000 - - - - -
+
+RAM size:   47211 MB,  # CPU hardware threads:  32
+RAM usage:   7060 MB,  # Benchmark threads:     32
+
+                       Compressing  |                  Decompressing
+Dict     Speed Usage    R/U Rating  |      Speed Usage    R/U Rating
+         KiB/s     %   MIPS   MIPS  |      KiB/s     %   MIPS   MIPS
+
+22:     190016  3048   6064 184848  |    1859053  3118   5085 158538
+23:     172253  2975   5899 175505  |    1832065  3128   5069 158531
+24:     164602  2969   5961 176981  |    1798646  3128   5047 157872
+25:     157707  2994   6014 180064  |    1755066  3121   5005 156189
+----------------------------------  | ------------------------------
+Avr:            2997   5985 179349  |             3124   5051 157783
+Tot:            3060   5518 168566
