@@ -31,7 +31,8 @@ font "FiraCode Nerd Font" Medium 11
 bindsym Control+Mod1+l exec swaylock
 set $term alacritty
 
-exec ${pkgs.waybar}/bin/waybar --config ${import ./waybar.jsonc.nix {inherit pkgs;}} &
+exec dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP=sway
+exec ${pkgs.waybar}/bin/waybar --config ${import ./waybar.jsonc.nix {inherit pkgs;}} 2>&1 >/home/grmpf/sway.log &
 exec ${pkgs.flameshot}/bin/flameshot &
 exec ${pkgs.blueberry}/bin/blueberry-tray &
 

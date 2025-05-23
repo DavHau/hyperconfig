@@ -10,6 +10,6 @@
       };
     })
   ];
-  environment.etc."sway/config.d/cusom.config".source = pkgs.writeText "sway-custom-config" (import ./sway.config.nix {inherit pkgs;});
+  environment.etc."sway/config.d/custom.config".source = pkgs.writeText "sway-custom-config" (import ./sway.config.nix {inherit pkgs;});
   environment.etc."sway/config".source = ./sway-defaults.config;
 }
