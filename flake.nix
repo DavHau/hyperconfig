@@ -58,6 +58,9 @@
 
     nixvim.url = "github:nix-community/nixvim";
     nixvim.inputs.nixpkgs.follows = "nixpkgs";
+
+    buildbot-nix.url = "github:nix-community/buildbot-nix";
+    buildbot-nix.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = inputs@{ flake-parts, self, ... }:
