@@ -4,6 +4,7 @@
     ../../modules/nixos/common.nix
     ../../modules/nixos/monitoring.nix
     ../../modules/nixos/common-tools.nix
+    ../../modules/nixos/riscv64.nix
     ./home-assistant.nix
     # ./odoo.nix
   ];
