@@ -12,7 +12,7 @@ in
       ../../modules/nixos/nrb
       ../../modules/nixos/nix-caches.nix
       inputs.srvos.nixosModules.desktop
-      inputs.home-manager.nixosModule
+      inputs.home-manager.nixosModules.default
       inputs.retiolum.nixosModules.retiolum
       # ./hardware-configuration.nix
       ./vpn.nix
