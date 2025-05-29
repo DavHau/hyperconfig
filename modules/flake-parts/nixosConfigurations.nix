@@ -23,8 +23,9 @@ in {
     # add machines to their hosts
     inventory = {
       machines = {
-        bam.tags = [ "wifi"];
-        installer.tags = [ "wifi" ];
+        bam.tags = [ "wifi-home"];
+        installer.tags = [ "wifi-home" ];
+        cm-pi.tags = [ "wifi-home" ];
       };
       services = {
         importer.base = {
@@ -44,7 +45,7 @@ in {
           module.name = "wifi";
           module.input = "clan-core";
           roles.default.settings.networks.home = {};
-          roles.default.tags.wifi = {};
+          roles.default.tags.wifi-home = {};
         };
       };
     };
