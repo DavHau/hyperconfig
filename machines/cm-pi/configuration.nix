@@ -1,7 +1,6 @@
 {config, lib, inputs, modulesPath, pkgs, ...}: {
   imports = [
     (inputs.nixos-hardware + "/starfive/visionfive/v2")
-    (inputs.clan-core + "/clanModules/wifi/roles/default.nix")
     ../../modules/nixos/common.nix
     ../../modules/nixos/monitoring.nix
     ../../modules/nixos/common-tools.nix
@@ -34,9 +33,6 @@
   services.home-assistant.package = pkgs.home-assistant.override {
     # python313 = pkgs.python312;
   };
-
-  # clan.wifi.networks.cm-home.enable = true;
-  clan.wifi.networks.phone.enable = true;
 
   image.modules.starfive2 = ({config, ...}: {
     imports = [

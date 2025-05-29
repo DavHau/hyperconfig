@@ -75,7 +75,6 @@
         type = "app";
         program = builtins.toString (mkLinuxDeploy {
           inherit attrName;
-          hostName = config.config.deployAddress;
         });
       };
   in {
