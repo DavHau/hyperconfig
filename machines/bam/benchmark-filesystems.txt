@@ -1,0 +1,50 @@
+
+
+command:
+nix build nixpkgs/2795c506fe#{linux,linux.inputDerivation} && time nix build nixpkgs/2795c506fe#linux --rebuild -L
+
+
+-----------------------------
+# WITH OC 5/5
+
+## xfs
+
+real	9m55.667s
+user	232m50.253s
+sys	24m59.268s
+
+## zfs (encryption=aes-256-gcm compression=zstd atime=off)
+
+real	10m15.515s
+user	233m29.940s
+sys	28m11.647s
+
+
+
+------------------------------
+# WITH OC 10/5
+## zfs (no encryption, no compression=none, atime=on):
+
+real	10m3.248s
+user	231m0.340s
+sys	27m17.707s
+
+
+## zfs (encryption=aes-256-gcm compression=none atime=on)
+
+real	10m5.478s
+user	231m12.707s
+sys	28m2.468s
+
+
+## zfs (encryption=aes-256-gcm compression=none atime=off)
+
+real	10m4.085s
+user	230m42.901s
+sys	28m5.246s
+
+## zfs (encryption=aes-256-gcm compression=lz4 atime=off)
+
+real	10m3.249s
+user	230m26.901s
+sys	27m41.248s
