@@ -22,4 +22,6 @@
   services.zerotierone.joinNetworks = [
     "af415e486f4514ce" # home
   ];
+
+  zramSwap.enable = true;
 }
