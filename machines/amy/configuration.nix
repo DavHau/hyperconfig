@@ -112,6 +112,7 @@ in
     min-free = ${l.toString (10*1000*1000*1000)}
     max-free = ${l.toString (20*1000*1000*1000)}
   '';
+  nix.distributedBuilds = true;
   nix.buildMachines = [ {
     hostName = "bam";
     # if the builder supports building for multiple architectures,
@@ -119,11 +120,10 @@ in
     systems = [ "x86_64-linux" ];
     maxJobs = 40;
     speedFactor = 20;
-    supportedFeatures = [ "nixos-test" "benchmark" "big-parallel" "kvm" ];
+    supportedFeatures = [ "nixos-test" "benchmark" "big-parallel" "kvm" "uid-range" ];
     mandatoryFeatures = [ ];
   }];
   systemd.services.nix-daemon.environment.SSH_AUTH_SOCK = "/run/user/1000/ssh-agent";
-  # nix.distributedBuilds = true;
 
   environment.sessionVariables.TERMINAL = "alacritty";
   environment.sessionVariables.TERM = "xterm-256color";

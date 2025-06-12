@@ -24,4 +24,15 @@
   ];
 
   zramSwap.enable = true;
+  zramSwap.memoryPercent = 100;
+
+  # nix features
+  nix.settings.system-features = [
+    "uid-range"
+  ];
+  nix.settings.auto-allocate-uids = true;
+  nix.settings.experimental-features = [
+    "auto-allocate-uids"
+    "cgroups"
+  ];
 }
