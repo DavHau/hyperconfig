@@ -1,7 +1,7 @@
 {config, lib, pkgs, ...}: {
   # allow access to zigbee antenna
   services.udev.extraRules = ''
-    ENV{DEVNAME}=="/dev/ttyACM0", owner="hass"
+    ENV{DEVNAME}=="/dev/ttyACM0", OWNER="hass"
   '';
   services.home-assistant = {
     enable = true;
