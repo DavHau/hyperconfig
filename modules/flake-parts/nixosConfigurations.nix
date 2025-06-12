@@ -40,12 +40,23 @@ in {
           # roles.moon.machines = [ "nas" ];
         };
       };
+
+      # NEW API
+      modules = {
+        nix-cache = ../../modules/clan/nix-cache;
+      };
       instances = {
         wifi-home = {
           module.name = "wifi";
           module.input = "clan-core";
           roles.default.settings.networks.home = {};
           roles.default.tags.wifi-home = {};
+        };
+        dave-cache = {
+          module.name = "nix-cache";
+          # module.input = "self";
+          roles.server.machines.bam = {};
+          roles.client.tags.all = {};
         };
       };
     };
