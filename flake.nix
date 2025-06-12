@@ -9,7 +9,7 @@
       flake = false;
     };
     # nixpkgs.url = "git+https://github.com/nixos/nixpkgs?&ref=nixos-unstable&shallow=1";
-    nixpkgs.url = "git+https://github.com/davhau/nixpkgs?&ref=dave&shallow=1";
+    nixpkgs.url = "git+https://github.com/nixos/nixpkgs?&ref=nixos-unstable&shallow=1";
 
     home-manager.url = "github:nix-community/home-manager";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
@@ -61,6 +61,9 @@
 
     buildbot-nix.url = "github:nix-community/buildbot-nix";
     buildbot-nix.inputs.nixpkgs.follows = "nixpkgs";
+
+    stylix.url = "github:nix-community/stylix";
+    stylix.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = inputs@{ flake-parts, self, ... }:
