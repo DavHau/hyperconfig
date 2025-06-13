@@ -20,6 +20,10 @@ in {
       };
     meta.name = "DavClan";
 
+    modules = {
+      nix-cache = ../../modules/clan/nix-cache;
+    };
+
     # add machines to their hosts
     inventory = {
       machines = {
@@ -42,9 +46,6 @@ in {
       };
 
       # NEW API
-      modules = {
-        nix-cache = ../../modules/clan/nix-cache;
-      };
       instances = {
         wifi-home = {
           module.name = "wifi";
@@ -54,7 +55,6 @@ in {
         };
         dave-cache = {
           module.name = "nix-cache";
-          # module.input = "self";
           roles.server.machines.bam = {};
           roles.client.tags.all = {};
         };
