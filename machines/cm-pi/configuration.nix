@@ -29,8 +29,6 @@
     # screen = self.hello;
   })];
 
-  boot.kernelPackages = pkgs.linuxPackages_6_13;
-
   # clan.core.networking.targetHost= "root@[${config.clan.core.facts.services.zerotier.public.zerotier-ip.value}]";
 
   services.home-assistant.package = pkgs.home-assistant.override {
