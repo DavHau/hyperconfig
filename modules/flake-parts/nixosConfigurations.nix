@@ -58,6 +58,14 @@ in {
           roles.server.machines.bam = {};
           roles.client.tags.all = {};
         };
+        dave-backup = {
+          module.name = "borgbackup";
+          module.input = "clan-core";
+          roles.server.machines.nas = {};
+          roles.client.machines.amy = {};
+          roles.client.settings.exclude = import ../backup-exclude.nix;
+          roles.server.settings.directory = "/pool11/enc/clan-backup";
+        };
       };
     };
   };
