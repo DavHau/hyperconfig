@@ -24,10 +24,7 @@
       "tags": [
         "all",
         "nixos"
-      ],
-      "deploy": {
-        "targetHost": ""
-      }
+      ]
     },
     "test": {
       "name": "test",
