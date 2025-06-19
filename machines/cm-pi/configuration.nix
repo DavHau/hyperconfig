@@ -22,6 +22,7 @@
   nixpkgs.pkgs = import inputs.nixpkgs {
     system = "x86_64-linux";
     crossSystem = "riscv64-linux";
+    config.contentAddressedByDefault = true;
   };
 
   nixpkgs.overlays = [(self: super: {

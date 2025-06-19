@@ -34,5 +34,6 @@
   nix.settings.experimental-features = [
     "auto-allocate-uids"
     "cgroups"
+    "ca-derivations"
   ];
 }
