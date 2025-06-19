@@ -15,9 +15,10 @@
 in {
   flake = inputs.clan-core.lib.buildClan {
     inherit self;
-      specialArgs = {
-        inherit inputs pkgsCross self;
-      };
+    specialArgs = {
+      inherit inputs pkgsCross self;
+    };
+
     meta.name = "DavClan";
 
     modules = {
@@ -47,6 +48,13 @@ in {
 
       # NEW API
       instances = {
+        importer = {
+          module.name = "importer";
+          roles.default.tags.all = {};
+          roles.default.extraModules = [{
+            nixpkgs.config.contentAddressedByDefault = true;
+          }];
+        };
         wifi-home = {
           module.name = "wifi";
           module.input = "clan-core";
