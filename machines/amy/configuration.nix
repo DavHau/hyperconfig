@@ -304,6 +304,10 @@ in
       # ControlPath ~/.ssh/sockets/%r@%h-%p
       # ControlPersist 600
       Compression yes
+
+    Host build01 build02
+      ProxyJump tunnel@clan.lol
+      Hostname build01.vpn.clan.lol
   '';
   programs.mtr.enable = true;
 
