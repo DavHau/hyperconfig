@@ -18,7 +18,7 @@ in {
 
     pkgsForSystem = system: import inputs.nixpkgs {
       inherit system;
-      config.contentAddressedByDefault = true;
+      # config.contentAddressedByDefault = true;
     };
 
     specialArgs = {
