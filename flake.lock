@@ -106,13 +106,10 @@
         "treefmt-nix": "treefmt-nix_2"
       },
       "locked": {
-        "lastModified": 1750278964,
-        "narHash": "sha256-J63c21XlxrBeYK+F3tlGD7X2ZYcqb92RIToFz4U3+Y0=",
-        "ref": "refs/heads/main",
-        "rev": "5f318255142e6774f0094b7332b116e27037878a",
-        "revCount": 7706,
-        "type": "git",
-        "url": "https://git.clan.lol/clan/clan-core"
+        "lastModified": 1750672109,
+        "narHash": "sha256-lJdT7U/w7bc46yPwv2tgyjH4eAAec0RsC8jv2x8PMEE=",
+        "path": "/home/grmpf/synced/projects/clan/clan-core",
+        "type": "path"
       },
       "original": {
         "type": "git",
@@ -1431,19 +1428,19 @@
     },
     "nixpkgs_5": {
       "locked": {
-        "lastModified": 1750161439,
-        "narHash": "sha256-N8/5l+MRNM/rv1JMkGj/JyJxOp7SbC/ss5YbJOfmFBw=",
+        "lastModified": 1750611483,
+        "narHash": "sha256-4bDmcnP1MD3h3To2vB89kA7AlgGum2HS8QukF1dD50Q=",
         "ref": "dave",
-        "rev": "45479be175b47eaefe95f2b0581c5428fd58a0b7",
+        "rev": "ad8ce325e69d1637af3a9ab9af6128d2d91386e5",
         "shallow": true,
         "type": "git",
-        "url": "https://github.com/davhau/nixpkgs"
+        "url": "https://github.com/DavHau/nixpkgs"
       },
       "original": {
-        "ref": "nixos-unstable",
+        "ref": "dave",
         "shallow": true,
         "type": "git",
-        "url": "https://github.com/nixos/nixpkgs"
+        "url": "https://github.com/DavHau/nixpkgs"
       }
     },
     "nixvim": {

@@ -114,7 +114,7 @@ in
   nix.gc.options = ''--delete-older-than 14d --max-freed "$((30 * 1024**3 - 1024 * $(df -P -k /nix/store | tail -n 1 | ${pkgs.gawk}/bin/awk '{ print $4 }')))"'';
   nix.distributedBuilds = true;
   nix.buildMachines = [ {
-    hostName = "bam";
+    hostName = "bam.local";
     # if the builder supports building for multiple architectures,
     # replace the previous line by, e.g.,
     systems = [ "x86_64-linux" ];

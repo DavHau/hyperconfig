@@ -16,6 +16,7 @@
       ../../modules/nixos/dyndns-porkbun.nix
       ../../modules/nixos/hyprspace
       ../../modules/nixos/nix-caches.nix
+      ../../modules/nixos/easytier.nix
       ./automount
       ./hardware-configuration.nix
       ./smokeping.nix

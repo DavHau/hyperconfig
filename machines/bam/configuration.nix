@@ -2,6 +2,7 @@
   imports = [
     ../../modules/nixos/common.nix
     ../../modules/nixos/nix-caches.nix
+    ../../modules/nixos/easytier.nix
     ./disko-xfs.nix
     ./buildbot
   ];
