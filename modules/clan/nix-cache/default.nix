@@ -27,6 +27,17 @@ in
 
   roles.server = {
 
+    interface.options = {
+      priority = lib.mkOption {
+        type = lib.types.int;
+        description = ''
+          The priority of the cache. Lower values mean higher priority.
+          The default is 50, which is a lower priority than cache.nixos.org which has 30.
+        '';
+        default = 50;
+      };
+    };
+
     perInstance =
       { settings, instanceName, ... }:
       {
@@ -52,7 +63,7 @@ in
             services.harmonia.enable = true;
             # $ nix-store --generate-binary-cache-key cache.yourdomain.tld-1 harmonia.secret harmonia.pub
             services.harmonia.signKeyPaths = [ config.clan.core.vars.generators.harmonia-private.files.sign-key.path ];
-
+            services.harmonia.settings.priority = settings.priority;
           };
       };
   };
@@ -71,7 +82,7 @@ in
 
             # trust and use the cache
             nix.settings.substituters = flip map (attrNames roles.server.machines) (
-              machineName: "http://${machineName}:5000"
+              machineName: "http://${machineName}.local:5000"
             );
             nix.settings.trusted-public-keys = [
               config.clan.core.vars.generators.harmonia.files.pub-key.value

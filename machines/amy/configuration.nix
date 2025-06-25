@@ -118,9 +118,9 @@ in
     # if the builder supports building for multiple architectures,
     # replace the previous line by, e.g.,
     systems = [ "x86_64-linux" ];
-    maxJobs = 40;
+    maxJobs = 20;
     speedFactor = 20;
-    supportedFeatures = [ "nixos-test" "benchmark" "big-parallel" "kvm" "uid-range" ];
+    supportedFeatures = [ "nixos-test" "benchmark" "big-parallel" "kvm" "uid-range" "ca-derivations" ];
     mandatoryFeatures = [ ];
   }];
   systemd.services.nix-daemon.environment.SSH_AUTH_SOCK = "/run/user/1000/ssh-agent";
@@ -422,12 +422,14 @@ in
 # FIREWALL
   networking.firewall.allowedTCPPorts = [
     # 631 655
+    27015 27036  # don't starve together
   ];
   networking.firewall.allowedUDPPorts = [
     # 26000
     # 631
     # 655
     6881  # deluge
+    10999 27015 27031 27032 27033 27034 27035 27036  # don't starve together
   ];
   networking.firewall.allowPing = true;
   networking.firewall.enable = true;

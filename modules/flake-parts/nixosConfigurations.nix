@@ -63,6 +63,7 @@ in {
         dave-cache = {
           module.name = "nix-cache";
           roles.server.machines.bam = {};
+          roles.server.settings.priority = 41;
           roles.client.tags.all = {};
         };
         dave-backup = {
