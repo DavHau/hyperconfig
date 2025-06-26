@@ -29,6 +29,7 @@ in {
 
     modules = {
       nix-cache = ../../modules/clan/nix-cache;
+      easytier = ../../modules/clan/easytier;
     };
 
     # add machines to their hosts
@@ -73,6 +74,10 @@ in {
           roles.client.machines.amy = {};
           roles.client.settings.exclude = import ../backup-exclude.nix;
           roles.server.settings.directory = "/pool11/enc/clan-backup";
+        };
+        easytier = {
+          roles.peer.machines.nas = {};
+          roles.peer.machines.bam = {};
         };
       };
     };
