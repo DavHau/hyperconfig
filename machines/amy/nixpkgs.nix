@@ -3,6 +3,7 @@
   # acceept unfree license only for these packages
   nixpkgs.config = {
     allowUnfreePredicate = pkg: builtins.elem (lib.getName pkg) [
+      "claude-code"
       "steam"
       "steam-original"
       "steam-runtime"

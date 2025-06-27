@@ -75,9 +75,12 @@ in {
           roles.client.settings.exclude = import ../backup-exclude.nix;
           roles.server.settings.directory = "/pool11/enc/clan-backup";
         };
-        easytier = {
+        dave = {
+          module.name = "easytier";
+          roles.peer.settings.domain = "dave";
           roles.peer.machines.nas = {};
           roles.peer.machines.bam = {};
+          roles.peer.machines.amy = {};
         };
       };
     };

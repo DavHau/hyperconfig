@@ -214,6 +214,23 @@
         "type": "github"
       }
     },
+    "easytier": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1751014582,
+        "narHash": "sha256-g4/YrPtT+5SYBW282B7aAm3OC3+QxPlKmpinPpLzXQg=",
+        "owner": "DavHau",
+        "repo": "EasyTier",
+        "rev": "18cb79d949b2bebdfa453ea95b6f48123d16422b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "DavHau",
+        "ref": "dave",
+        "repo": "EasyTier",
+        "type": "github"
+      }
+    },
     "envfs": {
       "inputs": {
         "flake-parts": "flake-parts_3",
@@ -1652,6 +1669,7 @@
         "buildbot-nix": "buildbot-nix",
         "clan-core": "clan-core",
         "disko": "disko_2",
+        "easytier": "easytier",
         "envfs": "envfs",
         "flake-compat": "flake-compat",
         "flake-parts": "flake-parts_4",

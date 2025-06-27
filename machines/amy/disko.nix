@@ -54,6 +54,7 @@
           "root/nix" = {
             type = "zfs_fs";
             options.mountpoint = "/nix";
+            options."com.sun:auto-snapshot" = "false";
             mountpoint = "/nix";
           };
         };

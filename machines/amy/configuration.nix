@@ -105,6 +105,7 @@ in
     log-lines = 25;
     min-free = 10 * 1000 * 1000 * 1000;
     max-free = 20 * 1000 * 1000 * 1000;
+    connect-timeout = lib.mkForce 2;
   };
   nix.nrBuildUsers = 100;
   nix.optimise.dates = ["*:30"];
@@ -114,7 +115,7 @@ in
   nix.gc.options = ''--delete-older-than 14d --max-freed "$((30 * 1024**3 - 1024 * $(df -P -k /nix/store | tail -n 1 | ${pkgs.gawk}/bin/awk '{ print $4 }')))"'';
   nix.distributedBuilds = true;
   nix.buildMachines = [ {
-    hostName = "bam.local";
+    hostName = "bam.dave";
     # if the builder supports building for multiple architectures,
     # replace the previous line by, e.g.,
     systems = [ "x86_64-linux" ];
@@ -183,6 +184,9 @@ in
       minicom
       # AI
       # aider-chat-full
+      claude-code
+      delta
+      lsd
 
   # GUI tools
       arandr  # configure monitors
@@ -305,9 +309,13 @@ in
       # ControlPersist 600
       Compression yes
 
-    Host build01 build02
+    Host build01
       ProxyJump tunnel@clan.lol
       Hostname build01.vpn.clan.lol
+
+    Host build02
+      ProxyJump tunnel@clan.lol
+      Hostname build02.vpn.clan.lol
   '';
   programs.mtr.enable = true;
 
