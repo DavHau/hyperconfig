@@ -18,6 +18,9 @@ in {
 
     pkgsForSystem = system: import inputs.nixpkgs {
       inherit system;
+      # config = {
+      #   replaceStdenv = ({ pkgs }: pkgs.withCFlags [ "-funroll-loops" "-O3" "-march=x86-64-v3" ] pkgs.stdenv);
+      # };
       # config.contentAddressedByDefault = true;
     };
 

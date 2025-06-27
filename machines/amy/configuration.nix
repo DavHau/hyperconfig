@@ -28,7 +28,6 @@ in
       ./printing.nix
       ./nix-registry.nix
       ./low-battery-power-off.nix
-      ./nixpkgs.nix
       ./nix-lazy.nix
       ./nix-multi.nix
       ./bitwarden.nix
@@ -48,6 +47,49 @@ in
       ./udev.nix
       ./sway
   ];
+
+  nixpkgs.pkgs =
+    let
+      # N.B. Keep in sync with default arg for stdenv/generic.
+    defaultMkDerivationFromStdenv =
+      stdenv: (import (inputs.nixpkgs + "/pkgs/stdenv/generic/make-derivation.nix") { inherit lib; inherit (pkgs) config; } stdenv).mkDerivation;
+      withOldMkDerivation =
+        stdenvSuperArgs: k: stdenvSelf:
+        let
+          mkDerivationFromStdenv-super =
+            stdenvSuperArgs.mkDerivationFromStdenv or defaultMkDerivationFromStdenv;
+          mkDerivationSuper = mkDerivationFromStdenv-super stdenvSelf;
+        in
+        k stdenvSelf mkDerivationSuper;
+      # Wrap the original `mkDerivation` providing extra args to it.
+      extendMkDerivationArgs =
+        old: f:
+        withOldMkDerivation old (
+          _: mkDerivationSuper: args:
+          (mkDerivationSuper args).overrideAttrs f
+        );
+      withCFlags =
+        compilerFlags: stdenv:
+        stdenv.override (old: {
+          mkDerivationFromStdenv = extendMkDerivationArgs old (args:
+            if args ? NIX_CFLAGS_COMPILE then
+              {
+                NIX_CFLAGS_COMPILE = toString args.NIX_CFLAGS_COMPILE + " " + toString compilerFlags;
+              }
+            else
+              {
+                env = (args.env or { }) // {
+                  NIX_CFLAGS_COMPILE = toString (args.env.NIX_CFLAGS_COMPILE or "") + " ${toString compilerFlags}";
+                };
+              });
+        });
+    in
+    import inputs.nixpkgs {
+      system = "x86_64-linux";
+      config = (import ./nixpkgs-config.nix {inherit lib;}) // {
+        replaceStdenv = ({ pkgs }: withCFlags [ "-funroll-loops" "-O3" "-march=x86-64-v3" ] pkgs.stdenv);
+      };
+    };
 
   nixpkgs.hostPlatform = "x86_64-linux";
 
