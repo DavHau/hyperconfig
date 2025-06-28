@@ -11,7 +11,7 @@
   services.buildbot-nix.master = {
     enable = true;
     # Domain name under which the buildbot frontend is reachable
-    domain = "bam";
+    domain = "bam.dave";
     # The workers file configures credentials for the buildbot workers to connect to the master.
     # "name" is the configured worker name in services.buildbot-nix.worker.name of a worker
     # (defaults to the hostname of the machine)
@@ -47,7 +47,7 @@
     # FIXME: replace this with a secret not stored in the nix store
     workerPasswordFile = pkgs.writeText "worker-password" "hello";
     workers = 16;
-    name = "bam.dave";
+    name = "bam";
   };
 
   networking.firewall.allowedTCPPorts = [80];
