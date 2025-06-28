@@ -47,7 +47,7 @@
     # FIXME: replace this with a secret not stored in the nix store
     workerPasswordFile = pkgs.writeText "worker-password" "hello";
     workers = 16;
-    name = "bam";
+    name = "bam.dave";
   };
 
   networking.firewall.allowedTCPPorts = [80];

@@ -492,7 +492,6 @@ in
 
 # NETWORKING
   networking.hostName = "grmpf-nix"; # Define your hostname.
-  networking.domain = "grmpf";
   networking.networkmanager.enable = true;
   networking.dhcpcd.extraConfig = "nohook resolv.conf";
   networking.networkmanager.dns = lib.mkForce "none";
