@@ -81,7 +81,9 @@ in
         compilerFlags: stdenv:
         stdenv.override (old: {
           mkDerivationFromStdenv = extendMkDerivationArgs old (args:
-            if args ? NIX_CFLAGS_COMPILE then
+            if args.pname or null == "libgcrypt" then
+              args
+            else if args ? NIX_CFLAGS_COMPILE then
               {
                 NIX_CFLAGS_COMPILE = toString args.NIX_CFLAGS_COMPILE + " " + toString compilerFlags;
               }
