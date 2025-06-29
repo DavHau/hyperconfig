@@ -48,6 +48,15 @@ in
       ./sway
   ];
 
+  nixpkgs.overlays = [(
+    curr: prev: {
+      libyuv = prev.libyuv.overrideAttrs (old: {
+        # crashes with the enabled optimizations
+        doCheck = false;
+      });
+    }
+  )];
+
   nixpkgs.pkgs =
     let
       # N.B. Keep in sync with default arg for stdenv/generic.
