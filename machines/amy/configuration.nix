@@ -86,6 +86,7 @@ in
         "sysdig"
         "lib2geom"
         "syslinux-unstable"
+        "linux"
       ];
       withCFlags =
         compilerFlags: stdenv:
