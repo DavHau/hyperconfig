@@ -77,11 +77,21 @@ in
           _: mkDerivationSuper: args:
           (mkDerivationSuper args).overrideAttrs f
         );
+      ignore = [
+        "libgcrypt"
+        "docker-runc"
+        "runc"
+        "libtpms"
+        "seabios"
+        "sysdig"
+        "lib2geom"
+        "syslinux-unstable"
+      ];
       withCFlags =
         compilerFlags: stdenv:
         stdenv.override (old: {
           mkDerivationFromStdenv = extendMkDerivationArgs old (args:
-            if args.pname or null == "libgcrypt" then
+            if lib.elem args.pname or null ignore then
               args
             else if args ? NIX_CFLAGS_COMPILE then
               {
