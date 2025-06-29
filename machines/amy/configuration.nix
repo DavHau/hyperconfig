@@ -85,9 +85,18 @@ in
         "seabios"
         "sysdig"
         "lib2geom"
-        "syslinux-unstable"
+        "syslinux"
         "linux"
         "systemd"
+        "qtbase"
+        "moby"
+        "multipath-tools"
+        "podman"
+        "efivar"
+        "OVMF"
+        "libreoffice"
+        "ipxe"
+        "xen"
       ];
       withCFlags =
         compilerFlags: stdenv:
