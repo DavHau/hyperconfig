@@ -38,7 +38,7 @@
       streetsidesoftware.code-spell-checker
       ms-python.python
       # ms-vscode.cmake-tools
-      # llvm-vs-code-extensions.vscode-clangd
+      llvm-vs-code-extensions.vscode-clangd
       # ms-vscode-remote.remote-containers
       # mkhl.direnv
       # editorconfig.editorconfig
