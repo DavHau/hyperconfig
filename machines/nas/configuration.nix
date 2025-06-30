@@ -7,7 +7,6 @@
 {
   imports =
     [ # Include the results of the hardware scan.
-      inputs.srvos.nixosModules.server
       inputs.srvos.nixosModules.mixins-systemd-boot
       ../../modules/nixos/monitoring.nix
       ../../modules/nixos/role-parasit.nix

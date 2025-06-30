@@ -11,7 +11,6 @@ in
       # ../../modules/nixos/hyprspace
       ../../modules/nixos/nrb
       ../../modules/nixos/nix-caches.nix
-      inputs.srvos.nixosModules.desktop
       inputs.home-manager.nixosModules.default
       inputs.retiolum.nixosModules.retiolum
       # ./hardware-configuration.nix
@@ -416,6 +415,7 @@ in
   services.pipewire.pulse.enable = true;
   services.pipewire.jack.enable = true;
   services.gnome.gnome-keyring.enable = true;
+  services.gnome.gcr-ssh-agent.enable = false;
   services.pipewire.socketActivation = false;
   systemd.user.services.pipewire.wantedBy = ["graphical-session.target"];
   systemd.user.services.pipewire-pulse.wantedBy = ["pipewire.service"];
