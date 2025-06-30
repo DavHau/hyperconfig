@@ -1499,10 +1499,10 @@
     },
     "nixpkgs_5": {
       "locked": {
-        "lastModified": 1750611483,
-        "narHash": "sha256-4bDmcnP1MD3h3To2vB89kA7AlgGum2HS8QukF1dD50Q=",
+        "lastModified": 1751255034,
+        "narHash": "sha256-Ah3u8LF4oF0qpFm3UfXfOOw+X4R4/zRbOwgTLO1cVuE=",
         "ref": "dave",
-        "rev": "ad8ce325e69d1637af3a9ab9af6128d2d91386e5",
+        "rev": "10e68e9eafd1e3e67ff7f23fea3b3cf76a00f40d",
         "shallow": true,
         "type": "git",
         "url": "https://github.com/DavHau/nixpkgs"
