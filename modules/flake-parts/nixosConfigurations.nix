@@ -84,9 +84,7 @@ in {
           module.name = "easytier";
           module.input = "self";
           roles.peer.settings.domain = "dave";
-          roles.peer.machines.nas = {};
-          roles.peer.machines.bam = {};
-          roles.peer.machines.amy = {};
+          roles.peer.tags.all = {};
         };
         sshd = {
           module.name = "sshd";
