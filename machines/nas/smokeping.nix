@@ -1,5 +1,4 @@
 {
-  networking.domain = "davhau.com"; # needed for smokeping
   networking.firewall.allowedTCPPorts = [80];
   services.nginx.virtualHosts.smokeping.forceSSL = true;
   services.nginx.virtualHosts.smokeping.enableACME = true;
