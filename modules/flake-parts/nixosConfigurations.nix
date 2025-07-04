@@ -47,6 +47,7 @@ in {
           roles.default.tags = ["all"];
           roles.default.extraModules = [
             inputs.clan-core.clanModules.static-hosts
+            ../../modules/nixos/common.nix
           ];
         };
         zerotier.zt-home = {
@@ -66,6 +67,7 @@ in {
         };
         dave-cache = {
           module.name = "nix-cache";
+          module.input = "self";
           roles.server.machines.bam = {};
           roles.server.settings.priority = 41;
           roles.client.tags.all = {};
@@ -80,10 +82,17 @@ in {
         };
         dave = {
           module.name = "easytier";
+          module.input = "self";
           roles.peer.settings.domain = "dave";
           roles.peer.machines.nas = {};
           roles.peer.machines.bam = {};
           roles.peer.machines.amy = {};
+        };
+        sshd = {
+          module.name = "sshd";
+          module.input = "clan-core";
+          roles.server.tags.all = {};
+          roles.client.tags.all = {};
         };
       };
     };
