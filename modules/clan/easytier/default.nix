@@ -76,14 +76,33 @@ in
                 (host: "\n${getIpv6Address ipv6Prefix host} ${host}.${instanceName}")
                 allHosts;
 
+            # pre-service to update environment file with network_secret
+            systemd.services."easytier-${instanceName}-update-env" = {
+              description = "Update EasyTier environment file with shared secret";
+              before = [ "easytier-${instanceName}.service" ];
+              partOf = [ "easytier-${instanceName}.service" ];
+              requiredBy = [ "easytier-${instanceName}.service" ];
+              serviceConfig = {
+                Type = "oneshot";
+                RemainAfterExit = true;
+              };
+              script = ''
+                mkdir -p /run/secrets/easytier
+                echo "ET_NETWORK_SECRET=\"$(cat ${config.clan.core.vars.generators."easytier-${instanceName}".files.shared-secret.path})\"" \
+                  > "/run/secrets/easytier/${instanceName}.env"
+              '';
+            };
+
             # easytier
             services.easytier = {
               enable = true;
               package = pkgs.callPackage ./package.nix { easytier-src = inputs.easytier; };
               instances.${instanceName} = {
+                environmentFiles = [
+                  "/run/secrets/easytier/${instanceName}.env"
+                ];
                 settings = {
-                  network_name = instanceName;
-                  network_secret = "pick_a_secret";
+                  network_name = "${instanceName}2";
                   listeners = [
                     "tcp://0.0.0.0:11010"
                   ];
