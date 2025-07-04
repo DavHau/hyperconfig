@@ -16,6 +16,8 @@
     };
   };
 
+  programs.fish.enable = true;
+
   services.openssh.enable = true;
 
   services.zerotierone.enable = lib.mkDefault true;

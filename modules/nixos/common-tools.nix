@@ -1,10 +1,15 @@
 {
   pkgs,
+  lib,
   ...
 }: {
-  environment.systemPackages = [
-    pkgs.file
-    pkgs.htop
-    pkgs.git
-  ];
+  environment.systemPackages = lib.attrValues {
+    inherit (pkgs)
+      bat
+      file
+      git
+      htop
+      vim
+      ;
+  };
 }
