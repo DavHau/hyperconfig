@@ -117,9 +117,10 @@ in
     in
     import inputs.nixpkgs {
       system = "x86_64-linux";
-      config = (import ./nixpkgs-config.nix {inherit lib;}) // {
-        replaceStdenv = ({ pkgs }: withCFlags [ "-funroll-loops" "-O3" "-march=x86-64-v3" ] pkgs.stdenv);
-      };
+      config = (import ./nixpkgs-config.nix {inherit lib;});
+      # config = (import ./nixpkgs-config.nix {inherit lib;}) // {
+      #   replaceStdenv = ({ pkgs }: withCFlags [ "-funroll-loops" "-O3" "-march=x86-64-v3" ] pkgs.stdenv);
+      # };
     };
 
   nixpkgs.hostPlatform = "x86_64-linux";
