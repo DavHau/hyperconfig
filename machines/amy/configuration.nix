@@ -47,15 +47,6 @@ in
       ./sway
   ];
 
-  nixpkgs.overlays = [(
-    curr: prev: {
-      libyuv = prev.libyuv.overrideAttrs (old: {
-        # crashes with the enabled optimizations
-        doCheck = false;
-      });
-    }
-  )];
-
   nixpkgs.pkgs =
     let
       # N.B. Keep in sync with default arg for stdenv/generic.
@@ -77,24 +68,25 @@ in
           (mkDerivationSuper args).overrideAttrs f
         );
       ignore = [
-        "libgcrypt"
         "docker-runc"
-        "runc"
-        "libtpms"
-        "seabios"
-        "sysdig"
+        "efivar"
+        "ipxe"
         "lib2geom"
-        "syslinux"
+        "libgcrypt"
+        "libreoffice"
+        "libtpms"
+        "libyuv"
         "linux"
-        "systemd"
-        "qtbase"
         "moby"
         "multipath-tools"
-        "podman"
-        "efivar"
         "OVMF"
-        "libreoffice"
-        "ipxe"
+        "podman"
+        "qtbase"
+        "runc"
+        "seabios"
+        "sysdig"
+        "syslinux"
+        "systemd"
         "xen"
       ];
       withCFlags =
