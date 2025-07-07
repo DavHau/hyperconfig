@@ -80,7 +80,6 @@ in
             systemd.services."easytier-${instanceName}-update-env" = {
               description = "Update EasyTier environment file with shared secret";
               before = [ "easytier-${instanceName}.service" ];
-              partOf = [ "easytier-${instanceName}.service" ];
               requiredBy = [ "easytier-${instanceName}.service" ];
               serviceConfig = {
                 Type = "oneshot";
@@ -92,6 +91,10 @@ in
                   > "/run/secrets/easytier/${instanceName}.env"
               '';
             };
+
+            systemd.services."easytier-${instanceName}".partOf = [
+              "easytier-${instanceName}-update-env.service"
+            ];
 
             # easytier
             services.easytier = {
