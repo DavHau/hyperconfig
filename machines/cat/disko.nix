@@ -1,13 +1,19 @@
+# TODO: !!!!!!!!!
+# PLEASE ADD SOME SWAP TO THE NEXT SERVER!
+
+{ config, pkgs, ... }:
 {
-  boot.loader.grub.efiSupport = true;
-  boot.loader.grub.efiInstallAsRemovable = true;
-  boot.loader.grub.enable = true;
+  boot.loader.grub = {
+    enable = true;
+    efiSupport = true;
+    efiInstallAsRemovable = true;
+  };
+
   disko.devices = {
     disk = {
-      main = {
-        name = "nvme-main";
-        device = "/dev/sda";
+      x = rec {
         type = "disk";
+        device = "/dev/sda";
         content = {
           type = "gpt";
           partitions = {
@@ -17,23 +23,42 @@
               priority = 1;
             };
             ESP = {
-              type = "EF00";
               size = "1G";
+              type = "EF00";
               content = {
                 type = "filesystem";
                 format = "vfat";
                 mountpoint = "/boot";
-                mountOptions = [ "umask=0077" ];
               };
             };
-            root = {
+            zfs = {
               size = "100%";
               content = {
-                type = "filesystem";
-                format = "xfs";
-                mountpoint = "/";
+                type = "zfs";
+                pool = "zroot";
               };
             };
+          };
+        };
+      };
+    };
+    zpool = {
+      zroot = {
+        type = "zpool";
+        rootFsOptions = {
+          compression = "zstd";
+        };
+        datasets = {
+          "root" = {
+            type = "zfs_fs";
+            options = {
+              mountpoint = "none";
+            };
+          };
+          "root/nixos" = {
+            type = "zfs_fs";
+            options.mountpoint = "/";
+            mountpoint = "/";
           };
         };
       };
