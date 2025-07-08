@@ -81,6 +81,10 @@ in
               description = "Update EasyTier environment file with shared secret";
               before = [ "easytier-${instanceName}.service" ];
               requiredBy = [ "easytier-${instanceName}.service" ];
+              # TODO: upstream systemd CREDENTIALS_DIRECTORY support
+              # this is a hack and will lead the VPN to restart on each activation
+              # sops should not delete the /run/secrets directory
+              partOf = ["sysinit-reactivation.target"];
               serviceConfig = {
                 Type = "oneshot";
                 RemainAfterExit = true;
@@ -105,14 +109,14 @@ in
                   "/run/secrets/easytier/${instanceName}.env"
                 ];
                 settings = {
-                  network_name = "${instanceName}2";
+                  network_name = "${instanceName}4";
                   listeners = [
                     "tcp://0.0.0.0:11010"
                   ];
                   peers = [
                     "tcp://public.easytier.cn:11010"
                   ];
-                  dhcp = true;
+                  dhcp = false;
                 };
                 extraSettings = {
                   flags.dev_name = interface;
