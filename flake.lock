@@ -194,16 +194,15 @@
     "easytier": {
       "flake": false,
       "locked": {
-        "lastModified": 1751640735,
-        "narHash": "sha256-DWUBVJdJRYbSqJQxE7Wj9dGxTSaxpINihOKY+uTlkh8=",
-        "owner": "DavHau",
+        "lastModified": 1751900351,
+        "narHash": "sha256-vOsb2G/g1/h7k225OTNTukT+t0NQpvEb8t/LETt+QL0=",
+        "owner": "EasyTier",
         "repo": "EasyTier",
-        "rev": "99b4316cd1558b645fc6cfaffbfce7b5314eb977",
+        "rev": "0025973453a94d93d3a260b42cec28498530d672",
         "type": "github"
       },
       "original": {
-        "owner": "DavHau",
-        "ref": "dave",
+        "owner": "EasyTier",
         "repo": "EasyTier",
         "type": "github"
       }

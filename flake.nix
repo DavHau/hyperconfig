@@ -65,7 +65,7 @@
     stylix.url = "github:nix-community/stylix";
     stylix.inputs.nixpkgs.follows = "nixpkgs";
 
-    easytier.url = "github:DavHau/EasyTier/dave";
+    easytier.url = "github:EasyTier/EasyTier";
     easytier.flake = false;
   };
 
