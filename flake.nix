@@ -69,7 +69,11 @@
     easytier.flake = false;
   };
 
-  outputs = inputs@{ flake-parts, self, ... }:
+  outputs = inputs@{ self, flake-parts, nixpkgs, ... }:
+    let
+      inherit (nixpkgs.lib)
+        genAttrs;
+    in
     flake-parts.lib.mkFlake { inherit inputs; } {
 
       systems = [
@@ -82,10 +86,17 @@
 
       flake.inputs = inputs;
 
-      flake.checks.x86_64-linux = {
-        amy = self.nixosConfigurations.amy.config.system.build.toplevel;
-        cm-pi = self.nixosConfigurations.cm-pi.config.system.build.toplevel;
-        nas = self.nixosConfigurations.nas.config.system.build.toplevel;
-      };
+      flake.checks.x86_64-linux = genAttrs
+        [
+          "amy"
+          "bam"
+          "cat"
+          "dom"
+          "cm-pi"
+          "nas"
+        ]
+        (
+          host: self.nixosConfigurations.${host}.config.system.build.toplevel
+        );
     };
 }
