@@ -37,6 +37,7 @@
       twxs.cmake
       streetsidesoftware.code-spell-checker
       ms-python.python
+      # rust-lang.rust-analyzer # potentially buggy (pty-host not responsive)
       # ms-vscode.cmake-tools
       llvm-vs-code-extensions.vscode-clangd
       # ms-vscode-remote.remote-containers
@@ -65,7 +66,6 @@
       # denoland.vscode-deno
       # justusadam.language-haskell
       # haskell.haskell
-      # rust-lang.rust-analyzer
       # ms-toolsai.jupyter
       # arrterian.nix-env-selector
       # arrterian.nix-env-selector
