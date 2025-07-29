@@ -96,9 +96,14 @@ in
               '';
             };
 
-            systemd.services."easytier-${instanceName}".partOf = [
-              "easytier-${instanceName}-update-env.service"
-            ];
+            systemd.services."easytier-${instanceName}" = {
+              partOf = [
+                "easytier-${instanceName}-update-env.service"
+              ];
+              # exits with 0 sometimes if it cannot connect
+              # see https://github.com/EasyTier/EasyTier/issues/1167
+              serviceConfig.Restart = lib.mkForce "always";
+            };
 
             # easytier
             services.easytier = {
