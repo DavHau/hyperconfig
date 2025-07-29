@@ -18,7 +18,7 @@ rustPlatform.buildRustPackage rec {
   src = easytier-src;
   useFetchCargoVendor = true;
 
-  cargoHash = "sha256-GyYZRir31gScf2nsCAVEiOekrgA/gXFOUT3TmlMwJKo=";
+  cargoHash = "sha256-rwwrCiTiLn1DM3LaTNKzQi0tUWGzAYMXku9LHjq2K7g=";
 
   nativeBuildInputs = [
     protobuf

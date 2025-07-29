@@ -190,11 +190,11 @@
     "easytier": {
       "flake": false,
       "locked": {
-        "lastModified": 1751900351,
-        "narHash": "sha256-vOsb2G/g1/h7k225OTNTukT+t0NQpvEb8t/LETt+QL0=",
+        "lastModified": 1753752647,
+        "narHash": "sha256-RhPoogOGTaItlinEhMGZtFJsaC947TtuGk25iV5LMZo=",
         "owner": "EasyTier",
         "repo": "EasyTier",
-        "rev": "0025973453a94d93d3a260b42cec28498530d672",
+        "rev": "2ec88da82329db26344679573783106bb210d60d",
         "type": "github"
       },
       "original": {

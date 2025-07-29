@@ -2,8 +2,9 @@
 let
   inherit (lib)
     attrNames
-    substring
     concatMapStrings
+    mkOption
+    substring
     ;
   inherit (builtins)
     hashString
@@ -36,6 +37,18 @@ in
   manifest.categories = [ "Utility" ];
 
   roles.peer = {
+
+    interface.options = {
+      foreignHostNames = mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [];
+        description = ''
+          This allows to set up a VPN across clans.
+          Make sure to use the same `shared-secret` on both instances.
+          By adding the other hostNames here, their IPs will be added to the /etc/hosts file for all hosts in this EasyTier instance.
+        '';
+      };
+    };
 
     perInstance =
       { settings, instanceName, roles, machine, ... }:
@@ -74,7 +87,7 @@ in
             networking.extraHosts =
               concatMapStrings
                 (host: "\n${getIpv6Address ipv6Prefix host} ${host}.${instanceName}")
-                allHosts;
+                (allHosts ++ settings.foreignHostNames);
 
             # pre-service to update environment file with network_secret
             systemd.services."easytier-${instanceName}-update-env" = {
