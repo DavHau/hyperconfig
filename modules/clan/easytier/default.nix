@@ -134,7 +134,7 @@ in
                   peers = [
                     "tcp://public.easytier.cn:11010"
                   ];
-                  dhcp = false;
+                  dhcp = true;
                 };
                 extraSettings = {
                   flags.dev_name = interface;
