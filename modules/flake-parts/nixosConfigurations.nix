@@ -13,7 +13,7 @@
   );
 
 in {
-  flake = inputs.clan-core.lib.buildClan {
+  flake.clan = (inputs.clan-core.lib.clan {
     inherit self;
 
     pkgsForSystem = system: import inputs.nixpkgs {
@@ -77,6 +77,7 @@ in {
           module.input = "clan-core";
           roles.server.machines.nas = {};
           roles.client.machines.amy = {};
+          roles.client.machines.amy = {};
           roles.client.settings.exclude = import ../backup-exclude.nix;
           roles.server.settings.directory = "/pool11/enc/clan-backup";
         };
@@ -94,5 +95,5 @@ in {
         };
       };
     };
-  };
+  }).config;
 }
