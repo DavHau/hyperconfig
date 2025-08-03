@@ -5,14 +5,17 @@ in
 {
   imports =
     [
+      inputs.home-manager.nixosModules.default
+      inputs.retiolum.nixosModules.retiolum
+      # inputs.nixos-hardware.nixosModules.framework-13-7040-amd
+      # inputs.nixos-hardware.nixosModules.lenovo-yoga-7-14ARH7-amdgpu
+      inputs.nixos-hardware.nixosModules.tuxedo-pulse-14-gen3
       ../../modules/nixos/common.nix
       ../../modules/nixos/etc-hosts.nix
       ../../modules/nixos/nix-development.nix
       # ../../modules/nixos/hyprspace
       ../../modules/nixos/nrb
       ../../modules/nixos/nix-caches.nix
-      inputs.home-manager.nixosModules.default
-      inputs.retiolum.nixosModules.retiolum
       # ./hardware-configuration.nix
       ./vpn.nix
       ./home-manager.nix
@@ -30,7 +33,7 @@ in
       ./nix-lazy.nix
       ./nix-multi.nix
       ./bitwarden.nix
-      ./envfs.nix
+      # ./envfs.nix
       # ./devenv.nix
       ./blueberry.nix
       # ./nix-heuristic-gc.nix
@@ -269,7 +272,7 @@ in
       pavucontrol # audio settings
       wireshark
       # editors
-        zed self.packages.${system}.nixvim
+        self.packages.${system}.nixvim
       # file manager
         filezilla nautilus eog
       # browser
@@ -326,19 +329,19 @@ in
   # time.timeZone = "Europe/Berlin";
 
   # BOOTLOADER
-    boot.loader.systemd-boot.enable = true;
-    boot.loader.efi.canTouchEfiVariables = true;
+  boot.loader.systemd-boot.enable = true;
+  boot.loader.efi.canTouchEfiVariables = true;
 
   # KERNEL
-    boot.initrd.availableKernelModules = [ "ahci" "sdhci_pci" ];
+  boot.initrd.availableKernelModules = [ "ahci" "sdhci_pci" ];
 
   # FILESYSTEMS
-    boot.tmp.useTmpfs = true;
-    boot.tmp.tmpfsSize = "80%";
-    boot.supportedFilesystems = [ "ntfs-3g" "exfat" "apfs" "cifs" "smb" ];
-    # boot.initrd.supportedFilesystems = ["zfs"];
-    # required by zfs
-    networking.hostId = "5eb1bf28";
+  boot.tmp.useTmpfs = true;
+  boot.tmp.tmpfsSize = "80%";
+  boot.supportedFilesystems = [ "ntfs-3g" "exfat" "apfs" "cifs" "smb" ];
+  # boot.initrd.supportedFilesystems = ["zfs"];
+  # required by zfs
+  networking.hostId = "5eb1bf28";
 
   # TLP
   services.tlp.enable = true;
@@ -353,7 +356,6 @@ in
     CPU_MAX_PERF_ON_BAT=40;
   };
 
-  # BORING STUFF.
   console.font = "Lat2-Terminus16";
   console.keyMap = "us";
   i18n = {
