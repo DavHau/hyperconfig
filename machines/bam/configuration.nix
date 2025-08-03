@@ -10,6 +10,7 @@
   boot.binfmt.emulatedSystems = ["aarch64-linux"];
 
   nix.settings.max-jobs = 16;
+  nix.settings.sandbox = "relaxed";
   networking.firewall.interfaces.dave.allowedTCPPorts = [
     9933
     9944
