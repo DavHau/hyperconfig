@@ -37,11 +37,11 @@
       twxs.cmake
       streetsidesoftware.code-spell-checker
       ms-python.python
-      # rust-lang.rust-analyzer # potentially buggy (pty-host not responsive)
+      rust-lang.rust-analyzer
+      mkhl.direnv
       # ms-vscode.cmake-tools
       llvm-vs-code-extensions.vscode-clangd
       # ms-vscode-remote.remote-containers
-      # mkhl.direnv
       # editorconfig.editorconfig
       # davidanson.vscode-markdownlint
       # timonwong.shellcheck
