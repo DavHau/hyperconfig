@@ -7,17 +7,17 @@ let
 
   varsForInstance = instanceName: pkgs: {
       clan.core.vars.generators.harmonia = {
-      share = true;
-      files.sign-key.secret = true;
-      files.sign-key.deploy = false;
-      files.pub-key.secret = false;
-      script = ''
-        ${pkgs.nix}/bin/nix-store --generate-binary-cache-key ${instanceName}-1 \
-          $out/sign-key \
-          $out/pub-key
-      '';
+        share = true;
+        files.sign-key.secret = true;
+        files.sign-key.deploy = false;
+        files.pub-key.secret = false;
+        script = ''
+          ${pkgs.nix}/bin/nix-store --generate-binary-cache-key ${instanceName}-1 \
+            $out/sign-key \
+            $out/pub-key
+        '';
+      };
     };
-  };
 in
 {
   _class = "clan.service";
