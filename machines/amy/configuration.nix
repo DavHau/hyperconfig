@@ -13,6 +13,7 @@ in
       ../../modules/nixos/common.nix
       ../../modules/nixos/etc-hosts.nix
       ../../modules/nixos/nix-development.nix
+      ../../modules/nixos/dns.nix
       # ../../modules/nixos/hyprspace
       ../../modules/nixos/nrb
       ../../modules/nixos/nix-caches.nix
@@ -20,7 +21,6 @@ in
       ./vpn.nix
       ./home-manager.nix
       ./fish.nix
-      # ./dnscrypt.nix
       ./backup.nix
       ./retiolum.nix
       ./amdgpu.nix
@@ -344,17 +344,18 @@ in
   networking.hostId = "5eb1bf28";
 
   # TLP
-  services.tlp.enable = true;
-  services.tlp.settings = {
-    CPU_SCALING_GOVERNOR_ON_AC = "powersave";
-    CPU_SCALING_GOVERNOR_ON_BAT = "powersave";
-    CPU_MAX_PERF_ON_AC = 100;
-    STOP_CHARGE_THRESH_BAT0 = 100;
-    START_CHARGE_THRESH_BAT0 = 85;
-    CPU_SCALING_MAX_FREQ_ON_BAT = 1600000;
-    CPU_SCALING_MAX_FREQ_ON_AC = 9999999;
-    CPU_MAX_PERF_ON_BAT=40;
-  };
+  # services.tlp.enable = true;
+  # services.tlp.settings = {
+  #   CPU_SCALING_GOVERNOR_ON_AC = "powersave";
+  #   CPU_SCALING_GOVERNOR_ON_BAT = "powersave";
+  #   CPU_MAX_PERF_ON_AC = 100;
+  #   STOP_CHARGE_THRESH_BAT0 = 100;
+  #   START_CHARGE_THRESH_BAT0 = 85;
+  #   CPU_SCALING_MAX_FREQ_ON_BAT = 1600000;
+  #   CPU_SCALING_MAX_FREQ_ON_AC = 9999999;
+  #   CPU_MAX_PERF_ON_BAT=40;
+  # };
+  services.power-profiles-daemon.enable = true;
 
   console.font = "Lat2-Terminus16";
   console.keyMap = "us";
@@ -369,12 +370,10 @@ in
     # AddKeysToAgent yes
 
     Host *
-        ServerAliveInterval 240
-
-    Host *
-      # ControlMaster auto
-      # ControlPath ~/.ssh/sockets/%r@%h-%p
-      # ControlPersist 600
+      ServerAliveInterval 240
+      ControlMaster auto
+      ControlPath ~/.ssh/control/%C
+      ControlPersist 600
       Compression yes
 
     Host build01
