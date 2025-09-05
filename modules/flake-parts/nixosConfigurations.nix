@@ -43,6 +43,7 @@ in {
             bam.tags = [ "wifi-home"];
             installer.tags = [ "wifi-home" ];
             cm-pi.tags = [ "wifi-home" ];
+            joy.deploy.targetHost = "joy.dave";
           };
           services = {
             importer.base = {
@@ -61,6 +62,32 @@ in {
 
           # NEW API
           instances = {
+            dave-user = { #
+              module.name = "users";
+              roles.default.tags.all = { }; #
+              roles.default.settings = {
+                user = "dave"; #
+                groups = [
+                  "wheel" # Allow using 'sudo'
+                  "networkmanager" # Allows to manage network connections.
+                  "video" # Allows to access video devices.
+                  "input" # Allows to access input devices.
+                ];
+              };
+            };
+            joy-user = {
+              module.name = "users";
+              roles.default.machines.joy = {};
+              roles.default.settings = {
+                user = "joy";
+                groups = [
+                  "wheel" # Allow using 'sudo'
+                  "networkmanager" # Allows to manage snetwork connections.
+                  "video" # Allows to access video devices.
+                  "input" # Allows to access input devices.
+                ];
+              };
+            };
             wifi-home = {
               module.name = "wifi";
               module.input = "clan-core";
@@ -78,7 +105,6 @@ in {
               module.name = "borgbackup";
               module.input = "clan-core";
               roles.server.machines.nas = {};
-              roles.client.machines.amy = {};
               roles.client.machines.amy = {};
               roles.client.settings.exclude = import ../backup-exclude.nix;
               roles.server.settings.directory = "/pool11/enc/clan-backup";

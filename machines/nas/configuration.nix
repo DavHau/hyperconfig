@@ -8,6 +8,8 @@
   imports =
     [ # Include the results of the hardware scan.
       inputs.srvos.nixosModules.mixins-systemd-boot
+      ../../modules/nixos/common.nix
+      ../../modules/nixos/common-tools.nix
       ../../modules/nixos/monitoring.nix
       ../../modules/nixos/role-parasit.nix
       ../../modules/nixos/role-sshuttle-server
