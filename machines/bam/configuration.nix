@@ -3,6 +3,7 @@
     ../../modules/nixos/common.nix
     ../../modules/nixos/common-tools.nix
     ../../modules/nixos/nix-caches.nix
+    ../../modules/nixos/dns.nix
     ./disko-xfs.nix
     ./buildbot
   ];

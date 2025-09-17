@@ -14,6 +14,7 @@ in
       ../../modules/nixos/etc-hosts.nix
       ../../modules/nixos/nix-development.nix
       ../../modules/nixos/dns.nix
+      ../../modules/nixos/nix.nix
       # ../../modules/nixos/hyprspace
       ../../modules/nixos/nrb
       ../../modules/nixos/nix-caches.nix
