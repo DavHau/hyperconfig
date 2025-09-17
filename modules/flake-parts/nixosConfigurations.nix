@@ -45,23 +45,17 @@ in {
             cm-pi.tags = [ "wifi-home" ];
             joy.deploy.targetHost = "joy.dave";
           };
-          services = {
-            importer.base = {
-              roles.default.tags = ["all"];
-              roles.default.extraModules = [
-                inputs.clan-core.clanModules.static-hosts
-                ../../modules/nixos/common.nix
-              ];
-            };
-            zerotier.zt-home = {
-              roles.peer.tags = [ "all" ];
-              roles.controller.machines = [ "nas" ];
-              # roles.moon.machines = [ "nas" ];
-            };
-          };
 
           # NEW API
           instances = {
+            zt-home = {
+              module.name = "zerotier";
+              roles.peer.tags.all = {};
+              roles.controller.machines.nas = {};
+            };
+            importer.roles.default.extraModules = [
+              ../../modules/nixos/common.nix
+            ];
             dave-user = { #
               module.name = "users";
               roles.default.tags.all = { }; #
