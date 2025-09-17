@@ -17,6 +17,7 @@ in
       # ../../modules/nixos/hyprspace
       ../../modules/nixos/nrb
       ../../modules/nixos/nix-caches.nix
+      ../../modules/nixos/niri.nix
       # ./hardware-configuration.nix
       ./vpn.nix
       ./home-manager.nix
@@ -47,7 +48,7 @@ in
       # ./iodine-client.nix
       ./disko.nix
       ./udev.nix
-      ./sway
+      # ./sway
   ];
 
   nixpkgs.pkgs =
@@ -132,6 +133,7 @@ in
 
   home-manager.users.grmpf.imports = [
     ../../modules/home-manager/htop
+    ../../modules/home-manager/firefox.nix
   ];
 
   clan.core.networking.targetHost = "root@localhost";
