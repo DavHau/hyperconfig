@@ -7,7 +7,7 @@
 }:
 {
   imports = [
-    clan-core.clanModules.trusted-nix-caches
+    # clan-core.clanModules.trusted-nix-caches
   ];
 
   networking.hostName = "nixos-installer";

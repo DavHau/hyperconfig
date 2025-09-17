@@ -2,7 +2,6 @@
   imports = [
     ./hardware.nix
     ./disko.nix
-    inputs.disko.nixosModules.default
     inputs.srvos.nixosModules.server
     ./localai.nix
   ];

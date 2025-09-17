@@ -14,7 +14,7 @@
       inputs.nixos-generators.nixosModules.all-formats
     ];
 
-  deployAddress = "10.241.225.42";
+  clan.core.networking.targetHost = "10.241.225.42";
 
   nixpkgs.config.allowUnfreePredicate = pkg: builtins.elem (lib.getName pkg) [
     "zerotierone"
