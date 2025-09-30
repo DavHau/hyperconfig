@@ -13,10 +13,11 @@
   services.resolved.enable = true;
 
   environment.systemPackages = with pkgs; [
-    krita
+    firefox
     gimp
     inkscape
-    firefox
+    krita
     libreoffice
+    telegram-desktop
   ];
 }
