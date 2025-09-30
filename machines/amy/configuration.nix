@@ -143,7 +143,6 @@ in
   # sops.age.keyFile = "/home/grmpf/.config/sops/age/keys.txt";
 
   # NIX settings
-  nix.package = inputs.nix.packages.x86_64-linux.default;
   nix.nixPath = [
     "tb=/home/grmpf/synced/projects/github/nix-toolbox"
     "nixpkgs=${pkgs.path}"
