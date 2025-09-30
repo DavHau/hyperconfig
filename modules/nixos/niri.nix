@@ -4,9 +4,10 @@
 
   environment.systemPackages = with pkgs; [
     fuzzel
-    swaylock
     mako
     swayidle
+    swaylock
+    xwayland-satellite
   ];
 
   environment.variables = {
