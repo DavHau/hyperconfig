@@ -274,7 +274,7 @@ in
       pavucontrol # audio settings
       wireshark
       # editors
-        self.packages.${system}.nixvim
+        # self.packages.${system}.nixvim
       # file manager
         filezilla nautilus eog
       # browser
