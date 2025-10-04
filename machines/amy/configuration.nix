@@ -190,7 +190,7 @@ in
     # if the builder supports building for multiple architectures,
     # replace the previous line by, e.g.,
     systems = [ "x86_64-linux" ];
-    maxJobs = 20;
+    maxJobs = 10;
     speedFactor = 20;
     supportedFeatures = [ "nixos-test" "benchmark" "big-parallel" "kvm" "uid-range" "ca-derivations" ];
     mandatoryFeatures = [ ];
@@ -280,7 +280,7 @@ in
       # browser
         firefox chromium
       # media viewer
-        vlc
+        vlc freetube
       # graphical tools
         gimp inkscape
         # darktable
