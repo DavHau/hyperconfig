@@ -9,6 +9,10 @@
     # ./odoo.nix
   ];
 
+  # TODO: remove this once fixed in nixpkgs
+  programs.fish.enable = lib.mkForce false;
+  documentation.nixos.enable = false;
+
   nixpkgs.hostPlatform = "riscv64-linux";
   clan.core.networking.targetHost= "root@cm-pi.local";
   # clan.core.networking.buildHost= "root@cm-pi.local";
