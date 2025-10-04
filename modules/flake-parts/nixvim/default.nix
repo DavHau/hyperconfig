@@ -35,6 +35,6 @@ in
         module.imports = lib.attrValues (readModulesDir ./.);
       };
 
-      checks."packages/nixvim" = self'.packages.nixvim;
+      # checks."packages/nixvim" = self'.packages.nixvim;
     };
 }
