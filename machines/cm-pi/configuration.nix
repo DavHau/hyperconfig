@@ -23,7 +23,7 @@
   boot.initrd.systemd.tpm2.enable = false;
   boot.initrd.systemd.enable = false;
 
-  nixpkgs.pkgs = import inputs.nixpkgs-staging {
+  nixpkgs.pkgs = import inputs.nixpkgs-riscv {
     system = "x86_64-linux";
     crossSystem = "riscv64-linux";
     # config.contentAddressedByDefault = true;

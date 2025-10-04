@@ -1209,21 +1209,21 @@
         "type": "github"
       }
     },
-    "nixpkgs-staging": {
+    "nixpkgs-riscv": {
       "locked": {
-        "lastModified": 1759573442,
-        "narHash": "sha256-V1GsgbyN7Rtpu3vKPwMps4XSJeDV+azB30Mm6VulvXo=",
-        "ref": "staging-next",
-        "rev": "2d936f578ad9c58fb20232a710b328b2986c42d5",
+        "lastModified": 1759582845,
+        "narHash": "sha256-7O4nukeetryZMYUTbpIJSvYP/t3CPgEib+MbFIVQYiQ=",
+        "ref": "riscv",
+        "rev": "8cca7c885cdb97f756655a6b867c439f1a04ead9",
         "shallow": true,
         "type": "git",
-        "url": "https://github.com/nixos/nixpkgs"
+        "url": "https://github.com/davhau/nixpkgs"
       },
       "original": {
-        "ref": "staging-next",
+        "ref": "riscv",
         "shallow": true,
         "type": "git",
-        "url": "https://github.com/nixos/nixpkgs"
+        "url": "https://github.com/davhau/nixpkgs"
       }
     },
     "nixpkgs_2": {
@@ -1398,7 +1398,7 @@
         "nixos-hardware": "nixos-hardware",
         "nixos-images": "nixos-images",
         "nixpkgs": "nixpkgs_5",
-        "nixpkgs-staging": "nixpkgs-staging",
+        "nixpkgs-riscv": "nixpkgs-riscv",
         "nixvim": "nixvim",
         "retiolum": "retiolum",
         "srvos": "srvos",
