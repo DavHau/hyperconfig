@@ -1,3 +1,8 @@
+external_components:
+  - source:
+      type: git
+      url: https://github.com/rozh1/esphome-haier-ac-ir
+
 esphome:
   name: $name
   friendly_name: $friendly_name
@@ -32,21 +37,11 @@ captive_portal:
 web_server:
   port: 80
 
-
 climate:
-  - platform: heatpumpir
+  - platform: haier_acyrw02
+    sensor_id: current_temperature
+    pin: 4 # Pin with IR led
     name: $name
-    protocol: mitsubishi_msy
-    horizontal_default: middle
-    vertical_default: up
-    min_temperature: 16
-    max_temperature: 31
-    # receiver_id: rcvr
-
-remote_transmitter:
-  pin:
-    number: GPIO4
-  carrier_duty_percent: 50%
 
 # remote_receiver:
 #   id: rcvr
@@ -72,3 +67,7 @@ sensor:
     entity_category: "diagnostic"
     device_class: ""
 
+  # External temperature sensor from Home Assistant
+  - platform: homeassistant
+    id: current_temperature
+    entity_id: sensor.sonoff_snzb_02d_temperature
