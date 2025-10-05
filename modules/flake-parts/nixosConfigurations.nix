@@ -48,6 +48,15 @@ in {
 
           # NEW API
           instances = {
+            admin = {
+              roles.default.tags.all = { };
+              roles.default.settings.allowedKeys = {
+                # Insert the public key that you want to use for SSH access.
+                # All keys will have ssh access to all machines ("tags.all" means 'all machines').
+                # Alternatively set 'users.users.root.openssh.authorizedKeys.keys' in each machine
+                "dave" = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDuhpzDHBPvn8nv8RH1MRomDOaXyP4GziQm7r3MZ1Syk";
+              };
+            };
             zt-home = {
               module.name = "zerotier";
               roles.peer.tags.all = {};
