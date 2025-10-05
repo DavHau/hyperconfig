@@ -109,7 +109,7 @@ in {
               # roles.peer.settings.domain = "dave";
               roles.peer.settings.foreignHostNames = [
                 "ashburn1"
-                "buremberg1"
+                "nuremberg1"
               ];
               roles.peer.tags.all = {};
             };

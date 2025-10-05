@@ -16,7 +16,6 @@
   nixpkgs.hostPlatform = "riscv64-linux";
   clan.core.networking.targetHost= "root@cm-pi.local";
   # clan.core.networking.buildHost= "root@cm-pi.local";
-  clan.core.networking.buildHost= "grmpf@localhost";
 
   system.stateVersion = "25.05";
   systemd.tpm2.enable = false;
@@ -35,10 +34,6 @@
   })];
 
   # clan.core.networking.targetHost= "root@[${config.clan.core.facts.services.zerotier.public.zerotier-ip.value}]";
-
-  services.home-assistant.package = pkgs.home-assistant.override {
-    # python313 = pkgs.python312;
-  };
 
   image.modules.starfive2 = ({config, ...}: {
     imports = [
