@@ -1,7 +1,7 @@
 external_components:
   - source:
       type: git
-      url: https://github.com/rozh1/esphome-haier-ac-ir
+      url: https://github.com/DavHau/esphome-haier-ac-ir
 
 esphome:
   name: $name
@@ -26,6 +26,7 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  fast_connect: true  # disables scan (not needed for a single network)
 
   # Enable fallback hotspot (captive portal) in case wifi connection fails
   ap:
@@ -39,9 +40,18 @@ web_server:
 
 climate:
   - platform: haier_acyrw02
+    id: haier_climate
     sensor_id: current_temperature
     pin: 4 # Pin with IR led
     name: $name
+
+button:
+  # Display light toggle button - references the climate component
+  - platform: haier_display
+    climate_id: haier_climate
+    name: "AC Display Toggle"
+    icon: "mdi:television"
+    # Note: This sends a toggle command to turn display on/off
 
 # remote_receiver:
 #   id: rcvr
