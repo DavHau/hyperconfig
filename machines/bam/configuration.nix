@@ -20,4 +20,8 @@
   ];
   virtualisation.docker.enable = true;
   virtualisation.docker.rootless.enable = true;
+
+  users.users.root.openssh.authorizedKeys.keys = [
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOirp5rceowRPLnkCT2/vlTPgxtRWPeKdMIPnJ7ixJfi"
+  ];
 }
