@@ -112,6 +112,29 @@ in {
               roles.client.settings.exclude = import ../backup-exclude.nix;
               roles.server.settings.directory = "/pool11/enc/clan-backup";
             };
+            sshd = {
+              module.name = "sshd";
+              module.input = "clan-core";
+              roles.server.tags.all = {};
+              roles.client.tags.all = {};
+            };
+
+            # VPNs
+            wireguard = {
+              roles.controller = {
+                machines.edi = {};
+                settings = {
+                  # Public endpoint where this controller can be reached
+                  endpoint = "wg.davhau.com";
+                  # Optional: Change the UDP port (default: 51820)
+                  port = 51820;
+                };
+              };
+              roles.peer = {
+                machines.bam = {};
+              };
+            };
+            # easytier
             dave = {
               module.name = "easytier";
               module.input = "self";
@@ -121,12 +144,6 @@ in {
                 "nuremberg1"
               ];
               roles.peer.tags.all = {};
-            };
-            sshd = {
-              module.name = "sshd";
-              module.input = "clan-core";
-              roles.server.tags.all = {};
-              roles.client.tags.all = {};
             };
           };
         };
