@@ -28,7 +28,7 @@
 
     retiolum.url = "github:mic92/retiolum";
 
-    clan-core.url = "git+https://git.clan.lol/clan/clan-core";
+    clan-core.url = "git+https://git.clan.lol/clan/clan-core?ref=wireguard";
     clan-core.inputs.nixpkgs.follows = "nixpkgs";
 
     disko.url = "github:nix-community/disko";

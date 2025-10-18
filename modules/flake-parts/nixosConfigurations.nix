@@ -120,18 +120,37 @@ in {
             };
 
             # VPNs
-            wireguard = {
+            wg-casa = {
+              module.name = "wireguard";
               roles.controller = {
-                machines.edi = {};
+                machines.nas.settings = {
+                  ipv4.enable = true;
+                  ipv4.address = "10.42.1.1/24";
+                  externalPeers = {
+                    dave-handy = {
+                      allowInternetAccess = true;
+                      ipv4.address = "10.42.1.50/32";
+                    };
+                    papa-handy = {
+                      allowInternetAccess = true;
+                      ipv4.address = "10.42.1.51/32";
+                    };
+                    papa-laptop = {
+                      allowInternetAccess = true;
+                      ipv4.address = "10.42.1.52/32";
+                    };
+                    papa-tv-stick = {
+                      allowInternetAccess = true;
+                      ipv4.address = "10.42.1.53/32";
+                    };
+                  };
+                };
                 settings = {
                   # Public endpoint where this controller can be reached
-                  endpoint = "wg.davhau.com";
+                  endpoint = "casa.bruch-bu.de";
                   # Optional: Change the UDP port (default: 51820)
                   port = 51820;
                 };
-              };
-              roles.peer = {
-                machines.bam = {};
               };
             };
             # easytier
