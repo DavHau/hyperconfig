@@ -14,6 +14,7 @@
       "rpi_power"
       "radio_browser"
       "backup"
+      "mobile_app"
 
       "zha"
     ];
