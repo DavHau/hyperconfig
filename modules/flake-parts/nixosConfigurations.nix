@@ -124,8 +124,10 @@ in {
               module.name = "wireguard";
               roles.controller = {
                 machines.nas.settings = {
+
                   ipv4.enable = true;
                   ipv4.address = "10.42.1.1/24";
+
                   externalPeers = {
                     dave-handy = {
                       allowInternetAccess = true;

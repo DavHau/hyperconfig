@@ -197,7 +197,7 @@ def main() -> None:
 
     # Generate QR code
     print("QR Code:")
-    cmd = nix_shell(["git"], ["qrencode", "-s", "2", "-m", "2", "-t", "utf8"])
+    cmd = nix_shell(["qrencode"], ["qrencode", "-s", "2", "-m", "2", "-t", "utf8"])
     qr_result = run(
         cmd,
         input=config,
