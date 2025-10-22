@@ -1212,19 +1212,19 @@
     },
     "nixpkgs-riscv": {
       "locked": {
-        "lastModified": 1759582845,
-        "narHash": "sha256-7O4nukeetryZMYUTbpIJSvYP/t3CPgEib+MbFIVQYiQ=",
-        "ref": "riscv",
-        "rev": "8cca7c885cdb97f756655a6b867c439f1a04ead9",
+        "lastModified": 1761106491,
+        "narHash": "sha256-aO4E+Q3n68o2y7ULi8s+KHleNhFJYyi2WSOElIQUf7A=",
+        "ref": "dave",
+        "rev": "1647b20ea2724f9fd9b98742c840c2364b1923e3",
         "shallow": true,
         "type": "git",
-        "url": "https://github.com/davhau/nixpkgs"
+        "url": "https://github.com/DavHau/nixpkgs"
       },
       "original": {
-        "ref": "riscv",
+        "ref": "dave",
         "shallow": true,
         "type": "git",
-        "url": "https://github.com/davhau/nixpkgs"
+        "url": "https://github.com/DavHau/nixpkgs"
       }
     },
     "nixpkgs_2": {
