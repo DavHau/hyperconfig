@@ -1212,10 +1212,10 @@
     },
     "nixpkgs-riscv": {
       "locked": {
-        "lastModified": 1761106491,
-        "narHash": "sha256-aO4E+Q3n68o2y7ULi8s+KHleNhFJYyi2WSOElIQUf7A=",
+        "lastModified": 1761112933,
+        "narHash": "sha256-iMvzlId5+o7dVc/0Dzbbk3PMKCP3CeBHCSSVXieLOOs=",
         "ref": "dave",
-        "rev": "1647b20ea2724f9fd9b98742c840c2364b1923e3",
+        "rev": "a0aeb3c02ed1805b971da792dce80b6698a648bb",
         "shallow": true,
         "type": "git",
         "url": "https://github.com/DavHau/nixpkgs"
