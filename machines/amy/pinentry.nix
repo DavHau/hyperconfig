@@ -1,5 +1,5 @@
 {pkgs, ...}: {
   environment.systemPackages = [
-    pkgs.pinentry
+    pkgs.pinentry-curses
   ];
 }

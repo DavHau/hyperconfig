@@ -14,9 +14,49 @@
       "rpi_power"
       "radio_browser"
       "backup"
-      "mobile_app"
+      # "mobile_app"
 
       "zha"
+    ];
+    # These are the modules behind "default_config", excluded python-matter-server
+    # TODO: fix cross compilation for python-matter-server
+    extraPackages = python3Packages: with python3Packages; [
+      aiodhcpwatcher
+      aiodiscover
+      aiohasupervisor
+      async-upnp-client
+      av
+      bleak
+      bleak-retry-connector
+      bluetooth-adapters
+      bluetooth-auto-recovery
+      bluetooth-data-tools
+      cached-ipaddress
+      cronsim
+      dbus-fast
+      fnv-hash-fast
+      go2rtc-client
+      ha-ffmpeg
+      habluetooth
+      hass-nabucasa
+      hassil
+      home-assistant-frontend
+      home-assistant-intents
+      ifaddr
+      mutagen
+      numpy
+      pillow
+      psutil-home-assistant
+      pymicro-vad
+      pynacl
+      pyserial
+      pyspeex-noise
+      # python-matter-server
+      pyturbojpeg
+      pyudev
+      securetar
+      sqlalchemy
+      zeroconf
     ];
   };
   networking.firewall.allowedTCPPorts = [8123];

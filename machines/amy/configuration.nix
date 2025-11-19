@@ -7,9 +7,10 @@ in
     [
       inputs.home-manager.nixosModules.default
       inputs.retiolum.nixosModules.retiolum
-      # inputs.nixos-hardware.nixosModules.framework-13-7040-amd
+      # inputs.nixos-hardware.nixosModules.framework-amd-ai-300-series
+      inputs.nixos-hardware.nixosModules.framework-13-7040-amd
       # inputs.nixos-hardware.nixosModules.lenovo-yoga-7-14ARH7-amdgpu
-      inputs.nixos-hardware.nixosModules.tuxedo-pulse-14-gen3
+      # inputs.nixos-hardware.nixosModules.tuxedo-pulse-14-gen3
       ../../modules/nixos/common.nix
       ../../modules/nixos/etc-hosts.nix
       ../../modules/nixos/nix-development.nix
@@ -50,6 +51,7 @@ in
       ./disko.nix
       ./udev.nix
       # ./sway
+      # ./ups.nix
   ];
 
   nixpkgs.pkgs =
@@ -494,6 +496,7 @@ in
     nixr = ''nix --builders "ssh://root@168.119.226.152 x86_64-linux,aarch64-linux - 100 1 big-parallel,benchmark"'';
     mkcd = ''bash -c 'dir=$1 && mkdir -p $dir && cd $dir' '';
     lg = ''lazygit'';
+    nixl = ''nix --builders "" --substituters "https://cache.nixos.org"'';
   };
 
 
