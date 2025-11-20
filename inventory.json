@@ -11,13 +11,6 @@
         "targetHost": null
       }
     },
-    "foo": {
-      "name": "foo",
-      "description": "foo",
-      "tags": [
-        "all"
-      ]
-    },
     "cm-pi": {
       "name": "cm-pi",
       "description": null,
@@ -41,6 +34,22 @@
       "name": "bam",
       "tags": [],
       "deploy": {}
+    }
+  },
+  "instances": {
+    "monitoring": {
+      "module": {
+        "name": "monitoring"
+      },
+      "roles": {
+        "telegraf": {
+          "machines": {
+            "bam": {},
+            "edi": {}
+          },
+          "tags": {}
+        }
+      }
     }
   }
 }
