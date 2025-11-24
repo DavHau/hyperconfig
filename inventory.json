@@ -35,21 +35,5 @@
       "tags": [],
       "deploy": {}
     }
-  },
-  "instances": {
-    "monitoring": {
-      "module": {
-        "name": "monitoring"
-      },
-      "roles": {
-        "telegraf": {
-          "machines": {
-            "bam": {},
-            "edi": {}
-          },
-          "tags": {}
-        }
-      }
-    }
   }
 }
