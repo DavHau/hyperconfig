@@ -73,7 +73,7 @@ in
               '';
             };
 
-            clan.core.networking.targetHost = "[${ipv6Address}]";
+            # clan.core.networking.targetHost = "[${ipv6Address}]";
 
             # firewall
             networking.firewall.allowedTCPPorts = [
