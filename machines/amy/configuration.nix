@@ -139,7 +139,7 @@ in
     ../../modules/home-manager/firefox.nix
   ];
 
-  clan.core.networking.targetHost = "root@localhost";
+  clan.core.networking.targetHost = lib.mkForce "root@localhost";
 
   # set by default via clan
   # sops.age.keyFile = "/home/grmpf/.config/sops/age/keys.txt";
@@ -188,7 +188,7 @@ in
   nix.gc.options = ''--delete-older-than 14d --max-freed "$((30 * 1024**3 - 1024 * $(df -P -k /nix/store | tail -n 1 | ${pkgs.gawk}/bin/awk '{ print $4 }')))"'';
   nix.distributedBuilds = true;
   nix.buildMachines = [ {
-    hostName = "bam.dave";
+    hostName = "bam.d";
     # if the builder supports building for multiple architectures,
     # replace the previous line by, e.g.,
     systems = [ "x86_64-linux" ];
@@ -211,7 +211,7 @@ in
       # default tools
       wget vim killall file pv gptfdisk screen gnumake python3 jq fx eza
       # version control
-      git gti gitg github-cli tig ghq h github-cli lazygit git-absorb
+      git gti gitg github-cli tig ghq h github-cli lazygit git-absorb jujutsu
       # search
       ripgrep nix-index
       # default tools crazy editions

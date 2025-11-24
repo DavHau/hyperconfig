@@ -24,7 +24,6 @@
       ./users.nix
       ./reverse-proxy.nix
       ./file-browser-roman.nix
-      ../stefan-vm/host-module.nix
     ];
 
   # services.hyprspace.settings.peers = [

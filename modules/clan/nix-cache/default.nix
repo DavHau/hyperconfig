@@ -82,7 +82,7 @@ in
 
             # trust and use the cache
             nix.settings.substituters = flip map (attrNames roles.server.machines) (
-              machineName: "http://${machineName}.dave:5000"
+              machineName: "http://${machineName}.d:5000"
             );
             nix.settings.trusted-public-keys = [
               config.clan.core.vars.generators.harmonia.files.pub-key.value
