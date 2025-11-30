@@ -124,27 +124,6 @@ in {
             # VPNs
             yggdrasil = {
               roles.default.tags = ["all"];
-              roles.default.extraModules = [
-                (
-                  { lib, config, ... }:
-                  {
-                    services.yggdrasil.settings =
-                      lib.optionalAttrs (true)
-                        {
-                          Listen = [
-                            "quic://0.0.0.0:6443"
-                            "ws//0.0.0.0:6443"
-                            "tls://0.0.0.0:6443"
-                            "quic://[::]:6443"
-                            "ws//[::]:6443"
-                            "tls://[::]:6443"
-                          ];
-                        };
-                    networking.firewall.allowedTCPPorts = [ 6443 ];
-                    networking.firewall.allowedUDPPorts = [ 6443 ];
-                  }
-                )
-              ];
             };
             wg-casa = {
               module.name = "wireguard";
