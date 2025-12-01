@@ -1209,23 +1209,6 @@
         "type": "github"
       }
     },
-    "nixpkgs-riscv": {
-      "locked": {
-        "lastModified": 1761112933,
-        "narHash": "sha256-iMvzlId5+o7dVc/0Dzbbk3PMKCP3CeBHCSSVXieLOOs=",
-        "ref": "dave",
-        "rev": "a0aeb3c02ed1805b971da792dce80b6698a648bb",
-        "shallow": true,
-        "type": "git",
-        "url": "https://github.com/DavHau/nixpkgs"
-      },
-      "original": {
-        "ref": "dave",
-        "shallow": true,
-        "type": "git",
-        "url": "https://github.com/DavHau/nixpkgs"
-      }
-    },
     "nixpkgs_2": {
       "locked": {
         "lastModified": 1747179050,
@@ -1398,7 +1381,9 @@
         "nixos-hardware": "nixos-hardware",
         "nixos-images": "nixos-images",
         "nixpkgs": "nixpkgs_5",
-        "nixpkgs-riscv": "nixpkgs-riscv",
+        "nixpkgs-riscv": [
+          "nixpkgs"
+        ],
         "nixvim": "nixvim",
         "retiolum": "retiolum",
         "srvos": "srvos",
