@@ -33,7 +33,8 @@
     "bam": {
       "name": "bam",
       "tags": [],
-      "deploy": {}
+      "deploy": {},
+      "installedAt": 1764659202
     }
   }
 }
