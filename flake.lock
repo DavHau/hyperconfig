@@ -106,11 +106,12 @@
         "treefmt-nix": "treefmt-nix_2"
       },
       "locked": {
-        "lastModified": 1764512480,
-        "narHash": "sha256-qMz6kU0bGXU0Fp9PdWAvC5jBkIXDY9UAZ5ZfAdMJvEU=",
-        "ref": "refs/heads/main",
-        "rev": "212783d21310e4a8b9374199a57446a8e7554ad7",
-        "revCount": 11323,
+        "lastModified": 1764596905,
+        "narHash": "sha256-2pZW/vsbyKiM7Vis6KmMERQYNZKEY067GaR694mfQkg=",
+        "ref": "refs/pull/5862/head",
+        "rev": "27885211216eb9594d5b2c66b67d8d59614b1a9f",
+        "revCount": 11355,
+        "shallow": false,
         "type": "git",
         "url": "https://git.clan.lol/clan/clan-core"
       },
@@ -1031,11 +1032,11 @@
     },
     "nixos-hardware": {
       "locked": {
-        "lastModified": 1762847253,
-        "narHash": "sha256-BWWnUUT01lPwCWUvS0p6Px5UOBFeXJ8jR+ZdLX8IbrU=",
+        "lastModified": 1764440730,
+        "narHash": "sha256-ZlJTNLUKQRANlLDomuRWLBCH5792x+6XUJ4YdFRjtO4=",
         "owner": "nixos",
         "repo": "nixos-hardware",
-        "rev": "899dc449bc6428b9ee6b3b8f771ca2b0ef945ab9",
+        "rev": "9154f4569b6cdfd3c595851a6ba51bfaa472d9f3",
         "type": "github"
       },
       "original": {
