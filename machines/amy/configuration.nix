@@ -7,8 +7,8 @@ in
     [
       inputs.home-manager.nixosModules.default
       inputs.retiolum.nixosModules.retiolum
-      # inputs.nixos-hardware.nixosModules.framework-amd-ai-300-series
-      inputs.nixos-hardware.nixosModules.framework-13-7040-amd
+      inputs.nixos-hardware.nixosModules.framework-amd-ai-300-series
+      # inputs.nixos-hardware.nixosModules.framework-13-7040-amd
       # inputs.nixos-hardware.nixosModules.lenovo-yoga-7-14ARH7-amdgpu
       # inputs.nixos-hardware.nixosModules.tuxedo-pulse-14-gen3
       ../../modules/nixos/common.nix
@@ -451,10 +451,8 @@ in
 
 # USERS
   users.mutableUsers = false;
-  users.users.root.hashedPassword = "$6$.Op44MVHQ3qw$YwbFuIrs37BiAScgJSXAIcTxLjFL4ziejub.VBj.Xt41Pm3C8QilLjI2yW6R2lit1RnLydmTwDqzuQa/WUlor.";
   users.users.grmpf = {
     isNormalUser = true;
-    hashedPassword = "$6$.Op44MVHQ3qw$YwbFuIrs37BiAScgJSXAIcTxLjFL4ziejub.VBj.Xt41Pm3C8QilLjI2yW6R2lit1RnLydmTwDqzuQa/WUlor.";
     openssh.authorizedKeys.keys = [ "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDuhpzDHBPvn8nv8RH1MRomDOaXyP4GziQm7r3MZ1Syk grmpf@grmpf-ThinkPad-T460p" ];
     # wheel enables ‘sudo’ for the user.
     extraGroups = [ "wheel" "networkmanager" "audio" "ledger" "plugdev" "dialout" ];
