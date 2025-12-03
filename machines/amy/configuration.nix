@@ -453,6 +453,7 @@ in
   users.mutableUsers = false;
   users.users.grmpf = {
     isNormalUser = true;
+    hashedPasswordFile = config.users.users.dave.hashedPasswordFile;
     openssh.authorizedKeys.keys = [ "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDuhpzDHBPvn8nv8RH1MRomDOaXyP4GziQm7r3MZ1Syk grmpf@grmpf-ThinkPad-T460p" ];
     # wheel enables ‘sudo’ for the user.
     extraGroups = [ "wheel" "networkmanager" "audio" "ledger" "plugdev" "dialout" ];
@@ -520,7 +521,6 @@ in
 
 
 # NETWORKING
-  networking.hostName = "grmpf-nix"; # Define your hostname.
   networking.networkmanager.enable = true;
   networking.dhcpcd.extraConfig = "nohook resolv.conf";
   networking.networkmanager.dns = lib.mkForce "none";
