@@ -1260,19 +1260,19 @@
     },
     "nixpkgs_5": {
       "locked": {
-        "lastModified": 1764517877,
-        "narHash": "sha256-pp3uT4hHijIC8JUK5MEqeAWmParJrgBVzHLNfJDZxg4=",
-        "ref": "nixos-unstable",
-        "rev": "2d293cbfa5a793b4c50d17c05ef9e385b90edf6c",
+        "lastModified": 1764769590,
+        "narHash": "sha256-EMYfydCvhqiqKozI6RRTyyjOT5vKgxQHqdI8mZ2MCnA=",
+        "ref": "dave",
+        "rev": "2cd19a2a75dd1f48dd074622641fbd4679ec9803",
         "shallow": true,
         "type": "git",
-        "url": "https://github.com/nixos/nixpkgs"
+        "url": "https://github.com/DavHau/nixpkgs"
       },
       "original": {
-        "ref": "nixos-unstable",
+        "ref": "dave",
         "shallow": true,
         "type": "git",
-        "url": "https://github.com/nixos/nixpkgs"
+        "url": "https://github.com/DavHau/nixpkgs"
       }
     },
     "nixvim": {
