@@ -11,7 +11,8 @@
   services.buildbot-nix.master = {
     enable = true;
     # Domain name under which the buildbot frontend is reachable
-    domain = "bam.dave";
+    domain = "bam.d";
+    admins = ["admin"];
     # The workers file configures credentials for the buildbot workers to connect to the master.
     # "name" is the configured worker name in services.buildbot-nix.worker.name of a worker
     # (defaults to the hostname of the machine)
@@ -29,6 +30,7 @@
     ];
 
     authBackend = "none";
+    allowAnonymousControl = true;
 
     jobReportLimit = 0;
     # optional nix-eval-jobs settings
