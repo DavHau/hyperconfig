@@ -71,6 +71,10 @@
 
     easytier.url = "github:EasyTier/EasyTier";
     easytier.flake = false;
+
+    # external clan services
+    ncps.url = "git+https://git.clan.lol/TakodaS/clan-core.git?shallow=1&ref=ncps";
+    ncps.flake = false;
   };
 
   outputs = inputs@{ self, flake-parts, nixpkgs, ... }:

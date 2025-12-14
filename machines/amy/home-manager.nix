@@ -48,6 +48,7 @@
         pull.rebase = true;
         rebase.autoStash = true;
         git.commit.autoWrapCommitMessage = false;
+        push.autoSetupRemote = true;
       };
       aliases = {
         cl = "clone";

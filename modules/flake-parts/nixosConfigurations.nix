@@ -37,6 +37,7 @@ in {
           nix-cache = ../../modules/clan/nix-cache;
           easytier = ../../modules/clan/easytier;
           wireguard = ../../modules/clan/wireguard;
+          ncps = inputs.ncps + "/clanServices/ncps";
         };
 
         # add machines to their hosts
@@ -48,7 +49,6 @@ in {
             joy.deploy.targetHost = "joy.dave";
           };
 
-          # NEW API
           instances = {
             admin = {
               roles.default.tags.all = { };
@@ -57,6 +57,7 @@ in {
                 # All keys will have ssh access to all machines ("tags.all" means 'all machines').
                 # Alternatively set 'users.users.root.openssh.authorizedKeys.keys' in each machine
                 "dave" = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDuhpzDHBPvn8nv8RH1MRomDOaXyP4GziQm7r3MZ1Syk";
+                "phone" = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJwzL0rt4J+kzggV4pFXf9yh9zBF6n4hdXXVbCB7p1x6";
               };
             };
             zt-home = {
@@ -171,6 +172,22 @@ in {
                 "nuremberg1"
               ];
               roles.peer.tags.all = {};
+            };
+
+            ncps = {
+              module.name = "ncps";
+              module.input = "self";
+              roles.server.machines.bam = {
+                settings.caches = [
+                  "https://cache.nixos.org"
+                  "https://cache.clan.lol"
+                ];
+                settings.publicKeys = [
+                  "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
+                  "cache.clan.lol-1:3KztgSAB5R1M+Dz7vzkBGzXdodizbgLXGXKXlcQLA28="
+                ];
+              };
+              roles.client.machines.amy = {};
             };
           };
         };
