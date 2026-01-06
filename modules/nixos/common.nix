@@ -30,6 +30,4 @@
     "cgroups"
     "ca-derivations"
   ];
-
-  networking.domain = "dave";
 }
