@@ -2,6 +2,8 @@
   description = "nas home server";
 
   inputs = {
+    # systems.url = "path:./flake.systems.nix";
+    # systems.flake = false;
     flake-parts.url = "github:hercules-ci/flake-parts";
     flake-parts.inputs.nixpkgs-lib.follows = "nixpkgs";
     flake-compat = {
@@ -32,6 +34,7 @@
 
     clan-core.url = "git+https://git.clan.lol/clan/clan-core";
     clan-core.inputs.nixpkgs.follows = "nixpkgs";
+    # clan-core.inputs.systems.follows = "systems";
 
     disko.url = "github:nix-community/disko";
     disko.inputs.nixpkgs.follows = "nixpkgs";
