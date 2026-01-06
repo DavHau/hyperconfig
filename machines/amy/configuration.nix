@@ -513,7 +513,7 @@ in
   ];
   networking.firewall.allowPing = true;
   networking.firewall.enable = true;
-  boot.kernelPackages = pkgs.linuxPackages_6_17;
+  boot.kernelPackages = pkgs.linuxPackages;
   boot.kernelModules = [ "br_netfilter" "xboxdrv" ];
   boot.kernel.sysctl = {
     # See https://wiki.libvirt.org/page/Net.bridge.bridge-nf-call_and_sysctl.conf for background information
