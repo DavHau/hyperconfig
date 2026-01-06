@@ -191,7 +191,7 @@ in
     hostName = "bam.d";
     # if the builder supports building for multiple architectures,
     # replace the previous line by, e.g.,
-    systems = [ "x86_64-linux" ];
+    systems = [ "x86_64-linux" "aarch64-linux" ];
     maxJobs = 10;
     speedFactor = 20;
     supportedFeatures = [ "nixos-test" "benchmark" "big-parallel" "kvm" "uid-range" "ca-derivations" ];
