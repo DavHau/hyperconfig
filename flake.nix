@@ -35,6 +35,7 @@
     clan-core.url = "git+https://git.clan.lol/clan/clan-core";
     clan-core.inputs.nixpkgs.follows = "nixpkgs";
     # clan-core.inputs.systems.follows = "systems";
+    clan-core-monitoring.url = "git+https://git.clan.lol/friedow/clan-core?ref=feat/monitoring-service&shallow=1";
 
     disko.url = "github:nix-community/disko";
     disko.inputs.nixpkgs.follows = "nixpkgs";

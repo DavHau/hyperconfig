@@ -38,6 +38,7 @@ in {
           easytier = ../../modules/clan/easytier;
           wireguard = ../../modules/clan/wireguard;
           ncps = inputs.ncps + "/clanServices/ncps";
+          monitoring = inputs.clan-core-monitoring + "/modules/monitoring";
         };
 
         # add machines to their hosts
@@ -188,6 +189,20 @@ in {
                 ];
               };
               roles.client.machines.amy = {};
+              roles.client.machines.bam = {};
+            };
+
+            monitoring = {
+              module.name = "monitoring";
+              module.input = "clan-core-monitoring";
+              roles.server.machines.bam = {};
+              roles.server.settings = {
+                grafana.enable = true;
+              };
+              roles.client.machines.bam = {};
+              roles.client.settings = {
+                useSSL = false;
+              };
             };
           };
         };
