@@ -35,7 +35,7 @@ in {
 
         modules = {
           nix-cache = ../../modules/clan/nix-cache;
-          easytier = ../../modules/clan/easytier;
+          # easytier = ../../modules/clan/easytier;
           wireguard = ../../modules/clan/wireguard;
           ncps = inputs.ncps + "/clanServices/ncps";
           monitoring = inputs.clan-core-monitoring + "/modules/monitoring";
@@ -164,16 +164,16 @@ in {
               };
             };
             # easytier
-            dave = {
-              module.name = "easytier";
-              module.input = "self";
-              # roles.peer.settings.domain = "dave";
-              roles.peer.settings.foreignHostNames = [
-                "ashburn1"
-                "nuremberg1"
-              ];
-              roles.peer.tags.all = {};
-            };
+            # dave = {
+            #   module.name = "easytier";
+            #   module.input = "self";
+            #   # roles.peer.settings.domain = "dave";
+            #   roles.peer.settings.foreignHostNames = [
+            #     "ashburn1"
+            #     "nuremberg1"
+            #   ];
+            #   roles.peer.tags.all = {};
+            # };
 
             ncps = {
               module.name = "ncps";
