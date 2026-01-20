@@ -151,13 +151,11 @@ in
   ];
   nix.settings = {
     max-jobs = 40;
-    auto-allocate-uids = true;
     system-features = [
       "kvm"
       "nixos-test"
       "benchmark"
       "big-parallel"
-      "uid-range"
     ];
     trusted-users = [ "root" "grmpf" ];
     substituters = [
@@ -174,7 +172,7 @@ in
     http2 = true;
     http-connections = 200;
     builders-use-substitutes = true;
-    experimental-features = [ "nix-command" "flakes" "impure-derivations" "recursive-nix" "auto-allocate-uids" "cgroups" ];
+    experimental-features = [ "nix-command" "flakes" "impure-derivations" "recursive-nix"];
     log-lines = 25;
     min-free = 10 * 1000 * 1000 * 1000;
     max-free = 20 * 1000 * 1000 * 1000;
