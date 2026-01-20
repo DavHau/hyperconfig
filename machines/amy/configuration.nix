@@ -25,7 +25,7 @@ in
       ./home-manager.nix
       ./fish.nix
       ./backup.nix
-      ./retiolum.nix
+      # ./retiolum.nix
       ./amdgpu.nix
       ./opengl.nix
       # ./cura.nix  # slicer for 3d printing
