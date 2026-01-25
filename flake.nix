@@ -67,7 +67,7 @@
     nixvim.inputs.nixpkgs.follows = "nixpkgs";
 
     # buildbot-nix.url = "github:nix-community/buildbot-nix";
-    buildbot-nix.url = "github:DavHau/buildbot-nix/anon-control";
+    buildbot-nix.url = "github:nix-community/buildbot-nix";
     buildbot-nix.inputs.nixpkgs.follows = "nixpkgs";
 
     stylix.url = "github:nix-community/stylix";

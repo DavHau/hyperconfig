@@ -30,7 +30,7 @@
     ];
 
     authBackend = "none";
-    allowAnonymousControl = true;
+    allowUnauthenticatedControl = true;
 
     jobReportLimit = 0;
     # optional nix-eval-jobs settings
