@@ -6,6 +6,8 @@
     # ../../modules/nixos/dns.nix
     ./disko-xfs.nix
     ./buildbot
+    ./nextcloud.nix
+    ./vikunja.nix
   ];
   nixpkgs.hostPlatform = "x86_64-linux";
   boot.binfmt.emulatedSystems = ["aarch64-linux"];
