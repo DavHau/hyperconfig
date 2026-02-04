@@ -209,7 +209,7 @@ in
       # default tools
       wget vim killall file pv gptfdisk screen gnumake python3 jq fx eza
       # version control
-      git gti gitg github-cli tig ghq h github-cli lazygit git-absorb jujutsu
+      git gti gitg github-cli tig ghq h github-cli lazygit git-absorb jujutsu jjui
       # search
       ripgrep nix-index
       # default tools crazy editions
