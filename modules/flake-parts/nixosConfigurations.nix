@@ -44,7 +44,6 @@ in {
         # add machines to their hosts
         inventory = {
           machines = {
-            bam.tags = [ "wifi-home"];
             installer.tags = [ "wifi-home" ];
             cm-pi.tags = [ "wifi-home" ];
             joy.deploy.targetHost = "joy.dave";
