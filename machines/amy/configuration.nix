@@ -24,7 +24,7 @@ in
       ./vpn.nix
       ./home-manager.nix
       ./fish.nix
-      ./backup.nix
+      # ./backup.nix
       # ./retiolum.nix
       ./amdgpu.nix
       ./opengl.nix
@@ -206,6 +206,7 @@ in
 # SOFTWARE
   environment.systemPackages = with pkgs; [
   # cmdline tools
+      signal-desktop
       # default tools
       wget vim killall file pv gptfdisk screen gnumake python3 jq fx eza
       # version control

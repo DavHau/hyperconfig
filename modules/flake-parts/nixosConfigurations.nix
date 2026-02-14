@@ -31,7 +31,7 @@ in {
         };
 
         meta.name = "DavClan";
-        meta.tld = "d";
+        meta.domain = "d";
 
         modules = {
           nix-cache = ../../modules/clan/nix-cache;
@@ -198,10 +198,7 @@ in {
               roles.server.settings = {
                 grafana.enable = true;
               };
-              roles.client.machines.bam = {};
-              roles.client.settings = {
-                useSSL = false;
-              };
+              roles.client.tags = ["all"];
             };
           };
         };
