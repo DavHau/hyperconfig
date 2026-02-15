@@ -1,6 +1,6 @@
 substitutions:
   name: aircon_mitsubishi
-  friendly_name: Mitsubishi AC
+  friendly_name: AC
 
 esphome:
   name: $name
@@ -53,8 +53,11 @@ external_components:
 climate:
   - platform: cn105
     id: hp
-    name: "My Heat Pump"
+    name: "$friendly_name"
     update_interval: 2s # update interval can be adjusted after a first run and logs monitoring
+    vertical_vane_select:
+      name: Vertikalflügel
+      disabled_by_default: false
 
 sensor:
   - platform: uptime
