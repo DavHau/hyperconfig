@@ -308,7 +308,6 @@ in
   programs.vim.enable = true;
   programs.vim.defaultEditor = true;
   programs.nm-applet.enable = true;
-  programs.adb.enable = true;
   programs.steam.enable = true;
   programs.wireshark.enable = true;
   hardware.ledger.enable = true;
