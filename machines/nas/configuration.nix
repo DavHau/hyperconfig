@@ -53,14 +53,6 @@
     # needed for gigabit ethernet adapter, since r8169 is disabled above
     # TODO: currently broken, but could be updated in nixpkgs
     # config.boot.kernelPackages.r8168
-
-
-    # config.boot.kernelPackages.rtl8821au
-    # config.boot.kernelPackages.rtl88x2bu
-    # BrosTrend wifi stick
-    (pkgs.linuxPackages.rtl8812au.override {
-      kernel = config.boot.kernelPackages.kernel;
-    })
   ];
 
   # power
