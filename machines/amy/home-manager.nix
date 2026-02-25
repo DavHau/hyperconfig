@@ -36,12 +36,13 @@
     programs.zoxide.enable = true;
 
     # git
+    programs.difftastic.enable = true;
+    programs.difftastic.git.enable = true;
     programs.git = {
       enable = true;
-      userName = "DavHau";
-      userEmail = "hsngrmpf+github@gmail.com";
-      difftastic.enable = true;
-      extraConfig = {
+      settings = {
+        user.name = "DavHau";
+        user.email = "hsngrmpf+github@gmail.com";
         # pack.compression = 0;
         # core.editor = "codium";
         init.defaultBranch = "main";
@@ -49,40 +50,40 @@
         rebase.autoStash = true;
         git.commit.autoWrapCommitMessage = false;
         push.autoSetupRemote = true;
-      };
-      aliases = {
-        cl = "clone";
-        gh-cl = "gh-clone";
-        cr = "cr-fix";
-        p = "push";
-        pl = "pull";
-        f = "fetch";
-        fa = "fetch --all";
-        a = "add";
-        ap = "add -p";
-        d = "diff";
-        dl = "diff HEAD~ HEAD";
-        ds = "diff --staged";
-        l = "log --show-signature";
-        l1 = "log -1";
-        lp = "log -p";
-        c = "commit";
-        ca = "commit --amend";
-        co = "checkout";
-        cb = "checkout -b";
-        cm = "checkout origin/master";
-        de = "checkout --detach";
-        fco = "fetch-checkout";
-        br = "branch";
-        s = "status";
-        re = "reset --hard";
-        r = "rebase";
-        rc = "rebase --continue";
-        ri = "rebase -i";
-        m = "merge";
-        t = "tag";
-        su = "submodule update --init --recursive";
-        bi = "bisect";
+        alias = {
+          cl = "clone";
+          gh-cl = "gh-clone";
+          cr = "cr-fix";
+          p = "push";
+          pl = "pull";
+          f = "fetch";
+          fa = "fetch --all";
+          a = "add";
+          ap = "add -p";
+          d = "diff";
+          dl = "diff HEAD~ HEAD";
+          ds = "diff --staged";
+          l = "log --show-signature";
+          l1 = "log -1";
+          lp = "log -p";
+          c = "commit";
+          ca = "commit --amend";
+          co = "checkout";
+          cb = "checkout -b";
+          cm = "checkout origin/master";
+          de = "checkout --detach";
+          fco = "fetch-checkout";
+          br = "branch";
+          s = "status";
+          re = "reset --hard";
+          r = "rebase";
+          rc = "rebase --continue";
+          ri = "rebase -i";
+          m = "merge";
+          t = "tag";
+          su = "submodule update --init --recursive";
+          bi = "bisect";
+        };
       };
     };
   };

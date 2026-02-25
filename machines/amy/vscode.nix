@@ -17,7 +17,7 @@
         rm -rf $userDir/settings.json
         cat \
           ${(pkgs.formats.json {}).generate "blabla"
-            config.programs.vscode.userSettings} \
+            config.programs.vscode.profiles.default.userSettings} \
           > $userDir/settings.json
       done
     '';
@@ -27,7 +27,7 @@
   programs.vscode = {
     enable = true;
     package = pkgs.vscode;
-    extensions = with pkgs.vscode-extensions; [
+    profiles.default.extensions = with pkgs.vscode-extensions; [
       jnoortheen.nix-ide
       ms-pyright.pyright
       eamodio.gitlens
@@ -76,7 +76,7 @@
       # emmanuelbeziat.vscode-great-icons
     ];
 
-    userSettings = {
+    profiles.default.userSettings = {
       "files.autoSave" = "onFocusChange";
       "files.insertFinalNewline" = true;
       "files.trimTrailingWhitespace" = true;
@@ -122,7 +122,7 @@
       "workbench.iconTheme" = "material-icon-theme";
     };
 
-    keybindings = [
+    profiles.default.keybindings = [
       { command = "editor.action.duplicateSelection";
         key = "Ctrl+D"; }
       { command = "editor.action.toggleColumnSelection";
