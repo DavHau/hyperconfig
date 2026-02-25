@@ -39,7 +39,6 @@ in
       ./bitwarden.nix
       # ./envfs.nix
       # ./devenv.nix
-      ./blueberry.nix
       # ./nix-heuristic-gc.nix
       ./ollama.nix
       ./fonts.nix
@@ -433,10 +432,12 @@ in
   services.xserver.xkb.layout = "us";
   services.xserver.xkb.variant = "altgr-intl";
   services.xserver.xkb.options = "eurosign:e";
-  services.xserver.displayManager.sessionCommands = ''
-    ${pkgs.flameshot}/bin/flameshot &
-    ${pkgs.blueberry}/bin/blueberry-tray &
-  '';
+  # Moved to niri spawn-at-startup / systemd user services to avoid
+  # launching before the compositor is ready (which breaks xdg-desktop-portal).
+  # services.xserver.displayManager.sessionCommands = ''
+  #   ${pkgs.flameshot}/bin/flameshot &
+  #   ${pkgs.blueberry}/bin/blueberry-tray &
+  # '';
   #services.xserver.deviceSection = ''
   #  Driver "amdgpu
   #  Option "TearFree" "true"
