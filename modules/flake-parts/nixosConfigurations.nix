@@ -191,15 +191,15 @@ in {
               roles.client.machines.bam = {};
             };
 
-            monitoring = {
-              module.name = "monitoring";
-              module.input = "clan-core-monitoring";
-              roles.server.machines.bam = {};
-              roles.server.settings = {
-                grafana.enable = true;
-              };
-              roles.client.tags = ["all"];
-            };
+            # monitoring = {
+            #   module.name = "monitoring";
+            #   module.input = "clan-core-monitoring";
+            #   # roles.server.machines.bam = {};
+            #   roles.server.settings = {
+            #     grafana.enable = true;
+            #   };
+            #   # roles.client.tags = ["all"];
+            # };
           };
         };
       });
