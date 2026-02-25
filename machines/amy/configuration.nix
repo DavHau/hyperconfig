@@ -24,6 +24,7 @@ in
       ./vpn.nix
       ./home-manager.nix
       ./fish.nix
+      ./fish-ai.nix
       # ./backup.nix
       # ./retiolum.nix
       ./amdgpu.nix
