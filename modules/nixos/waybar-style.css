@@ -304,6 +304,23 @@ label:focus {
 	background-color: transparent;
 }
 
+#custom-brightness-20,
+#custom-brightness-40,
+#custom-brightness-60,
+#custom-brightness-80,
+#custom-brightness-100 {
+    padding: 0 6px;
+    background-color: #90b1b1;
+}
+
+#custom-brightness-20:hover,
+#custom-brightness-40:hover,
+#custom-brightness-60:hover,
+#custom-brightness-80:hover,
+#custom-brightness-100:hover {
+    background-color: #b0d1d1;
+}
+
 #custom-ollama {
     padding: 0 10px;
 }

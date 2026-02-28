@@ -82,6 +82,11 @@ in
           "memory"
           "temperature"
           "backlight"
+          "custom/brightness-20"
+          "custom/brightness-40"
+          "custom/brightness-60"
+          "custom/brightness-80"
+          "custom/brightness-100"
           "keyboard-state"
           "battery"
           "battery#bat2"
@@ -179,6 +184,31 @@ in
             default = [ "" "" "" ];
           };
           on-click = "pavucontrol";
+        };
+        "custom/brightness-20" = {
+          format = "🌑";
+          tooltip = false;
+          on-click = "${pkgs.brightnessctl}/bin/brightnessctl set 20%";
+        };
+        "custom/brightness-40" = {
+          format = "🌒";
+          tooltip = false;
+          on-click = "${pkgs.brightnessctl}/bin/brightnessctl set 40%";
+        };
+        "custom/brightness-60" = {
+          format = "🌓";
+          tooltip = false;
+          on-click = "${pkgs.brightnessctl}/bin/brightnessctl set 60%";
+        };
+        "custom/brightness-80" = {
+          format = "🌔";
+          tooltip = false;
+          on-click = "${pkgs.brightnessctl}/bin/brightnessctl set 80%";
+        };
+        "custom/brightness-100" = {
+          format = "🌕";
+          tooltip = false;
+          on-click = "${pkgs.brightnessctl}/bin/brightnessctl set 100%";
         };
         "custom/ollama" = {
           format = "{icon}";
