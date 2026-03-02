@@ -3,10 +3,10 @@ let
   version = "2.10.2";
 
   src = pkgs.fetchFromGitHub {
-    owner = "Realiserad";
+    owner = "DavHau";
     repo = "fish-ai";
-    rev = "v${version}";
-    hash = "sha256-2LYgpE26FP+enUz0+h6OCdp8Tb9kRAVFL/eCwx1Cm1Q=";
+    rev = "main";
+    hash = "sha256-DFTws/0dgUqoq9epujAbFvSjw57BRIxKJAU4+ScklUc=";
   };
 
   python = pkgs.python3;
