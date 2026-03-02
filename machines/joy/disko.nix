@@ -1,60 +1,39 @@
-{ config, pkgs, ... }:
+{ pkgs, lib, ... }:
 {
-  boot.loader.grub = {
-    enable = true;
-    efiSupport = true;
-    efiInstallAsRemovable = true;
-  };
-
   disko.devices = {
-    disk = {
-      x = {
-        type = "disk";
-        device = "/dev/nvme0n1";
-        content = {
-          type = "gpt";
-          partitions = {
-            "boot" = {
-              size = "1M";
-              type = "EF02"; # for grub MBR
-              priority = 1;
-            };
-            ESP = {
-              size = "1G";
-              type = "EF00";
-              content = {
-                type = "filesystem";
-                format = "vfat";
-                mountpoint = "/boot";
-              };
-            };
-            zfs = {
-              size = "100%";
-              content = {
-                type = "zfs";
-                pool = "zroot";
-              };
+    disk.main = {
+      type = "disk";
+      device = "/dev/disk/by-id/some-disk-id";
+      imageSize = "16G";
+      content = {
+        type = "gpt";
+        partitions = {
+          ESP = {
+            size = "1G";
+            type = "EF00";
+            content = {
+              type = "filesystem";
+              format = "vfat";
+              mountpoint = "/boot";
+              mountOptions = [ "umask=0077" ];
             };
           };
-        };
-      };
-    };
-    zpool = {
-      zroot = {
-        type = "zpool";
-        rootFsOptions = {
-          compression = "lz4";
-        };
-        datasets = {
-          "root" = {
-            type = "zfs_fs";
-            options = {
-              encryption = "aes-256-gcm";
-              keyformat = "passphrase";
-              keylocation = "prompt";
-              "com.sun:auto-snapshot" = "true";
+          luks = {
+            size = "100%";
+            content = {
+              type = "luks";
+              name = "cryptusb";
+              # passwordFile is only used during image creation (not propagated to boot config),
+              # so the booted system will prompt interactively for the LUKS passphrase.
+              # Provide the password file at build time via: --pre-format-files ./secret.key /tmp/secret.key
+              passwordFile = "/tmp/secret.key";
+              settings.allowDiscards = true;
+              content = {
+                type = "filesystem";
+                format = "ext4";
+                mountpoint = "/";
+              };
             };
-            mountpoint = "/";
           };
         };
       };

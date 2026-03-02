@@ -1,8 +1,14 @@
-{pkgs, ...}: {
+{pkgs, inputs, ...}: {
   imports = [
+    inputs.nixos-hardware.nixosModules.framework-12-13th-gen-intel
     ../../modules/nixos/common.nix
     ../../modules/nixos/common-tools.nix
+    ./output-formats.nix
   ];
+
+  nixpkgs.hostPlatform = "x86_64-linux";
+  boot.loader.systemd-boot.enable = true;
+  hardware.enableAllHardware = true;
 
   services.desktopManager.plasma6.enable = true;
   services.displayManager.sddm.enable = true;
@@ -19,5 +25,8 @@
     krita
     libreoffice
     telegram-desktop
+    maliit-keyboard
+    xournalpp
+    rnote
   ];
 }

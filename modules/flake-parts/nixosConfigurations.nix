@@ -46,7 +46,7 @@ in {
           machines = {
             installer.tags = [ "wifi-home" ];
             cm-pi.tags = [ "wifi-home" ];
-            joy.deploy.targetHost = "joy.dave";
+            # joy.deploy.targetHost = "joy.dave";
           };
 
           instances = {
