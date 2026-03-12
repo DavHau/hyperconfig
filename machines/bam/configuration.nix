@@ -1,4 +1,4 @@
-{clan-core, lib, ...}: {
+{config, ...}: {
   nixpkgs.overlays = [
     (import ../../overlays/ollama.nix)
   ];
@@ -13,6 +13,7 @@
     ./vikunja.nix
     ./ollama.nix
   ];
+
   nixpkgs.hostPlatform = "x86_64-linux";
   boot.binfmt.emulatedSystems = ["aarch64-linux"];
 
@@ -31,6 +32,7 @@
     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOirp5rceowRPLnkCT2/vlTPgxtRWPeKdMIPnJ7ixJfi ds@nintendo-ds"
     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHfFgVZxuSVWvuNua41SaxGQxpMb6oUuCEiIF7SZpAD1 root@nintendo-ds"
   ];
+  users.users.dave.openssh.authorizedKeys.keys = config.users.users.root.openssh.authorizedKeys.keys;
 
   services.jackett.enable = true;
   services.jackett.openFirewall = true;
