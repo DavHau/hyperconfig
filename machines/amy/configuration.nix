@@ -12,6 +12,7 @@ in
       # inputs.nixos-hardware.nixosModules.lenovo-yoga-7-14ARH7-amdgpu
       # inputs.nixos-hardware.nixosModules.tuxedo-pulse-14-gen3
       ../../modules/nixos/common.nix
+      ../../modules/nixos/common-tools.nix
       ../../modules/nixos/etc-hosts.nix
       ../../modules/nixos/nix-development.nix
       ../../modules/nixos/dns.nix
@@ -20,6 +21,8 @@ in
       ../../modules/nixos/nrb
       ../../modules/nixos/nix-caches.nix
       ../../modules/nixos/niri.nix
+      ../../modules/nixos/sbox.nix
+      ../../modules/nixos/pi.nix
       # ./hardware-configuration.nix
       ./vpn.nix
       ./home-manager.nix
@@ -257,6 +260,7 @@ in
       # AI
       # aider-chat-full
       claude-code
+
       delta
       lsd
 
@@ -275,7 +279,6 @@ in
       pavucontrol # audio settings
       wireshark
       # editors
-        # self.packages.${system}.nixvim
       # file manager
         filezilla nautilus eog
       # browser

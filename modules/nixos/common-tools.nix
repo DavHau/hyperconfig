@@ -1,8 +1,12 @@
 {
   pkgs,
   lib,
+  inputs,
   ...
 }: {
+  imports = [
+    inputs.direnv-sandbox.nixosModules.default
+  ];
   environment.systemPackages = lib.attrValues {
     inherit (pkgs)
       bat
@@ -15,7 +19,12 @@
   };
 
   programs.direnv.enable = true;
-  programs.direnv.nix-direnv.enable = true;
+  programs.direnv.sandbox.enable = true;
+  programs.direnv.sandbox.allowParent = "read";
+  programs.direnv.sandbox.bind = [
+    "$HOME/.pi"
+    "$HOME/.local/share/zoxide"
+  ];
 
   programs.bash.interactiveShellInit = ''
     if [[ $(${pkgs.procps}/bin/ps --no-header --pid=$PPID --format=comm) != "fish" && -z ''${BASH_EXECUTION_STRING} ]]

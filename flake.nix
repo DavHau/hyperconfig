@@ -79,6 +79,16 @@
     # external clan services
     ncps.url = "git+https://git.clan.lol/TakodaS/clan-core.git?shallow=1&ref=ncps";
     ncps.flake = false;
+
+    direnv-sandbox.url = "path:///home/grmpf/synced/projects/direnv-sandbox";
+    direnv-sandbox.inputs.nixpkgs.follows = "nixpkgs";
+
+    llm-agents.url = "github:numtide/llm-agents.nix";
+    llm-agents.inputs.nixpkgs.follows = "nixpkgs";
+
+    mics-skills.url = "github:Mic92/mics-skills";
+    mics-skills.inputs.nixpkgs.follows = "nixpkgs";
+
   };
 
   outputs = inputs@{ self, flake-parts, nixpkgs, ... }:
