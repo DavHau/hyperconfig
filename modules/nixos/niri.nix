@@ -7,6 +7,8 @@ let
     else
       ${pkgs.gnused}/bin/sed -i 's|server = http://bam.d:11434/v1|server = http://localhost:11434/v1|' "$config"
     fi
+    # Swap which model line is active (expects exactly two model lines: one commented, one not)
+    ${pkgs.gnused}/bin/sed -i -e 's/^model = /TEMP_MODEL = /' -e 's/^; model = /model = /' -e 's/^TEMP_MODEL = /; model = /' "$config"
     pkill -RTMIN+10 waybar
   '';
 
@@ -127,7 +129,7 @@ in
         temperature = {
           critical-threshold = 80;
           format = "{temperatureC}°C {icon}";
-          format-icons = [ "" "" "" ];
+          format-icons = [ "" "" "" ];
         };
         backlight = {
           format = "{percent}% {icon}";
@@ -140,7 +142,7 @@ in
           };
           format = "{capacity}% {icon}";
           format-full = "{capacity}% {icon}";
-          format-charging = "{capacity}% ";
+          format-charging = "{capacity}% {icon}";
           format-plugged = "{capacity}% ";
           format-alt = "{time} {icon}";
           format-icons = [ "" "" "" "" "" ];
