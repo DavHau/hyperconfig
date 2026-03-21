@@ -37,7 +37,6 @@ in
       ./nix-registry.nix
       ./low-battery-power-off.nix
       ./nix-lazy.nix
-      ./nix-multi.nix
       ./bitwarden.nix
       # ./envfs.nix
       # ./devenv.nix

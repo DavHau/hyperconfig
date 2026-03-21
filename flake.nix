@@ -28,18 +28,7 @@
     nil.inputs.nixpkgs.follows = "nixpkgs";
 
     nix.url = "https://flakehub.com/f/NixOS/nix/2.*.*.tar.gz";
-    nix.inputs.flake-compat.follows = "flake-compat";
-    nix.inputs.flake-parts.follows = "flake-parts";
-    nix.inputs.nixpkgs.follows = "nixpkgs";
-    nix-lazy.url = "github:edolstra/nix/lazy-trees";
-    nix-lazy.inputs.flake-compat.follows = "flake-compat";
-    nix-lazy.inputs.flake-parts.follows = "flake-parts";
-    nix-lazy.inputs.nixpkgs.follows = "nixpkgs";
-    nix-multi.url = "git+https://github.com/DeterminateSystems/nix-src?&ref=multithreaded-eval&shallow=1";
-    nix-multi.inputs.flake-compat.follows = "flake-compat";
-    nix-multi.inputs.flake-parts.follows = "flake-parts";
-    nix-multi.inputs.nixpkgs.follows = "nixpkgs";
-
+    nix-lazy.url = "github:nixos/nix/lazy-trees-v2";
     retiolum.url = "github:mic92/retiolum";
 
     clan-core.url = "git+https://git.clan.lol/clan/clan-core";

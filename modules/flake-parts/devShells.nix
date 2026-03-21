@@ -16,7 +16,6 @@
         packages = [
           clan-cli-with-p2p-ssh
           # pkgs.esphome
-          # inputs'.nix-multi.packages.nix
         ];
       };
     };
