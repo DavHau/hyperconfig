@@ -25,17 +25,32 @@
     nixos-hardware.url = "github:nixos/nixos-hardware";
 
     nil.url = "github:oxalica/nil";
+    nil.inputs.nixpkgs.follows = "nixpkgs";
 
     nix.url = "https://flakehub.com/f/NixOS/nix/2.*.*.tar.gz";
+    nix.inputs.flake-compat.follows = "flake-compat";
+    nix.inputs.flake-parts.follows = "flake-parts";
+    nix.inputs.nixpkgs.follows = "nixpkgs";
     nix-lazy.url = "github:edolstra/nix/lazy-trees";
+    nix-lazy.inputs.flake-compat.follows = "flake-compat";
+    nix-lazy.inputs.flake-parts.follows = "flake-parts";
+    nix-lazy.inputs.nixpkgs.follows = "nixpkgs";
     nix-multi.url = "git+https://github.com/DeterminateSystems/nix-src?&ref=multithreaded-eval&shallow=1";
+    nix-multi.inputs.flake-compat.follows = "flake-compat";
+    nix-multi.inputs.flake-parts.follows = "flake-parts";
+    nix-multi.inputs.nixpkgs.follows = "nixpkgs";
 
     retiolum.url = "github:mic92/retiolum";
 
     clan-core.url = "git+https://git.clan.lol/clan/clan-core";
     clan-core.inputs.nixpkgs.follows = "nixpkgs";
+    clan-core.inputs.disko.follows = "disko";
+    clan-core.inputs.flake-parts.follows = "flake-parts";
     # clan-core.inputs.systems.follows = "systems";
     clan-core-monitoring.url = "git+https://git.clan.lol/friedow/clan-core?ref=feat/monitoring-service&shallow=1";
+    clan-core-monitoring.inputs.disko.follows = "disko";
+    clan-core-monitoring.inputs.flake-parts.follows = "flake-parts";
+    clan-core-monitoring.inputs.nixpkgs.follows = "nixpkgs";
 
     disko.url = "github:nix-community/disko";
     disko.inputs.nixpkgs.follows = "nixpkgs";
@@ -44,6 +59,7 @@
 
     envfs.url = "github:Mic92/envfs";
     envfs.inputs.nixpkgs.follows = "nixpkgs";
+    envfs.inputs.flake-parts.follows = "flake-parts";
 
     # devenv.url = "github:cachix/devenv";
     # devenv.inputs.nixpkgs.follows = "nixpkgs";
@@ -62,16 +78,20 @@
 
     hyprspace.url = "github:hyprspace/hyprspace";
     hyprspace.inputs.nixpkgs.follows = "nixpkgs";
+    hyprspace.inputs.flake-parts.follows = "flake-parts";
 
     nixvim.url = "github:nix-community/nixvim";
     nixvim.inputs.nixpkgs.follows = "nixpkgs";
+    nixvim.inputs.flake-parts.follows = "flake-parts";
 
     # buildbot-nix.url = "github:nix-community/buildbot-nix";
     buildbot-nix.url = "github:nix-community/buildbot-nix";
     buildbot-nix.inputs.nixpkgs.follows = "nixpkgs";
+    buildbot-nix.inputs.flake-parts.follows = "flake-parts";
 
     stylix.url = "github:nix-community/stylix";
     stylix.inputs.nixpkgs.follows = "nixpkgs";
+    stylix.inputs.flake-parts.follows = "flake-parts";
 
     easytier.url = "github:EasyTier/EasyTier";
     easytier.flake = false;
@@ -85,9 +105,11 @@
 
     llm-agents.url = "github:numtide/llm-agents.nix";
     llm-agents.inputs.nixpkgs.follows = "nixpkgs";
+    llm-agents.inputs.flake-parts.follows = "flake-parts";
 
     mics-skills.url = "github:Mic92/mics-skills";
     mics-skills.inputs.nixpkgs.follows = "nixpkgs";
+    mics-skills.inputs.flake-parts.follows = "flake-parts";
 
   };
 
