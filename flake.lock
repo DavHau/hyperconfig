@@ -229,14 +229,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1772631570,
-        "narHash": "sha256-jV25u3XcnNlOWsy6aJlyt7hnyVN+SBTcFmxcKg6ZOX4=",
-        "path": "/home/grmpf/synced/projects/direnv-sandbox",
-        "type": "path"
+        "lastModified": 1774100225,
+        "narHash": "sha256-UBZB/2wsaUEpMjBWt0lgXsVDiTwGTwxvYBcrcX6LSlg=",
+        "owner": "DavHau",
+        "repo": "direnv-sandbox",
+        "rev": "d5a27036519359fe5ee02059f4ec985a3ab61c5d",
+        "type": "github"
       },
       "original": {
-        "path": "/home/grmpf/synced/projects/direnv-sandbox",
-        "type": "path"
+        "owner": "DavHau",
+        "repo": "direnv-sandbox",
+        "type": "github"
       }
     },
     "disko": {

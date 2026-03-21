@@ -21,7 +21,6 @@ in
       ../../modules/nixos/nrb
       ../../modules/nixos/nix-caches.nix
       ../../modules/nixos/niri.nix
-      ../../modules/nixos/sbox.nix
       ../../modules/nixos/pi.nix
       # ./hardware-configuration.nix
       ./vpn.nix
@@ -259,7 +258,7 @@ in
       minicom
       # AI
       # aider-chat-full
-      claude-code
+      inputs.llm-agents.packages.${system}.claude-code
 
       delta
       lsd
@@ -470,6 +469,7 @@ in
 
   virtualisation.docker.enable = true;
   virtualisation.docker.rootless.enable = true;
+  virtualisation.docker.rootless.setSocketVariable = true;
   virtualisation.podman.enable = true;
   virtualisation.waydroid.enable = true;
   # virtualisation.podman.dockerSocket.enable = true;

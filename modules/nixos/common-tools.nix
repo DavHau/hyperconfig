@@ -19,12 +19,22 @@
   };
 
   programs.direnv.enable = true;
-  programs.direnv.sandbox.enable = true;
-  programs.direnv.sandbox.allowParent = "read";
-  programs.direnv.sandbox.bind = [
-    "$HOME/.pi"
-    "$HOME/.local/share/zoxide"
-  ];
+  programs.direnv.sandbox = {
+    enable = true;
+    allowParent = "read";
+    persist = [
+      "$HOME/.claude"
+    ];
+    bind = {
+      "$HOME/.pi" = {};
+      "$HOME/.local/share/zoxide" = {};
+      "$HOME/.claude/.credentials.json" = {};
+    };
+    bindReadOnly = {
+      "$HOME/.ssh/id_ed25519_github1".to = "$HOME/.ssh/id_ed25519";
+      "$HOME/.ssh/id_ed25519_github1.pub".to = "$HOME/.ssh/id_ed25519.pub";
+    };
+  };
 
   programs.bash.interactiveShellInit = ''
     if [[ $(${pkgs.procps}/bin/ps --no-header --pid=$PPID --format=comm) != "fish" && -z ''${BASH_EXECUTION_STRING} ]]
