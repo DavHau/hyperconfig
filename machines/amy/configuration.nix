@@ -265,7 +265,7 @@ in
   # GUI tools
       arandr  # configure monitors
       # blender  # graphics software
-      blueberry  # manage bluetooth devices
+      blueman  # manage bluetooth devices
       # ark # archive viewer/extractor
       # kcalc  # claculator
       httpie # make http requests
@@ -341,7 +341,7 @@ in
   # FILESYSTEMS
   boot.tmp.useTmpfs = true;
   boot.tmp.tmpfsSize = "80%";
-  boot.supportedFilesystems = [ "ntfs-3g" "exfat" "apfs" "cifs" "smb" ];
+  boot.supportedFilesystems = [ "ntfs-3g" "exfat" "cifs" "smb" ];
   # boot.initrd.supportedFilesystems = ["zfs"];
   # required by zfs
   networking.hostId = "5eb1bf28";
@@ -359,6 +359,10 @@ in
   #   CPU_MAX_PERF_ON_BAT=40;
   # };
   services.power-profiles-daemon.enable = true;
+
+  # Use latest kernel for USB4/Thunderbolt and s2idle fixes on Strix Point.
+  # 6.19 includes LPS0 constraint handling fixes and USB4 suspend improvements.
+  boot.kernelPackages = pkgs.linuxPackages_latest;
 
   console.font = "Lat2-Terminus16";
   console.keyMap = "us";
@@ -515,7 +519,7 @@ in
   ];
   networking.firewall.allowPing = true;
   networking.firewall.enable = true;
-  boot.kernelPackages = pkgs.linuxPackages;
+
   boot.kernelModules = [ "br_netfilter" "xboxdrv" ];
   boot.kernel.sysctl = {
     # See https://wiki.libvirt.org/page/Net.bridge.bridge-nf-call_and_sysctl.conf for background information

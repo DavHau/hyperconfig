@@ -86,6 +86,7 @@ button:hover {
 #network,
 #pulseaudio,
 #wireplumber,
+#custom-netspeed,
 #custom-media,
 #tray,
 #mode,
@@ -209,6 +210,13 @@ label:focus {
 
 #wireplumber.muted {
     background-color: #f53c3c;
+}
+
+#custom-netspeed {
+    padding: 0 10px;
+    min-width: 155px;
+    background-color: #1abc9c;
+    color: #000000;
 }
 
 #custom-media {

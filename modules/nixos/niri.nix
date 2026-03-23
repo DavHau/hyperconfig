@@ -12,6 +12,38 @@ let
     pkill -RTMIN+10 waybar
   '';
 
+  netspeed = pkgs.writeShellScript "netspeed" ''
+    iface=$(${pkgs.iproute2}/bin/ip route | ${pkgs.gawk}/bin/awk '/default/ {print $5; exit}')
+    if [ -z "$iface" ]; then
+      echo '{"text":"No net","tooltip":"No active interface"}'
+      exit 0
+    fi
+    rx1=$(cat /sys/class/net/$iface/statistics/rx_bytes)
+    tx1=$(cat /sys/class/net/$iface/statistics/tx_bytes)
+    sleep 1
+    rx2=$(cat /sys/class/net/$iface/statistics/rx_bytes)
+    tx2=$(cat /sys/class/net/$iface/statistics/tx_bytes)
+    rx=$(( (rx2 - rx1) ))
+    tx=$(( (tx2 - tx1) ))
+
+    human_readable() {
+      local bytes=$1
+      ${pkgs.gawk}/bin/awk "BEGIN {
+        b = $bytes
+        if (b >= 1073741824) { v = b/1073741824; u = \"GB/s\" }
+        else if (b >= 1048576) { v = b/1048576; u = \"MB/s\" }
+        else if (b >= 1024) { v = b/1024; u = \"KB/s\" }
+        else { printf \"%d B/s\", b; exit }
+        if (v >= 10) printf \"%d %s\", v, u
+        else printf \"%.1f %s\", v, u
+      }"
+    }
+
+    down=$(human_readable $rx)
+    up=$(human_readable $tx)
+    echo "{\"text\":\" $down  $up\",\"tooltip\":\"$iface\\nDown: $down\\nUp: $up\"}"
+  '';
+
   ollamaStatus = pkgs.writeShellScript "ollama-status" ''
     config="$HOME/.config/fish-ai.ini"
     if ${pkgs.gnugrep}/bin/grep -q "server = http://localhost" "$config"; then
@@ -27,7 +59,6 @@ in
 
   environment.systemPackages = with pkgs; [
     fuzzel
-    light
     mako
     networkmanagerapplet
     swayidle
@@ -78,6 +109,7 @@ in
           "custom/ollama"
           "idle_inhibitor"
           "pulseaudio"
+          "custom/netspeed"
           "network"
           "power-profiles-daemon"
           "cpu"
@@ -223,6 +255,13 @@ in
           on-click = "${ollamaToggle}";
           interval = 60;
           signal = 10;
+        };
+        "custom/netspeed" = {
+          format = "{}";
+          return-type = "json";
+          exec = "${netspeed}";
+          interval = 2;
+          tooltip = true;
         };
         "custom/power" = {
           format = "⏻ ";
