@@ -19,4 +19,6 @@
 
   programs.captive-browser.enable = true;
   programs.captive-browser.interface = "wlp1s0";
+
+  # networking.networkmanager.dns = lib.mkForce "none";
 }

@@ -22,6 +22,7 @@ in
       ../../modules/nixos/nix-caches.nix
       ../../modules/nixos/niri.nix
       ../../modules/nixos/pi.nix
+      ../../modules/nixos/proton-vpn.nix
       # ./hardware-configuration.nix
       ./vpn.nix
       ./home-manager.nix
@@ -530,7 +531,6 @@ in
 # NETWORKING
   networking.networkmanager.enable = true;
   networking.dhcpcd.extraConfig = "nohook resolv.conf";
-  networking.networkmanager.dns = lib.mkForce "none";
   # networking.networkmanager.insertNameservers = [
   #   "8.8.8.8"
   # ];
