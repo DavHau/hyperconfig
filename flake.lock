@@ -170,11 +170,12 @@
         "treefmt-nix": "treefmt-nix_2"
       },
       "locked": {
-        "lastModified": 1774210137,
-        "narHash": "sha256-QaPn/8NlrXd6jd8S9+KV2pYsGNZ8KWU5+jv2/QtRlUw=",
-        "ref": "refs/heads/main",
-        "rev": "1862f2641e54a51755b0b9acb907d01f6b324b2a",
-        "revCount": 13667,
+        "lastModified": 1774256494,
+        "narHash": "sha256-zSi/R4lKNihAwMIjiXsc2Uvm6tCpQK2TziAqnbAjc+k=",
+        "ref": "refs/pull/7123/head",
+        "rev": "35192d2eb0feca5a8866936c0dc98dbccb6e8298",
+        "revCount": 13668,
+        "shallow": false,
         "type": "git",
         "url": "https://git.clan.lol/clan/clan-core"
       },
@@ -273,11 +274,11 @@
     },
     "direnv-sandbox": {
       "locked": {
-        "lastModified": 1774171029,
-        "narHash": "sha256-2PVlIpu2H4ONgAL+hjZwYJF4TKsCS8It1ehUk7iv+T4=",
+        "lastModified": 1774277349,
+        "narHash": "sha256-/Wv5Vl69Seicp4u8goX2jPTOK6TZrOIO9EgPJe+bAJM=",
         "owner": "DavHau",
         "repo": "direnv-sandbox",
-        "rev": "7fff102f274f293a2e42cc75ff72f7a3c6abccc4",
+        "rev": "d22a75e34e699f43c5c98f1ce88e29b6a1a40756",
         "type": "github"
       },
       "original": {

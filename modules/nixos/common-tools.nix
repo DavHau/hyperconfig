@@ -29,10 +29,14 @@
       "$HOME/.pi" = {};
       "$HOME/.local/share/zoxide" = {};
       "$HOME/.claude/.credentials.json" = {};
+      # VSCode state/config (caches, workspaces, settings, etc.)
+      "$HOME/.config/Code" = {};
     };
     bindReadOnly = {
       "$HOME/.ssh/id_ed25519_github1".to = "$HOME/.ssh/id_ed25519";
       "$HOME/.ssh/id_ed25519_github1.pub".to = "$HOME/.ssh/id_ed25519.pub";
+      # VSCode extensions (nix-managed) and CLI
+      "$HOME/.vscode" = {};
     };
   };
 
