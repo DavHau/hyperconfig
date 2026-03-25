@@ -41,12 +41,12 @@ class NetworkTechnology(NetworkTechnologyBase):
                 *remote.ssh_cmd(control_master=False),
                 "-o",
                 "ConnectTimeout=15",
-                "-o",
-                "BatchMode=yes",
                 "--",
                 "true",
             ]
-            run(cmd, RunOpts(timeout=20))
+            # needs_user_terminal allows SSH to prompt for the key passphrase
+            # when the agent's cached key has expired
+            run(cmd, RunOpts(timeout=20, needs_user_terminal=True))
             return (time.time() - now) * 1000
         except ClanError as e:
             log.debug(f"p2p-ssh ping failed for {remote}: {e}")
@@ -63,6 +63,7 @@ class NetworkTechnology(NetworkTechnologyBase):
                 address=peer.name,
                 user=peer.ssh_user,
                 command_prefix=peer.name,
+                host_key_check="accept-new",
                 ssh_options={
                     "ProxyCommand": f"{dumbpipe} connect {ticket}",
                 },
