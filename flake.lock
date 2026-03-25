@@ -274,11 +274,11 @@
     },
     "direnv-sandbox": {
       "locked": {
-        "lastModified": 1774277349,
-        "narHash": "sha256-/Wv5Vl69Seicp4u8goX2jPTOK6TZrOIO9EgPJe+bAJM=",
+        "lastModified": 1774412809,
+        "narHash": "sha256-zIxzBac+BCRMD+cfih7625AR69Hq7ugqwOGGBnuihJM=",
         "owner": "DavHau",
         "repo": "direnv-sandbox",
-        "rev": "d22a75e34e699f43c5c98f1ce88e29b6a1a40756",
+        "rev": "31057d5ae23ed1a8ee062940858362708ffb06f1",
         "type": "github"
       },
       "original": {
