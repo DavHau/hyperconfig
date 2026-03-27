@@ -37,7 +37,6 @@ in {
           nix-cache = ../../modules/clan/nix-cache;
           # easytier = ../../modules/clan/easytier;
           wireguard = ../../modules/clan/wireguard;
-          p2p-ssh = ../../modules/clan/p2p-ssh;
           ncps = inputs.ncps + "/clanServices/ncps";
           monitoring = inputs.clan-core-monitoring + "/modules/monitoring";
         };
@@ -123,9 +122,9 @@ in {
               roles.client.tags.all = {};
             };
 
-            p2p-ssh = {
-              module.name = "p2p-ssh";
-              module.input = "self";
+            p2p-ssh-iroh = {
+              module.name = "p2p-ssh-iroh";
+              module.input = "clan-core";
               roles.server.tags.all = {};
             };
 
