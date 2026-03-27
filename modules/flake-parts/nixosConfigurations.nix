@@ -101,13 +101,13 @@ in {
               roles.default.settings.networks.home = {};
               roles.default.tags.wifi-home = {};
             };
-            dave-cache = {
-              module.name = "nix-cache";
-              module.input = "self";
-              roles.server.machines.bam = {};
-              roles.server.settings.priority = 41;
-              roles.client.tags.all = {};
-            };
+            # dave-cache = {
+            #   module.name = "nix-cache";
+            #   module.input = "self";
+            #   roles.server.machines.bam = {};
+            #   roles.server.settings.priority = 41;
+            #   roles.client.tags.all = {};
+            # };
             dave-backup = {
               module.name = "borgbackup";
               module.input = "clan-core";
@@ -181,22 +181,22 @@ in {
             #   roles.peer.tags.all = {};
             # };
 
-            ncps = {
-              module.name = "ncps";
-              module.input = "self";
-              roles.server.machines.bam = {
-                settings.caches = [
-                  "https://cache.nixos.org"
-                  "https://cache.clan.lol"
-                ];
-                settings.publicKeys = [
-                  "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
-                  "cache.clan.lol-1:3KztgSAB5R1M+Dz7vzkBGzXdodizbgLXGXKXlcQLA28="
-                ];
-              };
-              roles.client.machines.amy = {};
-              roles.client.machines.bam = {};
-            };
+            # ncps = {
+            #   module.name = "ncps";
+            #   module.input = "self";
+            #   roles.server.machines.bam = {
+            #     settings.caches = [
+            #       "https://cache.nixos.org"
+            #       "https://cache.clan.lol"
+            #     ];
+            #     settings.publicKeys = [
+            #       "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
+            #       "cache.clan.lol-1:3KztgSAB5R1M+Dz7vzkBGzXdodizbgLXGXKXlcQLA28="
+            #     ];
+            #   };
+            #   roles.client.machines.amy = {};
+            #   roles.client.machines.bam = {};
+            # };
 
             # monitoring = {
             #   module.name = "monitoring";
