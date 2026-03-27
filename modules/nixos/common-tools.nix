@@ -21,7 +21,7 @@
   programs.direnv.enable = true;
   programs.direnv.sandbox = {
     enable = true;
-    allowParent = "write";
+    allowParent = "off";
     persist = [
       "$HOME/.claude"
     ];
@@ -32,6 +32,8 @@
       "$HOME/.claude/.credentials.json" = {};
       # VSCode state/config (caches, workspaces, settings, etc.)
       "$HOME/.config/Code" = {};
+      "$HOME/synced/projects" = {};
+      "$HOME/projects" = {};
     };
     bindReadOnly = {
       "$HOME/.pi/agent/skills" = {};
