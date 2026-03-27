@@ -1,7 +1,4 @@
 {config, ...}: {
-  nixpkgs.overlays = [
-    (import ../../overlays/ollama.nix)
-  ];
   imports = [
     ../../modules/nixos/common.nix
     ../../modules/nixos/common-tools.nix
