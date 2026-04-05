@@ -24,6 +24,7 @@
     allowParent = "off";
     persist = [
       "$HOME/.claude"
+      "$HOME/.pi/agent/sessions"
     ];
     bind = {
       "$HOME/.pi/agent/auth.json" = {};
@@ -38,6 +39,7 @@
     bindReadOnly = {
       "$HOME/.pi/agent/skills" = {};
       "$HOME/.pi/agent/models.json" = {};
+      "$HOME/.pi/agent/AGENTS.md" = {};
       "$HOME/.ssh/id_ed25519_github1".to = "$HOME/.ssh/id_ed25519";
       "$HOME/.ssh/id_ed25519_github1.pub".to = "$HOME/.ssh/id_ed25519.pub";
       # VSCode extensions (nix-managed) and CLI
