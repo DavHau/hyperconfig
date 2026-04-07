@@ -5,7 +5,7 @@
   ...
 }: {
   imports = [
-    inputs.direnv-sandbox.nixosModules.default
+    inputs.sbox.nixosModules.default
   ];
   environment.systemPackages = lib.attrValues {
     inherit (pkgs)
@@ -19,7 +19,8 @@
   };
 
   programs.direnv.enable = true;
-  programs.direnv.sandbox = {
+  programs.direnv.sandbox.enable = true;
+  programs.sbox = {
     enable = true;
     allowParent = "off";
     persist = [
