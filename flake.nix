@@ -120,23 +120,7 @@
 
       flake.inputs = inputs;
 
-      flake.packages.x86_64-linux.vit-vm =
-        (self.nixosConfigurations.vit.extendModules {
-          modules = [({ pkgs, ... }: {
-            users.users.dave.hashedPasswordFile = nixpkgs.lib.mkForce null;
-            users.users.dave.hashedPassword = nixpkgs.lib.mkForce "$6$4PW3Q8YUR5.aep1m$fbCWXV2Lfuo53gE0Pz7BZo7V4AgRq6O6dWZ47vnzzgZsUuh7q389xzlSW9ku0SGP2kfMQhJ3BVasp01/NplRx/";  # dave
-            users.users.grmpf.hashedPasswordFile = nixpkgs.lib.mkForce null;
-            users.users.grmpf.hashedPassword = nixpkgs.lib.mkForce "$6$4PW3Q8YUR5.aep1m$fbCWXV2Lfuo53gE0Pz7BZo7V4AgRq6O6dWZ47vnzzgZsUuh7q389xzlSW9ku0SGP2kfMQhJ3BVasp01/NplRx/";  # dave
-
-            # VM settings
-            virtualisation.vmVariant.virtualisation.qemu.options = [
-              "-device virtio-vga-gl"
-              "-display gtk,gl=on"
-            ];
-            virtualisation.vmVariant.virtualisation.memorySize = 4096;
-            virtualisation.vmVariant.virtualisation.cores = 4;
-          })];
-        }).config.system.build.vm;
+      flake.packages.x86_64-linux.vit-vm = self.nixosConfigurations.vit.config.system.build.vm;
 
       flake.checks.x86_64-linux = genAttrs
         [

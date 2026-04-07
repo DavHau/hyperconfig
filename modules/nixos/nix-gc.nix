@@ -7,7 +7,7 @@
       "benchmark"
       "big-parallel"
     ];
-    trusted-users = [ "root" "grmpf" ];
+    trusted-users = [ "root" ];
     substituters = [
       "https://cache.nixos.org/"
       "https://nix-community.cachix.org"
