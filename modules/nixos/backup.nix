@@ -5,7 +5,7 @@
     ''${pkgs.gnugrep}/bin/grep -vq Discharging /sys/class/power_supply/BAT1/status'';
 
   services.borgbackup.jobs.laptop = {
-    exclude = import ../../modules/backup-exclude.nix;
+    exclude = import ../backup-exclude.nix;
     environment.BORG_HOST_ID = "nas";
     user = "root";
     doInit = false;
