@@ -271,21 +271,6 @@
         "url": "https://git.clan.lol/clan/data-mesher/archive/main.tar.gz"
       }
     },
-    "direnv-sandbox": {
-      "locked": {
-        "lastModified": 1774446526,
-        "narHash": "sha256-GD9SYH7cpp5KT1YOIUp9P85PFLO20rPXfq7N9DAb2PE=",
-        "owner": "DavHau",
-        "repo": "direnv-sandbox",
-        "rev": "62b30c9d53610da3e9447446d450c60480c523c3",
-        "type": "github"
-      },
-      "original": {
-        "owner": "DavHau",
-        "repo": "direnv-sandbox",
-        "type": "github"
-      }
-    },
     "disko": {
       "inputs": {
         "nixpkgs": [
@@ -1273,7 +1258,6 @@
         "buildbot-nix": "buildbot-nix",
         "clan-core": "clan-core",
         "clan-core-monitoring": "clan-core-monitoring",
-        "direnv-sandbox": "direnv-sandbox",
         "disko": "disko",
         "easytier": "easytier",
         "envfs": "envfs",
@@ -1297,8 +1281,24 @@
         ],
         "nixvim": "nixvim",
         "retiolum": "retiolum",
+        "sbox": "sbox",
         "srvos": "srvos",
         "stylix": "stylix"
+      }
+    },
+    "sbox": {
+      "locked": {
+        "lastModified": 1775393835,
+        "narHash": "sha256-1ueKFFxWw5Zawn3S2IevbufDKFKrZGGBi3L7xotufss=",
+        "owner": "DavHau",
+        "repo": "sbox",
+        "rev": "555da350eba238e5b0b14148d0810982ba2608bb",
+        "type": "github"
+      },
+      "original": {
+        "owner": "DavHau",
+        "repo": "sbox",
+        "type": "github"
       }
     },
     "sops-nix": {

@@ -89,8 +89,7 @@
     ncps.url = "git+https://git.clan.lol/TakodaS/clan-core.git?shallow=1&ref=ncps";
     ncps.flake = false;
 
-    direnv-sandbox.url = "github:DavHau/direnv-sandbox";
-    direnv-sandbox.inputs.nixpkgs.follows = "nixpkgs";
+    sbox.url = "github:DavHau/sbox";
 
     llm-agents.url = "github:numtide/llm-agents.nix";
     llm-agents.inputs.nixpkgs.follows = "nixpkgs";
