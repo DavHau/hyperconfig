@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, lib, ... }:
 {
   # VIDEO
   services.xserver.videoDrivers = [ "modesetting" ];
@@ -21,5 +21,5 @@
   environment.sessionVariables.TERM = "xterm-256color";
 
   # power management
-  services.power-profiles-daemon.enable = true;
+  services.power-profiles-daemon.enable = lib.mkDefault true;
 }
