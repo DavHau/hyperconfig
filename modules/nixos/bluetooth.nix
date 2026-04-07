@@ -1,0 +1,12 @@
+{ ... }:
+{
+  hardware.bluetooth.enable = true;
+  services.blueman.enable = true;
+  # hack for xbox controller:
+  # boot.extraModprobeConfig = ''
+  #   options bluetooth disable_ertm=1
+  #   options kvm_intel nested=1
+  #   options kvm_intel emulate_invalid_guest_state=0
+  #   options kvm ignore_msrs=1
+  # '';
+}
