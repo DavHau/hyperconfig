@@ -24,36 +24,36 @@ in
       ../../modules/nixos/pi.nix
       ../../modules/nixos/proton-vpn.nix
       # ./hardware-configuration.nix
-      ./vpn.nix
-      ./home-manager.nix
-      ./fish.nix
-      ./fish-ai.nix
-      # ./backup.nix
-      # ./retiolum.nix
-      ./amdgpu.nix
-      ./opengl.nix
-      # ./cura.nix  # slicer for 3d printing
-      # ./tplink-archer-t2u-nano.nix
-      ./printing.nix
-      ./nix-registry.nix
-      ./low-battery-power-off.nix
-      ./nix-lazy.nix
-      ./bitwarden.nix
-      # ./envfs.nix
-      # ./devenv.nix
-      # ./nix-heuristic-gc.nix
-      ./ollama.nix
-      ./fonts.nix
-      ./gocr.nix
-      ./ocr
-      # ./nether.nix
-      # ./mycelium.nix
-      # ./vagrant.nix
-      # ./iodine-client.nix
+      ../../modules/nixos/vpn.nix
+      ../../modules/nixos/home-manager.nix
+      ../../modules/nixos/fish.nix
+      ../../modules/nixos/fish-ai.nix
+      # ../../modules/nixos/backup.nix
+      # ../../modules/nixos/retiolum.nix
+      ../../modules/nixos/amdgpu.nix
+      ../../modules/nixos/opengl.nix
+      # ../../modules/nixos/cura.nix  # slicer for 3d printing
+      # ../../modules/nixos/tplink-archer-t2u-nano.nix
+      ../../modules/nixos/printing.nix
+      ../../modules/nixos/nix-registry.nix
+      ../../modules/nixos/low-battery-power-off.nix
+      ../../modules/nixos/nix-lazy.nix
+      ../../modules/nixos/bitwarden.nix
+      # ../../modules/nixos/envfs.nix
+      # ../../modules/nixos/devenv.nix
+      # ../../modules/nixos/nix-heuristic-gc.nix
+      ../../modules/nixos/ollama.nix
+      ../../modules/nixos/fonts.nix
+      ../../modules/nixos/gocr.nix
+      ../../modules/nixos/ocr
+      # ../../modules/nixos/nether.nix
+      # ../../modules/nixos/mycelium.nix
+      # ../../modules/nixos/vagrant.nix
+      # ../../modules/nixos/iodine-client.nix
       ./disko.nix
-      ./udev.nix
-      # ./sway
-      # ./ups.nix
+      ../../modules/nixos/udev.nix
+      # ../../modules/nixos/sway
+      # ../../modules/nixos/ups.nix
   ];
 
   nixpkgs.pkgs =
@@ -118,8 +118,8 @@ in
     in
     import inputs.nixpkgs {
       system = "x86_64-linux";
-      config = (import ./nixpkgs-config.nix {inherit lib;});
-      # config = (import ./nixpkgs-config.nix {inherit lib;}) // {
+      config = (import ../../modules/nixos/nixpkgs-config.nix {inherit lib;});
+      # config = (import ../../modules/nixos/nixpkgs-config.nix {inherit lib;}) // {
       #   replaceStdenv = ({ pkgs }: withCFlags [ "-funroll-loops" "-O3" "-march=x86-64-v3" ] pkgs.stdenv);
       # };
     };
