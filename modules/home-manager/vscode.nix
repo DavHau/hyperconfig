@@ -3,7 +3,7 @@
     after = [];
     before = [ "checkLinkTargets" ];
     data = ''
-      for userDir in /home/grmpf/.config/Code/User; do
+      for userDir in ${config.home.homeDirectory}/.config/Code/User; do
         rm -rf $userDir/settings.json
       done
     '';
@@ -13,13 +13,14 @@
     after = [ "writeBoundary" ];
     before = [];
     data = ''
-      for userDir in /home/grmpf/.config/Code/User; do
-        rm -rf $userDir/settings.json
+      userDir="${config.home.homeDirectory}/.config/Code/User"
+      if [ -d "$userDir" ]; then
+        rm -rf "$userDir/settings.json"
         cat \
           ${(pkgs.formats.json {}).generate "blabla"
             config.programs.vscode.profiles.default.userSettings} \
-          > $userDir/settings.json
-      done
+          > "$userDir/settings.json"
+      fi
     '';
   };
 
