@@ -22,6 +22,13 @@
     virtualisation.memorySize = 4096;
     virtualisation.cores = 4;
 
+    # Enable SSH and forward port for debugging
+    virtualisation.forwardPorts = [
+      { from = "host"; host.port = 2222; guest.port = 22; }
+    ];
+    services.openssh.enable = true;
+    home-manager.backupFileExtension = "hm-backup";
+
     # Use Alt as Mod key in VM (host captures Super)
     home-manager.users.dave.xdg.configFile."niri/config.kdl".source = lib.mkForce (pkgs.runCommand "niri-vm-config.kdl" {} ''
       cp ${../../modules/nixos/niri-config.kdl} $out
