@@ -147,14 +147,14 @@ in
     "nixpkgs=${pkgs.path}"
   ];
   nix.settings.max-jobs = 40;
-  nix.buildMachines = [ {
-    hostName = "bam.d";
-    systems = [ "x86_64-linux" "aarch64-linux" ];
-    maxJobs = 10;
-    speedFactor = 20;
-    supportedFeatures = [ "nixos-test" "benchmark" "big-parallel" "kvm" "uid-range" "ca-derivations" ];
-    mandatoryFeatures = [ ];
-  }];
+  # nix.buildMachines = [ {
+  #   hostName = "bam.d";
+  #   systems = [ "x86_64-linux" "aarch64-linux" ];
+  #   maxJobs = 10;
+  #   speedFactor = 20;
+  #   supportedFeatures = [ "nixos-test" "benchmark" "big-parallel" "kvm" "uid-range" "ca-derivations" ];
+  #   mandatoryFeatures = [ ];
+  # }];
   systemd.services.nix-daemon.environment.SSH_AUTH_SOCK = "/run/user/1000/ssh-agent";
 
   # Kernel
