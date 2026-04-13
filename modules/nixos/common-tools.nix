@@ -39,6 +39,7 @@
     };
     bindReadOnly = {
       "$HOME/.pi/agent/skills" = {};
+      "$HOME/.pi/agent/extensions" = {};
       "$HOME/.pi/agent/models.json" = {};
       "$HOME/.pi/agent/AGENTS.md" = {};
       "$HOME/.ssh/id_ed25519_github1".to = "$HOME/.ssh/id_ed25519";
