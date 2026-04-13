@@ -8,6 +8,7 @@ in
     inputs.retiolum.nixosModules.retiolum
     ./common.nix
     ./common-tools.nix
+    ./sbox.nix
     ./etc-hosts.nix
     ./nix-development.nix
     ./dns.nix
