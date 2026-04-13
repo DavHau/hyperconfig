@@ -31,4 +31,6 @@
     "ca-derivations"
   ];
   clan.core.sops.defaultGroups = [ "admins" ];
+
+  hardware.enableAllHardware = lib.mkDefault true;
 }
