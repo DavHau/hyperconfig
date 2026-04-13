@@ -99,6 +99,9 @@
     mics-skills.inputs.nixpkgs.follows = "nixpkgs";
     mics-skills.inputs.flake-parts.follows = "flake-parts";
 
+    wrappers.url = "github:lassulus/wrappers";
+    wrappers.inputs.nixpkgs.follows = "nixpkgs";
+
   };
 
   outputs = inputs@{ self, flake-parts, nixpkgs, ... }:

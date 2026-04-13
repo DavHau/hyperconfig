@@ -1283,7 +1283,8 @@
         "retiolum": "retiolum",
         "sbox": "sbox",
         "srvos": "srvos",
-        "stylix": "stylix"
+        "stylix": "stylix",
+        "wrappers": "wrappers"
       }
     },
     "sbox": {
@@ -1730,6 +1731,26 @@
       "original": {
         "owner": "numtide",
         "repo": "treefmt-nix",
+        "type": "github"
+      }
+    },
+    "wrappers": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1775600302,
+        "narHash": "sha256-2fgKImv78CXIcfo1RsY7EI4uMZ84x/MggA5rrusYc7c=",
+        "owner": "lassulus",
+        "repo": "wrappers",
+        "rev": "9d8397d8ef1ac35763085f3338589f558128f7db",
+        "type": "github"
+      },
+      "original": {
+        "owner": "lassulus",
+        "repo": "wrappers",
         "type": "github"
       }
     }
