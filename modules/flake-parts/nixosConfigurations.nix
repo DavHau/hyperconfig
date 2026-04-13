@@ -24,6 +24,7 @@ in {
           #   replaceStdenv = ({ pkgs }: pkgs.withCFlags [ "-funroll-loops" "-O3" "-march=x86-64-v3" ] pkgs.stdenv);
           # };
           # config.contentAddressedByDefault = true;
+          config = import ../nixos/nixpkgs-config.nix {inherit lib;};
         };
 
         specialArgs = {
