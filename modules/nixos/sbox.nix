@@ -13,7 +13,6 @@
     persist = [
       "$HOME/.claude"
       "$HOME/.pi/agent/sessions"
-      "$HOME/.omp/agent/sessions"
     ];
     bind = {
       "$HOME/.pi/agent/auth.json" = {};
