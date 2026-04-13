@@ -19,6 +19,8 @@
       "$HOME/.pi/agent/auth.json" = {};
       "$HOME/.pi/agent/settings.json" = {};
       "$HOME/.omp/agent/agent.db" = {};
+      "$HOME/.omp/agent/agent.db-shm" = {};
+      "$HOME/.omp/agent/agent.db-wal" = {};
       "$HOME/.local/share/zoxide" = {};
       "$HOME/.claude/.credentials.json" = {};
       # VSCode state/config (caches, workspaces, settings, etc.)
