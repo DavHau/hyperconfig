@@ -1,6 +1,7 @@
 {lib, ...}: {
   imports = [
     ../../modules/nixos/common-tools.nix
+    ../../modules/nixos/sbox.nix
   ];
   networking.firewall.allowedTCPPorts = [
     30333

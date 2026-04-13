@@ -3,6 +3,7 @@
     inputs.nixos-hardware.nixosModules.framework-12-13th-gen-intel
     ../../modules/nixos/common.nix
     ../../modules/nixos/common-tools.nix
+    ../../modules/nixos/sbox.nix
     ./output-formats.nix
   ];
 

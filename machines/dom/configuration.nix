@@ -1,6 +1,7 @@
 {config, ...}: {
   imports = [
     ../../modules/nixos/common-tools.nix
+    ../../modules/nixos/sbox.nix
     ./reverse-proxy.nix
   ];
 
