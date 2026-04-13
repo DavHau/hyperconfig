@@ -5,6 +5,7 @@
 }: {
   imports = [
     # ./nix-caches.nix
+    ./all-hardware.nix
   ];
   users.mutableUsers = false;
 
@@ -31,6 +32,4 @@
     "ca-derivations"
   ];
   clan.core.sops.defaultGroups = [ "admins" ];
-
-  hardware.enableAllHardware = lib.mkDefault true;
 }
