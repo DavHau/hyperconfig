@@ -8,7 +8,7 @@
     inherit pkgs;
     package = inputs.llm-agents.packages.${sys}.omp;
     preHook = ''
-      config_dir="${PI_CODING_AGENT_DIR:-$HOME/.omp/agent}"
+      config_dir="''${PI_CODING_AGENT_DIR:-$HOME/.omp/agent}"
       mkdir -p "$config_dir"
       ln -sf ${configFile} "$config_dir/config.yml"
     '';
