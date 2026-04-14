@@ -29,11 +29,11 @@
     home-manager.backupFileExtension = "hm-backup";
 
     # Use Alt as Mod key in VM (host captures Super)
-    home-manager.users.grmpf.xdg.configFile."niri/config.kdl".source = lib.mkForce (pkgs.runCommand "niri-vm-config.kdl" {} ''
-      cp ${../../modules/nixos/niri-config.kdl} $out
-      chmod +w $out
-      sed -i '/^input {/a\    mod-key "Alt"' $out
-    '');
+    niri.extraConfig = ''
+      input {
+        mod-key "Alt"
+      }
+    '';
   };
 
   # required by zfs

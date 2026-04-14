@@ -4,7 +4,6 @@
     inputs.noctalia.homeModules.default
   ];
 
-  xdg.configFile."niri/config.kdl".source = ../nixos/niri-config.kdl;
 
   services.network-manager-applet.enable = true;
 
