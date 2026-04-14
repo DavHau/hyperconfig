@@ -255,7 +255,7 @@ layout {
 // which may be more convenient to use.
 // See the binds section below for more spawn examples.
 
-spawn-at-startup "waybar"
+spawn-at-startup "noctalia-shell"
 
 // Uncomment this line to ask the clients to omit their client-side decorations if possible.
 // If the client will specifically ask for CSD, the request will be honored.
@@ -304,6 +304,23 @@ window-rule {
     // - Flatpak Firefox (app-id is "org.mozilla.firefox")
     match app-id=r#"firefox$"# title="^Picture-in-Picture$"
     open-floating true
+}
+
+// Noctalia: rounded corners
+window-rule {
+    geometry-corner-radius 20
+    clip-to-geometry true
+}
+
+debug {
+    // Required for noctalia notification actions and window activation.
+    honor-xdg-activation-with-invalid-serial
+}
+
+// Noctalia: blurred overview wallpaper on backdrop
+layer-rule {
+    match namespace="^noctalia-overview*"
+    place-within-backdrop true
 }
 
 // Example: block out two password managers from screen capture.
