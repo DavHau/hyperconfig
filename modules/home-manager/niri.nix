@@ -39,7 +39,10 @@
       right = [
         { id = "Tray"; }
         { id = "NotificationHistory"; }
-        { id = "Battery"; }
+        {
+          id = "Battery";
+          alwaysShowPercentage = true;
+        }
         { id = "Volume"; }
         { id = "Brightness"; }
         { id = "ControlCenter"; }

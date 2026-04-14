@@ -29,4 +29,7 @@
 
   security.pam.services.swaylock = {};
   security.polkit.enable = true;
+
+  # battery indicator (noctalia Battery widget needs upower D-Bus)
+  services.upower.enable = true;
 }
