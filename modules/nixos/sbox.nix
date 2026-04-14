@@ -20,6 +20,7 @@
       "$HOME/.omp/agent" = {};
       "$HOME/.local/share/zoxide" = {};
       "$HOME/.claude/.credentials.json" = {};
+      "$HOME/.claude.json" = {};
       # VSCode state/config (caches, workspaces, settings, etc.)
       "$HOME/.config/Code" = {};
       "$HOME/synced/projects" = {};
