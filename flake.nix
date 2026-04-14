@@ -102,6 +102,9 @@
     wrappers.url = "github:lassulus/wrappers";
     wrappers.inputs.nixpkgs.follows = "nixpkgs";
 
+    noctalia.url = "github:noctalia-dev/noctalia-shell";
+    noctalia.inputs.nixpkgs.follows = "nixpkgs";
+
   };
 
   outputs = inputs@{ self, flake-parts, nixpkgs, ... }:
@@ -123,6 +126,7 @@
 
       flake.inputs = inputs;
 
+      flake.packages.x86_64-linux.amy-vm = self.nixosConfigurations.amy.config.system.build.vm;
       flake.packages.x86_64-linux.vit-vm = self.nixosConfigurations.vit.config.system.build.vm;
 
       flake.checks.x86_64-linux = genAttrs
