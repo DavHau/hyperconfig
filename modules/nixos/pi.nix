@@ -9,8 +9,9 @@
     package = inputs.llm-agents.packages.${sys}.omp;
     preHook = ''
       config_dir="''${PI_CODING_AGENT_DIR:-$HOME/.omp/agent}"
-      mkdir -p "$config_dir"
+      mkdir -p "$config_dir/skills/caveman"
       ln -sf ${configFile} "$config_dir/config.yml"
+      ln -sf ${inputs.caveman}/skills/caveman/SKILL.md "$config_dir/skills/caveman/SKILL.md"
     '';
   };
 in {

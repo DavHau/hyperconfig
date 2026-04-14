@@ -19,5 +19,33 @@
     ];
   };
 
-  programs.noctalia-shell.enable = true;
+  programs.noctalia-shell = {
+    enable = true;
+    settings.bar.widgets = {
+      left = [
+        { id = "Launcher"; }
+        { id = "Clock"; }
+        {
+          id = "SystemMonitor";
+          compactMode = false;
+          showNetworkStats = true;
+        }
+        { id = "ActiveWindow"; }
+        { id = "MediaMini"; }
+      ];
+      center = [
+        { id = "Workspace"; }
+      ];
+      right = [
+        { id = "Tray"; }
+        { id = "NotificationHistory"; }
+        { id = "Battery"; }
+        { id = "Volume"; }
+        { id = "Brightness"; }
+        { id = "ControlCenter"; }
+      ];
+    };
+  };
+
+  xdg.configFile."noctalia/settings.json".force = true;
 }
