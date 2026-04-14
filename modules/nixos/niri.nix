@@ -31,34 +31,34 @@ let
         };
       };
 
-      layout = {
-        gaps = 8;
-        center-focused-column = "never";
-        preset-column-widths = [
-          { proportion = 0.33333; }
-          { proportion = 0.5; }
-          { proportion = 0.66667; }
-        ];
-        default-column-width = { proportion = 0.5; };
-        focus-ring = {
-          width = 4;
-          active-color = "#7fc8ff";
-          inactive-color = "#505050";
-        };
-        border = {
-          off = null;
-          width = 4;
-          active-color = "#ffc87f";
-          inactive-color = "#505050";
-          urgent-color = "#9b0000";
-        };
-        shadow = {
-          softness = 30;
-          spread = 5;
-          offset = { x = 0; y = 5; _keys = true; };
-          color = "#0007";
-        };
-      };
+      # layout = {
+      #   gaps = 8;
+      #   center-focused-column = "never";
+      #   preset-column-widths = [
+      #     { proportion = 0.33333; }
+      #     { proportion = 0.5; }
+      #     { proportion = 0.66667; }
+      #   ];
+      #   default-column-width = { proportion = 0.5; };
+      #   focus-ring = {
+      #     width = 4;
+      #     active-color = "#7fc8ff";
+      #     inactive-color = "#505050";
+      #   };
+      #   border = {
+      #     off = null;
+      #     width = 4;
+      #     active-color = "#ffc87f";
+      #     inactive-color = "#505050";
+      #     urgent-color = "#9b0000";
+      #   };
+      #   shadow = {
+      #     softness = 30;
+      #     spread = 5;
+      #     offset = { x = 0; y = 5; _keys = true; };
+      #     color = "#0007";
+      #   };
+      # };
 
       spawn-at-startup = [ "noctalia-shell" ];
 
@@ -262,14 +262,7 @@ let
         "XF86MonBrightnessUp"   = { spawn = [ "brightnessctl" "set" "5%+" "-e" ]; };
       };
 
-      # WezTerm workaround needs empty default-column-width {} block,
-      # which the Nix attrs→KDL compiler can't represent.
-      extraConfig = ''
-        window-rule {
-          match app-id="wezterm"
-          default-column-width {}
-        }
-      '' + config.niri.extraConfig;
+      extraConfig = config.niri.extraConfig;
     };
   }).wrapper;
 in
@@ -287,25 +280,23 @@ in
     environment.systemPackages = with pkgs; [
       fuzzel
       mako
-      networkmanagerapplet
-      swayidle
       swaylock
       xwayland-satellite
     ];
 
     environment.variables = {
       ELECTRON_OZONE_PLATFORM_HINT = "wayland";
-      CLUTTER_BACKEND = "wayland";
-      ECORE_EVAS_ENGINE = "wayland_egl";
-      ELM_ENGINE = "wayland_egl";
-      GDK_BACKEND = "wayland";
-      MOZ_ENABLE_WAYLAND = "1";
       NIXOS_OZONE_WL = "1";
-      QT_QPA_PLATFORM = "wayland";
-      QT_WAYLAND_DISABLE_WINDOWDECORATION = "1";
-      QT_WAYLAND_FORCE_DPI = "physical";
-      SDL_VIDEODRIVER = "wayland";
-      XDG_SESSION_TYPE = "wayland";
+      # CLUTTER_BACKEND = "wayland";
+      # ECORE_EVAS_ENGINE = "wayland_egl";
+      # ELM_ENGINE = "wayland_egl";
+      # GDK_BACKEND = "wayland";
+      # MOZ_ENABLE_WAYLAND = "1";
+      # QT_QPA_PLATFORM = "wayland";
+      # QT_WAYLAND_DISABLE_WINDOWDECORATION = "1";
+      # QT_WAYLAND_FORCE_DPI = "physical";
+      # SDL_VIDEODRIVER = "wayland";
+      # XDG_SESSION_TYPE = "wayland";
     };
 
     security.pam.services.swaylock = {};
