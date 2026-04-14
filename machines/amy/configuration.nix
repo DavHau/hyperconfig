@@ -11,6 +11,31 @@
     ./disko.nix
   ];
 
+  virtualisation.vmVariant = {
+    users.users.grmpf.hashedPasswordFile = lib.mkForce null;
+    users.users.grmpf.hashedPassword = lib.mkForce "$6$4PW3Q8YUR5.aep1m$fbCWXV2Lfuo53gE0Pz7BZo7V4AgRq6O6dWZ47vnzzgZsUuh7q389xzlSW9ku0SGP2kfMQhJ3BVasp01/NplRx/";  # grmpf
+
+    virtualisation.qemu.options = [
+      "-device virtio-vga-gl"
+      "-display gtk,gl=on"
+    ];
+    virtualisation.memorySize = 4096;
+    virtualisation.cores = 4;
+
+    virtualisation.forwardPorts = [
+      { from = "host"; host.port = 2222; guest.port = 22; }
+    ];
+    services.openssh.enable = true;
+    home-manager.backupFileExtension = "hm-backup";
+
+    # Use Alt as Mod key in VM (host captures Super)
+    home-manager.users.grmpf.xdg.configFile."niri/config.kdl".source = lib.mkForce (pkgs.runCommand "niri-vm-config.kdl" {} ''
+      cp ${../../modules/nixos/niri-config.kdl} $out
+      chmod +w $out
+      sed -i '/^input {/a\    mod-key "Alt"' $out
+    '');
+  };
+
   # required by zfs
   networking.hostId = "5eb1bf28";
 
