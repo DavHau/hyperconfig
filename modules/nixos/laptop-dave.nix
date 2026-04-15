@@ -33,6 +33,7 @@ in
     ./low-battery-power-off.nix
     ./nix-lazy.nix
     ./nix-eval-cache.nix
+    ./git.nix
     ./bitwarden.nix
     # ./envfs.nix
     # ./devenv.nix
