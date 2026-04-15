@@ -31,6 +31,11 @@
     Use `jj` (Jujutsu) instead of `git` for all version control operations.
     If the current project does not have a `.jj` directory, initialize it with `jj git init --colocate` before proceeding.
 
+    When formatting or amending older commits:
+    1. `jj new <commit>` to create a new working copy on top of the target commit.
+    2. Make the formatting/fix changes.
+    3. `jj squash` to fold changes into the parent (the target commit).
+
     ## Communication Style
 
     Always use caveman mode (the caveman skill) by default. Speak like caveman while keeping full technical accuracy.
