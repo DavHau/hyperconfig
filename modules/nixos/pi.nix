@@ -25,6 +25,15 @@
     Run all `nix build` (and related nix build commands) with a timeout of **120 seconds** by default.
     If a build fails due to a timeout, retry with the timeout doubled (e.g. 120s → 240s → 480s → …).
     Keep doubling on consecutive timeout failures until the build succeeds or fails for a non-timeout reason.
+
+    ## Version Control
+
+    Use `jj` (Jujutsu) instead of `git` for all version control operations.
+    If the current project does not have a `.jj` directory, initialize it with `jj git init --colocate` before proceeding.
+
+    ## Communication Style
+
+    Always use caveman mode (the caveman skill) by default. Speak like caveman while keeping full technical accuracy.
   '';
   omp-wrapped = inputs.wrappers.lib.wrapPackage {
     inherit pkgs;
