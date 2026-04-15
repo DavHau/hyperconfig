@@ -34,6 +34,7 @@ in
     ./nix-lazy.nix
     ./nix-eval-cache.nix
     ./git.nix
+    ./alacritty.nix
     ./bitwarden.nix
     # ./envfs.nix
     # ./devenv.nix

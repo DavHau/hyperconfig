@@ -15,12 +15,6 @@
 
   programs.fish.enable = true;
 
-  programs.alacritty.enable = true;
-  programs.alacritty.settings = {
-    font.size = 14;
-    font.normal.family = "FiraCode Nerd Font";
-  };
-  programs.alacritty.package = pkgs.alacritty;
 
   programs.zoxide.enable = true;
 
