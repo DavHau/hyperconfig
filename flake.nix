@@ -29,6 +29,7 @@
 
     nix.url = "https://flakehub.com/f/NixOS/nix/2.*.*.tar.gz";
     nix-lazy.url = "github:nixos/nix/lazy-trees-v2";
+    nix-eval-cache.url = "github:roberth/nix/eval-cache-next";
     retiolum.url = "github:mic92/retiolum";
 
     clan-core.url = "git+https://git.clan.lol/clan/clan-core";
