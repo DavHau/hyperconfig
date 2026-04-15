@@ -42,6 +42,7 @@
           id = "Battery";
           alwaysShowPercentage = true;
         }
+        { id = "PowerProfile"; }
         { id = "Volume"; }
         { id = "Brightness"; }
         { id = "ControlCenter"; }
