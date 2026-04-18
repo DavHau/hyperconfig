@@ -1,26 +1,7 @@
 { pkgs, inputs, ... }:
-{
-  imports = [
-    inputs.noctalia.homeModules.default
-  ];
-
-
-  services.network-manager-applet.enable = true;
-
-  services.swayidle = {
-    enable = true;
-    events = [
-      { event = "before-sleep"; command = "${pkgs.swaylock}/bin/swaylock -f -c 000000"; }
-    ];
-    timeouts = [
-      { timeout = 300; command = "${pkgs.swaylock}/bin/swaylock -f -c 000000"; }
-      { timeout = 600; command = "niri msg action power-off-monitors"; }
-    ];
-  };
-
-  programs.noctalia-shell = {
-    enable = true;
-    settings.bar.widgets = {
+let
+  settings = {
+    bar.widgets = {
       left = [
         { id = "Launcher"; }
         { id = "Clock"; }
@@ -49,6 +30,28 @@
       ];
     };
   };
+  settingsFile = (pkgs.formats.json { }).generate "noctalia-settings.json" settings;
+  # Wrap noctalia-shell via lassulus/wrappers: point it at a store-path
+  # settings.json via NOCTALIA_SETTINGS_FILE (honored by Commons/Settings.qml).
+  noctalia-shell = inputs.wrappers.lib.wrapPackage {
+    inherit pkgs;
+    package = pkgs.noctalia-shell;
+    env.NOCTALIA_SETTINGS_FILE = settingsFile;
+  };
+in
+{
+  services.network-manager-applet.enable = true;
 
-  xdg.configFile."noctalia/settings.json".force = true;
+  services.swayidle = {
+    enable = true;
+    events = [
+      { event = "before-sleep"; command = "${pkgs.swaylock}/bin/swaylock -f -c 000000"; }
+    ];
+    timeouts = [
+      { timeout = 300; command = "${pkgs.swaylock}/bin/swaylock -f -c 000000"; }
+      { timeout = 600; command = "niri msg action power-off-monitors"; }
+    ];
+  };
+
+  home.packages = [ noctalia-shell ];
 }

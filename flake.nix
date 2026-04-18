@@ -110,8 +110,6 @@
     caveman.url = "github:JuliusBrussee/caveman";
     caveman.flake = false;
 
-    noctalia.url = "github:noctalia-dev/noctalia-shell";
-    noctalia.inputs.nixpkgs.follows = "nixpkgs";
 
   };
 
