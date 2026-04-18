@@ -133,6 +133,10 @@ in {
             yggdrasil = {
               roles.default.tags = ["all"];
             };
+            hyprspace = {
+              module.input = "clan-community";
+              roles.default.tags = ["all"];
+            };
             wg-casa = {
               module.name = "wireguard";
               module.input = "self";
