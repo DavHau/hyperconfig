@@ -35,6 +35,7 @@ in
     ./nix-eval-cache.nix
     ./git.nix
     ./alacritty.nix
+    ./udiskie.nix
     ./bitwarden.nix
     # ./envfs.nix
     # ./devenv.nix
