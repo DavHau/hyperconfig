@@ -70,6 +70,10 @@
     hyprspace.inputs.nixpkgs.follows = "nixpkgs";
     hyprspace.inputs.flake-parts.follows = "flake-parts";
 
+    clan-community.url = "git+https://git.clan.lol/clan/clan-community?ref=feat/hyprspace&shallow=1";
+    clan-community.inputs.clan-core.follows = "clan-core";
+    clan-community.inputs.nixpkgs.follows = "nixpkgs";
+
     nixvim.url = "github:nix-community/nixvim";
     nixvim.inputs.nixpkgs.follows = "nixpkgs";
     nixvim.inputs.flake-parts.follows = "flake-parts";

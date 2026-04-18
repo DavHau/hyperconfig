@@ -16,7 +16,6 @@
       ../../modules/nixos/role-sshuttle-server
       ../../modules/nixos/role-iodine/default.nix
       ../../modules/nixos/dyndns-porkbun.nix
-      ../../modules/nixos/hyprspace
       ../../modules/nixos/nix-caches.nix
       ./automount
       ./hardware-configuration.nix
@@ -27,9 +26,6 @@
       ./file-browser-roman.nix
     ];
 
-  # services.hyprspace.settings.peers = [
-  #   { id = self.nixosConfigurations.grmpf-nix.config.clan.core.vars.generators.hyprspace.files.peer-id.value; }
-  # ];
 
   clan.core.networking.targetHost = "root@nas";
 
