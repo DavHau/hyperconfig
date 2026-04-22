@@ -1,8 +1,15 @@
 {pkgs, inputs, lib, ...}: let
   sys = pkgs.stdenv.hostPlatform.system;
+  cavemanRule = pkgs.runCommandLocal "caveman-rule" {} ''
+    mkdir -p $out
+    printf '%s\n' '---' 'alwaysApply: true' '---' > $out/caveman.md
+    # Strip YAML frontmatter (first --- to second ---) from upstream SKILL.md
+    ${pkgs.gawk}/bin/awk 'BEGIN{s=0} /^---$/{s++; next} s>=2{print}' \
+      ${inputs.caveman}/skills/caveman/SKILL.md >> $out/caveman.md
+  '';
   configFile = pkgs.writeText "config.yml" ''
     modelRoles:
-      default: anthropic/claude-opus-4-7:medium
+      default: anthropic/claude-opus-4-6:medium
   '';
   agentsFile = pkgs.writeText "AGENTS.md" ''
     # Global Agent Instructions
@@ -23,7 +30,7 @@
     ## Nix Build Timeout
 
     Run all `nix build` (and related nix build commands) with a timeout of **120 seconds** by default.
-    If a build fails due to a timeout, retry with the timeout doubled (e.g. 120s → 240s → 480s → …).
+    If a build fails due to a timeout, retry with the timeout doubled (e.g. 120s \u2192 240s \u2192 480s \u2192 \u2026).
     Keep doubling on consecutive timeout failures until the build succeeds or fails for a non-timeout reason.
 
     ## Version Control
@@ -38,16 +45,22 @@
 
     ## Communication Style
 
-    Always use caveman mode (the caveman skill) by default. Speak like caveman while keeping full technical accuracy.
+    ## Dependency Source Code
+
+    When you need to understand how any dependency works, always get its source code rather than guessing or relying on documentation alone.
+    1. First check `$HOME/projects/` for an existing checkout of the dependency.
+    2. If not found, clone the project into `$HOME/projects/` and read the source there.
+    3. Use the source code as the primary reference for understanding behavior, APIs, and internals.
   '';
   omp-wrapped = inputs.wrappers.lib.wrapPackage {
     inherit pkgs;
     package = inputs.llm-agents.packages.${sys}.omp;
     preHook = ''
       config_dir="''${PI_CODING_AGENT_DIR:-$HOME/.omp/agent}"
-      mkdir -p "$config_dir/skills/caveman"
+      mkdir -p "$config_dir/skills/caveman" "$config_dir/rules"
       ln -sf ${configFile} "$config_dir/config.yml"
       ln -sf ${inputs.caveman}/skills/caveman/SKILL.md "$config_dir/skills/caveman/SKILL.md"
+      cp -f ${cavemanRule}/caveman.md "$config_dir/rules/caveman.md"
       ln -sf ${agentsFile} "$config_dir/AGENTS.md"
     '';
   };
