@@ -4,8 +4,9 @@ let
   isVM = config.services.qemuGuest.enable;
 in
 {
-  # Register NVIDIA as a video driver (required by nvidia-container-toolkit)
-  services.xserver.videoDrivers = lib.mkIf (!isVM) [ "nvidia" ];
+  # Override desktop.nix's modesetting-only default; NVIDIA prime offload
+  # needs the nvidia driver registered.
+  services.xserver.videoDrivers = lib.mkForce [ "nvidia" ];
 
   # Use CUDA-accelerated llama-server with native CPU optimizations.
   services.llama-swap.llama-server-package = lib.mkIf (!isVM) ((pkgs.llama-cpp.override {
@@ -35,16 +36,7 @@ in
     dynamicBoost.enable = true;
   };
 
-  # Expose NVIDIA GPUs to rootless Docker containers via CDI
-  virtualisation.docker.rootless.daemon.settings.features.cdi = !isVM;
-  hardware.nvidia-container-toolkit.enable = !isVM;
-
-  # Avoid waking the NVIDIA GPU for compositing (use Intel/AMD iGPU only)
-  environment.variables = lib.mkIf (!isVM) {
-    WLR_DRM_DEVICES = "/dev/dri/card1";
-    __EGL_VENDOR_LIBRARY_FILENAMES = "/run/opengl-driver/share/glvnd/egl_vendor.d/50_mesa.json";
-    __GLX_VENDOR_LIBRARY_NAME = "mesa";
-  };
+  environment.systemPackages = [ config.hardware.nvidia.package.bin ];
 
   services.ollama.package = lib.mkIf (!isVM) (lib.mkForce pkgs.ollama-cuda);
 
