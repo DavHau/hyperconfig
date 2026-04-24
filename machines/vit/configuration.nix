@@ -5,6 +5,8 @@
     ../../modules/nixos/laptop-dave.nix
     ../../modules/nixos/user-dave.nix
     ./disko.nix
+    ../../modules/nixos/nvidia.nix
+    ../../modules/nixos/llama-swap.nix
   ];
 
   # Enable all hardware support
