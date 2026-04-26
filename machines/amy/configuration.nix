@@ -39,5 +39,6 @@
   # required by zfs
   networking.hostId = "5eb1bf28";
 
+
   system.stateVersion = "19.03"; # Did you read the comment?
 }
