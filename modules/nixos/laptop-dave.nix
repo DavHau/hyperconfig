@@ -162,9 +162,6 @@ in
   # }];
   systemd.services.nix-daemon.environment.SSH_AUTH_SOCK = "/run/user/1000/ssh-agent";
 
-  # Kernel
-  boot.kernelPackages = pkgs.linuxPackages_latest;
-
   # TLP
   # services.tlp.enable = true;
   # services.tlp.settings = {
