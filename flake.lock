@@ -168,6 +168,27 @@
         "type": "github"
       }
     },
+    "cctl": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1777048912,
+        "narHash": "sha256-25rjS+zfTiZgBUxpIRbjyTfm9Z8XUT5NLeYNcO4PZJk=",
+        "ref": "refs/heads/main",
+        "rev": "ba902d7beaa516b1004852e312049ebd2496e8b5",
+        "revCount": 13,
+        "type": "git",
+        "url": "https://github.com/allouis/cctl"
+      },
+      "original": {
+        "owner": "allouis",
+        "repo": "cctl",
+        "type": "github"
+      }
+    },
     "clan-community": {
       "inputs": {
         "clan-core": [
@@ -1460,6 +1481,7 @@
       "inputs": {
         "buildbot-nix": "buildbot-nix",
         "caveman": "caveman",
+        "cctl": "cctl",
         "clan-community": "clan-community",
         "clan-core": "clan-core",
         "clan-core-monitoring": "clan-core-monitoring",

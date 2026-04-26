@@ -110,6 +110,9 @@
     caveman.url = "github:JuliusBrussee/caveman";
     caveman.flake = false;
 
+    cctl.url = "github:allouis/cctl";
+    cctl.inputs.nixpkgs.follows = "nixpkgs";
+
 
   };
 

@@ -40,6 +40,7 @@ in {
           wireguard = ../../modules/clan/wireguard;
           ncps = inputs.ncps + "/clanServices/ncps";
           monitoring = inputs.clan-core-monitoring + "/modules/monitoring";
+          cctl = ../../modules/clan/cctl;
         };
 
         # add machines to their hosts
@@ -65,6 +66,9 @@ in {
               module.name = "zerotier";
               roles.peer.tags.all = {};
               roles.controller.machines.nas = {};
+              roles.controller.settings.allowedIps = [
+                "7c29125877"
+              ];
             };
             importer.roles.default.extraModules = [
               ../../modules/nixos/common.nix
@@ -127,6 +131,15 @@ in {
               module.name = "p2p-ssh-iroh";
               module.input = "clan-core";
               roles.server.tags.all = {};
+            };
+
+            cctl = {
+              module.name = "cctl";
+              module.input = "self";
+              roles.server.machines.amy.settings.user = "grmpf";
+              roles.server.extraModules = [
+                { networking.firewall.interfaces."ztfwr2j6pf".allowedTCPPorts = [ 80 ]; }
+              ];
             };
 
             # VPNs
