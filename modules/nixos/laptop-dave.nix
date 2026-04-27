@@ -38,14 +38,12 @@ in
     ./udiskie.nix
     ./bitwarden.nix
     # ./envfs.nix
-    # ./devenv.nix
     # ./nix-heuristic-gc.nix
     ./ollama.nix
     ./fonts.nix
     ./gocr.nix
     ./ocr
     # ./nether.nix
-    # ./mycelium.nix
     # ./vagrant.nix
     # ./iodine-client.nix
     ./udev.nix
