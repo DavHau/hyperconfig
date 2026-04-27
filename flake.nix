@@ -110,6 +110,18 @@
     cctl.url = "github:allouis/cctl";
     cctl.inputs.nixpkgs.follows = "nixpkgs";
 
+    nixos-example.url = "path:/home/grmpf/synced/projects/nixos-example";
+    nixos-example.inputs.nixpkgs.follows = "nixpkgs";
+    nixos-example.inputs.disko.follows = "disko";
+    nixos-example.inputs.nixos-hardware.follows = "nixos-hardware";
+    nixos-example.inputs.llm-agents.follows = "llm-agents";
+    nixos-example.inputs.sbox.follows = "sbox";
+    nixos-example.inputs.wrappers.follows = "wrappers";
+
+    hermes-agent.url = "github:NousResearch/hermes-agent";
+    messaging-daemon.url = "github:vbuterin/messaging-daemon";
+    messaging-daemon.flake = false;
+
 
   };
 
