@@ -51,9 +51,6 @@
     envfs.inputs.nixpkgs.follows = "nixpkgs";
     envfs.inputs.flake-parts.follows = "flake-parts";
 
-    # devenv.url = "github:cachix/devenv";
-    # devenv.inputs.nixpkgs.follows = "nixpkgs";
-
     nix-heuristic-gc.url = "github:risicle/nix-heuristic-gc";
     nix-heuristic-gc.inputs.nixpkgs.follows = "nixpkgs";
 
