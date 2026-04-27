@@ -52,20 +52,18 @@ in {
           };
 
           instances = {
-            admin = {
-              roles.default.tags.all = { };
-              roles.default.settings.allowedKeys = {
-                # Insert the public key that you want to use for SSH access.
-                # All keys will have ssh access to all machines ("tags.all" means 'all machines').
-                # Alternatively set 'users.users.root.openssh.authorizedKeys.keys' in each machine
-                "dave" = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDuhpzDHBPvn8nv8RH1MRomDOaXyP4GziQm7r3MZ1Syk";
-                "phone" = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJwzL0rt4J+kzggV4pFXf9yh9zBF6n4hdXXVbCB7p1x6";
-              };
-            };
             zt-home = {
               module.name = "zerotier";
               roles.peer.tags.all = {};
               roles.controller.machines.nas = {};
+              roles.controller.settings.allowedIps = [
+                "7c29125877"
+              ];
+            };
+            zt-home-th = {
+              module.name = "zerotier";
+              roles.peer.tags.all = {};
+              roles.controller.machines.bam = {};
               roles.controller.settings.allowedIps = [
                 "7c29125877"
               ];
@@ -124,6 +122,10 @@ in {
               module.name = "sshd";
               module.input = "clan-core";
               roles.server.tags.all = {};
+              roles.server.settings.authorizedKeys = {
+                "dave" = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDuhpzDHBPvn8nv8RH1MRomDOaXyP4GziQm7r3MZ1Syk";
+                "phone" = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJwzL0rt4J+kzggV4pFXf9yh9zBF6n4hdXXVbCB7p1x6";
+              };
               roles.client.tags.all = {};
             };
 

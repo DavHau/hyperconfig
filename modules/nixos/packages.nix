@@ -52,7 +52,7 @@
     minicom
     # AI
     # aider-chat-full
-    inputs.llm-agents.packages.${pkgs.system}.claude-code
+    inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.claude-code
 
     delta
     lsd
@@ -89,7 +89,7 @@
     # gaming
     moonlight-qt
     # VPN
-    mullvad-vpn protonvpn-gui
+    mullvad-vpn proton-vpn
     # wallets
     ledger-live-desktop
     # VMs

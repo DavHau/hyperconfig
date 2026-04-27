@@ -35,7 +35,7 @@ let
   # settings.json via NOCTALIA_SETTINGS_FILE (honored by Commons/Settings.qml).
   noctalia-shell = inputs.wrappers.lib.wrapPackage {
     inherit pkgs;
-    package = pkgs.noctalia-shell;
+    package = inputs.noctalia.packages.${pkgs.stdenv.hostPlatform.system}.default;
     env.NOCTALIA_SETTINGS_FILE = settingsFile;
   };
 in
@@ -44,9 +44,9 @@ in
 
   services.swayidle = {
     enable = true;
-    events = [
-      { event = "before-sleep"; command = "${pkgs.swaylock}/bin/swaylock -f -c 000000"; }
-    ];
+    events = {
+      "before-sleep" = "${pkgs.swaylock}/bin/swaylock -f -c 000000";
+    };
     timeouts = [
       { timeout = 300; command = "${pkgs.swaylock}/bin/swaylock -f -c 000000"; }
       { timeout = 600; command = "niri msg action power-off-monitors"; }

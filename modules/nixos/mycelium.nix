@@ -47,7 +47,7 @@ in
 
     serviceConfig = {
       ExecStart = lib.concatStringsSep " " (lib.flatten [
-        (lib.getExe inputs.lassulus.packages.${pkgs.system}.mycelium)
+        (lib.getExe inputs.lassulus.packages.${pkgs.stdenv.hostPlatform.system}.mycelium)
         "--tun-name myc"
         "--peers" peers
         "--key-file" config.clanCore.secrets.mycelium.secrets."mycelium_key".path
@@ -66,7 +66,7 @@ in
     secrets."mycelium_key" = { };
     generator = {
       path = [
-        inputs.lassulus.packages.${pkgs.system}.mycelium
+        inputs.lassulus.packages.${pkgs.stdenv.hostPlatform.system}.mycelium
         pkgs.coreutils
       ];
       script = ''
