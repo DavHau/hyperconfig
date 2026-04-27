@@ -1,7 +1,7 @@
 { ... }:
 {
   hardware.bluetooth.enable = true;
-  services.blueman.enable = true;
+
   # hack for xbox controller:
   # boot.extraModprobeConfig = ''
   #   options bluetooth disable_ertm=1

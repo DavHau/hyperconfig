@@ -60,7 +60,6 @@
     # GUI tools
     arandr  # configure monitors
     # blender  # graphics software
-    blueman  # manage bluetooth devices
     # ark  # archive viewer/extractor
     # kcalc  # calculator
     httpie  # make http requests
