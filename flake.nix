@@ -10,7 +10,7 @@
       url = "github:edolstra/flake-compat";
       flake = false;
     };
-    nixpkgs.url = "git+https://github.com/nixos/nixpkgs?&ref=nixos-unstable&shallow=1";
+    nixpkgs.url = "git+https://github.com/nixos/nixpkgs?ref=nixos-unstable&shallow=1";
     # nixpkgs.url = "git+https://github.com/DavHau/nixpkgs?&ref=dave&shallow=1";
     # nixpkgs-riscv.url = "git+https://github.com/davhau/nixpkgs?&ref=riscv&shallow=1";
     # nixpkgs-riscv.url = "git+https://github.com/DavHau/nixpkgs?&ref=dave&shallow=1";
@@ -107,10 +107,13 @@
     wrappers.url = "github:lassulus/wrappers";
     wrappers.inputs.nixpkgs.follows = "nixpkgs";
 
+    noctalia.url = "github:noctalia-dev/noctalia-shell";
+    noctalia.inputs.nixpkgs.follows = "nixpkgs";
+
     cctl.url = "github:allouis/cctl";
     cctl.inputs.nixpkgs.follows = "nixpkgs";
 
-    nixos-example.url = "path:/home/grmpf/synced/projects/nixos-example";
+    nixos-example.url = "github:DavHau/nixos-example";
     nixos-example.inputs.nixpkgs.follows = "nixpkgs";
     nixos-example.inputs.disko.follows = "disko";
     nixos-example.inputs.nixos-hardware.follows = "nixos-hardware";

@@ -4,8 +4,10 @@
   manifest.name = "cctl";
   manifest.description = "cctl web dashboard for managing Claude Code sessions";
   manifest.categories = [ "Development" ];
+  manifest.readme = "Web dashboard for managing Claude Code sessions via nginx reverse proxy with basic auth.";
 
   roles.server = {
+    description = "Hosts the cctl web dashboard for managing Claude Code sessions.";
 
     interface = { lib, ... }: {
       options = {
@@ -33,7 +35,7 @@
         nixosModule =
           { config, pkgs, inputs, ... }:
           let
-            cctlPkg = inputs.cctl.packages.${pkgs.system}.default;
+            cctlPkg = inputs.cctl.packages.${pkgs.stdenv.hostPlatform.system}.default;
             domain =
               if settings.domain != null
               then settings.domain
