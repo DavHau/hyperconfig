@@ -152,22 +152,6 @@
         "type": "github"
       }
     },
-    "caveman": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1776016763,
-        "narHash": "sha256-pHPMQGr9/ufsUODmqHm2T6sCOaeOOJl4baX4OeeYp6k=",
-        "owner": "JuliusBrussee",
-        "repo": "caveman",
-        "rev": "63e797cd753b301374947a5ed975c21775d962b9",
-        "type": "github"
-      },
-      "original": {
-        "owner": "JuliusBrussee",
-        "repo": "caveman",
-        "type": "github"
-      }
-    },
     "cctl": {
       "inputs": {
         "nixpkgs": [
@@ -1480,7 +1464,6 @@
     "root": {
       "inputs": {
         "buildbot-nix": "buildbot-nix",
-        "caveman": "caveman",
         "cctl": "cctl",
         "clan-community": "clan-community",
         "clan-core": "clan-core",
