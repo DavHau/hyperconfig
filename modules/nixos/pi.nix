@@ -1,12 +1,5 @@
 {pkgs, inputs, lib, ...}: let
   sys = pkgs.stdenv.hostPlatform.system;
-  cavemanRule = pkgs.runCommandLocal "caveman-rule" {} ''
-    mkdir -p $out
-    printf '%s\n' '---' 'alwaysApply: true' '---' > $out/caveman.md
-    # Strip YAML frontmatter (first --- to second ---) from upstream SKILL.md
-    ${pkgs.gawk}/bin/awk 'BEGIN{s=0} /^---$/{s++; next} s>=2{print}' \
-      ${inputs.caveman}/skills/caveman/SKILL.md >> $out/caveman.md
-  '';
   configFile = pkgs.writeText "config.yml" ''
     modelRoles:
       default: anthropic/claude-opus-4-6:medium
@@ -43,24 +36,22 @@
     2. Make the formatting/fix changes.
     3. `jj squash` to fold changes into the parent (the target commit).
 
-    ## Communication Style
-
     ## Dependency Source Code
 
     When you need to understand how any dependency works, always get its source code rather than guessing or relying on documentation alone.
     1. First check `$HOME/projects/` for an existing checkout of the dependency.
     2. If not found, clone the project into `$HOME/projects/` and read the source there.
     3. Use the source code as the primary reference for understanding behavior, APIs, and internals.
+
+    ${builtins.readFile ./caveman.md}
   '';
   omp-wrapped = inputs.wrappers.lib.wrapPackage {
     inherit pkgs;
     package = inputs.llm-agents.packages.${sys}.omp;
     preHook = ''
       config_dir="''${PI_CODING_AGENT_DIR:-$HOME/.omp/agent}"
-      mkdir -p "$config_dir/skills/caveman" "$config_dir/rules"
+      mkdir -p "$config_dir"
       ln -sf ${configFile} "$config_dir/config.yml"
-      ln -sf ${inputs.caveman}/skills/caveman/SKILL.md "$config_dir/skills/caveman/SKILL.md"
-      cp -f ${cavemanRule}/caveman.md "$config_dir/rules/caveman.md"
       ln -sf ${agentsFile} "$config_dir/AGENTS.md"
     '';
   };
