@@ -61,6 +61,7 @@ in
     ./locale.nix
     ./shell-aliases.nix
     ./nix-gc.nix
+    ./pueue.nix
   ];
 
   nixpkgs.pkgs =
@@ -172,6 +173,4 @@ in
   #   CPU_SCALING_MAX_FREQ_ON_AC = 9999999;
   #   CPU_MAX_PERF_ON_BAT=40;
   # };
-
-
 }
