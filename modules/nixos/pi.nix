@@ -43,6 +43,26 @@
     2. If not found, clone the project into `$HOME/projects/` and read the source there.
     3. Use the source code as the primary reference for understanding behavior, APIs, and internals.
 
+    ## Long-Running Commands
+
+    Run all shell commands with a default timeout of **5 seconds**.
+    If a command fails due to a timeout, rerun it using `pueue` with a timeout of **600 seconds**:
+
+    ```bash
+    # Add command to pueue
+    pueue add -- '<command>'
+    # Wait for it to complete (with 600s timeout)
+    pueue wait -t 600 <task_id>
+    # Get the output
+    pueue log <task_id>
+    ```
+
+    ## NixOS Module Organization
+
+    Always create new NixOS features as a separate `.nix` file in `modules/nixos/` and import it where needed.
+    Do NOT inline new features into existing files.
+
+
     ${builtins.readFile ./caveman.md}
   '';
   omp-wrapped = inputs.wrappers.lib.wrapPackage {
