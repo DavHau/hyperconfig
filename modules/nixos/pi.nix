@@ -51,10 +51,12 @@
     ```bash
     # Add command to pueue
     pueue add -- '<command>'
-    # Wait for it to complete (with 600s timeout)
-    pueue wait -t 600 <task_id>
-    # Get the output
+    # get last 15 lines of log output
     pueue log <task_id>
+    # kill command
+    pueue kill <task_id>
+    # wait for command to finish
+    pueue wait <task_id>
     ```
 
     ## NixOS Module Organization
