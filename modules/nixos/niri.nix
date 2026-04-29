@@ -20,7 +20,7 @@ let
           drag-lock = null;
           natural-scroll = null;
         };
-      };
+      } // config.niri.inputSettings;
 
       outputs = {
         "eDP-1" = {
@@ -271,6 +271,12 @@ in
     type = lib.types.lines;
     default = "";
     description = "Extra KDL config appended to the niri configuration.";
+  };
+
+  options.niri.inputSettings = lib.mkOption {
+    type = lib.types.attrs;
+    default = {};
+    description = "Extra input settings merged into the niri input block.";
   };
 
   config = {
