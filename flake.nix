@@ -107,6 +107,10 @@
     noctalia.url = "github:noctalia-dev/noctalia-shell";
     noctalia.inputs.nixpkgs.follows = "nixpkgs";
 
+    distro.url = "github:generational-infrastructure/distro";
+    distro.inputs.nixpkgs.follows = "nixpkgs";
+    distro.inputs.llm-agents.follows = "llm-agents";
+
     cctl.url = "github:allouis/cctl";
     cctl.inputs.nixpkgs.follows = "nixpkgs";
 
