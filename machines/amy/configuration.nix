@@ -13,7 +13,12 @@
 
   virtualisation.vmVariant = {
     users.users.grmpf.hashedPasswordFile = lib.mkForce null;
-    users.users.grmpf.hashedPassword = lib.mkForce "$6$4PW3Q8YUR5.aep1m$fbCWXV2Lfuo53gE0Pz7BZo7V4AgRq6O6dWZ47vnzzgZsUuh7q389xzlSW9ku0SGP2kfMQhJ3BVasp01/NplRx/";  # grmpf
+    users.users.grmpf.hashedPassword = lib.mkForce null;
+    users.users.grmpf.initialPassword = "grmpf";
+
+    users.users.dave.hashedPasswordFile = lib.mkForce null;
+    users.users.dave.hashedPassword = lib.mkForce null;
+    users.users.dave.initialPassword = "dave";
 
     virtualisation.qemu.options = [
       "-device virtio-vga-gl"
@@ -29,11 +34,7 @@
     home-manager.backupFileExtension = "hm-backup";
 
     # Use Alt as Mod key in VM (host captures Super)
-    niri.extraConfig = ''
-      input {
-        mod-key "Alt"
-      }
-    '';
+    niri.inputSettings.mod-key = "Alt";
   };
 
   # required by zfs
