@@ -40,26 +40,9 @@ in
 
   services.ollama.package = lib.mkIf (!isVM) (lib.mkForce pkgs.ollama-cuda);
 
-  # Stop llama-swap before suspend to free GPU VRAM, restart on resume.
-  # The NVIDIA driver crashes on suspend when VRAM is in use.
-  # Must run before nvidia-suspend.service saves VRAM.
+  # NVIDIA driver crashes on suspend when VRAM is in use.
+  # Extend distro's llama-swap-suspend to also run before nvidia-suspend.
   systemd.services.llama-swap-suspend = lib.mkIf config.services.llama-swap.enable {
-    description = "Stop llama-swap before suspend";
-    before = [ "nvidia-suspend.service" "systemd-suspend.service" ];
-    wantedBy = [ "suspend.target" ];
-    serviceConfig.Type = "oneshot";
-    script = ''
-      ${pkgs.systemd}/bin/systemctl stop llama-swap.service || true
-      sleep 2
-    '';
-  };
-  systemd.services.llama-swap-resume = lib.mkIf config.services.llama-swap.enable {
-    description = "Restart llama-swap after resume";
-    after = [ "systemd-suspend.service" ];
-    wantedBy = [ "suspend.target" ];
-    serviceConfig.Type = "oneshot";
-    script = ''
-      ${pkgs.systemd}/bin/systemctl start llama-swap.service || true
-    '';
+    before = [ "nvidia-suspend.service" ];
   };
 }

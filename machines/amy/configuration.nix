@@ -8,10 +8,12 @@
     ../../modules/nixos/laptop-dave.nix
     ../../modules/nixos/user-grmpf.nix
     ../../modules/nixos/amdgpu.nix
+    ../../modules/nixos/llama-swap.nix
     ./disko.nix
   ];
 
   virtualisation.vmVariant = {
+    imports = [ ../../modules/nixos/user-dave.nix ];
     users.users.grmpf.hashedPasswordFile = lib.mkForce null;
     users.users.grmpf.hashedPassword = lib.mkForce null;
     users.users.grmpf.initialPassword = "grmpf";
@@ -24,13 +26,15 @@
       "-device virtio-vga-gl"
       "-display gtk,gl=on"
     ];
-    virtualisation.memorySize = 4096;
+    virtualisation.memorySize = 8192;
     virtualisation.cores = 4;
 
     virtualisation.forwardPorts = [
       { from = "host"; host.port = 2222; guest.port = 22; }
     ];
     services.openssh.enable = true;
+    services.openssh.settings.PasswordAuthentication = lib.mkForce true;
+    services.openssh.settings.KbdInteractiveAuthentication = lib.mkForce true;
     home-manager.backupFileExtension = "hm-backup";
 
     # Use Alt as Mod key in VM (host captures Super)

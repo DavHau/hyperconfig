@@ -6,6 +6,7 @@ in
   imports = [
     inputs.home-manager.nixosModules.default
     inputs.retiolum.nixosModules.retiolum
+    inputs.distro.nixosModules.noctalia-plugin
     ./common.nix
     ./common-tools.nix
     ./sbox.nix
