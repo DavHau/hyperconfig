@@ -1,5 +1,15 @@
-{pkgs, inputs, lib, ...}: let
+{pkgs, inputs, lib, config, ...}: let
   sys = pkgs.stdenv.hostPlatform.system;
+  llama-swap-enabled = (config.services.llama-swap.enable or false);
+  modelsFile = pkgs.writeText "models.yml" ''
+    providers:
+      llama-swap:
+        baseUrl: http://127.0.0.1:${toString config.services.llama-swap.port}/v1
+        api: openai-completions
+        auth: none
+        discovery:
+          type: lm-studio
+  '';
   configFile = pkgs.writeText "config.yml" ''
     modelRoles:
       default: anthropic/claude-opus-4-6:medium
@@ -75,6 +85,7 @@
       mkdir -p "$config_dir"
       ln -sf ${configFile} "$config_dir/config.yml"
       ln -sf ${agentsFile} "$config_dir/AGENTS.md"
+      ${lib.optionalString llama-swap-enabled ''ln -sf ${modelsFile} "$config_dir/models.yml"''}
     '';
   };
 in {
