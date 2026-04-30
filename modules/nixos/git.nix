@@ -4,7 +4,7 @@ let
     inherit pkgs;
     settings = {
       user.name = "DavHau";
-      user.email = "hsngrmpf+github@gmail.com";
+      user.email = "need-more-ram@DavHau.com";
       init.defaultBranch = "main";
       pull.rebase = true;
       rebase.autoStash = true;
