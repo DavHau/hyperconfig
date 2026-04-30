@@ -376,11 +376,11 @@
         "treefmt-nix": "treefmt-nix_6"
       },
       "locked": {
-        "lastModified": 1777553170,
-        "narHash": "sha256-MVnRrgkoyRvouk6VIyFGDldF0p41X3YBjX+CKTRhPHI=",
+        "lastModified": 1777557559,
+        "narHash": "sha256-XRPBtAfgw4yrIJUolJ/CdbF8dO4jlaRLmcoPv5Bjkt8=",
         "owner": "generational-infrastructure",
         "repo": "distro",
-        "rev": "b6b833e45b5335c57da39979ae56c84c75934b14",
+        "rev": "959bd870ca1bc4de9c739354127ef9c782ce5f59",
         "type": "github"
       },
       "original": {
