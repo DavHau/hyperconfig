@@ -1,4 +1,4 @@
-{ pkgs, inputs, ... }:
+{ pkgs, lib, inputs, ... }:
 let
   git = (inputs.wrappers.wrapperModules.git.apply {
     inherit pkgs;
@@ -10,7 +10,20 @@ let
       rebase.autoStash = true;
       commit.autoWrapCommitMessage = false;
       push.autoSetupRemote = true;
-      diff.external = "${pkgs.difftastic}/bin/difft";
+      core.pager = "${pkgs.delta}/bin/delta";
+      interactive.diffFilter = "${pkgs.delta}/bin/delta --color-only";
+      delta = {
+        side-by-side = true;
+        line-numbers = true;
+        navigate = true;
+        dark = true;
+        syntax-theme = "Monokai Extended";
+      };
+      # Opt into semantic/AST diff:
+      #   GIT_EXTERNAL_DIFF=difft git log -p --ext-diff
+      diff.tool = "difftastic";
+      difftool.difftastic.cmd = ''${pkgs.difftastic}/bin/difft "$LOCAL" "$REMOTE"'';
+      difftool.prompt = false;
       alias = {
         cl = "clone";
         gh-cl = "gh-clone";
@@ -49,7 +62,8 @@ let
   }).wrapper;
 in {
   environment.systemPackages = [
-    git
+    (lib.hiPrio git)
     pkgs.difftastic
+    pkgs.delta
   ];
 }

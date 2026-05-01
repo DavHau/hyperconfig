@@ -36,6 +36,7 @@ in
     ./nix-lazy.nix
     ./nix-eval-cache.nix
     ./git.nix
+    ./jujutsu.nix
     ./alacritty.nix
     ./udiskie.nix
     ./bitwarden.nix
