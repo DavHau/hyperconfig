@@ -18,6 +18,7 @@ in
     ./nrb
     ./nix-caches.nix
     ./niri.nix
+    ./greetd.nix
     ./pi.nix
     ./proton-vpn.nix
     ./vpn.nix
