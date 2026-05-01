@@ -1,5 +1,14 @@
 { config, pkgs, lib, inputs, ... }:
 let
+  reload-noctalia = pkgs.writeShellScript "reload-noctalia" ''
+    ${pkgs.procps}/bin/pkill -f 'quickshell' || true
+    for _ in $(seq 1 50); do
+      ${pkgs.procps}/bin/pgrep -f 'quickshell' >/dev/null || break
+      sleep 0.1
+    done
+    exec noctalia-shell
+  '';
+
   niriWrapped = (inputs.wrappers.wrapperModules.niri.apply {
     inherit pkgs;
     settings = {
@@ -256,6 +265,12 @@ let
         "Mod+Shift+E"    = { quit = null; };
         "Ctrl+Alt+Delete" = { quit = null; };
         "Mod+Shift+P"    = { power-off-monitors = null; };
+
+        # Reload noctalia
+        "Mod+Shift+N" = {
+          spawn = "${reload-noctalia}";
+          _attrs = { hotkey-overlay-title = "Reload Noctalia"; };
+        };
 
         # Brightness
         "XF86MonBrightnessDown" = { spawn = [ "brightnessctl" "set" "5%-" "-e" ]; };
