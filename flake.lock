@@ -241,13 +241,10 @@
         "treefmt-nix": "treefmt-nix_3"
       },
       "locked": {
-        "lastModified": 1777366660,
-        "narHash": "sha256-X3KyrpM13nMrFf856L35hu8x0yy5/srCweURZKbDKAU=",
-        "ref": "refs/heads/main",
-        "rev": "4af9268976ce74fa26d1b3260febe7efaf46a6f2",
-        "revCount": 14225,
-        "type": "git",
-        "url": "https://git.clan.lol/clan/clan-core"
+        "lastModified": 1777714130,
+        "narHash": "sha256-0JAjlZZi+Cq6RXa06wpHOIvnU1gNADfyhdGRr7bhsXE=",
+        "path": "/home/grmpf/synced/projects/clan/clan-core",
+        "type": "path"
       },
       "original": {
         "type": "git",
@@ -304,11 +301,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1777259361,
-        "narHash": "sha256-v8n+YBZurGxvVLoOMc+gHbL/j8mpTlWoNZJaKMrC7pM=",
-        "rev": "39fbab42b97e3d1f0d4cf74673737aacac0de92d",
+        "lastModified": 1777561466,
+        "narHash": "sha256-64Nh3VyhldsPuCipeIubP2Gc04HGT8PA7HTYawpE+kY=",
+        "rev": "088353e49081f88d7ac475aabd69f1db87b21ea8",
         "type": "tarball",
-        "url": "https://git.clan.lol/api/v1/repos/clan/data-mesher/archive/39fbab42b97e3d1f0d4cf74673737aacac0de92d.tar.gz"
+        "url": "https://git.clan.lol/api/v1/repos/clan/data-mesher/archive/088353e49081f88d7ac475aabd69f1db87b21ea8.tar.gz"
       },
       "original": {
         "type": "tarball",
@@ -376,11 +373,11 @@
         "treefmt-nix": "treefmt-nix_6"
       },
       "locked": {
-        "lastModified": 1777578076,
-        "narHash": "sha256-ZzsPUfui7RteEkeSuooWTtwnVhKZF7hVXI6wb4HSpio=",
+        "lastModified": 1777580137,
+        "narHash": "sha256-c0qxUMURpISwYpP3HKpu4apakdlR06ou66GYeTaX1mw=",
         "owner": "generational-infrastructure",
         "repo": "distro",
-        "rev": "441c3c9653094ff5b51bcb7a1e9f0cfaa5468b46",
+        "rev": "ef5a3e348213dc155c79e5daeccaee5de9863a79",
         "type": "github"
       },
       "original": {
@@ -1792,11 +1789,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1777473749,
-        "narHash": "sha256-BsQCPY2koxaGahPHAd2eo2KgTAA0Rlh9tFkzEmNdh0c=",
+        "lastModified": 1777579777,
+        "narHash": "sha256-jwHDgDe5CLncnOly3mgh/xDYbh5QYHnufA+fmmP0Rvw=",
         "owner": "pinpox",
         "repo": "opencrow",
-        "rev": "2815f11f22261888f88026582486146ac652e0c7",
+        "rev": "d83140d2e38c1f7dd3d49c80a4e9cf09841dffd6",
         "type": "github"
       },
       "original": {
