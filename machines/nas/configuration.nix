@@ -22,7 +22,6 @@
       ./smokeping.nix
       # ./sync-from-manu.nix
       ./users.nix
-      ./reverse-proxy.nix
       ./file-browser-roman.nix
     ];
 
