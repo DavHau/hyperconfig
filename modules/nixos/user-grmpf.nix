@@ -8,7 +8,7 @@
     # shell = pkgs.fish;
     autoSubUidGidRange = true;
   };
-  users.extraUsers.grmpf.extraGroups = [ "libvirtd" "podman" ];
+  users.extraUsers.grmpf.extraGroups = [ "libvirtd" "podman" "input" ];
 
   home-manager.users.grmpf = {
     home.stateVersion = "22.11";
