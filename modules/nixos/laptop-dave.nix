@@ -65,6 +65,7 @@ in
     ./shell-aliases.nix
     ./nix-gc.nix
     ./pueue.nix
+    ./voxtype.nix
   ];
 
   nixpkgs.pkgs =

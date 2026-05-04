@@ -275,6 +275,12 @@ let
         # Brightness
         "XF86MonBrightnessDown" = { spawn = [ "brightnessctl" "set" "5%-" "-e" ]; };
         "XF86MonBrightnessUp"   = { spawn = [ "brightnessctl" "set" "5%+" "-e" ]; };
+
+        # Voice-to-text (voxtype toggle: press to start/stop recording)
+        "Mod+Space" = {
+          spawn = [ "voxtype" "record" "toggle" ];
+          _attrs = { hotkey-overlay-title = "Voice to Text: voxtype"; };
+        };
       };
 
       extraConfig = config.niri.extraConfig;
