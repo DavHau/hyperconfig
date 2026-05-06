@@ -39,6 +39,7 @@
       ms-python.python
       rust-lang.rust-analyzer
       mkhl.direnv
+      jjk.jjk
       # ms-vscode.cmake-tools
       llvm-vs-code-extensions.vscode-clangd
       # ms-vscode-remote.remote-containers
