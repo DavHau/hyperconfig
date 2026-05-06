@@ -126,9 +126,6 @@
     messaging-daemon.url = "github:vbuterin/messaging-daemon";
     messaging-daemon.flake = false;
 
-    voxtype.url = "github:peteonrails/voxtype";
-    voxtype.inputs.nixpkgs.follows = "nixpkgs";
-    voxtype.inputs.flake-utils.url = "github:numtide/flake-utils";
 
 
   };
