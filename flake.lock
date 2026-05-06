@@ -374,10 +374,12 @@
         "voxtype": "voxtype"
       },
       "locked": {
-        "lastModified": 1778060582,
-        "narHash": "sha256-rSfjGSDPDYqpT6hvvhCeFBOQ/60CBlDE4AW5KYlE9qs=",
-        "path": "/home/grmpf/synced/projects/distro",
-        "type": "path"
+        "lastModified": 1778060657,
+        "narHash": "sha256-+/ZaVOm+pRkoB9rZh9IG0xXnT73jS1M4OEjHof6jcSs=",
+        "owner": "generational-infrastructure",
+        "repo": "distro",
+        "rev": "b6f6660b9c605c5e19ee3ec1590e88adb52bed28",
+        "type": "github"
       },
       "original": {
         "owner": "generational-infrastructure",
@@ -2120,11 +2122,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1759366584,
-        "narHash": "sha256-GoeShBq/+xv9g9POP69vbOrObpLtS/mDfF1/pfPIQrU=",
+        "lastModified": 1777862740,
+        "narHash": "sha256-W6g53anJ2XSZWeysVBiKzk9kMyWlB2lknUYpTA2SiQY=",
         "owner": "nix-community",
         "repo": "srvos",
-        "rev": "1dbb22b9b15f449a7c8c92a94aec9fe5aea8ef7c",
+        "rev": "1131c2898d718b2c35cbee54056db3df24abdb74",
         "type": "github"
       },
       "original": {

@@ -7,6 +7,7 @@ let
       users
   );
   userModule = user: {
+    security.acme.acceptTerms = true;
     services.nginx.enable = true;
     services.nginx.virtualHosts."daten.${user}.bruch-bu.de" = {
       forceSSL = true;
