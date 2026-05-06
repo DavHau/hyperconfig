@@ -370,15 +370,14 @@
         ],
         "noctalia-shell": "noctalia-shell",
         "opencrow": "opencrow",
-        "treefmt-nix": "treefmt-nix_6"
+        "treefmt-nix": "treefmt-nix_6",
+        "voxtype": "voxtype"
       },
       "locked": {
-        "lastModified": 1777580137,
-        "narHash": "sha256-c0qxUMURpISwYpP3HKpu4apakdlR06ou66GYeTaX1mw=",
-        "owner": "generational-infrastructure",
-        "repo": "distro",
-        "rev": "ef5a3e348213dc155c79e5daeccaee5de9863a79",
-        "type": "github"
+        "lastModified": 1778060582,
+        "narHash": "sha256-rSfjGSDPDYqpT6hvvhCeFBOQ/60CBlDE4AW5KYlE9qs=",
+        "path": "/home/grmpf/synced/projects/distro",
+        "type": "path"
       },
       "original": {
         "owner": "generational-infrastructure",
@@ -655,7 +654,7 @@
     },
     "flake-utils": {
       "inputs": {
-        "systems": "systems_7"
+        "systems": "systems_6"
       },
       "locked": {
         "lastModified": 1731533236,
@@ -691,7 +690,7 @@
     },
     "flake-utils_3": {
       "inputs": {
-        "systems": "systems_12"
+        "systems": "systems_9"
       },
       "locked": {
         "lastModified": 1731533236,
@@ -1011,7 +1010,7 @@
         "nixpkgs": [
           "nixpkgs"
         ],
-        "systems": "systems_6",
+        "systems": "systems_7",
         "treefmt-nix": "treefmt-nix_8"
       },
       "locked": {
@@ -1212,7 +1211,7 @@
     },
     "nix-heuristic-gc": {
       "inputs": {
-        "flake-utils": "flake-utils",
+        "flake-utils": "flake-utils_2",
         "nixpkgs": [
           "nixpkgs"
         ]
@@ -1618,7 +1617,7 @@
           "nixpkgs"
         ],
         "nuschtosSearch": "nuschtosSearch",
-        "systems": "systems_9"
+        "systems": "systems_10"
       },
       "locked": {
         "lastModified": 1751904655,
@@ -1685,7 +1684,7 @@
           "noctalia",
           "nixpkgs"
         ],
-        "systems": "systems_10",
+        "systems": "systems_11",
         "treefmt-nix": "treefmt-nix_10"
       },
       "locked": {
@@ -1774,7 +1773,7 @@
     },
     "nuschtosSearch": {
       "inputs": {
-        "flake-utils": "flake-utils_2",
+        "flake-utils": "flake-utils_3",
         "ixx": "ixx",
         "nixpkgs": [
           "nixvim",
@@ -2054,7 +2053,6 @@
         "sbox": "sbox",
         "srvos": "srvos",
         "stylix": "stylix",
-        "voxtype": "voxtype",
         "wrappers": "wrappers"
       }
     },
@@ -2150,7 +2148,7 @@
           "nixpkgs"
         ],
         "nur": "nur",
-        "systems": "systems_11",
+        "systems": "systems_12",
         "tinted-foot": "tinted-foot",
         "tinted-kitty": "tinted-kitty",
         "tinted-schemes": "tinted-schemes",
@@ -2188,21 +2186,6 @@
     },
     "systems_10": {
       "locked": {
-        "lastModified": 1689347949,
-        "narHash": "sha256-12tWmuL2zgBgZkdoB6qXZsgJEH9LR3oUgpaQq2RbI80=",
-        "owner": "nix-systems",
-        "repo": "default-linux",
-        "rev": "31732fcf5e8fea42e59c2488ad31a0e651500f68",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nix-systems",
-        "repo": "default-linux",
-        "type": "github"
-      }
-    },
-    "systems_11": {
-      "locked": {
         "lastModified": 1681028828,
         "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
         "owner": "nix-systems",
@@ -2213,6 +2196,21 @@
       "original": {
         "owner": "nix-systems",
         "repo": "default",
+        "type": "github"
+      }
+    },
+    "systems_11": {
+      "locked": {
+        "lastModified": 1689347949,
+        "narHash": "sha256-12tWmuL2zgBgZkdoB6qXZsgJEH9LR3oUgpaQq2RbI80=",
+        "owner": "nix-systems",
+        "repo": "default-linux",
+        "rev": "31732fcf5e8fea42e59c2488ad31a0e651500f68",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-systems",
+        "repo": "default-linux",
         "type": "github"
       }
     },
@@ -2771,8 +2769,9 @@
     },
     "voxtype": {
       "inputs": {
-        "flake-utils": "flake-utils_3",
+        "flake-utils": "flake-utils",
         "nixpkgs": [
+          "distro",
           "nixpkgs"
         ]
       },
