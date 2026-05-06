@@ -65,15 +65,27 @@
     pueue log <task_id>
     # kill command
     pueue kill <task_id>
-    # wait for command to finish
-    pueue wait <task_id>
+    # wait for command to finish (returns early if process terminates)
+    timeout 60 pueue wait <task_id>
     ```
+
+    **Do NOT** use `sleep N && pueue wait`. Use `timeout N pueue wait <task_id>` instead — it returns immediately when the task finishes rather than always waiting the full sleep duration.
 
     ## NixOS Module Organization
 
     Always create new NixOS features as a separate `.nix` file in `modules/nixos/` and import it where needed.
     Do NOT inline new features into existing files.
 
+
+    ## Nix Store
+
+    **NEVER** run `find` on the top-level `/nix/store` directory. It contains millions of entries and will hang or time out. If you need to locate a file inside a specific store path, use the full store path (e.g. `find /nix/store/<hash>-<name>/`).
+
+    ## Running Unavailable Programs
+
+    If a program is not currently installed, do NOT attempt to install it via `nix-env` or similar. Instead, use one of:
+    - `nix-shell -p <package> --run '<command>'`
+    - `nix shell nixpkgs#<package> -c <command>`
 
     ${builtins.readFile ./caveman.md}
   '';
