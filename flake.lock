@@ -2820,15 +2820,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1775600302,
-        "narHash": "sha256-2fgKImv78CXIcfo1RsY7EI4uMZ84x/MggA5rrusYc7c=",
-        "owner": "lassulus",
+        "lastModified": 1778145312,
+        "narHash": "sha256-AxNIv773tAtcHUPQJtynTpKrLPUIiEpS1kCV9bzJJvg=",
+        "owner": "DavHau",
         "repo": "wrappers",
-        "rev": "9d8397d8ef1ac35763085f3338589f558128f7db",
+        "rev": "8332e607a193b3005a66e46f16dadb8be82ffca3",
         "type": "github"
       },
       "original": {
-        "owner": "lassulus",
+        "owner": "DavHau",
+        "ref": "niri-systemd",
         "repo": "wrappers",
         "type": "github"
       }

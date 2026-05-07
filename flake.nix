@@ -101,7 +101,7 @@
     mics-skills.inputs.nixpkgs.follows = "nixpkgs";
     mics-skills.inputs.flake-parts.follows = "flake-parts";
 
-    wrappers.url = "github:lassulus/wrappers";
+    wrappers.url = "github:DavHau/wrappers/niri-systemd";
     wrappers.inputs.nixpkgs.follows = "nixpkgs";
 
     noctalia.url = "github:noctalia-dev/noctalia-shell";

@@ -277,7 +277,6 @@ let
       extraConfig = config.niri.extraConfig;
     };
   };
-  niriConfigFile = niriEvaluated."config.kdl".path;
 in
 {
   options.niri.extraConfig = lib.mkOption {
@@ -296,15 +295,17 @@ in
 
   config = {
     programs.niri.enable = true;
-    # Use stock pkgs.niri so the user-mode `niri.service` unit's ExecStart
-    # path stays stable across config-only changes. Otherwise every settings
-    # tweak would rewrite the unit and force user systemd to restart niri,
-    # killing the active session on `nixos-rebuild switch`.
-    environment.etc."niri/config.kdl".source = niriConfigFile;
-    # niri reads NIRI_CONFIG from its environment and watches that path for
-    # changes (see niri-config/src/lib.rs watcher), giving us hot reload on
-    # switch as long as the path itself is stable.
-    environment.sessionVariables.NIRI_CONFIG = "/etc/niri/config.kdl";
+    # On `nixos-rebuild switch`, NixOS's switch-to-configuration would
+    # normally restart niri.service whenever its [Service] section
+    # changes (i.e. on every config tweak, since ExecStartPre/ExecReload
+    # embed the per-build kdl path). Setting `reloadIfChanged = true`
+    # emits `X-ReloadIfChanged=true` on the unit, which switch reads and
+    # converts every "needs restart" verdict into a `systemctl --user
+    # reload niri.service` -- running our ExecReload (rewrites mutable
+    # runtime config + sends `niri msg action load-config-file`) without
+    # killing the live session.
+    programs.niri.package = niriEvaluated.wrapper;
+    systemd.packages = [ niriEvaluated.outputs.systemd-user ];
 
     environment.systemPackages = with pkgs; [
       fuzzel
