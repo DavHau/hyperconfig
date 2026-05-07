@@ -9,7 +9,7 @@ let
     exec noctalia-shell
   '';
 
-  niriWrapped = (inputs.wrappers.wrapperModules.niri.apply {
+  niriEvaluated = inputs.wrappers.wrapperModules.niri.apply {
     inherit pkgs;
     settings = {
       input = {
@@ -276,7 +276,8 @@ let
 
       extraConfig = config.niri.extraConfig;
     };
-  }).wrapper;
+  };
+  niriConfigFile = niriEvaluated."config.kdl".path;
 in
 {
   options.niri.extraConfig = lib.mkOption {
@@ -295,7 +296,15 @@ in
 
   config = {
     programs.niri.enable = true;
-    programs.niri.package = niriWrapped;
+    # Use stock pkgs.niri so the user-mode `niri.service` unit's ExecStart
+    # path stays stable across config-only changes. Otherwise every settings
+    # tweak would rewrite the unit and force user systemd to restart niri,
+    # killing the active session on `nixos-rebuild switch`.
+    environment.etc."niri/config.kdl".source = niriConfigFile;
+    # niri reads NIRI_CONFIG from its environment and watches that path for
+    # changes (see niri-config/src/lib.rs watcher), giving us hot reload on
+    # switch as long as the path itself is stable.
+    environment.sessionVariables.NIRI_CONFIG = "/etc/niri/config.kdl";
 
     environment.systemPackages = with pkgs; [
       fuzzel
