@@ -12,7 +12,7 @@
   '';
   configFile = pkgs.writeText "config.yml" ''
     modelRoles:
-      default: anthropic/claude-opus-4-6:medium
+      default: anthropic/claude-opus-4-7:medium
   '';
   agentsFile = pkgs.writeText "AGENTS.md" ''
     # Global Agent Instructions
