@@ -31,15 +31,6 @@ let
         };
       } // config.niri.inputSettings;
 
-      outputs = {
-        "eDP-1" = {
-          mode = "1920x1080@60.008";
-          scale = 1.5;
-          transform = "normal";
-          position = { x = 1280; y = 0; _keys = true; };
-        };
-      };
-
       # layout = {
       #   gaps = 8;
       #   center-focused-column = "never";
@@ -290,7 +281,9 @@ in
 {
   options.niri.extraConfig = lib.mkOption {
     type = lib.types.lines;
-    default = "";
+    default = ''
+      include optional=true "~/.config/niri/displays.kdl"
+    '';
     description = "Extra KDL config appended to the niri configuration.";
   };
 

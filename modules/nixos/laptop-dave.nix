@@ -65,6 +65,7 @@ in
     ./shell-aliases.nix
     ./nix-gc.nix
     ./pueue.nix
+    ./wdisplays.nix
     inputs.distro.nixosModules.voxtype
   ];
 
