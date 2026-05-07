@@ -44,5 +44,11 @@
   # required by zfs
   networking.hostId = "5eb1bf28";
 
+  # Disable USB autosuspend for Intel AX210 Bluetooth — prevents adapter
+  # from powering down shortly after boot (firmware load race on new card).
+  services.udev.extraRules = ''
+    ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="8087", ATTR{idProduct}=="0032", ATTR{power/autosuspend_delay_ms}="-1"
+  '';
+
   system.stateVersion = "19.03"; # Did you read the comment?
 }

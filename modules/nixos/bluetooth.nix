@@ -1,6 +1,16 @@
 { ... }:
 {
-  hardware.bluetooth.enable = true;
+  hardware.bluetooth = {
+    enable = true;
+    # powerOnBoot = true;
+    # settings = {
+    #   General = {
+    #     ControllerMode = "dual";
+    #     Experimental = true;
+    #   };
+    #   Policy.AutoEnable = true;
+    # };
+  };
 
   # hack for xbox controller:
   # boot.extraModprobeConfig = ''
