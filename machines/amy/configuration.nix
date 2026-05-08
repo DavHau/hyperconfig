@@ -9,6 +9,7 @@
     ../../modules/nixos/user-grmpf.nix
     ../../modules/nixos/amdgpu.nix
     ../../modules/nixos/llama-swap.nix
+    ../../modules/nixos/bluetooth-resume-fix.nix
     ./disko.nix
   ];
 
