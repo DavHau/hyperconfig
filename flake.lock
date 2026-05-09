@@ -374,11 +374,11 @@
         "voxtype": "voxtype"
       },
       "locked": {
-        "lastModified": 1778060657,
-        "narHash": "sha256-+/ZaVOm+pRkoB9rZh9IG0xXnT73jS1M4OEjHof6jcSs=",
+        "lastModified": 1778275604,
+        "narHash": "sha256-pr0BIONzp6T5b9duR+rMXJ45MJowWk9sp0hTkbvCnNY=",
         "owner": "generational-infrastructure",
         "repo": "distro",
-        "rev": "b6f6660b9c605c5e19ee3ec1590e88adb52bed28",
+        "rev": "a80828ae389ca27a5f35c37bdd44e2e8fb8726fd",
         "type": "github"
       },
       "original": {
@@ -1617,16 +1617,16 @@
     },
     "nixpkgs_6": {
       "locked": {
-        "lastModified": 1777954456,
-        "narHash": "sha256-hGdgeU2Nk87RAuZyYjyDjFL6LK7dAZN5RE9+hrDTkDU=",
-        "ref": "nixos-unstable",
-        "rev": "549bd84d6279f9852cae6225e372cc67fb91a4c1",
+        "lastModified": 1778274207,
+        "narHash": "sha256-I4puXmX1iovcCHZlRmztO3vW0mAbbRvq4F8wgIMQ1MM=",
+        "ref": "nixpkgs-unstable",
+        "rev": "b3da656039dc7a6240f27b2ef8cc6a3ef3bccae7",
         "shallow": true,
         "type": "git",
         "url": "https://github.com/nixos/nixpkgs"
       },
       "original": {
-        "ref": "nixos-unstable",
+        "ref": "nixpkgs-unstable",
         "shallow": true,
         "type": "git",
         "url": "https://github.com/nixos/nixpkgs"
