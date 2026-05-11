@@ -46,6 +46,11 @@
     2. Make the formatting/fix changes.
     3. `jj squash` to fold changes into the parent (the target commit).
 
+    After finishing any change, always update the description of the current
+    commit with `jj describe -m "..."` so the message reflects what the
+    working copy now contains. Do this as the final step of the change, not
+    at the start.
+
     ## Dependency Source Code
 
     When you need to understand how any dependency works, always get its source code rather than guessing or relying on documentation alone.
