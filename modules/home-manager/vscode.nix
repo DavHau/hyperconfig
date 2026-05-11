@@ -31,7 +31,6 @@
     profiles.default.extensions = with pkgs.vscode-extensions; [
       jnoortheen.nix-ide
       ms-pyright.pyright
-      eamodio.gitlens
       github.copilot
       github.copilot-chat
       tomoki1207.pdf
@@ -97,10 +96,10 @@
       # "editor.formatOnPaste" = true;
       "breadcrumbs.enabled" = true;
       "terminal.integrated.scrollback" = 10000;
-      # git
-      "git.confirmSync" = false;
+      # git (built-in integration disabled)
+      "git.enabled" = false;
       "git.autofetch" = false;
-      "magit.code-path" = "codium";
+      "scm.diffDecorations" = "none";
       "nix.enableLanguageServer" = true;
       "nix.serverPath" = "nil";
       "rust-analyzer.check.command" = "clippy";
