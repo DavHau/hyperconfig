@@ -20,6 +20,7 @@ in
     ./niri.nix
     ./greetd.nix
     ./pi.nix
+    ./omr.nix
     ./proton-vpn.nix
     ./vpn.nix
     ./home-manager.nix
