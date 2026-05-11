@@ -374,11 +374,11 @@
         "voxtype": "voxtype"
       },
       "locked": {
-        "lastModified": 1778275604,
-        "narHash": "sha256-pr0BIONzp6T5b9duR+rMXJ45MJowWk9sp0hTkbvCnNY=",
+        "lastModified": 1778513569,
+        "narHash": "sha256-+RNbHjwFg3urkPVHgS0QjZTSPYnrqv2GH9214qo35Pw=",
         "owner": "generational-infrastructure",
         "repo": "distro",
-        "rev": "a80828ae389ca27a5f35c37bdd44e2e8fb8726fd",
+        "rev": "7be7e8d84a150a79bfcb4cfb6e14090bc4c5ebcc",
         "type": "github"
       },
       "original": {
@@ -1830,15 +1830,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1777579777,
-        "narHash": "sha256-jwHDgDe5CLncnOly3mgh/xDYbh5QYHnufA+fmmP0Rvw=",
+        "lastModified": 1778510679,
+        "narHash": "sha256-l5Uj5LqMPOETgLANEnygd/incn9uSqeU8R+y55J3lDE=",
         "owner": "pinpox",
         "repo": "opencrow",
-        "rev": "d83140d2e38c1f7dd3d49c80a4e9cf09841dffd6",
+        "rev": "6e2432b40ddbff1c2ca9d568ed069d9763f099a6",
         "type": "github"
       },
       "original": {
         "owner": "pinpox",
+        "ref": "pull/67/head",
         "repo": "opencrow",
         "type": "github"
       }
