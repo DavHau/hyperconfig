@@ -100,6 +100,7 @@
       "git.enabled" = false;
       "git.autofetch" = false;
       "scm.diffDecorations" = "none";
+      "scm.defaultViewMode" = "tree";
       "nix.enableLanguageServer" = true;
       "nix.serverPath" = "nil";
       "rust-analyzer.check.command" = "clippy";
