@@ -374,12 +374,10 @@
         "voxtype": "voxtype"
       },
       "locked": {
-        "lastModified": 1778529525,
-        "narHash": "sha256-mKSi6mDxU40wuDn2NCGNo+biSg+w74uo4+t8xoQiCRA=",
-        "owner": "generational-infrastructure",
-        "repo": "distro",
-        "rev": "5ea2ee1303e5c270ce47324242ae9451833695f1",
-        "type": "github"
+        "lastModified": 1778571018,
+        "narHash": "sha256-TwCarzCRuOY7CdCIYygDRF5aCorHbYDUfI1b7fPWdD4=",
+        "path": "/home/grmpf/synced/projects/distro",
+        "type": "path"
       },
       "original": {
         "owner": "generational-infrastructure",
