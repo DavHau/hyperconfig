@@ -51,6 +51,11 @@
     working copy now contains. Do this as the final step of the change, not
     at the start.
 
+    At the start of every new session, and before writing any files when new
+    changes are about to be made, first ensure the current `jj` commit has a
+    description (set one with `jj describe -m "..."` if it is empty), then
+    start a new commit with `jj new` before making the edits.
+
     ## Dependency Source Code
 
     When you need to understand how any dependency works, always get its source code rather than guessing or relying on documentation alone.
