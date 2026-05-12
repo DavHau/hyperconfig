@@ -43,7 +43,7 @@ in
       ];
       serviceConfig.Type = "oneshot";
       script = lib.optionalString (cfg.ipv4Entries != []) ''
-        ipv4=$(curl -4 --silent --fail ifconfig.co)
+        ipv4=$(curl -4 --silent --fail https://ipv4.icanhazip.com)
         for entry in ${toString cfg.ipv4Entries}; do
           curl "https://api.porkbun.com/api/json/v3/dns/editByNameType/''${entry}" -d "
             {
@@ -55,7 +55,7 @@ in
         done
       ''
       + lib.optionalString (cfg.ipv6Entries != []) ''
-        ipv6=$(curl -6 --silent --fail ifconfig.co)
+        ipv6=$(curl -6 --silent --fail https://ipv6.icanhazip.com)
         for entry in ${toString cfg.ipv6Entries}; do
           curl "https://api.porkbun.com/api/json/v3/dns/editByNameType/''${entry}" -d "
             {
