@@ -39,22 +39,37 @@
     ## Version Control
 
     Use `jj` (Jujutsu) instead of `git` for all version control operations.
-    If the current project does not have a `.jj` directory, initialize it with `jj git init --colocate` before proceeding.
+    If the current project does not have a `.jj` directory, initialize it with
+    `jj git init --colocate` before proceeding.
+
+    ### Mandatory per-task workflow
+
+    You **MUST** follow these steps for every task that modifies files. No
+    exceptions. The task is **NOT** complete until step 4 is done.
+
+    1. **Before any file write**, run `jj st` and `jj log -r @ --no-graph`.
+       - If the current working-copy commit (`@`) has no description AND
+         contains changes that are not yours, stop and ask the user.
+       - If the current `@` is your previous finished task (has a description
+         and committed changes), run `jj new` to start a fresh commit.
+       - If the current `@` is empty or already your in-progress work, reuse it.
+    2. Make the edits.
+    3. Verify the change (build/test as appropriate).
+    4. **Before yielding back to the user**, you **MUST** run
+       `jj describe -m "<concise summary of what changed>"` on the current
+       working-copy commit. This is not optional and not "later" — it is the
+       last tool call of the task, after verification, before your final
+       message. A task with an undescribed `@` commit is an incomplete task.
+
+    Yielding without running `jj describe` is a contract violation equivalent
+    to leaving a TODO in shipped code.
+
+    ### Amending older commits
 
     When formatting or amending older commits:
     1. `jj new <commit>` to create a new working copy on top of the target commit.
     2. Make the formatting/fix changes.
     3. `jj squash` to fold changes into the parent (the target commit).
-
-    After finishing any change, always update the description of the current
-    commit with `jj describe -m "..."` so the message reflects what the
-    working copy now contains. Do this as the final step of the change, not
-    at the start.
-
-    At the start of every new session, and before writing any files when new
-    changes are about to be made, first ensure the current `jj` commit has a
-    description (set one with `jj describe -m "..."` if it is empty), then
-    start a new commit with `jj new` before making the edits.
 
     ## Dependency Source Code
 
