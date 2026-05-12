@@ -94,7 +94,6 @@
   # dyndns
   services.porkbun.ipv4Entries = [
     "bruch-bu.de/A/casa"
-    "bruch-bu.de/A/playa"
   ];
   services.porkbun.ipv6Entries = [
     "bruch-bu.de/AAAA/casa"
