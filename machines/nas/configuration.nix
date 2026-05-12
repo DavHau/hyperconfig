@@ -14,7 +14,6 @@
       ../../modules/nixos/role-parasit.nix
       ../../modules/nixos/role-sshuttle-server
       ../../modules/nixos/role-iodine/default.nix
-      ../../modules/nixos/dyndns-porkbun.nix
       ../../modules/nixos/nix-caches.nix
       ./automount
       ./hardware-configuration.nix
@@ -90,12 +89,6 @@
     screen
     vim
   ];
-
-  # dyndns
-  services.porkbun.ipv6Entries = [
-    "bruch-bu.de/AAAA/casa"
-  ];
-
   # Open ports in the firewall.
   # networking.firewall.allowedTCPPorts = [ ... ];
   # networking.firewall.allowedUDPPorts = [ ... ];
