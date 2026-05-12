@@ -263,12 +263,18 @@ let
           _attrs = { hotkey-overlay-title = "Reload Noctalia"; };
         };
 
+        # Toggle opencrow AI chat via noctalia plugin
+        "Mod+A" = {
+          spawn = [ "noctalia-shell" "ipc" "call" "plugin:opencrow-chat" "toggle" ];
+          _attrs = { hotkey-overlay-title = "Toggle AI Chat"; };
+        };
+
         # Brightness
         "XF86MonBrightnessDown" = { spawn = [ "brightnessctl" "set" "5%-" "-e" ]; };
         "XF86MonBrightnessUp"   = { spawn = [ "brightnessctl" "set" "5%+" "-e" ]; };
 
         # Voice-to-text (voxtype toggle: press to start/stop recording)
-        "Mod+Space" = {
+        "Mod+S" = {
           spawn = [ "voxtype" "record" "toggle" ];
           _attrs = { hotkey-overlay-title = "Voice to Text: voxtype"; };
         };
