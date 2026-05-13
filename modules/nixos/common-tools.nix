@@ -9,6 +9,7 @@
       file
       git
       htop
+      python3
       screen
       vim
       ;
