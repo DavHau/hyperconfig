@@ -19,6 +19,8 @@ let
       ];
       right = [
         { id = "Tray"; }
+        { id = "Network"; }
+        { id = "Bluetooth"; }
         { id = "NotificationHistory"; }
         {
           id = "Battery";
@@ -41,8 +43,6 @@ let
   };
 in
 {
-  services.network-manager-applet.enable = true;
-
   services.swayidle = {
     enable = true;
     events = {
