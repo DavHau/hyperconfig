@@ -180,6 +180,19 @@ in {
                 };
               };
             };
+            wg-edi = {
+              module.name = "wireguard";
+              module.input = "clan-core";
+              roles.controller.machines.edi.settings = {
+                endpoint = "casa.bruch-bu.de";
+                # Different port from wg-casa (which lives on the same NAT/WAN IP)
+                port = 51821;
+              };
+              roles.peer.machines = lib.genAttrs [
+                "amy" "bam" "cat" "cm-pi" "dom" "joy" "manu-nas" "nas"
+                "sir" "test" "tossa-pi" "vit" "v-machine" "installer"
+              ] (_: { });
+            };
             # easytier
             # dave = {
             #   module.name = "easytier";
