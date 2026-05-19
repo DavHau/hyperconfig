@@ -106,6 +106,11 @@
 
     **NEVER** run `find` on the top-level `/nix/store` directory. It contains millions of entries and will hang or time out. If you need to locate a file inside a specific store path, use the full store path (e.g. `find /nix/store/<hash>-<name>/`).
 
+    **NEVER** run `find` on `/` or other large filesystem roots. It will hang or time out. To locate source code or definitions, prefer in order:
+    1. `nix eval` (e.g. `nix eval --raw nixpkgs#<pkg>.src` or `nix eval .#nixosConfigurations.<host>.config.<path>`) to resolve store paths or config values.
+    2. `git` / `jj` (e.g. `git grep`, `git ls-files`) inside the relevant repo.
+    3. `$HOME/projects/<project>` checkouts — clone there if missing and search the source tree directly.
+
     ## Running Unavailable Programs
 
     If a program is not currently installed, do NOT attempt to install it via `nix-env` or similar. Instead, use one of:
