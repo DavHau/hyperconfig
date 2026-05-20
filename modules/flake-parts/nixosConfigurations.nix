@@ -102,14 +102,15 @@ in {
             #   roles.server.settings.priority = 41;
             #   roles.client.tags.all = {};
             # };
-            dave-backup = {
-              module.name = "borgbackup";
-              module.input = "clan-core";
-              roles.server.machines.nas = {};
-              roles.client.machines.amy = {};
-              roles.client.settings.exclude = import ../backup-exclude.nix;
-              roles.server.settings.directory = "/pool11/enc/clan-backup";
-            };
+            # TODO: enable backups again
+            # dave-backup = {
+            #   module.name = "borgbackup";
+            #   module.input = "clan-core";
+            #   roles.server.machines.nas = {};
+            #   roles.client.machines.amy = {};
+            #   roles.client.settings.exclude = import ../backup-exclude.nix;
+            #   roles.server.settings.directory = "/pool11/enc/clan-backup";
+            # };
             sshd = {
               module.name = "sshd";
               module.input = "clan-core";
