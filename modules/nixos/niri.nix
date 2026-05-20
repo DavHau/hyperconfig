@@ -264,7 +264,7 @@ let
         };
 
         # Toggle AI chat via noctalia plugin
-        "Mod+A" = {
+        "Caps_Lock" = {
           spawn = [ "noctalia-shell" "ipc" "call" "plugin:pi-chat" "toggle" ];
           _attrs = { hotkey-overlay-title = "Toggle AI Chat"; };
         };

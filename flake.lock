@@ -376,8 +376,8 @@
         "voxtype": "voxtype"
       },
       "locked": {
-        "lastModified": 1779280704,
-        "narHash": "sha256-6P9ZMMqA6nP5EGV47GONCtDJDcHHlJYbS5T7TTBWbSY=",
+        "lastModified": 1779281212,
+        "narHash": "sha256-uBwd37cVnnea+1UwXFM7YUBOj5cK5jPWYwom2KUHt5k=",
         "path": "/home/grmpf/synced/projects/distro-1",
         "type": "path"
       },
