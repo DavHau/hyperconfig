@@ -1,4 +1,4 @@
-# Enable opencrow-local's OpenRouter provider.
+# Enable pi-chat's OpenRouter provider.
 #
 # The API key is stored as a clan var (`openrouter/apikey`), prompted on
 # `clan vars generate` and persisted in the clan secret store. The host
@@ -12,7 +12,7 @@
     prompts.apikey.persist = true;
   };
 
-  services.opencrow-local.openrouter = {
+  services.pi-chat.openrouter = {
     enable = true;
     apiKeyFile = config.clan.core.vars.generators.openrouter.files.apikey.path;
   };

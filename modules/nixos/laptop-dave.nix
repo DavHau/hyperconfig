@@ -7,7 +7,7 @@ in
     inputs.home-manager.nixosModules.default
     inputs.retiolum.nixosModules.retiolum
     inputs.distro.nixosModules.noctalia-plugin
-    ./opencrow-openrouter.nix
+    ./pi-chat-openrouter.nix
     ./common.nix
     ./common-tools.nix
     ./sbox.nix
