@@ -372,14 +372,13 @@
           "nixpkgs"
         ],
         "noctalia-shell": "noctalia-shell",
-        "opencrow": "opencrow",
         "treefmt-nix": "treefmt-nix_6",
         "voxtype": "voxtype"
       },
       "locked": {
-        "lastModified": 1778777302,
-        "narHash": "sha256-dW0JQAzQ16zPP4+RqBMqMHAGWTOkGHuynYciq2Eaz0I=",
-        "path": "/home/grmpf/synced/projects/distro",
+        "lastModified": 1779280704,
+        "narHash": "sha256-6P9ZMMqA6nP5EGV47GONCtDJDcHHlJYbS5T7TTBWbSY=",
+        "path": "/home/grmpf/synced/projects/distro-1",
         "type": "path"
       },
       "original": {
@@ -1690,11 +1689,11 @@
         "treefmt-nix": "treefmt-nix_5"
       },
       "locked": {
-        "lastModified": 1775957204,
-        "narHash": "sha256-d4CVRtAty2GzDYXx4xYQmR+nlOjjKovyprQfZhgLckU=",
+        "lastModified": 1778377995,
+        "narHash": "sha256-uUzHDHqQF1rdVNiTa05L0mML3/d7fpbAShjCRWxbrBQ=",
         "owner": "noctalia-dev",
         "repo": "noctalia-qs",
-        "rev": "68e82fe34c68ee839a9c37e3466820e266af0c86",
+        "rev": "d8327a723eed6dd9aebe8e0b162126f390e827df",
         "type": "github"
       },
       "original": {
@@ -1735,16 +1734,16 @@
         "noctalia-qs": "noctalia-qs"
       },
       "locked": {
-        "lastModified": 1776239934,
-        "narHash": "sha256-oGMYWsP0qthxQisirZc/r/vpdGTZrInwkh75AC714AE=",
+        "lastModified": 1778694557,
+        "narHash": "sha256-QszLpoDPD7JEv8B/w1U2u1ksBw/CYBDmwUTLhJrekF0=",
         "owner": "noctalia-dev",
         "repo": "noctalia-shell",
-        "rev": "d85ad414baffd12ea6cf4c88ae5def8e96ec3753",
+        "rev": "3abfa1fc09b62dc4cdeeb7b787886f075696f0b7",
         "type": "github"
       },
       "original": {
         "owner": "noctalia-dev",
-        "ref": "v4.7.6",
+        "ref": "v4.7.7",
         "repo": "noctalia-shell",
         "type": "github"
       }
@@ -1816,32 +1815,6 @@
       "original": {
         "owner": "NuschtOS",
         "repo": "search",
-        "type": "github"
-      }
-    },
-    "opencrow": {
-      "inputs": {
-        "nixpkgs": [
-          "distro",
-          "nixpkgs"
-        ],
-        "treefmt-nix": [
-          "distro",
-          "treefmt-nix"
-        ]
-      },
-      "locked": {
-        "lastModified": 1778510679,
-        "narHash": "sha256-l5Uj5LqMPOETgLANEnygd/incn9uSqeU8R+y55J3lDE=",
-        "owner": "pinpox",
-        "repo": "opencrow",
-        "rev": "6e2432b40ddbff1c2ca9d568ed069d9763f099a6",
-        "type": "github"
-      },
-      "original": {
-        "owner": "pinpox",
-        "ref": "pull/67/head",
-        "repo": "opencrow",
         "type": "github"
       }
     },

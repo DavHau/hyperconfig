@@ -15,7 +15,7 @@ let
       ];
       center = [
         { id = "Workspace"; }
-        { id = "plugin:opencrow-chat"; }
+        { id = "plugin:pi-chat"; }
       ];
       right = [
         { id = "Tray"; }
