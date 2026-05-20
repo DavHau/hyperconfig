@@ -39,8 +39,9 @@
     services.openssh.settings.KbdInteractiveAuthentication = lib.mkForce true;
     home-manager.backupFileExtension = "hm-backup";
 
-    # Use Alt as Mod key in VM (host captures Super)
-    niri.inputSettings.mod-key = "Alt";
+    # mod-key was set via the old hyperconfig niri.nix; distro's niri module
+    # writes /etc/niri/config.kdl directly. To restore VM-only Alt-as-mod
+    # configure distro's niri config knob or drop a niri config drop-in.
   };
 
   # required by zfs

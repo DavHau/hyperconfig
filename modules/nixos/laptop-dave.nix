@@ -6,7 +6,7 @@ in
   imports = [
     inputs.home-manager.nixosModules.default
     inputs.retiolum.nixosModules.retiolum
-    inputs.distro.nixosModules.noctalia-plugin
+    inputs.distro.nixosModules.distro
     ./pi-chat-openrouter.nix
     ./common.nix
     ./common-tools.nix
@@ -18,7 +18,14 @@ in
     # ./hyprspace
     ./nrb
     ./nix-caches.nix
-    ./niri.nix
+    # niri compositor + noctalia shell now come from distro.nixosModules.distro
+    # (above). The local ./niri.nix wired noctalia via niri's spawn-at-startup,
+    # which bypassed the systemd user unit — so anything set on
+    # systemd.user.services.noctalia-shell.environment (e.g. pi-chat's
+    # NOCTALIA_NOTIF_HISTORY_FILE redirect) never reached the running shell.
+    # Kept in-tree for reference until the distro-managed flow has been
+    # exercised on this host.
+    # ./niri.nix
     ./greetd.nix
     ./pi.nix
     ./omr.nix
@@ -68,7 +75,7 @@ in
     ./nix-gc.nix
     ./pueue.nix
     ./wdisplays.nix
-    inputs.distro.nixosModules.voxtype
+    # voxtype now arrives via inputs.distro.nixosModules.distro (above).
   ];
 
   nixpkgs.pkgs =

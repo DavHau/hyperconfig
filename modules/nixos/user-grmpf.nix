@@ -17,7 +17,12 @@
       ../home-manager/common.nix
       ../home-manager/htop
       ../home-manager/firefox.nix
-      ../home-manager/niri.nix
+      # home-manager/niri.nix wraps noctalia-shell with NOCTALIA_SETTINGS_FILE
+      # so a custom bar layout shows up; distro's noctalia-bar now owns the
+      # systemd unit and ExecStart, and the wrapper would race that launch.
+      # Kept in-tree to seed a future settings-file drop-in via
+      # systemd.user.services.noctalia-shell.environment.
+      # ../home-manager/niri.nix
       ../home-manager/fish-ai.nix
     ];
   };
