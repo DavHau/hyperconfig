@@ -31,9 +31,8 @@
     services.openssh.enable = true;
     home-manager.backupFileExtension = "hm-backup";
 
-    # mod-key was set via the old hyperconfig niri.nix; distro's niri module
-    # writes /etc/niri/config.kdl directly. To restore VM-only Alt-as-mod
-    # configure distro's niri config knob or drop a niri config drop-in.
+    # VM (host captures Super) → use Alt as niri's mod-key.
+    services.distro.niri.modKey = "Alt";
   };
 
   system.stateVersion = "25.11";
