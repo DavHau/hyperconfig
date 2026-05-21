@@ -104,9 +104,6 @@
     wrappers.url = "github:DavHau/wrappers/niri-systemd";
     wrappers.inputs.nixpkgs.follows = "nixpkgs";
 
-    noctalia.url = "github:noctalia-dev/noctalia-shell";
-    noctalia.inputs.nixpkgs.follows = "nixpkgs";
-
     distro.url = "github:generational-infrastructure/distro";
     distro.inputs.nixpkgs.follows = "nixpkgs";
     distro.inputs.llm-agents.follows = "llm-agents";

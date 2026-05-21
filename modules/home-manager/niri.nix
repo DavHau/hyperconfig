@@ -36,8 +36,8 @@ let
   settingsFile = (pkgs.formats.json { }).generate "noctalia-settings.json" settings;
   # Wrap noctalia-shell via lassulus/wrappers: point it at a store-path
   # settings.json via NOCTALIA_SETTINGS_FILE (honored by Commons/Settings.qml).
-  # pkgs.noctalia-shell carries distro's plugins-autoload patch via the
-  # `distro.overlays.noctalia` overlay wired into nixpkgs.
+  # pkgs.noctalia-shell carries distro's plugins-autoload patch via
+  # `nixosModules.noctalia`'s overlay (registered on nixpkgs.overlays).
   noctalia-shell = inputs.wrappers.lib.wrapPackage {
     inherit pkgs;
     package = pkgs.noctalia-shell;
