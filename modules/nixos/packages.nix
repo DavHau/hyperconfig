@@ -1,7 +1,6 @@
 { pkgs, inputs, ... }:
 {
   environment.systemPackages = with pkgs; [
-    # cmdline tools
     signal-desktop
     # default tools
     wget vim killall file pv gptfdisk screen gnumake python3 jq fx eza
@@ -78,7 +77,7 @@
     # media viewer
     vlc freetube
     # graphical tools
-    gimp inkscape
+    inkscape
     # darktable
     # 3d tools
     # freecad
