@@ -1,8 +1,10 @@
 {
   nix.settings.trusted-substituters = [
     "https://cache.clan.lol"
+    "http://pradille-nix.alternativebit.fr/"
   ];
   nix.settings.substituters = [
+    "http://pradille-nix.alternativebit.fr/"
     "https://cache.clan.lol"
   ];
   nix.settings.trusted-public-keys = [
