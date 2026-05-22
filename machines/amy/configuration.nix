@@ -24,16 +24,15 @@
     users.users.dave.hashedPassword = lib.mkForce null;
     users.users.dave.initialPassword = "dave";
 
-    virtualisation.qemu.options = [
-      "-device virtio-vga-gl"
-      "-display gtk,gl=on"
-    ];
+    # virtualisation.qemu.options = [
+    #   "-device virtio-vga-gl"
+    #   "-display gtk,gl=on"
+    # ];
     virtualisation.memorySize = 8192;
-    virtualisation.cores = 4;
 
-    virtualisation.forwardPorts = [
-      { from = "host"; host.port = 2222; guest.port = 22; }
-    ];
+    # virtualisation.forwardPorts = [
+    #   { from = "host"; host.port = 2222; guest.port = 22; }
+    # ];
     services.openssh.enable = true;
     services.openssh.settings.PasswordAuthentication = lib.mkForce true;
     services.openssh.settings.KbdInteractiveAuthentication = lib.mkForce true;
