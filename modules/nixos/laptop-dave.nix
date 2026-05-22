@@ -49,6 +49,7 @@ in
     ./alacritty.nix
     ./udiskie.nix
     ./bitwarden.nix
+    ./short-videos
     # ./envfs.nix
     # ./nix-heuristic-gc.nix
     ./ollama.nix
