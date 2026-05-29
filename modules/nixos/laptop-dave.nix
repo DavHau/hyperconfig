@@ -29,6 +29,7 @@ in
     ./greetd.nix
     ./pi.nix
     ./workmux.nix
+    ./cpu-powersave-cap.nix
     ./omr.nix
     ./proton-vpn.nix
     ./vpn.nix

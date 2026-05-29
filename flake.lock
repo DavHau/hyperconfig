@@ -380,10 +380,10 @@
         "voxtype": "voxtype"
       },
       "locked": {
-        "lastModified": 1780055975,
-        "narHash": "sha256-WgrJKSihQ1o7o8qQOiywVGduEfS3rrq31GxFrU2dLjU=",
-        "rev": "19a03e7f3fee245789d0de7036b9d32b9b620923",
-        "revCount": 173,
+        "lastModified": 1780063472,
+        "narHash": "sha256-CN3njreAZI0XaaHfNFuXn91a79dGJ23iTsqubDXCTXU=",
+        "rev": "a65f097979cea75fc9655f05ffe7f07c4762fe3c",
+        "revCount": 174,
         "type": "git",
         "url": "file:///home/grmpf/synced/projects/distro"
       },
