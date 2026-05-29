@@ -14,6 +14,12 @@
     modelRoles:
       default: anthropic/claude-opus-4-7:medium
   '';
+  workmux = inputs.llm-agents.packages.${sys}.workmux;
+  # workmux reads ~/.config/workmux/config.yaml; point it at omp (`pi`) instead
+  # of its built-in default agent (`claude`).
+  workmuxConfigFile = pkgs.writeText "workmux-config.yaml" ''
+    agent: pi
+  '';
   agentsFile = pkgs.writeText "AGENTS.md" ''
     # Global Agent Instructions
 
@@ -41,6 +47,29 @@
     Use `jj` (Jujutsu) instead of `git` for all version control operations.
     If the current project does not have a `.jj` directory, initialize it with
     `jj git init --colocate` before proceeding.
+
+    **Exception — inside a `git` worktree (e.g. one created by `workmux`): use
+    `git`, not `jj`.** A git worktree is not a jj workspace, and
+    `jj git init --colocate` fails inside one (`Cannot create a colocated jj
+    repo inside a Git worktree`). Detect this before touching version control:
+
+    - Run `git rev-parse --git-dir` and `git rev-parse --git-common-dir`. If they
+      resolve to **different** directories — the work tree's `.git` is a file
+      pointing into `.../.git/worktrees/<name>` — you are in a linked worktree.
+
+    When you are in a linked git worktree:
+    - Do **NOT** run `jj git init`, `jj new`, `jj describe`, or any `jj` command.
+    - Use `git` for everything: stage with `git add -A`, commit with
+      `git commit -m "<summary>"`. The "Mandatory per-task workflow" below does
+      **not** apply; your `git` commit is the completion record that replaces
+      `jj describe`.
+    - Do not hand-merge back to the base branch. Merging/cleanup is done with
+      `workmux merge` (or the `/skill:merge` skill); jj re-absorbs the change on
+      the main checkout side automatically.
+
+    In the **main checkout** (original repo: `.git` is a directory and
+    `git rev-parse --git-dir` equals `--git-common-dir`), keep using `jj` exactly
+    as described here. See "Parallel work with workmux" below.
 
     ### Mandatory per-task workflow
 
@@ -117,6 +146,35 @@
     - `nix-shell -p <package> --run '<command>'`
     - `nix shell nixpkgs#<package> -c <command>`
 
+    ## Parallel work with workmux
+
+    `workmux` runs multiple agents in parallel, each in its own **git worktree**
+    and tmux window. It is installed system-wide and configured to launch omp
+    (`pi`) as its agent. Its skills are installed into omp and discoverable.
+
+    Use it when a task splits into independent sub-tasks touching disjoint files,
+    or when the user asks to parallelize or delegate work.
+
+    Skills (read on demand via `skill://<name>`, or invoke with `/skill:<name>`):
+    - `workmux` — reference for the workmux CLI, config, and concepts.
+    - `worktree` — dispatch one or more tasks to fresh worktree agents
+      (fire-and-forget). You write prompt files and run `workmux add`; the
+      worktree agents do the implementation.
+    - `coordinator` — orchestrate worktree agents through their full lifecycle
+      (spawn, monitor, send follow-ups, merge).
+    - `merge`, `rebase`, `open-pr` — finish work from inside a worktree.
+
+    Core commands:
+    - `workmux add <name> -p "<prompt>"` — new worktree + window, launch omp with the prompt.
+    - `workmux add <name> -b -P <file>` — background dispatch, prompt read from a file.
+    - `workmux status` / `workmux wait` / `workmux capture` / `workmux send` — monitor and talk to agents.
+    - `workmux merge [<name>]` — merge the branch and clean up the worktree, window, and branch.
+
+    **Version control inside a worktree is `git`, not `jj`** — see the exception
+    under "Version Control" above. A worktree agent implements its task and
+    commits with `git`; it must not run `jj`. Do not recursively dispatch more
+    worktrees from inside a worktree agent unless the user explicitly asks.
+
     ${builtins.readFile ./caveman.md}
   '';
   omp-wrapped = inputs.wrappers.lib.wrapPackage {
@@ -128,6 +186,18 @@
       ln -sf ${configFile} "$config_dir/config.yml"
       ln -sf ${agentsFile} "$config_dir/AGENTS.md"
       ${lib.optionalString llama-swap-enabled ''ln -sf ${modelsFile} "$config_dir/models.yml"''}
+
+      # --- workmux integration ---
+      # Make omp discover workmux's skills + status extension, and point
+      # workmux's global config at `pi` (its built-in default is `claude`).
+      wm_cfg_dir="''${XDG_CONFIG_HOME:-$HOME/.config}/workmux"
+      mkdir -p "$config_dir/skills" "$config_dir/extensions" "$wm_cfg_dir"
+      for skill in ${workmux}/share/workmux/skills/*/; do
+        [ -d "$skill" ] || continue
+        ln -sfn "$skill" "$config_dir/skills/$(basename "$skill")"
+      done
+      ln -sf ${./workmux-status.ts} "$config_dir/extensions/workmux-status.ts"
+      ln -sf ${workmuxConfigFile} "$wm_cfg_dir/config.yaml"
     '';
   };
 in {

@@ -28,6 +28,7 @@ in
     # ./niri.nix
     ./greetd.nix
     ./pi.nix
+    ./workmux.nix
     ./omr.nix
     ./proton-vpn.nix
     ./vpn.nix
