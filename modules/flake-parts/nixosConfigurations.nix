@@ -60,6 +60,14 @@ in {
                 "7c29125877"
               ];
             };
+            zt-eu = {
+              module.name = "zerotier";
+              roles.peer.tags.all = {};
+              roles.controller.machines.edi = {};
+              roles.controller.settings.allowedIps = [
+                "7c29125877"
+              ];
+            };
             importer.roles.default.extraModules = [
               ../../modules/nixos/common.nix
             ];
