@@ -94,7 +94,7 @@
     sbox.url = "github:DavHau/sbox";
 
     llm-agents.url = "github:numtide/llm-agents.nix";
-    llm-agents.inputs.nixpkgs.follows = "nixpkgs";
+    # llm-agents.inputs.nixpkgs.follows = "nixpkgs";
     llm-agents.inputs.flake-parts.follows = "flake-parts";
 
     mics-skills.url = "github:Mic92/mics-skills";
