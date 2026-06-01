@@ -32,7 +32,7 @@
     home-manager.backupFileExtension = "hm-backup";
 
     # VM (host captures Super) → use Alt as niri's mod-key.
-    services.distro.niri.modKey = "Alt";
+    services.spaces.niri.modKey = "Alt";
   };
 
   system.stateVersion = "25.11";
