@@ -12,7 +12,7 @@
   '';
   configFile = pkgs.writeText "config.yml" ''
     modelRoles:
-      default: anthropic/claude-opus-4-7:medium
+      default: anthropic/claude-opus-4-8:high
   '';
   workmux = inputs.llm-agents.packages.${sys}.workmux;
   # workmux reads ~/.config/workmux/config.yaml; point it at omp (`pi`) instead
