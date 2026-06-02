@@ -930,6 +930,27 @@
         "type": "github"
       }
     },
+    "home-manager_2": {
+      "inputs": {
+        "nixpkgs": [
+          "spaces",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1780099287,
+        "narHash": "sha256-efIPwVGtIWIjWcznhaop6XN6HxnOL8800hF6CBNvlqQ=",
+        "owner": "nix-community",
+        "repo": "home-manager",
+        "rev": "7d8127d308c3fb9664f7e643eec944be74ebb37d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "home-manager",
+        "type": "github"
+      }
+    },
     "hyprspace": {
       "inputs": {
         "flake-parts": [
@@ -2017,6 +2038,7 @@
     "spaces": {
       "inputs": {
         "blueprint": "blueprint_2",
+        "home-manager": "home-manager_2",
         "llm-agents": [
           "llm-agents"
         ],
@@ -2028,10 +2050,10 @@
         "voxtype": "voxtype"
       },
       "locked": {
-        "lastModified": 1780324023,
-        "narHash": "sha256-bF5U3avIWmDLCVQxK87wtYdXvUd6/dJzaqLpE4+z9eY=",
-        "rev": "d44f541321fa5c8cc0724d6c8a86d84e2a11825c",
-        "revCount": 196,
+        "lastModified": 1780413936,
+        "narHash": "sha256-WHhvnzAc15mN6F5+AGevjah/pcFGETKyXQeVlQt2D6Y=",
+        "rev": "06e1a3210e999dc20e07c05badb06ddf392ca173",
+        "revCount": 204,
         "type": "git",
         "url": "file:///home/grmpf/synced/projects/distro"
       },
