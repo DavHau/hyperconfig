@@ -13,6 +13,8 @@
   configFile = pkgs.writeText "config.yml" ''
     modelRoles:
       default: anthropic/claude-opus-4-8:high
+    startup:
+      quiet: true
   '';
   workmux = inputs.llm-agents.packages.${sys}.workmux;
   # workmux reads ~/.config/workmux/config.yaml; point it at omp (`pi`) instead
