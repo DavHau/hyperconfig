@@ -183,7 +183,7 @@ in {
                 };
                 settings = {
                   # Public endpoint where this controller can be reached
-                  endpoint = "wg.bruch-bu.de";
+                  endpoint = "wg-casa.bruch-bu.de";
                   # Optional: Change the UDP port (default: 51820)
                   port = 51820;
                 };
