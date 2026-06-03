@@ -1,8 +1,57 @@
 #!/usr/bin/env python3
 
+import os
+import sys
 from subprocess import run
 import argparse
 import json
+
+
+def _ensure_clan_lib() -> None:
+    """Make ``clan_lib`` importable when run as a plain executable.
+
+    The system ``python3`` has no access to clan-cli's bundled ``clan_lib``.
+    Locate the ``clan`` wrapper on ``PATH``, read the interpreter and
+    site-package dirs baked into it, then re-exec this script under that
+    interpreter with those dirs on ``PYTHONPATH``.
+    """
+    try:
+        import clan_lib  # noqa: F401
+        return
+    except ModuleNotFoundError:
+        pass
+
+    if os.environ.get("_GWC_REEXEC") == "1":
+        sys.exit("error: clan_lib still missing after re-exec; is clan-cli installed?")
+
+    import re
+    import shutil
+
+    clan = shutil.which("clan")
+    if clan is None:
+        sys.exit("error: 'clan' not on PATH. Run inside `nix develop` or install clan-cli.")
+    wrapper = os.path.join(os.path.dirname(os.path.realpath(clan)), ".clan-wrapped")
+    try:
+        src = open(wrapper, encoding="utf-8").read()
+    except OSError as e:
+        sys.exit(f"error: cannot read clan wrapper {wrapper}: {e}")
+
+    lines = src.splitlines()
+    if not lines or not lines[0].startswith("#!"):
+        sys.exit(f"error: unexpected clan wrapper format: {wrapper}")
+    interp = lines[0][2:].strip()
+    site_dirs = re.findall(r"'(/nix/store/[^']*?site-packages)'", src)
+    if not site_dirs:
+        sys.exit(f"error: no site-packages found in clan wrapper: {wrapper}")
+
+    env = dict(os.environ)
+    env["_GWC_REEXEC"] = "1"
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = os.pathsep.join(site_dirs + ([existing] if existing else []))
+    os.execve(interp, [interp, os.path.abspath(__file__), *sys.argv[1:]], env)
+
+
+_ensure_clan_lib()
 
 from clan_lib.flake import Flake
 from clan_lib.nix import nix_shell
@@ -78,23 +127,37 @@ def select_from_list(items: list[str], prompt: str, single_item_message: str) ->
             print("\nExiting...")
             exit(1)
 
-def get_endpoint(controller: str, instance: str) -> str:
-    endpoint = flake.select(
-        f"clan.clanInternals.inventoryClass.distributedServices.servicesEval.config.mappedServices.\"<clan-core>-wireguard\".instances.{instance}.roles.controller.machines.{controller}.finalSettings.config.endpoint"
-    )
-    return endpoint
+def get_wireguard_service_ids() -> list[str]:
+    """Distributed-service ids for every WireGuard instance in the clan.
 
-def get_port(controller: str, instance: str) -> int:
-    port_str = flake.select(
-        f"clan.clanInternals.inventoryClass.distributedServices.servicesEval.config.mappedServices.\"<clan-core>-wireguard\".instances.{instance}.roles.controller.machines.{controller}.finalSettings.config.port"
-    )
-    return int(port_str)
+    The id is ``<input>-wireguard`` where ``<input>`` is the flake input the
+    module came from (``<clan-core>`` when unset). A clan may run several
+    wireguard instances sourced from different inputs (e.g. a vendored
+    ``self`` copy alongside the upstream ``clan-core`` one), so collect all.
+    """
+    modules = flake.select("clan.inventory.instances.*.module")
+    ids = {
+        f'{module.get("input") or "<clan-core>"}-wireguard'
+        for module in modules.values()
+        if module.get("name") == "wireguard"
+    }
+    return sorted(ids)
+
 
 def get_instances_data() -> dict:
-    """Get the complete instances data structure."""
-    return flake.select(
-        "clan.clanInternals.inventoryClass.distributedServices.servicesEval.config.mappedServices.\"<clan-core>-wireguard\".instances.*.roles.controller.machines.*.finalSettings.config"
-    )
+    """Controller settings per instance: ``{instance: {controller: config}}``.
+
+    Merged across all wireguard distributed-service ids.
+    """
+    data: dict = {}
+    for service_id in get_wireguard_service_ids():
+        data.update(
+            flake.select(
+                f'clan._services.allServices."{service_id}"'
+                ".instances.*.roles.controller.machines.*.finalSettings.config"
+            )
+        )
+    return data
 
 
 def get_controllers_for_instance(instances_data: dict, instance: str) -> list[str]:
@@ -162,11 +225,12 @@ def main() -> None:
     prefix_cmd = ["clan", "vars", "get", controller, f"wireguard-network-{instance}/prefix"]
     prefix = run(prefix_cmd, capture_output=True, text=True, check=True).stdout.strip()
 
-    endpoint = get_endpoint(controller, instance)
-    port = get_port(controller, instance)
+    controller_config = instances_data[instance][controller]
+    endpoint = controller_config["endpoint"]
+    port = controller_config["port"]
 
     # Get peer-specific settings from instances_data
-    peer_config = instances_data[instance][controller]['externalPeers'][peer]
+    peer_config = controller_config['externalPeers'][peer]
     allow_internet_access = peer_config.get('allowInternetAccess', True)
 
     # Get peer's IPv4 address (can be overridden by command line arg)
@@ -174,7 +238,6 @@ def main() -> None:
     ipv4_address = args.ipv4_address if args.ipv4_address else peer_ipv4
 
     # Get IPv4 network address from controller config (for AllowedIPs)
-    controller_config = instances_data[instance][controller]
     ipv4_network = controller_config.get('ipv4', {}).get('address', '')
 
     config = make_config(
