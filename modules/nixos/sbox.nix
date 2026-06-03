@@ -27,9 +27,11 @@
       "$HOME/.config/Code" = {};
       "$HOME/synced/projects" = {};
       "$HOME/projects" = {};
-      # cctl: DB (rw) + tmux socket for session management
+      # cctl: DB + notify.sock (rw) for the in-sandbox agent hooks. The host
+      # tmux socket dir is intentionally NOT bound: sbox gives /tmp its own
+      # tmpfs, so a tmux server started inside a sandbox stays private to that
+      # sandbox rather than joining (and exposing) the host's tmux server.
       "$HOME/.config/cctl" = {};
-      "/tmp/tmux-$UID" = {};
     };
     bindReadOnly = {
       "$HOME/.pi/agent/skills" = {};

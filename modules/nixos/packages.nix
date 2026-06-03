@@ -3,7 +3,7 @@
   environment.systemPackages = with pkgs; [
     signal-desktop
     # default tools
-    wget vim killall file pv gptfdisk screen gnumake python3 jq fx eza
+    wget vim killall file pv gptfdisk screen tmux gnumake python3 jq fx eza
     # version control
     gti gitg github-cli tig ghq h github-cli lazygit git-absorb jjui
     # search
