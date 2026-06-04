@@ -7,6 +7,7 @@
     ../../modules/nixos/dyndns-porkbun.nix
     ./reverse-proxy.nix
     ./nginx-file-server.nix
+    ./reverse-proxy-maker.nix
     ./users.nix
   ];
 
