@@ -1,0 +1,194 @@
+# Gosund SW9 — 2-button roller-shutter switch (living room / Wohnzimmer).
+#
+# Migrated from Tasmota 14.0.0 running on the device at http://192.168.10.183
+#   Tasmota DeviceName "Tossa Wohnzimmer", Topic "rolladen-WZ", MAC 2C:F4:32:88:34:E7.
+#   Full Tasmota backup + status snapshot kept alongside this file.
+#
+# Hardware: Gosund SW9 (ESP8266EX). Pin map taken from the device's Tasmota template
+#   {"NAME":"Gosund SW9","GPIO":[160,0,0,0,0,161,0,0,225,288,224,0,0,0],"FLAG":0,"BASE":18}
+# and cross-checked against devices.esphome.io/devices/gosund-sw9 + blakadder:
+#   GPIO0  Button 1 (OPEN)   active-low, internal pull-up
+#   GPIO2  red LED 1         active-low  (unused by the Tasmota config; left unconfigured)
+#   GPIO4  red LED 2         active-low  (unused by the Tasmota config; left unconfigured)
+#   GPIO5  Button 2 (CLOSE)  active-low, internal pull-up
+#   GPIO12 Relay 2 -> CLOSE  active-high
+#   GPIO13 green status LED  active-low  *** see note below ***
+#   GPIO14 Relay 1 -> OPEN   active-high
+#
+# NOTE on GPIO13: the device's Tasmota template declared it as (non-inverted) "Led1",
+#   but the real hardware LED is active-low (blakadder = "LedLinki", esphome.io = inverted).
+#   Using inverted:true here is the hardware-correct polarity.
+#
+# Tasmota shutter settings reproduced (Status 0 / ShutterMode etc.):
+#   ShutterMode 1, ShutterRelay1 1  -> relay1 = open/up, relay2 = close/down (ShutterInvert 0)
+#   ShutterOpenDuration1  22.8 s
+#   ShutterCloseDuration1 22.3 s
+#   Interlock ON, Groups 1,2        -> the two relays are mutually exclusive (see interlock below)
+#   PowerOnState 3 (restore)        -> relays boot OFF; cover position restored from flash
+#   Switch1/2 = SwitchMode 3 (pushbutton): same-direction press = stop, opposite/idle = move
+#
+# NOT reproduced: Tasmota's non-linear travel calibration (50% reached at 66% of travel,
+#   ShutterCalibration1 "1460 310 3230 900 1000", ShutterSetHalfway1 66). time_based covers
+#   are linear; full open/close are exact, only intermediate position % is linearised.
+
+substitutions:
+  name: rolladen-wz
+  friendly_name: "Rolladen Wohnzimmer"
+  open_duration: 22.8s
+  close_duration: 22.3s
+  # Dead-time inserted before reversing the motor (only applied on a direction change).
+  reverse_delay: 300ms
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp8266:
+  board: esp01_1m
+  restore_from_flash: true  # persist cover position across power loss (Tasmota PowerOnState 3)
+
+logger:
+
+api:
+  encryption:
+    key: !secret key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# Boot-loop recovery — the anti-soft-brick safety net for this flash. If a freshly
+# flashed firmware fails to stay up for 1 min on 10 consecutive boots, the device drops
+# into safe mode (WiFi + OTA only, no GPIO/cover logic) so a fixed firmware can be pushed
+# over the air without opening the device for serial recovery. (The "comment at the top"
+# of the ESPHome Tasmota-migration guide — `ota: allow_partition_access: true` — is
+# ESP32/safeboot-only and is intentionally NOT set here: this is an ESP8266, where it is
+# invalid; image size + SetOption78 1 + safe_mode are the relevant safeguards instead.)
+safe_mode:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  min_auth_mode: WPA2    # GL-iNet supports WPA2/AES; avoids the insecure WPA/TKIP default
+  power_save_mode: none  # mains-powered control device: favour responsiveness/reliability
+  ap:
+    ssid: ${name}
+    password: !secret ap_password
+
+captive_portal:
+
+web_server:
+  port: 80
+
+# Green status LED (GPIO13, active-low): off in normal operation, lights/blinks on
+# WiFi/API problems — comparable to the Tasmota status LED behaviour.
+status_led:
+  pin:
+    number: GPIO13
+    inverted: true
+
+# Shutter motor relays. `interlock` mirrors Tasmota "Interlock ON, Groups 1,2": at most one
+# relay may be energised at a time. On a direction reversal time_based turns on the new relay
+# while the old one is still on; interlock then turns the old one off and waits `reverse_delay`
+# before energising the new one, giving the motor a safe dead-time. Hidden (internal) so the
+# cover is the only exposed control surface and both relays can never be driven manually.
+switch:
+  - platform: gpio
+    id: relay_open
+    pin: GPIO14  # Relay 1 = OPEN / UP
+    interlock: &shutter_interlock [relay_open, relay_close]
+    interlock_wait_time: ${reverse_delay}
+    restore_mode: ALWAYS_OFF
+    internal: true
+  - platform: gpio
+    id: relay_close
+    pin: GPIO12  # Relay 2 = CLOSE / DOWN
+    interlock: *shutter_interlock
+    interlock_wait_time: ${reverse_delay}
+    restore_mode: ALWAYS_OFF
+    internal: true
+
+cover:
+  - platform: time_based
+    id: shutter
+    name: Rolladen
+    device_class: shutter
+    open_action:
+      - switch.turn_on: relay_open
+    open_duration: ${open_duration}
+    close_action:
+      - switch.turn_on: relay_close
+    close_duration: ${close_duration}
+    stop_action:
+      - switch.turn_off: relay_open
+      - switch.turn_off: relay_close
+
+binary_sensor:
+  # Top button (GPIO0): OPEN. Pressing it again while opening stops the shutter; pressing it
+  # while closing reverses to open — matching the Tasmota pushbutton/shutter behaviour.
+  - platform: gpio
+    id: button_open
+    name: Button Open
+    entity_category: diagnostic
+    pin:
+      number: GPIO0
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    filters:
+      - delayed_on: 50ms   # Tasmota SwitchDebounce 50 ms
+      - delayed_off: 50ms
+    on_press:
+      - if:
+          condition:
+            lambda: 'return id(shutter).current_operation == cover::COVER_OPERATION_OPENING;'
+          then:
+            - cover.stop: shutter
+          else:
+            - cover.open: shutter
+
+  # Bottom button (GPIO5): CLOSE. Press again while closing = stop; press while opening = reverse.
+  - platform: gpio
+    id: button_close
+    name: Button Close
+    entity_category: diagnostic
+    pin:
+      number: GPIO5
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 50ms
+    on_press:
+      - if:
+          condition:
+            lambda: 'return id(shutter).current_operation == cover::COVER_OPERATION_CLOSING;'
+          then:
+            - cover.stop: shutter
+          else:
+            - cover.close: shutter
+
+  - platform: status
+    name: Status
+
+sensor:
+  - platform: wifi_signal
+    name: WiFi Signal dB
+    id: wifi_signal_db
+    update_interval: 60s
+    entity_category: diagnostic
+
+  - platform: copy
+    source_id: wifi_signal_db
+    name: WiFi Signal Percent
+    filters:
+      - lambda: return min(max(2 * (x + 100.0), 0.0), 100.0);
+    unit_of_measurement: "%"
+    entity_category: diagnostic
+
+  - platform: uptime
+    name: Uptime
+    entity_category: diagnostic

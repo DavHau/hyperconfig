@@ -1,0 +1,7 @@
+secrets.yaml
+.esphome/
+# Tasmota config backup contains (lightly obfuscated) WiFi/MQTT credentials.
+*.dmp
+build/
+# Transiently downloaded by flash.sh during a 2-step migration.
+tasmota-minimal.bin*
