@@ -1,0 +1,20 @@
+# Gosund SW9 roller-shutter — bedroom / Schlafzimmer.
+#
+# Migrated from Tasmota 14.0.0 at http://192.168.10.177
+#   DeviceName "Tossa Schlafzimmer", Topic "rolladen-SZ", hostname rolladen-SZ-0154.
+#   (Tasmota FriendlyName1 was a leftover default "Tasmota Gaestezimmer"; topic, hostname
+#   and device name all say SZ/Schlafzimmer, so the cover is named Rolladen Schlafzimmer.)
+#   Tasmota backup (Config_rolladen_SZ_*.dmp) + snapshot (tasmota-config-snapshot-sz.json)
+#   kept alongside this file.
+#
+# Same hardware as rolladen-wz (Gosund SW9). Only the travel times differ
+# (Tasmota ShutterOpenDuration1 18.0 s / ShutterCloseDuration1 17.6 s).
+
+substitutions:
+  name: rolladen-sz
+  friendly_name: "Rolladen Schlafzimmer"
+  open_duration: 18.0s
+  close_duration: 17.6s
+
+packages:
+  generic: !include rolladen-generic.yaml
