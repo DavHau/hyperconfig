@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Migrate the Gosund SW9 from Tasmota to ESPHome over the air.
 #
+# Usage:
+#   ./flash.sh                                              # default: rolladen-wz @ 192.168.10.183
+#   DEVICE_IP=192.168.10.177 ESPHOME_NAME=rolladen-sz ./flash.sh   # the bedroom unit
+# Builds <ESPHOME_NAME>.yaml (which !includes rolladen-generic.yaml) and flashes DEVICE_IP.
+#
 # Resumable. Detects starting state automatically:
 #   - full Tasmota (e.g. release-tasmota-DE)  -> may need the 2-step path (see below)
 #   - tasmota-minimal already installed       -> skip straight to ESPHome upload
@@ -36,9 +41,14 @@
 set -euo pipefail
 
 # --- knobs (env-overridable) -----------------------------------------------
-DEVICE_IP="${DEVICE_IP:-192.168.10.183}"
-EXPECTED_HOSTNAME_PREFIX="${EXPECTED_HOSTNAME_PREFIX:-rolladen-WZ}"
-ESPHOME_NAME="${ESPHOME_NAME:-rolladen-wz}"
+# Per-device selection — override these two for a different unit, e.g.:
+#   DEVICE_IP=192.168.10.177 ESPHOME_NAME=rolladen-sz ./flash.sh
+ESPHOME_NAME="${ESPHOME_NAME:-rolladen-wz}"   # which <name>.yaml to build + flash
+DEVICE_IP="${DEVICE_IP:-192.168.10.183}"      # the device's current IP
+# Safety guard: the running Tasmota hostname must start with this (case-insensitive) so we
+# never flash the wrong box. Defaults to ESPHOME_NAME — Tasmota hostnames here are e.g.
+# rolladen-WZ-5351 / rolladen-SZ-0154, a case-insensitive prefix of the node name.
+EXPECTED_HOSTNAME_PREFIX="${EXPECTED_HOSTNAME_PREFIX:-$ESPHOME_NAME}"
 TASMOTA_MINIMAL_URL="${TASMOTA_MINIMAL_URL:-http://ota.tasmota.com/tasmota/release/tasmota-minimal.bin.gz}"
 # How much headroom (bytes) to require above the .gz size when deciding whether the
 # direct upload fits. Tasmota's Update.begin reserves a few KB; 32 KB is a comfortable
@@ -237,8 +247,9 @@ case "$MODE" in
     ;;
   full)
     status=$(cm "Status 0")
-    grep -q "\"Hostname\":\"$EXPECTED_HOSTNAME_PREFIX" <<<"$status" \
-      || die "device hostname does not start with '$EXPECTED_HOSTNAME_PREFIX' — refusing to flash the wrong device"
+    host=$(grep -oE '"Hostname":"[^"]+"' <<<"$status" | head -n1 | cut -d'"' -f4)
+    [[ "${host,,}" == "${EXPECTED_HOSTNAME_PREFIX,,}"* ]] \
+      || die "device hostname '$host' does not start with '$EXPECTED_HOSTNAME_PREFIX' — refusing to flash the wrong device"
     ver=$(grep -oE '"Version":"[^"]+"' <<<"$status" | head -n1 | cut -d'"' -f4)
     major=$(grep -oE '^[0-9]+' <<<"$ver" || echo 0)
     [[ "$major" -ge 8 ]] \
