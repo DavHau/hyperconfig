@@ -1,0 +1,24 @@
+# Gosund SW9 roller-shutter — guest room / Gästezimmer.
+#
+# Migrated from Tasmota 13.0.0.1 (tasmota-GOSUND_SW9_DE) at http://192.168.10.155.
+#   The switch was previously in the dining room: its Tasmota identity is still
+#   DeviceName "Tossa Esszimmer", Topic "rolladen-EZ", hostname rolladen-EZ-7292.
+#   It has since been moved to the guest room, so the ESPHome node is named gz/Gästezimmer.
+#   Tasmota backup (Config_rolladen_EZ_*.dmp) + snapshot (tasmota-config-snapshot-gz.json)
+#   kept alongside this file.
+#
+# Same hardware as the other shutters (Gosund SW9). Travel times are the ones already
+# programmed in Tasmota (ShutterOpenDuration1 17.8 s / ShutterCloseDuration1 17.5 s).
+#
+# Flashing note: the device still reports the old Tasmota hostname (rolladen-EZ-*), so
+# override the safety guard when running flash.sh:
+#   DEVICE_IP=192.168.10.155 ESPHOME_NAME=rolladen-gz EXPECTED_HOSTNAME_PREFIX=rolladen-EZ ./flash.sh
+
+substitutions:
+  name: rolladen-gz
+  friendly_name: "Rolladen Gästezimmer"
+  open_duration: 17.8s
+  close_duration: 17.5s
+
+packages:
+  generic: !include rolladen-generic.yaml
