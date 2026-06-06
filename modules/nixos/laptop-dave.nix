@@ -30,6 +30,7 @@ in
     ./pi.nix
     ./workmux.nix
     ./cpu-powersave-cap.nix
+    ./amd-pstate-resume-fix.nix
     ./omr.nix
     ./proton-vpn.nix
     ./vpn.nix
