@@ -177,6 +177,21 @@ binary_sensor:
     name: Status
 
 sensor:
+  # Shutter openness as a standalone % sensor (0 = closed, 100 = fully open), mirroring the
+  # time_based cover's internal position so HA can show it as its own entity / gauge.
+  # Polled every 1 s; the delta filter suppresses idle republishing — it only emits while
+  # the shutter is actually moving (position changes well over 1%/s during travel).
+  - platform: template
+    name: Position
+    id: shutter_position
+    unit_of_measurement: "%"
+    icon: mdi:window-shutter
+    accuracy_decimals: 0
+    lambda: "return id(shutter).position * 100.0;"
+    update_interval: 1s
+    filters:
+      - delta: 1.0
+
   - platform: wifi_signal
     name: WiFi Signal dB
     id: wifi_signal_db
