@@ -122,9 +122,6 @@
     hermes-agent.url = "github:NousResearch/hermes-agent";
     messaging-daemon.url = "github:vbuterin/messaging-daemon";
     messaging-daemon.flake = false;
-
-
-
   };
 
   outputs = inputs@{ self, flake-parts, nixpkgs, ... }:
