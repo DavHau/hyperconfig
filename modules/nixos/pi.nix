@@ -15,6 +15,12 @@
       default: anthropic/claude-opus-4-8:high
     startup:
       quiet: true
+      # The onboarding setup wizard re-runs on every launch here: it bumps
+      # `setupVersion` on completion, but config.yml is a read-only Nix-store
+      # symlink so that write never persists, leaving setupVersion < current
+      # forever. It also calls playWelcomeIntro() at the end, replaying the
+      # logo animation even though `quiet` is set. Disable it outright.
+      setupWizard: false
   '';
   workmux = inputs.llm-agents.packages.${sys}.workmux;
   # workmux reads ~/.config/workmux/config.yaml; point it at omp (`pi`) instead
