@@ -669,10 +669,7 @@
     },
     "flake-utils_3": {
       "inputs": {
-        "systems": [
-          "spaces",
-          "systems"
-        ]
+        "systems": "systems_9"
       },
       "locked": {
         "lastModified": 1731533236,
@@ -2050,12 +2047,12 @@
         "voxtype": "voxtype"
       },
       "locked": {
-        "lastModified": 1780413936,
-        "narHash": "sha256-WHhvnzAc15mN6F5+AGevjah/pcFGETKyXQeVlQt2D6Y=",
-        "rev": "06e1a3210e999dc20e07c05badb06ddf392ca173",
-        "revCount": 204,
-        "type": "git",
-        "url": "file:///home/grmpf/synced/projects/distro"
+        "lastModified": 1780934877,
+        "narHash": "sha256-8nH7AnMi9hmofUeQaGOj0AEHt+fcs8YkKZK2A2nWm8U=",
+        "owner": "generational-infrastructure",
+        "repo": "distro",
+        "rev": "6c2029abfd9b24a7778ac2a7f7d5d73b60b27e23",
+        "type": "github"
       },
       "original": {
         "owner": "generational-infrastructure",
@@ -2098,7 +2095,7 @@
           "nixpkgs"
         ],
         "nur": "nur",
-        "systems": "systems_9",
+        "systems": "systems_10",
         "tinted-foot": "tinted-foot",
         "tinted-kitty": "tinted-kitty",
         "tinted-schemes": "tinted-schemes",
@@ -2120,6 +2117,21 @@
       }
     },
     "systems": {
+      "locked": {
+        "lastModified": 1681028828,
+        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
+        "owner": "nix-systems",
+        "repo": "default",
+        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-systems",
+        "repo": "default",
+        "type": "github"
+      }
+    },
+    "systems_10": {
       "locked": {
         "lastModified": 1681028828,
         "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
@@ -2636,11 +2648,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1776651662,
-        "narHash": "sha256-HMiN4cmXRr6avHiH6asF28w9/N+qjeYSvX9zAATVXss=",
+        "lastModified": 1780607114,
+        "narHash": "sha256-2AVR9CTNLuCE5tl1EU3Mgb1AdGlxYFiYOeATKfpgkz4=",
         "owner": "peteonrails",
         "repo": "voxtype",
-        "rev": "adf0ea62c2310b90c55febdc6515cca9f264e25a",
+        "rev": "978c4ed2a26a1f5fdff409767a697e4c28fbc4bc",
         "type": "github"
       },
       "original": {
