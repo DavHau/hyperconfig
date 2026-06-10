@@ -1013,11 +1013,11 @@
         "treefmt-nix": "treefmt-nix_6"
       },
       "locked": {
-        "lastModified": 1781032293,
-        "narHash": "sha256-/ylPOaovf4K4vI1XxWo7my72C1OJyDCrvrPT08rSYh4=",
+        "lastModified": 1781071048,
+        "narHash": "sha256-x+I/CbXlM6pieeCQV/43l4VYr9tORn2ap0hiHa9JiiY=",
         "owner": "numtide",
         "repo": "llm-agents.nix",
-        "rev": "8f3ed60fe9cf8f45956e597cc4a0eeae78ae5150",
+        "rev": "6f4945d637942c06390d0fd765c8981874020157",
         "type": "github"
       },
       "original": {
@@ -2047,9 +2047,9 @@
         "voxtype": "voxtype"
       },
       "locked": {
-        "lastModified": 1781082893,
-        "narHash": "sha256-AjiC2az2AoqzrJuy2J8nStVwbwScK0E/2CEPOVoRfaU=",
-        "path": "/home/grmpf/synced/projects/distro-2",
+        "lastModified": 1781088434,
+        "narHash": "sha256-zLScommoCAF+TbwdEkypcPo1R7UWerSrTYi+xqFKq3g=",
+        "path": "/home/grmpf/synced/projects/distro",
         "type": "path"
       },
       "original": {
