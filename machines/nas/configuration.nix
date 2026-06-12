@@ -22,6 +22,7 @@
       # ./sync-from-manu.nix
       ./users.nix
       ./file-browser-roman.nix
+      ./firewall.nix
     ];
 
 
