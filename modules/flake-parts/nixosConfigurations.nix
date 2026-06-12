@@ -136,14 +136,14 @@ in {
               roles.server.tags.all = {};
             };
 
-            cctl = {
-              module.name = "cctl";
-              module.input = "self";
-              roles.server.machines.amy.settings.user = "grmpf";
-              roles.server.extraModules = [
-                { networking.firewall.interfaces."ztfwr2j6pf".allowedTCPPorts = [ 80 ]; }
-              ];
-            };
+            # cctl = {
+            #   module.name = "cctl";
+            #   module.input = "self";
+            #   roles.server.machines.amy.settings.user = "grmpf";
+            #   roles.server.extraModules = [
+            #     { networking.firewall.interfaces."ztfwr2j6pf".allowedTCPPorts = [ 80 ]; }
+            #   ];
+            # };
 
             # VPNs
             yggdrasil = {

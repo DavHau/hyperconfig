@@ -11,8 +11,11 @@
     ../../modules/nixos/llama-swap.nix
     ../../modules/nixos/bluetooth-resume-fix.nix
     ../../modules/nixos/fw-fanctrl.nix
+    ../../modules/nixos/ssh-tpm-agent.nix
     ./disko.nix
   ];
+
+  networking.extraHosts = "10.0.0.1 127.0.0.0";
 
   virtualisation.vmVariant = {
     imports = [ ../../modules/nixos/user-dave.nix ];
