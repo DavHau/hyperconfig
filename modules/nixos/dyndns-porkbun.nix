@@ -44,8 +44,10 @@ in
       serviceConfig.Type = "oneshot";
       script = lib.optionalString (cfg.ipv4Entries != []) ''
         ipv4=$(curl -4 --silent --fail https://ipv4.icanhazip.com)
+        echo "Using IPv4 address: $ipv4"
         for entry in ${toString cfg.ipv4Entries}; do
-          curl "https://api.porkbun.com/api/json/v3/dns/editByNameType/''${entry}" -d "
+          echo "Updating entry: $entry"
+          curl --silent --show-error "https://api.porkbun.com/api/json/v3/dns/editByNameType/''${entry}" -d "
             {
               \"apikey\": \"$(cat ${config.clan.core.vars.generators.porkbun.files.apikey.path})\",
               \"secretapikey\": \"$(cat ${config.clan.core.vars.generators.porkbun.files.secretkey.path})\",
@@ -56,8 +58,10 @@ in
       ''
       + lib.optionalString (cfg.ipv6Entries != []) ''
         ipv6=$(curl -6 --silent --fail https://ipv6.icanhazip.com)
+        echo "Using IPv6 address: $ipv6"
         for entry in ${toString cfg.ipv6Entries}; do
-          curl "https://api.porkbun.com/api/json/v3/dns/editByNameType/''${entry}" -d "
+          echo "Updating entry: $entry"
+          curl --silent --show-error "https://api.porkbun.com/api/json/v3/dns/editByNameType/''${entry}" -d "
             {
               \"apikey\": \"$(cat ${config.clan.core.vars.generators.porkbun.files.apikey.path})\",
               \"secretapikey\": \"$(cat ${config.clan.core.vars.generators.porkbun.files.secretkey.path})\",

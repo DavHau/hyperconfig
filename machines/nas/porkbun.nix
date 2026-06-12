@@ -7,9 +7,11 @@
 
   services.porkbun.ipv4Entries = [
     "bruch-bu.de/A/wg-casa"
+    "bruch-bu.de/A/nas"
   ];
 
   services.porkbun.ipv6Entries = [
     "bruch-bu.de/AAAA/wg-casa"
+    "bruch-bu.de/AAAA/nas"
   ];
 }
