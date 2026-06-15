@@ -11,8 +11,6 @@
           type: lm-studio
   '';
   configFile = pkgs.writeText "config.yml" ''
-    modelRoles:
-      default: anthropic/fable-5:high
     startup:
       quiet: true
       # The onboarding setup wizard re-runs on every launch here: it bumps
