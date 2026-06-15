@@ -48,6 +48,13 @@ let
     quant = "Q8_0";
     sha256 = "sha256-oiMqZJUjw2v1MPHcNhTrjIAGRcQic5A4HIsF1Nbu4Fo=";
   };
+  # UD-Q5_K_XL: unsloth-dynamic Q5, sweet spot for 16G Blackwell (8.6G weights,
+  # ~7G left for KV cache); higher quality-per-VRAM than Q4_K_M.
+  gemma4-12b-q5 = fetchGemma4 {
+    size = "12b";
+    quant = "UD-Q5_K_XL";
+    sha256 = "sha256-AA0MwTH53ZMrTCPBimlJ2vmD33YrXYkJPfhVP6u+3ek=";
+  };
 in
 {
   services.llama-swap.settings.models = {
@@ -68,6 +75,9 @@ in
     };
     "gemma4:26b" = {
       cmd = "${llama-server} -hf unsloth/gemma-4-26B-A4B-it-GGUF:UD-Q4_K_M --port \${PORT}";
+    };
+    "gemma4:12b" = {
+      cmd = "${llama-server} -m ${gemma4-12b-q5} --port \${PORT}";
     };
     "gemma4:e2b-q4_k_m" = {
       cmd = "${llama-server} -m ${gemma4-e2b-q4} --port \${PORT}";
