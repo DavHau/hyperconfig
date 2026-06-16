@@ -11,6 +11,7 @@ in
     ./common.nix
     ./common-tools.nix
     ./sbox.nix
+    ./ssh-tpm-agent.nix
     ./etc-hosts.nix
     ./nix-development.nix
     ./dns.nix
@@ -111,7 +112,6 @@ in
   #   supportedFeatures = [ "nixos-test" "benchmark" "big-parallel" "kvm" "uid-range" "ca-derivations" ];
   #   mandatoryFeatures = [ ];
   # }];
-  systemd.services.nix-daemon.environment.SSH_AUTH_SOCK = "/run/user/1000/ssh-agent";
 
   # TLP
   # services.tlp.enable = true;

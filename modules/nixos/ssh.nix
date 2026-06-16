@@ -28,6 +28,6 @@
   services.openssh.settings.KbdInteractiveAuthentication = false;
 
   environment.variables = {
-    SSH_AUTH_SOCK = "/run/user/1000/ssh-agent";
+    SSH_AUTH_SOCK = "$XDG_RUNTIME_DIR/ssh-agent";
   };
 }

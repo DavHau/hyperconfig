@@ -11,7 +11,6 @@
     ../../modules/nixos/llama-swap.nix
     ../../modules/nixos/bluetooth-resume-fix.nix
     ../../modules/nixos/fw-fanctrl.nix
-    ../../modules/nixos/ssh-tpm-agent.nix
     ./disko.nix
   ];
 
