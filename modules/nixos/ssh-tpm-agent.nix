@@ -22,8 +22,11 @@ in
 
   security.tpm2.enable = true;
 
-  # Access to /dev/tpmrm0 requires tss group membership.
-  users.users.grmpf.extraGroups = [ config.security.tpm2.tssGroup ];
+  # Access to /dev/tpmrm0 requires tss group membership. This module is shared
+  # across laptops whose primary interactive user differs (grmpf on amy, dave
+  # on vit), so grant every normal user rather than hardcoding one.
+  users.groups.${config.security.tpm2.tssGroup}.members =
+    builtins.attrNames (lib.filterAttrs (_: u: u.isNormalUser) config.users.users);
 
   environment.systemPackages = [ pkgs.ssh-tpm-agent ];
 
@@ -56,5 +59,5 @@ in
 
   # Point clients at the TPM agent instead of the plain ssh-agent socket set
   # in ./ssh.nix; non-TPM keys still work because the agent proxies to it.
-  environment.variables.SSH_AUTH_SOCK = lib.mkForce "/run/user/1000/ssh-tpm-agent.sock";
+  environment.variables.SSH_AUTH_SOCK = lib.mkForce "$XDG_RUNTIME_DIR/ssh-tpm-agent.sock";
 }
