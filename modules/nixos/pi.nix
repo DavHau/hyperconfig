@@ -87,7 +87,12 @@
          contains changes that are not yours, stop and ask the user.
        - If the current `@` is your previous finished task (has a description
          and committed changes), run `jj new` to start a fresh commit.
-       - If the current `@` is empty or already your in-progress work, reuse it.
+       - If `@` has a description (yours or the user's) and you are about to
+         make changes **unrelated to that description** (a different logical
+         task), run `jj new` first — do not commingle unrelated work into an
+         already-described commit.
+       - If the current `@` is empty or already your in-progress work on the
+         same logical task, reuse it.
     2. Make the edits.
     3. Verify the change (build/test as appropriate).
     4. **Before yielding back to the user**, you **MUST** run
