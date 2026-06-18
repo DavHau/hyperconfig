@@ -1012,11 +1012,11 @@
         "treefmt-nix": "treefmt-nix_6"
       },
       "locked": {
-        "lastModified": 1781679218,
-        "narHash": "sha256-Upr1PqedUcpeKtBM9Ssoh3j4Oa2WdYASvucKArMKPFo=",
+        "lastModified": 1781896790,
+        "narHash": "sha256-Rx2QqCACY5IFK0mbm3YYSoEyJoYAvEUzLhH34k9TLx0=",
         "owner": "numtide",
         "repo": "llm-agents.nix",
-        "rev": "6b2e2cb6d784cc919c64f998093ecdb4f2b76152",
+        "rev": "1dd0ddc8db17a0a82f95112eb9ff856d4118641a",
         "type": "github"
       },
       "original": {
@@ -2062,10 +2062,10 @@
         "voxtype": "voxtype"
       },
       "locked": {
-        "lastModified": 1781295358,
-        "narHash": "sha256-HgumczUPTBYXFmA3Mw/6UntWd94ghWrggezlYp43mHo=",
-        "rev": "84127428832725285d2e67057c32b190a364c96b",
-        "revCount": 324,
+        "lastModified": 1781773893,
+        "narHash": "sha256-rQm8vuHMgvMbYVgun2jaAqbcd2T7eLzRobrvt3bdu34=",
+        "rev": "6d3a64d2815e6ba9f7d2518b26c9e01d30035641",
+        "revCount": 337,
         "type": "git",
         "url": "file:///home/grmpf/synced/projects/distro"
       },
