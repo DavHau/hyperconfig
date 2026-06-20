@@ -105,6 +105,18 @@
       options = [ "zfsutil" ];
     };
 
+  # Test-only: a deliberately failing mount, applied ONLY to the VM build
+  # (`system.build.vm` / `nix run .#nas-vm`), never to the real host.
+  # The device label never exists in the VM, and without `nofail` a failed
+  # mount is fatal -> local-fs.target fails -> systemd drops into
+  # emergency.target. The short device-timeout makes it fail fast instead
+  # of hanging on the default 90s device wait.
+  virtualisation.vmVariant.virtualisation.fileSystems."/mnt/emergency-test" = {
+    device = "/dev/disk/by-label/this-device-does-not-exist";
+    fsType = "ext4";
+    options = [ "x-systemd.device-timeout=5s" ];
+  };
+
   system.stateVersion = "21.11"; # Did you read the comment?
 }
 

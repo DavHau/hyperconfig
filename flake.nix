@@ -146,6 +146,7 @@
 
       flake.packages.x86_64-linux.amy-vm = self.nixosConfigurations.amy.config.system.build.vm;
       flake.packages.x86_64-linux.vit-vm = self.nixosConfigurations.vit.config.system.build.vm;
+      flake.packages.x86_64-linux.nas-vm = self.nixosConfigurations.nas.config.system.build.vm;
 
       flake.checks.x86_64-linux = genAttrs
         [
