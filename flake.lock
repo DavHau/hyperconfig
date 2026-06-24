@@ -2062,12 +2062,10 @@
         "voxtype": "voxtype"
       },
       "locked": {
-        "lastModified": 1781773893,
-        "narHash": "sha256-rQm8vuHMgvMbYVgun2jaAqbcd2T7eLzRobrvt3bdu34=",
-        "rev": "6d3a64d2815e6ba9f7d2518b26c9e01d30035641",
-        "revCount": 337,
-        "type": "git",
-        "url": "file:///home/grmpf/synced/projects/distro"
+        "lastModified": 1782301772,
+        "narHash": "sha256-7slmLlmKWRtYzsthfYNDbmEmaUwKWhH2BFQZwI1E0Nc=",
+        "path": "/home/grmpf/synced/projects/distro",
+        "type": "path"
       },
       "original": {
         "owner": "generational-infrastructure",
