@@ -101,6 +101,9 @@
     mics-skills.inputs.nixpkgs.follows = "nixpkgs";
     mics-skills.inputs.flake-parts.follows = "flake-parts";
 
+    mattpocock-skills.url = "github:mattpocock/skills";
+    mattpocock-skills.flake = false;
+
     wrappers.url = "github:DavHau/wrappers/niri-systemd";
     wrappers.inputs.nixpkgs.follows = "nixpkgs";
 
