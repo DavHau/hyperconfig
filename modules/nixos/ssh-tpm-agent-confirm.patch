@@ -1,0 +1,706 @@
+diff --git a/agent/agent.go b/agent/agent.go
+index ac39d24..0a1173d 100644
+--- a/agent/agent.go
++++ b/agent/agent.go
+@@ -11,6 +11,7 @@ import (
+ 	"log/slog"
+ 	"net"
+ 	"os"
++	"os/exec"
+ 	"path/filepath"
+ 	"slices"
+ 	"strings"
+@@ -20,6 +21,7 @@ import (
+ 	keyfile "github.com/foxboron/go-tpm-keyfiles"
+ 	"github.com/foxboron/ssh-tpm-agent/askpass"
+ 	"github.com/foxboron/ssh-tpm-agent/internal/keyring"
++	"github.com/foxboron/ssh-tpm-agent/internal/peerid"
+ 	"github.com/foxboron/ssh-tpm-agent/key"
+ 	"github.com/foxboron/ssh-tpm-agent/utils"
+ 	"github.com/google/go-tpm/tpm2"
+@@ -50,6 +52,7 @@ type Agent struct {
+ 	keys     []key.SSHTPMKeys
+ 	hierkeys []*key.HierSSHTPMKey
+ 	agents   []agent.ExtendedAgent
++	grants   *peerid.Grants
+ }
+ 
+ var _ agent.ExtendedAgent = &Agent{}
+@@ -164,10 +167,10 @@ func (a *Agent) List() ([]*agent.Key, error) {
+ }
+ 
+ func (a *Agent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.SignatureFlags) (*ssh.Signature, error) {
+-	return a.signWithFlags(key, data, flags, "")
++	return a.signWithFlags(key, data, flags, peerid.Identity{})
+ }
+ 
+-func (a *Agent) signWithFlags(key ssh.PublicKey, data []byte, flags agent.SignatureFlags, peer string) (*ssh.Signature, error) {
++func (a *Agent) signWithFlags(key ssh.PublicKey, data []byte, flags agent.SignatureFlags, id peerid.Identity) (*ssh.Signature, error) {
+ 	slog.Debug("called signwithflags")
+ 	a.mu.Lock()
+ 	defer a.mu.Unlock()
+@@ -204,7 +207,7 @@ func (a *Agent) signWithFlags(key ssh.PublicKey, data []byte, flags agent.Signat
+ 		if !bytes.Equal(s.PublicKey().Marshal(), wantKey) {
+ 			continue
+ 		}
+-		if err := a.confirmKeyUse(wantKey, peer); err != nil {
++		if err := a.confirmKeyUse(wantKey, id); err != nil {
+ 			return nil, err
+ 		}
+ 		return s.(ssh.AlgorithmSigner).SignWithAlgorithm(rand.Reader, data, alg)
+@@ -233,16 +236,18 @@ func (a *Agent) Sign(key ssh.PublicKey, data []byte) (*ssh.Signature, error) {
+ 	return a.SignWithFlags(key, data, 0)
+ }
+ 
+-// confirmKeyUse prompts the user via SSH_ASKPASS when a key was added with
+-// the confirm constraint (ssh-tpm-add -c). Mirrors ssh-agent(1) behaviour.
+-// wantKey must be the marshalled public key with any certificate wrapper
+-// already stripped, matching the comparison done in SignWithFlags.
+-// peer (from peerChain) is appended to the prompt when non-empty.
+-func (a *Agent) confirmKeyUse(wantKey []byte, peer string) error {
++// confirmKeyUse runs the confirmation gate before a key signs. A key is gated
++// when it carries the confirm-before-use constraint (ssh-tpm-add -c) or when
++// SSH_TPM_CONFIRM_ALL is set; the agent loads keys from disk, which cannot
++// carry the runtime constraint, so the env switch opts every key in.
++//
++// wantKey is the marshalled public key with any certificate wrapper stripped,
++// matching the comparison in signWithFlags.
++func (a *Agent) confirmKeyUse(wantKey []byte, id peerid.Identity) error {
++	confirmAll := os.Getenv("SSH_TPM_CONFIRM_ALL") != ""
+ 	for _, k := range a.keys {
+-		// AgentKey() may return a certificate; unwrap it so that a key
+-		// added both plain and as a cert is covered by either entry's
+-		// confirm constraint.
++		// AgentKey() may return a certificate; unwrap it so a key added both
++		// plain and as a cert is covered by either entry.
+ 		blob := k.AgentKey().Marshal()
+ 		if pub, err := ssh.ParsePublicKey(blob); err == nil {
+ 			if cert, ok := pub.(*ssh.Certificate); ok {
+@@ -252,44 +257,137 @@ func (a *Agent) confirmKeyUse(wantKey []byte, peer string) error {
+ 		if !bytes.Equal(blob, wantKey) {
+ 			continue
+ 		}
+-		if !k.GetConfirmBeforeUse() {
+-			continue
+-		}
+-		prompt := fmt.Sprintf("Allow use of key %s?\nKey fingerprint %s.",
+-			k.GetDescription(), k.Fingerprint())
+-		if peer != "" {
+-			prompt += "\nRequested by " + peer
++		if !confirmAll && !k.GetConfirmBeforeUse() {
++			return nil
+ 		}
+-		ok, err := askpass.AskPermission(prompt)
+-		if err != nil {
+-			slog.Info("askpass confirmation failed", slog.String("error", err.Error()))
+-			return ErrUserDeniedConfirm
++		return a.confirm(k, id)
++	}
++	return nil
++}
++
++// confirm authorises a single use of k by the peer described in id. A live
++// grant for (uid, session, exe) short-circuits the prompt. The channel depends
++// on whether the requester has a graphical display:
++//
++//   - GUI: a three-way zenity dialog (trust for the TTL / trust this session /
++//     deny); the chosen scope is cached.
++//   - headless: the PIN is entered on the requester's terminal via
++//     systemd-ask-password and is itself the authorisation (the TPM validates
++//     it at sign time). The entered PIN is seeded into the keyring so the signer
++//     finds it, and a TTL grant is cached.
++func (a *Agent) confirm(k key.SSHTPMKeys, id peerid.Identity) error {
++	headless := wantHeadless(id)
++	if a.grants.Allowed(id) {
++		if !headless {
++			return nil
+ 		}
+-		if !ok {
+-			return ErrUserDeniedConfirm
++		// The signer drops the cached PIN on a bad PIN, so a live grant can
++		// outlive it; stay silent only while the PIN is still present.
++		if _, err := a.keyring().ReadKey(k.Fingerprint()); err == nil {
++			return nil
+ 		}
++	}
++	if headless {
++		return a.confirmHeadless(k, id)
++	}
++	return a.confirmGUI(k, id)
++}
++
++func (a *Agent) confirmGUI(k key.SSHTPMKeys, id peerid.Identity) error {
++	prompt := fmt.Sprintf("Allow use of SSH key %s?\nFingerprint %s.",
++		k.GetDescription(), k.Fingerprint())
++	if id.Chain != "" {
++		prompt += "\nRequested by " + id.Chain
++	}
++	out, err := askpass.SshAskPass(prompt, "choice")
++	if err != nil {
++		slog.Info("confirm prompt failed", slog.String("error", err.Error()))
++		return ErrUserDeniedConfirm
++	}
++	switch strings.TrimSpace(string(out)) {
++	case "temporary":
++		a.grants.Grant(id, false, confirmTTL())
+ 		return nil
++	case "session":
++		a.grants.Grant(id, true, confirmTTL())
++		return nil
++	default:
++		return ErrUserDeniedConfirm
++	}
++}
++
++func (a *Agent) confirmHeadless(k key.SSHTPMKeys, id peerid.Identity) error {
++	prompt := fmt.Sprintf("ssh-tpm-agent: enter PIN to authorise SSH key %s", k.GetDescription())
++	if id.Chain != "" {
++		prompt += " (requested by " + id.Chain + ")"
++	}
++	pin, err := askPasswordTTY(prompt)
++	if err != nil {
++		slog.Info("headless PIN prompt failed", slog.String("error", err.Error()))
++		return ErrUserDeniedConfirm
++	}
++	if len(pin) == 0 {
++		return ErrUserDeniedConfirm
+ 	}
++	// Seed the entered PIN so the signer uses it; the TPM is the real validator.
++	if err := a.keyring().AddKey(k.Fingerprint(), pin); err != nil {
++		slog.Info("failed seeding PIN into keyring", slog.String("error", err.Error()))
++		return ErrUserDeniedConfirm
++	}
++	a.grants.Grant(id, false, confirmTTL())
+ 	return nil
+ }
+ 
+-// connAgent threads the per-connection peer description into Sign,
+-// since agent.ServeAgent does not expose the net.Conn to handlers.
++// askPasswordTTY reads a secret on the requester's terminal via
++// systemd-ask-password, which routes through logind so it works over SSH and
++// inside tmux/screen.
++func askPasswordTTY(prompt string) ([]byte, error) {
++	out, err := exec.Command("systemd-ask-password", "--no-tty", "--timeout=60", prompt).Output()
++	if err != nil {
++		return nil, err
++	}
++	return bytes.TrimRight(out, "\n"), nil
++}
++
++func confirmTTL() time.Duration {
++	if s := os.Getenv("SSH_TPM_CONFIRM_TTL"); s != "" {
++		if d, err := time.ParseDuration(s); err == nil && d > 0 {
++			return d
++		}
++	}
++	return 15 * time.Minute
++}
++
++// wantHeadless honours the SSH_TPM_PROMPT override (tty|gui|auto); auto falls
++// back to the requester's detected display.
++func wantHeadless(id peerid.Identity) bool {
++	switch os.Getenv("SSH_TPM_PROMPT") {
++	case "tty":
++		return true
++	case "gui":
++		return false
++	default:
++		return id.Headless
++	}
++}
++
++// connAgent threads the per-connection peer identity into Sign, since
++// agent.ServeAgent does not expose the net.Conn to handlers.
+ type connAgent struct {
+ 	*Agent
+-	peer string
++	id peerid.Identity
+ }
+ 
+ func (c *connAgent) Sign(key ssh.PublicKey, data []byte) (*ssh.Signature, error) {
+-	return c.Agent.signWithFlags(key, data, 0, c.peer)
++	return c.Agent.signWithFlags(key, data, 0, c.id)
+ }
+ 
+ func (c *connAgent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.SignatureFlags) (*ssh.Signature, error) {
+-	return c.Agent.signWithFlags(key, data, flags, c.peer)
++	return c.Agent.signWithFlags(key, data, flags, c.id)
+ }
+ 
+ func (a *Agent) serveConn(c *net.UnixConn) {
+-	ca := &connAgent{Agent: a, peer: peerChain(c)}
++	ca := &connAgent{Agent: a, id: peerid.Resolve(c)}
+ 	if err := agent.ServeAgent(ca, c); err != io.EOF {
+ 		slog.Info("Agent client connection ended unsuccessfully", slog.String("error", err.Error()))
+ 	}
+@@ -535,6 +633,7 @@ func NewAgent(listener *net.UnixListener, agents []agent.ExtendedAgent, keyring
+ 		keys:     []key.SSHTPMKeys{},
+ 		hierkeys: []*key.HierSSHTPMKey{},
+ 		keyring:  keyring,
++		grants:   peerid.NewGrants(),
+ 	}
+ 
+ 	a.wg.Add(1)
+diff --git a/agent/peer.go b/agent/peer.go
+deleted file mode 100644
+index 58cc27e..0000000
+--- a/agent/peer.go
++++ /dev/null
+@@ -1,60 +0,0 @@
+-package agent
+-
+-import (
+-	"fmt"
+-	"net"
+-	"os"
+-	"strconv"
+-	"strings"
+-
+-	"golang.org/x/sys/unix"
+-)
+-
+-const maxPeerChain = 4
+-
+-// peerChain describes the process at the other end of c and a few of its
+-// ancestors, e.g. "ssh (1234) ← git ← zsh ← kitty". Best effort; returns ""
+-// if SO_PEERCRED or /proc are unavailable.
+-func peerChain(c *net.UnixConn) string {
+-	rc, err := c.SyscallConn()
+-	if err != nil {
+-		return ""
+-	}
+-	var ucred *unix.Ucred
+-	if cerr := rc.Control(func(fd uintptr) {
+-		ucred, err = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
+-	}); cerr != nil || err != nil {
+-		return ""
+-	}
+-
+-	var parts []string
+-	for i, pid := 0, int(ucred.Pid); i < maxPeerChain && pid > 1; i++ {
+-		name, ppid := procStatus(pid)
+-		if name == "" {
+-			break
+-		}
+-		if i == 0 {
+-			name = fmt.Sprintf("%s (%d)", name, pid)
+-		}
+-		parts = append(parts, name)
+-		pid = ppid
+-	}
+-	return strings.Join(parts, " ← ")
+-}
+-
+-// procStatus returns Name and PPid from /proc/<pid>/status.
+-func procStatus(pid int) (name string, ppid int) {
+-	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
+-	if err != nil {
+-		return
+-	}
+-	for line := range strings.SplitSeq(string(b), "\n") {
+-		if v, ok := strings.CutPrefix(line, "Name:"); ok {
+-			name = strings.TrimSpace(v)
+-		} else if v, ok := strings.CutPrefix(line, "PPid:"); ok {
+-			ppid, _ = strconv.Atoi(strings.TrimSpace(v))
+-			return
+-		}
+-	}
+-	return
+-}
+diff --git a/internal/peerid/grant.go b/internal/peerid/grant.go
+new file mode 100644
+index 0000000..16530e1
+--- /dev/null
++++ b/internal/peerid/grant.go
+@@ -0,0 +1,76 @@
++package peerid
++
++import (
++	"sync"
++	"time"
++)
++
++type grantKey struct {
++	uid         uint32
++	sid         int
++	leaderStart uint64
++	exe         string
++}
++
++type grant struct {
++	expiry time.Time
++	sticky bool
++}
++
++// Grants is a confirmation cache scoped to (uid, session, binary).
++//
++// A grant is either time-bounded (expiry) or sticky. Because the key embeds the
++// session id and the session leader's start time, a sticky grant only ever
++// benefits the exact live session it was issued for: once that session ends, no
++// future process can match the key (a reused sid number gets a different leader
++// start time). Grants are in-memory and vanish when the agent recycles.
++//
++// The per-exe dimension is the novel-binary gate: approving `ssh` in a session
++// does not silently authorise a different binary that connects from the same
++// session.
++type Grants struct {
++	mu  sync.Mutex
++	m   map[grantKey]grant
++	now func() time.Time
++}
++
++func NewGrants() *Grants {
++	return &Grants{m: map[grantKey]grant{}, now: time.Now}
++}
++
++func keyOf(id Identity) grantKey {
++	return grantKey{uid: id.UID, sid: id.SID, leaderStart: id.LeaderStart, exe: id.Exe}
++}
++
++// Allowed reports whether a live grant covers id. Unidentified peers
++// (OK==false) are never allowed.
++func (g *Grants) Allowed(id Identity) bool {
++	if !id.OK {
++		return false
++	}
++	g.mu.Lock()
++	defer g.mu.Unlock()
++	k := keyOf(id)
++	gr, ok := g.m[k]
++	if !ok {
++		return false
++	}
++	if gr.sticky {
++		return true
++	}
++	if g.now().Before(gr.expiry) {
++		return true
++	}
++	delete(g.m, k)
++	return false
++}
++
++// Grant records approval for id. A sticky grant ignores ttl.
++func (g *Grants) Grant(id Identity, sticky bool, ttl time.Duration) {
++	if !id.OK {
++		return
++	}
++	g.mu.Lock()
++	defer g.mu.Unlock()
++	g.m[keyOf(id)] = grant{expiry: g.now().Add(ttl), sticky: sticky}
++}
+diff --git a/internal/peerid/peerid.go b/internal/peerid/peerid.go
+new file mode 100644
+index 0000000..6b246b3
+--- /dev/null
++++ b/internal/peerid/peerid.go
+@@ -0,0 +1,169 @@
++// Package peerid resolves the identity of the process connected to the agent
++// socket and caches confirmation grants scoped to (user, session, binary).
++//
++// Identity facts are taken only from kernel-authoritative sources: SO_PEERCRED
++// (uid/pid, stamped at connect) and /proc entries the peer cannot forge about
++// itself (session id, session-leader start time, the real exe path). The
++// human-readable ancestry chain and the comm names within it are display-only.
++package peerid
++
++import (
++	"bytes"
++	"fmt"
++	"net"
++	"os"
++	"strconv"
++	"strings"
++
++	"golang.org/x/sys/unix"
++)
++
++const maxPeerChain = 4
++
++// Identity describes the process at the other end of an agent connection.
++type Identity struct {
++	UID         uint32 // peer real uid (SO_PEERCRED)
++	PID         int    // connecting process
++	SID         int    // session id (terminal / login session)
++	LeaderStart uint64 // session-leader start time; pins SID against reuse
++	Exe         string // resolved path of the connecting binary
++	Headless    bool   // no graphical display reachable for the peer
++	Chain       string // human-readable ancestry, for the prompt only
++	OK          bool   // false when the peer could not be identified
++}
++
++// Resolve inspects the peer of c. It never errors: on any failure it returns an
++// Identity with OK=false, which callers MUST treat as "prompt every time, never
++// cache".
++func Resolve(c *net.UnixConn) Identity {
++	var id Identity
++	rc, err := c.SyscallConn()
++	if err != nil {
++		return id
++	}
++	var ucred *unix.Ucred
++	var uerr error
++	if cerr := rc.Control(func(fd uintptr) {
++		ucred, uerr = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
++	}); cerr != nil || uerr != nil || ucred == nil {
++		return id
++	}
++	id.UID = ucred.Uid
++	id.PID = int(ucred.Pid)
++	if id.PID <= 1 {
++		return id
++	}
++
++	sid, _, start, ok := readStat(id.PID)
++	if !ok {
++		return id
++	}
++	id.SID = sid
++	// The session leader's start time pins the session against sid reuse.
++	if _, _, leaderStart, ok := readStat(sid); ok {
++		id.LeaderStart = leaderStart
++	} else {
++		id.LeaderStart = start
++	}
++	id.Exe = readExe(id.PID)
++	id.Headless = isHeadless(id.PID)
++	id.Chain = chain(id.PID)
++
++	// Without the exe we cannot run the novel-binary gate, so refuse to cache.
++	id.OK = id.Exe != ""
++	return id
++}
++
++func readStat(pid int) (sid, pgid int, starttime uint64, ok bool) {
++	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
++	if err != nil {
++		return
++	}
++	return parseStat(b)
++}
++
++// parseStat extracts session id, process-group id and start time from the
++// contents of /proc/<pid>/stat. comm (field 2) is wrapped in parentheses and
++// may itself contain spaces and parentheses, so anchor on the final ')'.
++func parseStat(b []byte) (sid, pgid int, starttime uint64, ok bool) {
++	i := bytes.LastIndexByte(b, ')')
++	if i < 0 || i+1 >= len(b) {
++		return
++	}
++	// fields[0] is field 3 (state); field K maps to fields[K-3].
++	fields := strings.Fields(string(b[i+1:]))
++	if len(fields) < 20 {
++		return
++	}
++	pgid, _ = strconv.Atoi(fields[2])                    // field 5
++	sid, _ = strconv.Atoi(fields[3])                     // field 6
++	starttime, _ = strconv.ParseUint(fields[19], 10, 64) // field 22
++	ok = true
++	return
++}
++
++func readExe(pid int) string {
++	p, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
++	if err != nil {
++		return ""
++	}
++	return p
++}
++
++func isHeadless(pid int) bool {
++	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid))
++	if err != nil {
++		// Can't tell; assume an interactive GUI (the common local case)
++		// rather than silently routing to the headless PIN path.
++		return false
++	}
++	return headlessFromEnviron(b)
++}
++
++// headlessFromEnviron reports whether a NUL-separated environment block lacks a
++// usable graphical display.
++func headlessFromEnviron(b []byte) bool {
++	for _, kv := range bytes.Split(b, []byte{0}) {
++		eq := bytes.IndexByte(kv, '=')
++		if eq < 0 {
++			continue
++		}
++		k := string(kv[:eq])
++		if (k == "WAYLAND_DISPLAY" || k == "DISPLAY") && eq+1 < len(kv) {
++			return false
++		}
++	}
++	return true
++}
++
++func chain(pid int) string {
++	var parts []string
++	for i := 0; i < maxPeerChain && pid > 1; i++ {
++		name, ppid := procName(pid)
++		if name == "" {
++			break
++		}
++		if i == 0 {
++			name = fmt.Sprintf("%s (%d)", name, pid)
++		}
++		parts = append(parts, name)
++		pid = ppid
++	}
++	return strings.Join(parts, " ← ")
++}
++
++func procName(pid int) (name string, ppid int) {
++	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
++	if err != nil {
++		return
++	}
++	for _, line := range strings.Split(string(b), "\n") {
++		if v, ok := strings.CutPrefix(line, "Name:"); ok {
++			name = strings.TrimSpace(v)
++		} else if v, ok := strings.CutPrefix(line, "PPid:"); ok {
++			ppid, _ = strconv.Atoi(strings.TrimSpace(v))
++			return
++		}
++	}
++	return
++}
+diff --git a/internal/peerid/peerid_test.go b/internal/peerid/peerid_test.go
+new file mode 100644
+index 0000000..709f713
+--- /dev/null
++++ b/internal/peerid/peerid_test.go
+@@ -0,0 +1,134 @@
++package peerid
++
++import (
++	"testing"
++	"time"
++)
++
++func TestParseStat(t *testing.T) {
++	// comm contains spaces and parentheses; fields after the final ')' are:
++	// state ppid pgrp session tty ... (field 22 = starttime).
++	// Build: pid (comm) then fields 3..22.
++	rest := "S 1000 4242 7777 34816 4242 0 0 0 0 0 0 0 0 20 0 1 0 0 99887766"
++	line := []byte("1234 (we (ird) proc) " + rest + "\n")
++	sid, pgid, start, ok := parseStat(line)
++	if !ok {
++		t.Fatal("parseStat returned ok=false")
++	}
++	if sid != 7777 {
++		t.Errorf("sid = %d, want 7777", sid)
++	}
++	if pgid != 4242 {
++		t.Errorf("pgid = %d, want 4242", pgid)
++	}
++	if start != 99887766 {
++		t.Errorf("starttime = %d, want 99887766", start)
++	}
++}
++
++func TestParseStatTooShort(t *testing.T) {
++	if _, _, _, ok := parseStat([]byte("1 (init) S 0 1 1")); ok {
++		t.Error("expected ok=false for a truncated stat line")
++	}
++	if _, _, _, ok := parseStat([]byte("garbage without paren")); ok {
++		t.Error("expected ok=false when there is no comm close paren")
++	}
++}
++
++func TestHeadlessFromEarliest(t *testing.T) {
++	cases := []struct {
++		name string
++		env  []byte
++		want bool
++	}{
++		{"wayland present", []byte("PATH=/bin\x00WAYLAND_DISPLAY=wayland-1\x00"), false},
++		{"x11 present", []byte("DISPLAY=:0\x00HOME=/h\x00"), false},
++		{"no display", []byte("PATH=/bin\x00SSH_CONNECTION=a b c d\x00"), true},
++		{"empty display value is headless", []byte("WAYLAND_DISPLAY=\x00"), true},
++		{"empty environ", []byte{}, true},
++	}
++	for _, c := range cases {
++		t.Run(c.name, func(t *testing.T) {
++			if got := headlessFromEnviron(c.env); got != c.want {
++				t.Errorf("headlessFromEnviron = %v, want %v", got, c.want)
++			}
++		})
++	}
++}
++
++func id(exe string) Identity {
++	return Identity{UID: 1000, SID: 500, LeaderStart: 12345, Exe: exe, OK: true}
++}
++
++func TestGrantTemporaryExpires(t *testing.T) {
++	g := NewGrants()
++	now := time.Unix(1000, 0)
++	g.now = func() time.Time { return now }
++
++	g.Grant(id("/bin/ssh"), false, 15*time.Minute)
++	if !g.Allowed(id("/bin/ssh")) {
++		t.Fatal("grant should be live immediately")
++	}
++	now = now.Add(14 * time.Minute)
++	if !g.Allowed(id("/bin/ssh")) {
++		t.Error("grant should still be live before ttl")
++	}
++	now = now.Add(2 * time.Minute) // 16m total > 15m ttl
++	if g.Allowed(id("/bin/ssh")) {
++		t.Error("grant should have expired after ttl")
++	}
++}
++
++func TestGrantStickyNeverExpires(t *testing.T) {
++	g := NewGrants()
++	now := time.Unix(1000, 0)
++	g.now = func() time.Time { return now }
++
++	g.Grant(id("/bin/ssh"), true, 15*time.Minute)
++	now = now.Add(100 * time.Hour)
++	if !g.Allowed(id("/bin/ssh")) {
++		t.Error("sticky grant must survive arbitrary time")
++	}
++}
++
++func TestNovelExeGate(t *testing.T) {
++	g := NewGrants()
++	g.Grant(id("/bin/ssh"), true, time.Minute)
++	if g.Allowed(id("/bin/evil")) {
++		t.Error("a different binary in the same session must not inherit the grant")
++	}
++	if !g.Allowed(id("/bin/ssh")) {
++		t.Error("the granted binary should still be allowed")
++	}
++}
++
++func TestDifferentSessionGate(t *testing.T) {
++	g := NewGrants()
++	g.Grant(id("/bin/ssh"), true, time.Minute)
++
++	other := id("/bin/ssh")
++	other.SID = 999 // different terminal/session
++	if g.Allowed(other) {
++		t.Error("a different session must re-confirm")
++	}
++
++	reused := id("/bin/ssh")
++	reused.LeaderStart = 99999 // same sid number, new leader -> reuse-safe
++	if g.Allowed(reused) {
++		t.Error("a reused sid with a different leader start must re-confirm")
++	}
++}
++
++func TestUnidentifiedNeverCached(t *testing.T) {
++	g := NewGrants()
++	un := id("/bin/ssh")
++	un.OK = false
++	g.Grant(un, true, time.Minute) // must be a no-op
++	if g.Allowed(un) {
++		t.Error("unidentified peers must never be allowed from cache")
++	}
++	// Even if a matching OK identity exists, the no-op grant means no entry.
++	if g.Allowed(id("/bin/ssh")) {
++		t.Error("grant on unidentified peer must not create a cache entry")
++	}
++}
