@@ -1025,6 +1025,22 @@
         "type": "github"
       }
     },
+    "mattpocock-skills": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1782388103,
+        "narHash": "sha256-efsb/AXAmEvcjoknbExBeEHFB28o2c2Nk8muWwNNQFQ=",
+        "owner": "mattpocock",
+        "repo": "skills",
+        "rev": "5d78bd0903420f97c791f834201e550c765699f8",
+        "type": "github"
+      },
+      "original": {
+        "owner": "mattpocock",
+        "repo": "skills",
+        "type": "github"
+      }
+    },
     "messaging-daemon": {
       "flake": false,
       "locked": {
@@ -1965,6 +1981,7 @@
         "home-manager": "home-manager",
         "hyprspace": "hyprspace",
         "llm-agents": "llm-agents",
+        "mattpocock-skills": "mattpocock-skills",
         "messaging-daemon": "messaging-daemon",
         "mics-skills": "mics-skills",
         "ncps": "ncps",

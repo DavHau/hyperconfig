@@ -1,6 +1,22 @@
 {pkgs, inputs, lib, config, ...}: let
   sys = pkgs.stdenv.hostPlatform.system;
   llama-swap-enabled = (config.services.llama-swap.enable or false);
+  # Selected skills from github:mattpocock/skills, curated into a tree that
+  # preserves the upstream engineering/ + productivity/ grouping. omp's skill
+  # discovery is non-recursive (skills/<name>/SKILL.md), so the nested upstream
+  # taxonomy is surfaced by pointing skills.customDirectories (see config.yml)
+  # at each category dir. Includes the three requested skills plus the skill
+  # dependencies they invoke via /skill prose (codebase-design, domain-modeling).
+  mattpocockSkillsTree = pkgs.linkFarm "mattpocock-skills" (
+    let skill = name: { inherit name; path = "${inputs.mattpocock-skills}/skills/${name}"; };
+    in map skill [
+      "engineering/improve-codebase-architecture"
+      "engineering/grill-with-docs"
+      "engineering/codebase-design"
+      "engineering/domain-modeling"
+      "productivity/grilling"
+    ]
+  );
   modelsFile = pkgs.writeText "models.yml" ''
     providers:
       llama-swap:
@@ -19,6 +35,10 @@
       # forever. It also calls playWelcomeIntro() at the end, replaying the
       # logo animation even though `quiet` is set. Disable it outright.
       setupWizard: false
+    skills:
+      customDirectories:
+        - ${mattpocockSkillsTree}/engineering
+        - ${mattpocockSkillsTree}/productivity
   '';
   workmux = inputs.llm-agents.packages.${sys}.workmux;
   # workmux reads ~/.config/workmux/config.yaml. Point it at the wrapped `omp`
