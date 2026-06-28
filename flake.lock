@@ -1992,12 +1992,12 @@
     },
     "sbox": {
       "locked": {
-        "lastModified": 1780323502,
-        "narHash": "sha256-5gPHX6kmTfpn/C/sfHLlmGNCWoGYPFqfKObuhrdF1RU=",
-        "owner": "DavHau",
-        "repo": "sbox",
-        "rev": "1071beb193c1448b252e3996e0722bb89350bd04",
-        "type": "github"
+        "lastModified": 1782636740,
+        "narHash": "sha256-TNc/t6k1TxPlowUtmhZFWmWMZDavhJ32UIzn9PpBj1E=",
+        "rev": "edbee742369942f6c7a48f088151a309350dcbbf",
+        "revCount": 81,
+        "type": "git",
+        "url": "file:///home/grmpf/synced/projects/sbox"
       },
       "original": {
         "owner": "DavHau",
