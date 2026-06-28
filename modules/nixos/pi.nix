@@ -21,10 +21,16 @@
       setupWizard: false
   '';
   workmux = inputs.llm-agents.packages.${sys}.workmux;
-  # workmux reads ~/.config/workmux/config.yaml; point it at omp (`pi`) instead
-  # of its built-in default agent (`claude`).
+  # workmux reads ~/.config/workmux/config.yaml. Point it at the wrapped `omp`
+  # binary (built-in default is `claude`). The workmux integration — status
+  # extension, skills, worktree-aware AGENTS.md — is wired into omp's config
+  # dir (~/.omp/agent), NOT pi's (~/.pi/agent), so the agent MUST be `omp`, else
+  # worktree agents get no status icons, no workmux skills, and the wrong auth.
+  # base_branch: HEAD branches new worktrees from the current commit, required
+  # under jj-colocated repos where git HEAD is detached (plain `add` errors).
   workmuxConfigFile = pkgs.writeText "workmux-config.yaml" ''
-    agent: pi
+    agent: omp
+    base_branch: HEAD
   '';
   agentsFile = pkgs.writeText "AGENTS.md" ''
     # Global Agent Instructions
