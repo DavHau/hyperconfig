@@ -301,17 +301,14 @@ in
 
   config = {
     programs.niri.enable = true;
-    # On `nixos-rebuild switch`, NixOS's switch-to-configuration would
-    # normally restart niri.service whenever its [Service] section
-    # changes (i.e. on every config tweak, since ExecStartPre/ExecReload
-    # embed the per-build kdl path). Setting `reloadIfChanged = true`
-    # emits `X-ReloadIfChanged=true` on the unit, which switch reads and
-    # converts every "needs restart" verdict into a `systemctl --user
-    # reload niri.service` -- running our ExecReload (rewrites mutable
-    # runtime config + sends `niri msg action load-config-file`) without
-    # killing the live session.
+    # The niri.service user unit ships *inside* the wrapper package
+    # (share/systemd/user/niri.service). lassulus/wrappers' niri module bakes
+    # the per-build ExecReload + X-ReloadIfChanged into that unit via its
+    # patchHook, so `nixos-rebuild switch` reloads niri.service (rewrites the
+    # mutable runtime config + `niri msg action load-config-file`) instead of
+    # killing the live session on every config tweak.
     programs.niri.package = niriEvaluated.wrapper;
-    systemd.packages = [ niriEvaluated.outputs.systemd-user ];
+    systemd.packages = [ niriEvaluated.wrapper ];
 
     environment.systemPackages = with pkgs; [
       fuzzel

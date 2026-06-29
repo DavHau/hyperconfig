@@ -2009,10 +2009,10 @@
     },
     "sbox": {
       "locked": {
-        "lastModified": 1782647180,
-        "narHash": "sha256-Z3IwZHGS/AVNbJH/d6g4ZSylgUIoEbX8Bk1hVTGPJlQ=",
-        "rev": "592bd62db8350d13ea132162104cc7013cde441d",
-        "revCount": 82,
+        "lastModified": 1782699428,
+        "narHash": "sha256-hl/Kx201lc3JEf0tz3/CScvwmlnKoGbr6Z+FjIWnoT0=",
+        "rev": "7a2f15ae1e9ec8968177d671e6e57f801c4903fc",
+        "revCount": 83,
         "type": "git",
         "url": "file:///home/grmpf/synced/projects/sbox"
       },
@@ -2698,16 +2698,15 @@
         ]
       },
       "locked": {
-        "lastModified": 1778145312,
-        "narHash": "sha256-AxNIv773tAtcHUPQJtynTpKrLPUIiEpS1kCV9bzJJvg=",
-        "owner": "DavHau",
+        "lastModified": 1782375095,
+        "narHash": "sha256-bRepNpAluz2i0IIk7Tmzw/4BkyOrwABvc66NEgXPEhA=",
+        "owner": "lassulus",
         "repo": "wrappers",
-        "rev": "8332e607a193b3005a66e46f16dadb8be82ffca3",
+        "rev": "cd780e92c0fa66c2e721e1d91894f3db13b9f2b4",
         "type": "github"
       },
       "original": {
-        "owner": "DavHau",
-        "ref": "niri-systemd",
+        "owner": "lassulus",
         "repo": "wrappers",
         "type": "github"
       }
