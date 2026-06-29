@@ -2079,10 +2079,12 @@
         "voxtype": "voxtype"
       },
       "locked": {
-        "lastModified": 1782301772,
-        "narHash": "sha256-7slmLlmKWRtYzsthfYNDbmEmaUwKWhH2BFQZwI1E0Nc=",
-        "path": "/home/grmpf/synced/projects/distro",
-        "type": "path"
+        "lastModified": 1782305394,
+        "narHash": "sha256-IAbhpWVq0o8yHnl++hIgO6e+RbheqrbmFDSxC9iAUew=",
+        "owner": "generational-infrastructure",
+        "repo": "distro",
+        "rev": "45d54b7f44b6ea594f1436156269204eb523baab",
+        "type": "github"
       },
       "original": {
         "owner": "generational-infrastructure",
