@@ -2009,10 +2009,10 @@
     },
     "sbox": {
       "locked": {
-        "lastModified": 1782699428,
-        "narHash": "sha256-hl/Kx201lc3JEf0tz3/CScvwmlnKoGbr6Z+FjIWnoT0=",
-        "rev": "7a2f15ae1e9ec8968177d671e6e57f801c4903fc",
-        "revCount": 83,
+        "lastModified": 1782704910,
+        "narHash": "sha256-jOd9K66WnrxePEJOX3ngRPIaDoy1cq61IZ4UX8jNY08=",
+        "rev": "160f4ae7975e6a667e8bb4b294642f57307d44c0",
+        "revCount": 84,
         "type": "git",
         "url": "file:///home/grmpf/synced/projects/sbox"
       },
