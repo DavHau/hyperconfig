@@ -104,7 +104,7 @@
     mattpocock-skills.url = "github:mattpocock/skills";
     mattpocock-skills.flake = false;
 
-    wrappers.url = "github:DavHau/wrappers/niri-systemd";
+    wrappers.url = "github:lassulus/wrappers";
     wrappers.inputs.nixpkgs.follows = "nixpkgs";
 
     spaces.url = "github:generational-infrastructure/distro";
