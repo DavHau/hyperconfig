@@ -151,7 +151,12 @@
       flake.packages.x86_64-linux.vit-vm = self.nixosConfigurations.vit.config.system.build.vm;
       flake.packages.x86_64-linux.nas-vm = self.nixosConfigurations.nas.config.system.build.vm;
 
-      flake.checks.x86_64-linux = genAttrs
+      flake.packages.x86_64-linux.ssh-tpm-agent =
+        import ./modules/nixos/ssh-tpm-agent-package.nix {
+          pkgs = nixpkgs.legacyPackages.x86_64-linux;
+        };
+
+      flake.checks.x86_64-linux = (genAttrs
         [
           "amy"
           "bam"
@@ -162,6 +167,11 @@
         ]
         (
           host: self.nixosConfigurations.${host}.config.system.build.toplevel
-        );
+        )) // {
+        ssh-tpm-confirm-cache =
+          import ./modules/nixos/ssh-tpm-agent-confirm-test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          };
+      };
     };
 }

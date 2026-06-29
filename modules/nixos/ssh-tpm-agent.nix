@@ -3,14 +3,9 @@ let
   cfg = config.services.sshTpmAgent;
 
   # ssh-tpm-agent, patched to gate every signature behind a confirmation scoped
-  # to (uid, login-session, requesting binary): see ssh-tpm-agent-confirm.patch.
-  # A grant is cached per (session, binary) so repeated use from the same
-  # terminal/app is silent until it expires; a different binary or a different
-  # session re-prompts (the "novel-exe" gate). No new Go dependencies, so the
-  # upstream vendorHash is unchanged.
-  sshTpmAgent = pkgs.ssh-tpm-agent.overrideAttrs (old: {
-    patches = (old.patches or [ ]) ++ [ ./ssh-tpm-agent-confirm.patch ];
-  });
+  # to (uid, login-session, sandbox, requesting binary). See
+  # ssh-tpm-agent-package.nix (shared with the ssh-tpm-confirm-cache VM test).
+  sshTpmAgent = import ./ssh-tpm-agent-package.nix { inherit pkgs; };
 
   # SSH_ASKPASS handler for graphical prompts. The agent runs as a TTY-less user
   # service, so GUI prompts go through here; it resolves the wayland/X display at

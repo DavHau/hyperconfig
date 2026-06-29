@@ -309,10 +309,10 @@ index 58cc27e..0000000
 -}
 diff --git a/internal/peerid/grant.go b/internal/peerid/grant.go
 new file mode 100644
-index 0000000..16530e1
+index 0000000..f15524d
 --- /dev/null
 +++ b/internal/peerid/grant.go
-@@ -0,0 +1,76 @@
+@@ -0,0 +1,79 @@
 +package peerid
 +
 +import (
@@ -324,6 +324,7 @@ index 0000000..16530e1
 +	uid         uint32
 +	sid         int
 +	leaderStart uint64
++	pidns       uint64
 +	exe         string
 +}
 +
@@ -332,13 +333,15 @@ index 0000000..16530e1
 +	sticky bool
 +}
 +
-+// Grants is a confirmation cache scoped to (uid, session, binary).
++// Grants is a confirmation cache scoped to (uid, session, sandbox, binary).
 +//
 +// A grant is either time-bounded (expiry) or sticky. Because the key embeds the
 +// session id and the session leader's start time, a sticky grant only ever
 +// benefits the exact live session it was issued for: once that session ends, no
 +// future process can match the key (a reused sid number gets a different leader
-+// start time). Grants are in-memory and vanish when the agent recycles.
++// start time). The key also embeds the peer's pid namespace, so two sandboxes
++// launched from the same terminal never share a grant. Grants are in-memory and
++// vanish when the agent recycles.
 +//
 +// The per-exe dimension is the novel-binary gate: approving `ssh` in a session
 +// does not silently authorise a different binary that connects from the same
@@ -354,7 +357,7 @@ index 0000000..16530e1
 +}
 +
 +func keyOf(id Identity) grantKey {
-+	return grantKey{uid: id.UID, sid: id.SID, leaderStart: id.LeaderStart, exe: id.Exe}
++	return grantKey{uid: id.UID, sid: id.SID, leaderStart: id.LeaderStart, pidns: id.PidNS, exe: id.Exe}
 +}
 +
 +// Allowed reports whether a live grant covers id. Unidentified peers
@@ -391,17 +394,19 @@ index 0000000..16530e1
 +}
 diff --git a/internal/peerid/peerid.go b/internal/peerid/peerid.go
 new file mode 100644
-index 0000000..6b246b3
+index 0000000..398296a
 --- /dev/null
 +++ b/internal/peerid/peerid.go
-@@ -0,0 +1,169 @@
+@@ -0,0 +1,230 @@
 +// Package peerid resolves the identity of the process connected to the agent
-+// socket and caches confirmation grants scoped to (user, session, binary).
++// socket and caches confirmation grants scoped to (user, session, sandbox,
++// binary).
 +//
 +// Identity facts are taken only from kernel-authoritative sources: SO_PEERCRED
 +// (uid/pid, stamped at connect) and /proc entries the peer cannot forge about
-+// itself (session id, session-leader start time, the real exe path). The
-+// human-readable ancestry chain and the comm names within it are display-only.
++// itself (session id, session-leader start time, pid namespace, the real exe
++// path). The human-readable ancestry chain and the comm names within it are
++// display-only.
 +package peerid
 +
 +import (
@@ -415,14 +420,18 @@ index 0000000..6b246b3
 +	"golang.org/x/sys/unix"
 +)
 +
-+const maxPeerChain = 4
++const (
++	maxPeerChain   = 4
++	maxSessionHops = 8
++)
 +
 +// Identity describes the process at the other end of an agent connection.
 +type Identity struct {
 +	UID         uint32 // peer real uid (SO_PEERCRED)
 +	PID         int    // connecting process
-+	SID         int    // session id (terminal / login session)
++	SID         int    // enclosing login/terminal session (see resolveSession)
 +	LeaderStart uint64 // session-leader start time; pins SID against reuse
++	PidNS       uint64 // peer pid-namespace inode; separates sandboxes
 +	Exe         string // resolved path of the connecting binary
 +	Headless    bool   // no graphical display reachable for the peer
 +	Chain       string // human-readable ancestry, for the prompt only
@@ -451,17 +460,24 @@ index 0000000..6b246b3
 +		return id
 +	}
 +
-+	sid, _, start, ok := readStat(id.PID)
++	ppid, sid, _, start, ok := readStat(id.PID)
 +	if !ok {
 +		return id
 +	}
-+	id.SID = sid
-+	// The session leader's start time pins the session against sid reuse.
-+	if _, _, leaderStart, ok := readStat(sid); ok {
-+		id.LeaderStart = leaderStart
-+	} else {
-+		id.LeaderStart = start
-+	}
++	// A process manager (e.g. omp) may spawn the requester via setsid(), making
++	// it its own session leader with a session id unique to this one invocation;
++	// keying a grant on that re-prompts every time. Resolve the enclosing session
++	// the requester detached from so a grant tracks the launching terminal.
++	id.SID, id.LeaderStart = resolveSession(id.PID, ppid, sid, start, func(p int) (statSnap, bool) {
++		pp, sd, _, st, ok := readStat(p)
++		return statSnap{ppid: pp, sid: sd, start: st}, ok
++	})
++	// The pid namespace separates one sandbox from another: every sbox session
++	// runs in its own, so two sandboxes launched from the same terminal (same
++	// SID) still get distinct grants, while repeat requests from one sandbox
++	// share it. Non-sandboxed peers share the init namespace, leaving them
++	// scoped by SID alone (the original per-terminal behaviour).
++	id.PidNS = readPidNS(id.PID)
 +	id.Exe = readExe(id.PID)
 +	id.Headless = isHeadless(id.PID)
 +	id.Chain = chain(id.PID)
@@ -471,7 +487,37 @@ index 0000000..6b246b3
 +	return id
 +}
 +
-+func readStat(pid int) (sid, pgid int, starttime uint64, ok bool) {
++// statSnap is the subset of /proc/<pid>/stat the session walk needs.
++type statSnap struct {
++	ppid  int
++	sid   int
++	start uint64
++}
++
++// resolveSession returns the session a grant should be scoped to and that
++// session leader's start time (which pins the session id against pid reuse).
++//
++// Normally the peer inherited its login/terminal session (sid != pid) and the
++// loop body never runs. But a process manager may setsid() the requester,
++// making it its own session leader (sid == pid) with an id unique to a single
++// invocation. We then follow the parent chain past any such detached leaders to
++// the first enclosing session, so repeat requests from the same terminal/sandbox
++// keep matching one grant.
++func resolveSession(pid, ppid, sid int, peerStart uint64, lookup func(int) (statSnap, bool)) (int, uint64) {
++	for hops := 0; sid == pid && ppid > 1 && hops < maxSessionHops; hops++ {
++		p, ok := lookup(ppid)
++		if !ok {
++			break
++		}
++		pid, sid, ppid = ppid, p.sid, p.ppid
++	}
++	if leader, ok := lookup(sid); ok {
++		return sid, leader.start
++	}
++	return sid, peerStart
++}
++
++func readStat(pid int) (ppid, sid, pgid int, starttime uint64, ok bool) {
 +	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 +	if err != nil {
 +		return
@@ -479,10 +525,11 @@ index 0000000..6b246b3
 +	return parseStat(b)
 +}
 +
-+// parseStat extracts session id, process-group id and start time from the
-+// contents of /proc/<pid>/stat. comm (field 2) is wrapped in parentheses and
-+// may itself contain spaces and parentheses, so anchor on the final ')'.
-+func parseStat(b []byte) (sid, pgid int, starttime uint64, ok bool) {
++// parseStat extracts parent pid, session id, process-group id and start time
++// from the contents of /proc/<pid>/stat. comm (field 2) is wrapped in
++// parentheses and may itself contain spaces and parentheses, so anchor on the
++// final ')'.
++func parseStat(b []byte) (ppid, sid, pgid int, starttime uint64, ok bool) {
 +	i := bytes.LastIndexByte(b, ')')
 +	if i < 0 || i+1 >= len(b) {
 +		return
@@ -492,11 +539,28 @@ index 0000000..6b246b3
 +	if len(fields) < 20 {
 +		return
 +	}
++	ppid, _ = strconv.Atoi(fields[1])                    // field 4
 +	pgid, _ = strconv.Atoi(fields[2])                    // field 5
 +	sid, _ = strconv.Atoi(fields[3])                     // field 6
 +	starttime, _ = strconv.ParseUint(fields[19], 10, 64) // field 22
 +	ok = true
 +	return
++}
++
++// readPidNS returns the inode of the peer's pid namespace, or 0 if it cannot be
++// read. /proc/<pid>/ns/pid is a symlink of the form "pid:[4026531836]".
++func readPidNS(pid int) uint64 {
++	l, err := os.Readlink(fmt.Sprintf("/proc/%d/ns/pid", pid))
++	if err != nil {
++		return 0
++	}
++	a := strings.IndexByte(l, '[')
++	b := strings.LastIndexByte(l, ']')
++	if a < 0 || b <= a+1 {
++		return 0
++	}
++	n, _ := strconv.ParseUint(l[a+1:b], 10, 64)
++	return n
 +}
 +
 +func readExe(pid int) string {
@@ -566,10 +630,10 @@ index 0000000..6b246b3
 +}
 diff --git a/internal/peerid/peerid_test.go b/internal/peerid/peerid_test.go
 new file mode 100644
-index 0000000..709f713
+index 0000000..b5cd95e
 --- /dev/null
 +++ b/internal/peerid/peerid_test.go
-@@ -0,0 +1,134 @@
+@@ -0,0 +1,213 @@
 +package peerid
 +
 +import (
@@ -583,9 +647,12 @@ index 0000000..709f713
 +	// Build: pid (comm) then fields 3..22.
 +	rest := "S 1000 4242 7777 34816 4242 0 0 0 0 0 0 0 0 20 0 1 0 0 99887766"
 +	line := []byte("1234 (we (ird) proc) " + rest + "\n")
-+	sid, pgid, start, ok := parseStat(line)
++	ppid, sid, pgid, start, ok := parseStat(line)
 +	if !ok {
 +		t.Fatal("parseStat returned ok=false")
++	}
++	if ppid != 1000 {
++		t.Errorf("ppid = %d, want 1000", ppid)
 +	}
 +	if sid != 7777 {
 +		t.Errorf("sid = %d, want 7777", sid)
@@ -599,11 +666,70 @@ index 0000000..709f713
 +}
 +
 +func TestParseStatTooShort(t *testing.T) {
-+	if _, _, _, ok := parseStat([]byte("1 (init) S 0 1 1")); ok {
++	if _, _, _, _, ok := parseStat([]byte("1 (init) S 0 1 1")); ok {
 +		t.Error("expected ok=false for a truncated stat line")
 +	}
-+	if _, _, _, ok := parseStat([]byte("garbage without paren")); ok {
++	if _, _, _, _, ok := parseStat([]byte("garbage without paren")); ok {
 +		t.Error("expected ok=false when there is no comm close paren")
++	}
++}
++
++func snapLookup(m map[int]statSnap) func(int) (statSnap, bool) {
++	return func(p int) (statSnap, bool) { s, ok := m[p]; return s, ok }
++}
++
++func TestResolveSessionNormalPeer(t *testing.T) {
++	// A peer launched from a shell inherits the shell's session (sid != pid);
++	// the session resolves directly with no parent walk.
++	lookup := snapLookup(map[int]statSnap{
++		100: {ppid: 7, sid: 7, start: 999},
++		7:   {ppid: 1, sid: 7, start: 100},
++	})
++	sid, ls := resolveSession(100, 7, 7, 999, lookup)
++	if sid != 7 || ls != 100 {
++		t.Errorf("got sid=%d leaderStart=%d, want 7,100", sid, ls)
++	}
++}
++
++func TestResolveSessionSkipsDetachedLeader(t *testing.T) {
++	// omp setsid()s ssh, so ssh is its own session leader (sid == pid). The
++	// session must resolve to the enclosing login session (7) of its parent,
++	// not to the per-invocation ssh session.
++	lookup := snapLookup(map[int]statSnap{
++		100: {ppid: 50, sid: 100, start: 999}, // ssh, detached
++		50:  {ppid: 40, sid: 7, start: 500},   // omp, member of session 7
++		7:   {ppid: 1, sid: 7, start: 100},    // login shell, session leader
++	})
++	sid, ls := resolveSession(100, 50, 100, 999, lookup)
++	if sid != 7 {
++		t.Errorf("sid = %d, want 7 (enclosing session, not detached ssh)", sid)
++	}
++	if ls != 100 {
++		t.Errorf("leaderStart = %d, want 100 (session-7 leader start)", ls)
++	}
++}
++
++func TestResolveSessionNestedDetached(t *testing.T) {
++	// ssh <- git <- omp, where omp setsid()s both git and ssh. The walk must
++	// skip both detached leaders and land on omp's session.
++	lookup := snapLookup(map[int]statSnap{
++		200: {ppid: 150, sid: 200, start: 30}, // ssh, detached
++		150: {ppid: 50, sid: 150, start: 20},  // git, detached
++		50:  {ppid: 1, sid: 7, start: 10},     // omp, session 7
++		7:   {ppid: 1, sid: 7, start: 5},
++	})
++	sid, ls := resolveSession(200, 150, 200, 30, lookup)
++	if sid != 7 || ls != 5 {
++		t.Errorf("got sid=%d leaderStart=%d, want 7,5", sid, ls)
++	}
++}
++
++func TestResolveSessionLeaderUnreadableFallsBack(t *testing.T) {
++	// Nothing readable up the chain: keep the peer's own session and start time
++	// rather than inventing one (still a valid, if per-invocation, scope).
++	sid, ls := resolveSession(100, 1, 100, 999, snapLookup(map[int]statSnap{}))
++	if sid != 100 || ls != 999 {
++		t.Errorf("got sid=%d leaderStart=%d, want 100,999 (peer-start fallback)", sid, ls)
 +	}
 +}
 +
@@ -688,6 +814,23 @@ index 0000000..709f713
 +	reused.LeaderStart = 99999 // same sid number, new leader -> reuse-safe
 +	if g.Allowed(reused) {
 +		t.Error("a reused sid with a different leader start must re-confirm")
++	}
++}
++
++func TestDifferentSandboxGate(t *testing.T) {
++	g := NewGrants()
++	g.Grant(id("/bin/ssh"), true, time.Minute)
++
++	// Same uid/session/binary but a different pid namespace = a different
++	// sandbox launched from the same terminal; it must re-confirm.
++	other := id("/bin/ssh")
++	other.PidNS = 4026533663
++	if g.Allowed(other) {
++		t.Error("a different sandbox (pid namespace) must re-confirm")
++	}
++	// The granting sandbox still matches.
++	if !g.Allowed(id("/bin/ssh")) {
++		t.Error("the granting sandbox should still be allowed")
 +	}
 +}
 +
