@@ -10,6 +10,8 @@ let
       # side-by-side when it acts as the pager.
       ui.diff-formatter = ":git";
 
+      ui.default-command = ["log" "-r" "all()"];
+
       # delta as pager. `--paging=auto` makes delta only spawn its internal
       # less when the output exceeds the terminal, so short `jj log` output
       # stays in the terminal instead of dropping into a pager.
