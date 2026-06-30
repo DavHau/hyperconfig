@@ -27,6 +27,7 @@ in
     # Kept in-tree for reference until the distro-managed flow has been
     # exercised on this host.
     # ./niri.nix
+    ./niri-monitor-binds.nix
     ./greetd.nix
     ./pi.nix
     ./workmux.nix
