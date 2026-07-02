@@ -164,6 +164,8 @@
 
     **Do NOT** use `sleep N && pueue wait`. Use `timeout N pueue wait <task_id>` instead — it returns immediately when the task finishes rather than always waiting the full sleep duration.
 
+    **Do NOT** pipe the queued command's output through `tail`, `head`, or similar inside `pueue add` (e.g. `pueue add -- 'cmd 2>&1 | tail -n 25'`). The pipe hides everything but the kept lines from `pueue log`, breaks the exit status (pueue sees the pipe's status, not the command's), and buys nothing — `pueue log` already truncates. Queue the bare command; page its output later with `pueue log <task_id>`.
+
     ## NixOS Module Organization
 
     Always create new NixOS features as a separate `.nix` file in `modules/nixos/` and import it where needed.
