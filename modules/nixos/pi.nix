@@ -39,6 +39,8 @@
       customDirectories:
         - ${mattpocockSkillsTree}/engineering
         - ${mattpocockSkillsTree}/productivity
+    modelRoles:
+      default: claude-fable-5:medium
   '';
   workmux = inputs.llm-agents.packages.${sys}.workmux;
   # workmux reads ~/.config/workmux/config.yaml. Point it at the wrapped `omp`
