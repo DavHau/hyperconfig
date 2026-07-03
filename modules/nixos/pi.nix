@@ -10,6 +10,7 @@
   mattpocockSkillsTree = pkgs.linkFarm "mattpocock-skills" (
     let skill = name: { inherit name; path = "${inputs.mattpocock-skills}/skills/${name}"; };
     in map skill [
+      "engineering/diagnosing-bugs"
       "engineering/improve-codebase-architecture"
       "engineering/grill-with-docs"
       "engineering/codebase-design"
