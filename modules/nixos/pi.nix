@@ -42,6 +42,12 @@
         - ${mattpocockSkillsTree}/productivity
     modelRoles:
       default: claude-fable-5:medium
+      # Subagents (`task` tool) use the bundled `task` agent, whose model is
+      # `pi/task`. The `task` role does NOT inherit the `default` role's
+      # thinking suffix (only smol/slow/designer do), so leaving it unset makes
+      # subagents fall back to the built-in task chain at the model's default
+      # (high) effort. Pin it to keep subagents at medium like the parent.
+      task: claude-fable-5:medium
     task:
       isolation:
         # Isolated subagents (`task` tool, `isolated: true`) each run in a
