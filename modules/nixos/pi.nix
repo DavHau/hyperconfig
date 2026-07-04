@@ -58,18 +58,6 @@
   # when the dual-account services are disabled.
   defaultRole = if dual-enabled then "${dual.mainAccount.providerId}/${dual.mainAccount.model}:medium" else "claude-fable-5:medium";
   taskRole = if dual-enabled then "${dual.mainAccount.providerId}/${dual.mainAccount.model}:medium" else "claude-fable-5:medium";
-  # With the dual-account gateways serving fable-5/opus-4-8, the built-in
-  # `anthropic` provider (any stray default-profile OAuth login) would expose
-  # `anthropic/claude-fable-5` etc. sharing the SAME canonical ids as the
-  # gateway providers. Canonical coalescing can then resolve a bare/inherited
-  # `claude-fable-5` (e.g. a spawned subagent re-resolving its model) to the
-  # real api.anthropic.com variant instead of the gateway, which 404s the
-  # fictional catalog id ("Unknown model: claude-fable-5"). Disable the built-in
-  # provider so every claude-* canonical id resolves ONLY to a gateway.
-  disabledProvidersYaml = lib.optionalString dual-enabled ''
-    disabledProviders:
-      - anthropic
-  '';
   configFile = pkgs.writeText "config.yml" ''
     startup:
       quiet: true
@@ -79,7 +67,6 @@
       # forever. It also calls playWelcomeIntro() at the end, replaying the
       # logo animation even though `quiet` is set. Disable it outright.
       setupWizard: false
-    ${disabledProvidersYaml}
     skills:
       customDirectories:
         - ${mattpocockSkillsTree}/engineering
