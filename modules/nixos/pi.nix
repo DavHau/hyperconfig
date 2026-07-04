@@ -52,10 +52,22 @@
       isolation:
         # Isolated subagents (`task` tool, `isolated: true`) each run in a
         # copy-on-write snapshot of the repo; changes are merged back on
-        # finish. `patch` applies the diff to the parent working copy, so it
-        # lands as ordinary WIP in jj's `@`. Requires a colocated `.git`.
+        # finish. `branch` commits each subagent's changes onto a task branch
+        # and cherry-picks them onto the parent HEAD — more robust than `patch`
+        # for staged-new and binary files, and overlaps surface as real merge
+        # conflicts instead of silently dropped hunks. Requires a colocated
+        # `.git`.
         mode: auto
-        merge: patch
+        merge: branch
+    bash:
+      autoBackground:
+        # Auto-convert any non-PTY command still running after 10s into a
+        # background job (result auto-delivered on completion; poll/cancel via
+        # the `job` tool). omp-native backgrounding runs in-process, so it works
+        # inside the sandbox/isolation mounts where an external daemon (pueue)
+        # could not spawn. Replaces the former pueue workflow.
+        enabled: true
+        thresholdMs: 10000
   '';
   agentsFile = pkgs.writeText "AGENTS.md" ''
     # Global Agent Instructions
@@ -85,9 +97,17 @@
     If the current project does not have a `.jj` directory, initialize it with
     `jj git init --colocate` before proceeding.
 
+    **Isolated subagents run no version control.** When you are an isolated
+    `task` subagent (running in a copy-on-write worktree), you MUST NOT run
+    `jj` or `git` at all — no `jj st`/`new`/`describe`, no `git
+    add`/`commit`/`rm`. Just edit files. The harness snapshots your worktree
+    and commits/merges your changes into the parent automatically; running
+    version control yourself corrupts that capture. Everything below applies
+    to the top-level agent operating directly on the repo working copy.
+
     ### Mandatory per-task workflow
 
-    You **MUST** follow these steps for every task that modifies files. No
+    You **MUST** follow these steps for every **top-level** task that modifies files. No
     exceptions. The task is **NOT** complete until step 4 is done.
 
     1. **Before any file write**, run `jj st` and `jj log -r @ --no-graph`.
@@ -126,26 +146,6 @@
     2. If not found, clone the project into `$HOME/projects/` and read the source there.
     3. Use the source code as the primary reference for understanding behavior, APIs, and internals.
 
-    ## Long-Running Commands
-
-    Run all shell commands with a default timeout of **5 seconds**.
-    If a command fails due to a timeout, rerun it using `pueue` with a timeout of **600 seconds**:
-
-    ```bash
-    # Add command to pueue
-    pueue add -- '<command>'
-    # get last 15 lines of log output
-    pueue log <task_id>
-    # kill command
-    pueue kill <task_id>
-    # wait for command to finish (returns early if process terminates)
-    timeout 60 pueue wait <task_id>
-    ```
-
-    **Do NOT** use `sleep N && pueue wait`. Use `timeout N pueue wait <task_id>` instead — it returns immediately when the task finishes rather than always waiting the full sleep duration.
-
-    **Do NOT** pipe the queued command's output through `tail`, `head`, or similar inside `pueue add` (e.g. `pueue add -- 'cmd 2>&1 | tail -n 25'`). The pipe hides everything but the kept lines from `pueue log`, breaks the exit status (pueue sees the pipe's status, not the command's), and buys nothing — `pueue log` already truncates. Queue the bare command; page its output later with `pueue log <task_id>`.
-
     ## NixOS Module Organization
 
     Always create new NixOS features as a separate `.nix` file in `modules/nixos/` and import it where needed.
@@ -176,9 +176,12 @@
     the `job` tool, message running agents with `irc`, read results via
     `agent://<id>`.
 
-    Merged changes land as ordinary working-copy edits in `@` — describe them
-    with the normal jj workflow above. Isolation requires a colocated git
-    checkout (`jj git init --colocate`); do not run git worktree commands.
+    Each subagent's changes are committed onto a task branch and cherry-picked
+    onto the parent HEAD when it finishes (branch merge mode), so they arrive as
+    ready-made commits rather than loose WIP — describe your own remaining work
+    with the normal jj workflow above. The subagents themselves run no version
+    control. Isolation requires a colocated git checkout (`jj git init
+    --colocate`); do not run git worktree commands yourself.
 
     ${builtins.readFile ./caveman.md}
   '';
