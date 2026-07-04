@@ -30,6 +30,7 @@ in
     ./niri-monitor-binds.nix
     ./greetd.nix
     ./pi.nix
+    ./omp-dual-anthropic.nix
     ./cpu-powersave-cap.nix
     ./amd-pstate-resume-fix.nix
     ./omr.nix
