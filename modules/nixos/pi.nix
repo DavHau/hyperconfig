@@ -57,7 +57,7 @@
   # account 2's opus-4.8. Falls back to the single built-in anthropic provider
   # when the dual-account services are disabled.
   defaultRole = if dual-enabled then "${dual.mainAccount.providerId}/${dual.mainAccount.model}:medium" else "claude-fable-5:medium";
-  taskRole = if dual-enabled then "${dual.subAccount.providerId}/${dual.subAccount.model}:medium" else "claude-fable-5:medium";
+  taskRole = if dual-enabled then "${dual.mainAccount.providerId}/${dual.mainAccount.model}:medium" else "claude-fable-5:medium";
   configFile = pkgs.writeText "config.yml" ''
     startup:
       quiet: true
@@ -73,11 +73,11 @@
         - ${mattpocockSkillsTree}/productivity
     modelRoles:
       default: ${defaultRole}
-      # Subagents (`task` tool) run the bundled `task` agent. With the
-      # dual-account setup this pins them to the SECOND Anthropic account's
-      # opus-4.8 while the main loop uses the first account's fable-5, keeping
-      # the two accounts' rate limits independent. The `task` role does NOT
-      # inherit the `default` role's thinking suffix, so :medium is explicit.
+      # Subagents (`task` tool) run the bundled `task` agent. Default them to the
+      # SAME account/model as the main loop (account 1's fable-5). Heavier
+      # per-subagent models (e.g. account 2's opus via anthropic-sub) are opt-in
+      # per agent through frontmatter `model:` or `task.agentModelOverrides`. The
+      # `task` role does NOT inherit `default`'s thinking suffix, so :medium is explicit.
       task: ${taskRole}
     task:
       isolation:
