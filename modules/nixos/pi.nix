@@ -57,7 +57,11 @@
         # for staged-new and binary files, and overlaps surface as real merge
         # conflicts instead of silently dropped hunks. Requires a colocated
         # `.git`.
-        mode: auto
+        # Pin overlayfs (auto could otherwise pick reflink/rcopy per host): it
+        # mounts the project as a read-only lower layer — zero-copy even for
+        # large gitignored data, copy-up only on write — and runs in-process so
+        # it works inside the sandbox namespace.
+        mode: overlayfs
         merge: branch
     bash:
       autoBackground:
