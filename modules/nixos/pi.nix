@@ -18,15 +18,46 @@
       "productivity/grilling"
     ]
   );
-  modelsFile = pkgs.writeText "models.yml" ''
-    providers:
-      llama-swap:
-        baseUrl: http://127.0.0.1:${toString config.services.llama-swap.port}/v1
-        api: openai-completions
-        auth: none
-        discovery:
-          type: lm-studio
-  '';
+  dual = config.services.omp-dual-anthropic;
+  dual-enabled = dual.enable;
+  # One anthropic-messages custom provider per account gateway. This is
+  # api: anthropic-messages, NOT transport: pi-native — a pi-native client
+  # sends `<providerId>/<model>` as the model id, which the gateway keys only
+  # as `anthropic/<model>` (and bare `<model>`), so a renamed provider 404s.
+  # The anthropic client instead sends the bare model id to baseUrl/v1/messages;
+  # the gateway resolves it and dispatches with this account's single OAuth
+  # credential, adding the Claude-Code OAuth prefix the client omits. apiKey is
+  # the gateway bearer token at the profile's config root (see omp-dual-anthropic.nix).
+  mkGatewayProvider = acct: lib.concatStringsSep "\n" [
+    "  ${acct.providerId}:"
+    "    baseUrl: http://127.0.0.1:${toString acct.gatewayPort}"
+    "    api: anthropic-messages"
+    "    authHeader: true"
+    "    disableStrictTools: true"
+    "    apiKey: '!cat \"$HOME/.omp/profiles/${acct.profile}/auth-gateway.token\"'"
+    "    models:"
+    "      - id: ${acct.model}"
+  ];
+  llamaSwapProvider = lib.concatStringsSep "\n" [
+    "  llama-swap:"
+    "    baseUrl: http://127.0.0.1:${toString config.services.llama-swap.port}/v1"
+    "    api: openai-completions"
+    "    auth: none"
+    "    discovery:"
+    "      type: lm-studio"
+  ];
+  modelProviderBlocks =
+    lib.optional dual-enabled (mkGatewayProvider dual.mainAccount)
+    ++ lib.optional dual-enabled (mkGatewayProvider dual.subAccount)
+    ++ lib.optional llama-swap-enabled llamaSwapProvider;
+  models-needed = modelProviderBlocks != [ ];
+  modelsFile = pkgs.writeText "models.yml"
+    (lib.concatStringsSep "\n" ([ "providers:" ] ++ modelProviderBlocks) + "\n");
+  # Dual-account model roles: main loop -> account 1's fable-5, subagents ->
+  # account 2's opus-4.8. Falls back to the single built-in anthropic provider
+  # when the dual-account services are disabled.
+  defaultRole = if dual-enabled then "${dual.mainAccount.providerId}/${dual.mainAccount.model}:medium" else "claude-fable-5:medium";
+  taskRole = if dual-enabled then "${dual.subAccount.providerId}/${dual.subAccount.model}:medium" else "claude-fable-5:medium";
   configFile = pkgs.writeText "config.yml" ''
     startup:
       quiet: true
@@ -41,13 +72,13 @@
         - ${mattpocockSkillsTree}/engineering
         - ${mattpocockSkillsTree}/productivity
     modelRoles:
-      default: claude-fable-5:medium
-      # Subagents (`task` tool) use the bundled `task` agent, whose model is
-      # `pi/task`. The `task` role does NOT inherit the `default` role's
-      # thinking suffix (only smol/slow/designer do), so leaving it unset makes
-      # subagents fall back to the built-in task chain at the model's default
-      # (high) effort. Pin it to keep subagents at medium like the parent.
-      task: claude-fable-5:medium
+      default: ${defaultRole}
+      # Subagents (`task` tool) run the bundled `task` agent. With the
+      # dual-account setup this pins them to the SECOND Anthropic account's
+      # opus-4.8 while the main loop uses the first account's fable-5, keeping
+      # the two accounts' rate limits independent. The `task` role does NOT
+      # inherit the `default` role's thinking suffix, so :medium is explicit.
+      task: ${taskRole}
     task:
       isolation:
         # Isolated subagents (`task` tool, `isolated: true`) each run in a
@@ -197,7 +228,7 @@
       mkdir -p "$config_dir"
       ln -sf ${configFile} "$config_dir/config.yml"
       ln -sf ${agentsFile} "$config_dir/AGENTS.md"
-      ${lib.optionalString llama-swap-enabled ''ln -sf ${modelsFile} "$config_dir/models.yml"''}
+      ${lib.optionalString models-needed ''ln -sf ${modelsFile} "$config_dir/models.yml"''}
     '';
   };
 in {
