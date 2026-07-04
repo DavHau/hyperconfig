@@ -19,26 +19,6 @@
       "productivity/grilling"
     ]
   );
-  dual = config.services.omp-dual-anthropic;
-  dual-enabled = dual.enable;
-  # One anthropic-messages custom provider per account gateway. This is
-  # api: anthropic-messages, NOT transport: pi-native — a pi-native client
-  # sends `<providerId>/<model>` as the model id, which the gateway keys only
-  # as `anthropic/<model>` (and bare `<model>`), so a renamed provider 404s.
-  # The anthropic client instead sends the bare model id to baseUrl/v1/messages;
-  # the gateway resolves it and dispatches with this account's single OAuth
-  # credential, adding the Claude-Code OAuth prefix the client omits. apiKey is
-  # the gateway bearer token at the profile's config root (see omp-dual-anthropic.nix).
-  mkGatewayProvider = acct: lib.concatStringsSep "\n" [
-    "  ${acct.providerId}:"
-    "    baseUrl: http://127.0.0.1:${toString acct.gatewayPort}"
-    "    api: anthropic-messages"
-    "    authHeader: true"
-    "    disableStrictTools: true"
-    "    apiKey: '!cat \"$HOME/.omp/profiles/${acct.profile}/auth-gateway.token\"'"
-    "    models:"
-    "      - id: ${acct.model}"
-  ];
   llamaSwapProvider = lib.concatStringsSep "\n" [
     "  llama-swap:"
     "    baseUrl: http://127.0.0.1:${toString config.services.llama-swap.port}/v1"
@@ -48,17 +28,10 @@
     "      type: lm-studio"
   ];
   modelProviderBlocks =
-    lib.optional dual-enabled (mkGatewayProvider dual.mainAccount)
-    ++ lib.optional dual-enabled (mkGatewayProvider dual.subAccount)
-    ++ lib.optional llama-swap-enabled llamaSwapProvider;
+    lib.optional llama-swap-enabled llamaSwapProvider;
   models-needed = modelProviderBlocks != [ ];
   modelsFile = pkgs.writeText "models.yml"
     (lib.concatStringsSep "\n" ([ "providers:" ] ++ modelProviderBlocks) + "\n");
-  # Dual-account model roles: main loop -> account 1's fable-5, subagents ->
-  # account 2's opus-4.8. Falls back to the single built-in anthropic provider
-  # when the dual-account services are disabled.
-  defaultRole = if dual-enabled then "${dual.mainAccount.providerId}/${dual.mainAccount.model}:medium" else "claude-fable-5:medium";
-  taskRole = if dual-enabled then "${dual.mainAccount.providerId}/${dual.mainAccount.model}:medium" else "claude-fable-5:medium";
   configFile = pkgs.writeText "config.yml" ''
     startup:
       quiet: true
@@ -73,13 +46,14 @@
         - ${mattpocockSkillsTree}/engineering
         - ${mattpocockSkillsTree}/productivity
     modelRoles:
-      default: ${defaultRole}
+      default: claude-fable-5:medium
       # Subagents (`task` tool) run the bundled `task` agent. Default them to the
-      # SAME account/model as the main loop (account 1's fable-5). Heavier
-      # per-subagent models (e.g. account 2's opus via anthropic-sub) are opt-in
-      # per agent through frontmatter `model:` or `task.agentModelOverrides`. The
-      # `task` role does NOT inherit `default`'s thinking suffix, so :medium is explicit.
-      task: ${taskRole}
+      # SAME model as the main loop (fable-5); omp's claudeRankingStrategy
+      # quota-balances across all logged-in Anthropic accounts automatically.
+      # Heavier per-subagent models (e.g. opus-4.8) are opt-in per agent through
+      # frontmatter `model:` or `task.agentModelOverrides`. The `task` role does
+      # NOT inherit `default`'s thinking suffix, so :medium is explicit.
+      task: claude-fable-5:medium
     task:
       isolation:
         # Isolated subagents (`task` tool, `isolated: true`) each run in a
@@ -114,12 +88,8 @@
 
     ## Development Style
 
-    Follow Red-Green-Refactor TDD:
-    1. **Red**: Write a failing test first that defines the desired behavior.
-    2. **Green**: Write the minimal code to make the test pass.
-    3. **Refactor**: Clean up the code while keeping all tests green.
-
-    Repeat this cycle for each piece of functionality.
+    All implementation work is test-driven. Read the `tdd` skill
+    (`skill://tdd`) before you start implementing.
 
     ## Nix Build Timeout
 
