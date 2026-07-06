@@ -1,24 +1,40 @@
 # End-to-end regression test for the ssh-tpm-agent confirm-grant cache.
 #
-# Reproduces the omp-inside-sbox failure: a process manager spawns `ssh` via
-# setsid(), so each request is its own session leader. The grant key must resolve
-# the *enclosing* session (peerid.resolveSession) and include the peer's pid
-# namespace, so that:
-#   - repeated requests from one sandbox are cached (one prompt), and
-#   - two different sandboxes never share a grant (separate prompts).
+# The grant model: the confirm dialog offers the peer's process ancestry and
+# the user trusts ONE process; the grant covers that process and all of its
+# descendants, keyed by (pid, starttime). This reproduces the omp-inside-sbox
+# case: requests come from short-lived ssh processes inside a sandbox (own
+# user+pid namespace), so
+#   - trusting the requesting process itself silences nothing (fresh pid each
+#     time), while
+#   - trusting an ancestor (the sandbox shell) silences every later request
+#     from that subtree — including across the namespace boundary, because the
+#     agent only reads world-readable /proc/<pid>/stat, and
+#   - a second sandbox (different ancestor) prompts again.
 #
 # A scripted SSH_ASKPASS records every confirm dialog; we assert the count.
 { pkgs }:
 let
   sshTpmAgent = import ./ssh-tpm-agent-package.nix { inherit pkgs; };
 
-  # Records every confirm dialog and auto-approves "this session". PIN prompts
-  # (no SSH_ASKPASS_PROMPT) return an empty PIN for the no-PIN test key and are
-  # not counted.
+  # Records every confirm dialog and grants per /tmp/grant-mode:
+  #   self  -> sticky grant on the requesting process itself (choices line 1)
+  #   shell -> sticky grant on the nearest bash ancestor (the loop shell)
+  # PIN prompts (no SSH_ASKPASS_PROMPT) return an empty PIN for the no-PIN test
+  # key and are not counted.
   askpass = pkgs.writeShellScript "test-askpass" ''
     if [ "$SSH_ASKPASS_PROMPT" = choice ]; then
       echo confirm >> /tmp/prompts
-      echo session
+      case "$(${pkgs.coreutils}/bin/cat /tmp/grant-mode)" in
+        self)  pid="$(printf '%s\n' "$SSH_TPM_CHOICES" | ${pkgs.gnused}/bin/sed -n '1s/ .*//p')" ;;
+        shell) pid="$(printf '%s\n' "$SSH_TPM_CHOICES" | ${pkgs.gawk}/bin/awk '$2 == "bash" { print $1; exit }')" ;;
+        *)     pid="" ;;
+      esac
+      if [ -n "$pid" ]; then
+        echo "session $pid"
+      else
+        echo deny
+      fi
     else
       echo ""
     fi
@@ -38,7 +54,8 @@ let
   '';
 
   # $1 detached requests inside ONE fresh sandbox (own pid+user namespace, like
-  # sbox). Each ssh-add is setsid'd so it is its own session leader.
+  # sbox). Each ssh-add is setsid'd so it is its own session leader; the bash
+  # running the loop is the common ancestor a "shell" grant should stick to.
   reqSandbox = pkgs.writeShellScript "req-sandbox" ''
     ${pkgs.util-linux}/bin/unshare --user --map-current-user --pid --fork --mount-proc \
       ${pkgs.bash}/bin/bash -c '
@@ -79,10 +96,11 @@ pkgs.testers.runNixOSTest {
     machine.succeed("test -f /home/alice/.ssh/id_tpm.tpm")
     machine.succeed("test -f /home/alice/.ssh/id_tpm.pub")
 
-    def start_agent():
+    def start_agent(grant_mode):
         machine.succeed("systemctl stop tpmagent.service || true")
         machine.succeed("systemctl reset-failed tpmagent.service || true")
         machine.succeed("rm -f /tmp/tpmagent.sock /tmp/prompts; touch /tmp/prompts; chmod 666 /tmp/prompts")
+        machine.succeed(f"echo {grant_mode} > /tmp/grant-mode; chmod 644 /tmp/grant-mode")
         machine.succeed(
             "systemd-run --collect --unit=tpmagent -p User=alice "
             "--setenv=SSH_TPM_CONFIRM_ALL=1 --setenv=SSH_TPM_PROMPT=gui "
@@ -94,20 +112,23 @@ pkgs.testers.runNixOSTest {
     def prompts():
         return int(machine.succeed("wc -l < /tmp/prompts").strip())
 
-    with subtest("a single confirm prompts exactly once"):
-        start_agent()
+    with subtest("trusting the requester itself covers only that process"):
+        start_agent("self")
         machine.succeed("runuser -u alice -- ${reqDetached}")
         n = prompts()
         assert n == 1, f"expected exactly 1 confirm prompt, got {n}"
-
-    with subtest("repeat ssh from one sandbox is cached"):
-        start_agent()
-        machine.succeed("runuser -u alice -- ${reqSandbox} 2")
+        machine.succeed("runuser -u alice -- ${reqDetached}")
         n = prompts()
-        assert n == 1, f"second detached ssh in the same sandbox must be cached, got {n} prompts"
+        assert n == 2, f"a new requesting pid must re-prompt, got {n} prompts"
 
-    with subtest("two different sandboxes do not share a grant"):
-        start_agent()
+    with subtest("trusting the sandbox shell covers later requests from it"):
+        start_agent("shell")
+        machine.succeed("runuser -u alice -- ${reqSandbox} 3")
+        n = prompts()
+        assert n == 1, f"descendants of the granted shell must be cached, got {n} prompts"
+
+    with subtest("a second sandbox does not inherit the grant"):
+        start_agent("shell")
         machine.succeed("runuser -u alice -- ${reqSandbox} 1")
         machine.succeed("runuser -u alice -- ${reqSandbox} 1")
         n = prompts()

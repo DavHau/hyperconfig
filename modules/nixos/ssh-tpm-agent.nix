@@ -2,8 +2,9 @@
 let
   cfg = config.services.sshTpmAgent;
 
-  # ssh-tpm-agent, patched to gate every signature behind a confirmation scoped
-  # to (uid, login-session, sandbox, requesting binary). See
+  # ssh-tpm-agent, patched to gate every signature behind a confirmation. The
+  # dialog lists the requesting process and its ancestors; trusting one of them
+  # whitelists that process AND all of its children. See
   # ssh-tpm-agent-package.nix (shared with the ssh-tpm-confirm-cache VM test).
   sshTpmAgent = import ./ssh-tpm-agent-package.nix { inherit pkgs; };
 
@@ -13,7 +14,11 @@ let
   # compositor exported its environment (or survive a compositor restart).
   #
   # Modes (selected by the agent via SSH_ASKPASS_PROMPT):
-  #   choice  -> three-way confirm dialog. Prints temporary|session|deny.
+  #   choice  -> grant dialog. The agent passes the peer's ancestry in
+  #              SSH_TPM_CHOICES (one "pid name" line per process, requester
+  #              first). The user picks WHICH process to trust (a radiolist row;
+  #              the requester is preselected) and for how long (a button).
+  #              Prints "temporary <pid>" | "session <pid>" | "deny".
   #   (unset) -> TPM PIN passphrase entry via seahorse.
   # Headless requests never reach this script: the agent prompts for the PIN on
   # the requester's own terminal via systemd-ask-password (SSH/tmux friendly).
@@ -24,18 +29,27 @@ let
 
     if [ "$SSH_ASKPASS_PROMPT" = choice ]; then
       ttl="''${SSH_TPM_CONFIRM_TTL:-15m}"
-      # zenity: OK -> exit 0; the extra button prints its label (and exits 1);
-      # Cancel/close -> exit 1 with no output. Map those to the agent's tokens.
-      sel="$(${pkgs.zenity}/bin/zenity --question --no-wrap \
+      rows=()
+      checked=TRUE
+      while read -r pid name; do
+        [ -n "$pid" ] || continue
+        rows+=("$checked" "$pid" "$name")
+        checked=FALSE
+      done <<<"$SSH_TPM_CHOICES"
+
+      # yad prints the selected row's PID column for buttons with an EVEN exit
+      # code and nothing for odd ones (Deny, Esc/close = 252).
+      pid="$(${pkgs.yad}/bin/yad --list --radiolist --center --no-markup \
         --title "ssh-tpm-agent" --text "$1" \
-        --ok-label "Trust $ttl" \
-        --extra-button "Trust this session" \
-        --cancel-label "Deny")"
+        --column "Trust:RD" --column "PID:NUM" --column "Process" \
+        --print-column 2 --separator "" \
+        --button "Deny:1" --button "Trust $ttl:0" --button "Trust forever:2" \
+        "''${rows[@]}")"
       rc=$?
-      if [ "$sel" = "Trust this session" ]; then
-        echo session
-      elif [ "$rc" -eq 0 ]; then
-        echo temporary
+      if [ -n "$pid" ] && [ "$rc" -eq 0 ]; then
+        echo "temporary $pid"
+      elif [ -n "$pid" ] && [ "$rc" -eq 2 ]; then
+        echo "session $pid"
       else
         echo deny
       fi
@@ -51,11 +65,12 @@ in
     default = "15m";
     example = "8h";
     description = ''
-      Lifetime of a "Trust for <ttl>" confirmation grant (and of a headless PIN
+      Lifetime of a "Trust <ttl>" confirmation grant (and of a headless PIN
       authorisation) before ssh-tpm-agent re-prompts. Go duration syntax
       ("30s", "15m", "1h30m", "8h"). The value is also shown on the dialog
-      button. "Trust this session" grants ignore this and live until the
-      requesting login session ends or the agent restarts.
+      button. A grant applies to the process picked in the dialog and all of
+      its children; "Trust forever" ignores the TTL and lives until the
+      granted process exits or the agent restarts.
     '';
   };
 
@@ -102,7 +117,7 @@ in
         # Disk-loaded keys can't carry the runtime confirm constraint, so opt
         # every TPM key into the confirmation gate.
         SSH_TPM_CONFIRM_ALL = "1";
-        # Lifetime of "Trust for <ttl>" / headless grants.
+        # Lifetime of "Trust <ttl>" / headless grants.
         SSH_TPM_CONFIRM_TTL = cfg.confirmTtl;
         # auto: graphical dialog when the requester has a display, else a PIN
         # prompt on its terminal. Force with "gui" or "tty".
@@ -111,7 +126,7 @@ in
       serviceConfig = {
         # The kernel-keyring PIN cache stays (no --no-cache) because the confirm
         # gate authorises every signature regardless of PIN-cache state; and no
-        # RuntimeMaxSec, because the grant TTL + session binding is the bound.
+        # RuntimeMaxSec, because grants die with the granted process or the TTL.
         ExecStart = "${sshTpmAgent}/bin/ssh-tpm-agent -A %t/ssh-agent";
         SuccessExitStatus = "2";
       };
