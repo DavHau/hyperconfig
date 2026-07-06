@@ -1,5 +1,10 @@
 { lib, ... }:
-# Laptop niri keybinds: move the focused workspace to another monitor.
+# Laptop niri keybinds layered on top of the spaces base config.
+#
+# Mod+Shift+Ctrl+<dir>: move the focused workspace to another monitor.
+# Mod+T: open the terminal in the focused window's working directory
+# (niri-terminal-cwd, installed by ./niri-terminal-cwd.nix; falls back to
+# $HOME when the cwd is outside $HOME).
 #
 # niri's config is owned by the spaces flake, which writes a read-only
 # /etc/niri/config.kdl and points NIRI_CONFIG at it (which disables niri's
@@ -32,6 +37,7 @@
         Mod+Shift+Ctrl+J     hotkey-overlay-title="Move Workspace to Monitor Down"  { move-workspace-to-monitor-down; }
         Mod+Shift+Ctrl+K     hotkey-overlay-title="Move Workspace to Monitor Up"    { move-workspace-to-monitor-up; }
         Mod+Shift+Ctrl+L     hotkey-overlay-title="Move Workspace to Monitor Right" { move-workspace-to-monitor-right; }
+        Mod+T hotkey-overlay-title="Terminal (in focused window's cwd)" { spawn "niri-terminal-cwd"; }
     }
   '';
 
