@@ -1,18 +1,21 @@
 diff --git a/agent/agent.go b/agent/agent.go
-index ac39d24..0a1173d 100644
+index ac39d24..b76f7a8 100644
 --- a/agent/agent.go
 +++ b/agent/agent.go
-@@ -11,6 +11,7 @@ import (
+@@ -11,15 +11,17 @@ import (
  	"log/slog"
  	"net"
  	"os"
 +	"os/exec"
  	"path/filepath"
  	"slices"
++	"strconv"
  	"strings"
-@@ -20,6 +21,7 @@ import (
+ 	"sync"
+ 	"time"
+ 
  	keyfile "github.com/foxboron/go-tpm-keyfiles"
- 	"github.com/foxboron/ssh-tpm-agent/askpass"
+-	"github.com/foxboron/ssh-tpm-agent/askpass"
  	"github.com/foxboron/ssh-tpm-agent/internal/keyring"
 +	"github.com/foxboron/ssh-tpm-agent/internal/peerid"
  	"github.com/foxboron/ssh-tpm-agent/key"
@@ -76,7 +79,7 @@ index ac39d24..0a1173d 100644
  		blob := k.AgentKey().Marshal()
  		if pub, err := ssh.ParsePublicKey(blob); err == nil {
  			if cert, ok := pub.(*ssh.Certificate); ok {
-@@ -252,44 +257,137 @@ func (a *Agent) confirmKeyUse(wantKey []byte, peer string) error {
+@@ -252,44 +257,168 @@ func (a *Agent) confirmKeyUse(wantKey []byte, peer string) error {
  		if !bytes.Equal(blob, wantKey) {
  			continue
  		}
@@ -100,15 +103,16 @@ index ac39d24..0a1173d 100644
 +}
 +
 +// confirm authorises a single use of k by the peer described in id. A live
-+// grant for (uid, session, exe) short-circuits the prompt. The channel depends
-+// on whether the requester has a graphical display:
++// grant on any process in the peer's ancestry short-circuits the prompt. The
++// channel depends on whether the requester has a graphical display:
 +//
-+//   - GUI: a three-way zenity dialog (trust for the TTL / trust this session /
-+//     deny); the chosen scope is cached.
++//   - GUI: a dialog listing the peer's ancestry; the user picks which process
++//     to trust (that process and all its descendants) and for how long (the
++//     TTL or sticky for this agent session).
 +//   - headless: the PIN is entered on the requester's terminal via
 +//     systemd-ask-password and is itself the authorisation (the TPM validates
-+//     it at sign time). The entered PIN is seeded into the keyring so the signer
-+//     finds it, and a TTL grant is cached.
++//     it at sign time). The entered PIN is seeded into the keyring so the
++//     signer finds it, and a TTL grant is cached.
 +func (a *Agent) confirm(k key.SSHTPMKeys, id peerid.Identity) error {
 +	headless := wantHeadless(id)
 +	if a.grants.Allowed(id) {
@@ -122,40 +126,66 @@ index ac39d24..0a1173d 100644
 +		if _, err := a.keyring().ReadKey(k.Fingerprint()); err == nil {
 +			return nil
  		}
-+	}
+-		return nil
+ 	}
 +	if headless {
 +		return a.confirmHeadless(k, id)
 +	}
 +	return a.confirmGUI(k, id)
 +}
 +
++// confirmGUI shows the grant dialog. The SSH_ASKPASS helper receives the
++// peer's displayed ancestry via SSH_TPM_CHOICES (one "pid name" line per
++// candidate, requester first) and answers "temporary <pid>" or
++// "session <pid>" — anything else denies. The named pid must be one of the
++// offered ancestors; the grant covers it and all of its descendants.
 +func (a *Agent) confirmGUI(k key.SSHTPMKeys, id peerid.Identity) error {
 +	prompt := fmt.Sprintf("Allow use of SSH key %s?\nFingerprint %s.",
 +		k.GetDescription(), k.Fingerprint())
-+	if id.Chain != "" {
-+		prompt += "\nRequested by " + id.Chain
++	if c := id.Chain(); c != "" {
++		prompt += "\nRequested by " + c
 +	}
-+	out, err := askpass.SshAskPass(prompt, "choice")
++	bin := os.Getenv("SSH_ASKPASS")
++	if bin == "" {
++		slog.Info("confirm prompt unavailable: SSH_ASKPASS not set")
++		return ErrUserDeniedConfirm
++	}
++	var choices strings.Builder
++	for _, p := range id.Choices() {
++		fmt.Fprintf(&choices, "%d %s\n", p.PID, p.Name)
++	}
++	cmd := exec.Command(bin, prompt)
++	cmd.Env = append(os.Environ(),
++		"SSH_ASKPASS_PROMPT=choice",
++		"SSH_TPM_CHOICES="+choices.String())
++	out, err := cmd.Output()
 +	if err != nil {
 +		slog.Info("confirm prompt failed", slog.String("error", err.Error()))
 +		return ErrUserDeniedConfirm
 +	}
-+	switch strings.TrimSpace(string(out)) {
-+	case "temporary":
-+		a.grants.Grant(id, false, confirmTTL())
- 		return nil
-+	case "session":
-+		a.grants.Grant(id, true, confirmTTL())
-+		return nil
-+	default:
++	scope, pidStr, ok := strings.Cut(strings.TrimSpace(string(out)), " ")
++	if !ok || (scope != "temporary" && scope != "session") {
 +		return ErrUserDeniedConfirm
 +	}
-+}
-+
++	pid, err := strconv.Atoi(pidStr)
++	if err != nil {
++		return ErrUserDeniedConfirm
++	}
++	p, found := id.Find(pid)
++	if !found {
++		slog.Info("confirm reply named a pid outside the peer ancestry", slog.Int("pid", pid))
++		return ErrUserDeniedConfirm
++	}
++	a.grants.Grant(p, scope == "session", confirmTTL())
+ 	return nil
+ }
+ 
+-// connAgent threads the per-connection peer description into Sign,
+-// since agent.ServeAgent does not expose the net.Conn to handlers.
 +func (a *Agent) confirmHeadless(k key.SSHTPMKeys, id peerid.Identity) error {
 +	prompt := fmt.Sprintf("ssh-tpm-agent: enter PIN to authorise SSH key %s", k.GetDescription())
-+	if id.Chain != "" {
-+		prompt += " (requested by " + id.Chain + ")"
++	if c := id.Chain(); c != "" {
++		prompt += " (requested by " + c + ")"
 +	}
 +	pin, err := askPasswordTTY(prompt)
 +	if err != nil {
@@ -164,18 +194,23 @@ index ac39d24..0a1173d 100644
 +	}
 +	if len(pin) == 0 {
 +		return ErrUserDeniedConfirm
- 	}
++	}
 +	// Seed the entered PIN so the signer uses it; the TPM is the real validator.
 +	if err := a.keyring().AddKey(k.Fingerprint(), pin); err != nil {
 +		slog.Info("failed seeding PIN into keyring", slog.String("error", err.Error()))
 +		return ErrUserDeniedConfirm
 +	}
-+	a.grants.Grant(id, false, confirmTTL())
- 	return nil
- }
- 
--// connAgent threads the per-connection peer description into Sign,
--// since agent.ServeAgent does not expose the net.Conn to handlers.
++	// There is no dialog to pick a scope on this path: trust the requester's
++	// parent (the shell or process manager spawning these requests) for the
++	// TTL, so a burst of invocations from one place asks for the PIN once.
++	if n := len(id.Ancestry); n > 1 {
++		a.grants.Grant(id.Ancestry[1], false, confirmTTL())
++	} else if n == 1 {
++		a.grants.Grant(id.Ancestry[0], false, confirmTTL())
++	}
++	return nil
++}
++
 +// askPasswordTTY reads a secret on the requester's terminal via
 +// systemd-ask-password, which routes through logind so it works over SSH and
 +// inside tmux/screen.
@@ -233,7 +268,7 @@ index ac39d24..0a1173d 100644
  	if err := agent.ServeAgent(ca, c); err != io.EOF {
  		slog.Info("Agent client connection ended unsuccessfully", slog.String("error", err.Error()))
  	}
-@@ -535,6 +633,7 @@ func NewAgent(listener *net.UnixListener, agents []agent.ExtendedAgent, keyring
+@@ -535,6 +664,7 @@ func NewAgent(listener *net.UnixListener, agents []agent.ExtendedAgent, keyring
  		keys:     []key.SSHTPMKeys{},
  		hierkeys: []*key.HierSSHTPMKey{},
  		keyring:  keyring,
@@ -309,10 +344,10 @@ index 58cc27e..0000000
 -}
 diff --git a/internal/peerid/grant.go b/internal/peerid/grant.go
 new file mode 100644
-index 0000000..f15524d
+index 0000000..280964b
 --- /dev/null
 +++ b/internal/peerid/grant.go
-@@ -0,0 +1,79 @@
+@@ -0,0 +1,65 @@
 +package peerid
 +
 +import (
@@ -320,12 +355,9 @@ index 0000000..f15524d
 +	"time"
 +)
 +
-+type grantKey struct {
-+	uid         uint32
-+	sid         int
-+	leaderStart uint64
-+	pidns       uint64
-+	exe         string
++type procKey struct {
++	pid   int
++	start uint64
 +}
 +
 +type grant struct {
@@ -333,80 +365,71 @@ index 0000000..f15524d
 +	sticky bool
 +}
 +
-+// Grants is a confirmation cache scoped to (uid, session, sandbox, binary).
++// Grants caches user confirmations. Each grant names one process (by pid +
++// start time) and covers that process and all of its descendants: a peer is
++// allowed when ANY process in its ancestry holds a live grant.
 +//
-+// A grant is either time-bounded (expiry) or sticky. Because the key embeds the
-+// session id and the session leader's start time, a sticky grant only ever
-+// benefits the exact live session it was issued for: once that session ends, no
-+// future process can match the key (a reused sid number gets a different leader
-+// start time). The key also embeds the peer's pid namespace, so two sandboxes
-+// launched from the same terminal never share a grant. Grants are in-memory and
-+// vanish when the agent recycles.
-+//
-+// The per-exe dimension is the novel-binary gate: approving `ssh` in a session
-+// does not silently authorise a different binary that connects from the same
-+// session.
++// A grant is either time-bounded (expiry) or sticky. A sticky grant lives
++// until the agent recycles or the granted process dies — once its pid is
++// reused, the start time no longer matches and nothing can hit the entry
++// again. Grants are in-memory only.
 +type Grants struct {
 +	mu  sync.Mutex
-+	m   map[grantKey]grant
++	m   map[procKey]grant
 +	now func() time.Time
 +}
 +
 +func NewGrants() *Grants {
-+	return &Grants{m: map[grantKey]grant{}, now: time.Now}
++	return &Grants{m: map[procKey]grant{}, now: time.Now}
 +}
 +
-+func keyOf(id Identity) grantKey {
-+	return grantKey{uid: id.UID, sid: id.SID, leaderStart: id.LeaderStart, pidns: id.PidNS, exe: id.Exe}
-+}
-+
-+// Allowed reports whether a live grant covers id. Unidentified peers
-+// (OK==false) are never allowed.
++// Allowed reports whether a live grant covers id, i.e. whether any process in
++// its ancestry has been granted. Unidentified peers (empty ancestry) are never
++// allowed.
 +func (g *Grants) Allowed(id Identity) bool {
-+	if !id.OK {
-+		return false
-+	}
 +	g.mu.Lock()
 +	defer g.mu.Unlock()
-+	k := keyOf(id)
-+	gr, ok := g.m[k]
-+	if !ok {
-+		return false
++	for _, p := range id.Ancestry {
++		k := procKey{pid: p.PID, start: p.Start}
++		gr, ok := g.m[k]
++		if !ok {
++			continue
++		}
++		if gr.sticky || g.now().Before(gr.expiry) {
++			return true
++		}
++		delete(g.m, k)
 +	}
-+	if gr.sticky {
-+		return true
-+	}
-+	if g.now().Before(gr.expiry) {
-+		return true
-+	}
-+	delete(g.m, k)
 +	return false
 +}
 +
-+// Grant records approval for id. A sticky grant ignores ttl.
-+func (g *Grants) Grant(id Identity, sticky bool, ttl time.Duration) {
-+	if !id.OK {
++// Grant records approval for p and all of its descendants. A sticky grant
++// ignores ttl.
++func (g *Grants) Grant(p Proc, sticky bool, ttl time.Duration) {
++	if p.PID <= 1 {
 +		return
 +	}
 +	g.mu.Lock()
 +	defer g.mu.Unlock()
-+	g.m[keyOf(id)] = grant{expiry: g.now().Add(ttl), sticky: sticky}
++	g.m[procKey{pid: p.PID, start: p.Start}] = grant{expiry: g.now().Add(ttl), sticky: sticky}
 +}
 diff --git a/internal/peerid/peerid.go b/internal/peerid/peerid.go
 new file mode 100644
-index 0000000..398296a
+index 0000000..7ff5b6a
 --- /dev/null
 +++ b/internal/peerid/peerid.go
-@@ -0,0 +1,230 @@
-+// Package peerid resolves the identity of the process connected to the agent
-+// socket and caches confirmation grants scoped to (user, session, sandbox,
-+// binary).
+@@ -0,0 +1,183 @@
++// Package peerid identifies the process connected to the agent socket by its
++// process ancestry and caches user-issued confirmation grants.
 +//
-+// Identity facts are taken only from kernel-authoritative sources: SO_PEERCRED
-+// (uid/pid, stamped at connect) and /proc entries the peer cannot forge about
-+// itself (session id, session-leader start time, pid namespace, the real exe
-+// path). The human-readable ancestry chain and the comm names within it are
-+// display-only.
++// The model is deliberately simple: the user grants trust to ONE process out
++// of the peer's ancestry chain (e.g. the sandbox root, the process manager, or
++// the ssh binary itself), and that grant covers the process and every
++// descendant of it. A grant is keyed by (pid, starttime), so a recycled pid
++// never inherits it. Everything is read from /proc/<pid>/stat, which is
++// world-readable even for processes inside foreign user/pid namespaces
++// (sandboxes) — unlike /proc/<pid>/exe or /proc/<pid>/ns/*, which need ptrace
++// permission and made earlier, finer-grained scoping schemes fail there.
 +package peerid
 +
 +import (
@@ -421,26 +444,67 @@ index 0000000..398296a
 +)
 +
 +const (
-+	maxPeerChain   = 4
-+	maxSessionHops = 8
++	// maxDisplayChain bounds the ancestry shown in the prompt and offered as
++	// grant targets.
++	maxDisplayChain = 4
++	// maxAncestry bounds the /proc walk when matching grants; deep enough for
++	// any real process tree.
++	maxAncestry = 32
 +)
++
++// Proc is one process in the peer's ancestry.
++type Proc struct {
++	PID   int
++	Start uint64 // starttime from /proc/<pid>/stat; pins the PID against reuse
++	Name  string // comm, display only
++}
 +
 +// Identity describes the process at the other end of an agent connection.
 +type Identity struct {
-+	UID         uint32 // peer real uid (SO_PEERCRED)
-+	PID         int    // connecting process
-+	SID         int    // enclosing login/terminal session (see resolveSession)
-+	LeaderStart uint64 // session-leader start time; pins SID against reuse
-+	PidNS       uint64 // peer pid-namespace inode; separates sandboxes
-+	Exe         string // resolved path of the connecting binary
-+	Headless    bool   // no graphical display reachable for the peer
-+	Chain       string // human-readable ancestry, for the prompt only
-+	OK          bool   // false when the peer could not be identified
++	// Ancestry lists the connecting process first, then its parents up to
++	// (not including) pid 1, bounded by maxAncestry. Empty when the peer
++	// could not be identified; such peers are prompted every time and never
++	// cached.
++	Ancestry []Proc
++	Headless bool // no graphical display reachable for the peer
 +}
 +
-+// Resolve inspects the peer of c. It never errors: on any failure it returns an
-+// Identity with OK=false, which callers MUST treat as "prompt every time, never
-+// cache".
++// Chain returns the human-readable ancestry for the prompt, e.g.
++// "ssh (1234) ← omp ← bwrap".
++func (id Identity) Chain() string {
++	var parts []string
++	for i, p := range id.Choices() {
++		if i == 0 {
++			parts = append(parts, fmt.Sprintf("%s (%d)", p.Name, p.PID))
++		} else {
++			parts = append(parts, p.Name)
++		}
++	}
++	return strings.Join(parts, " ← ")
++}
++
++// Choices returns the ancestors the user may grant trust to (the displayed
++// prefix of the ancestry).
++func (id Identity) Choices() []Proc {
++	if len(id.Ancestry) > maxDisplayChain {
++		return id.Ancestry[:maxDisplayChain]
++	}
++	return id.Ancestry
++}
++
++// Find returns the ancestor with the given pid.
++func (id Identity) Find(pid int) (Proc, bool) {
++	for _, p := range id.Ancestry {
++		if p.PID == pid {
++			return p, true
++		}
++	}
++	return Proc{}, false
++}
++
++// Resolve inspects the peer of c. It never errors: on any failure it returns
++// an Identity with an empty Ancestry, which callers MUST treat as "prompt
++// every time, never cache".
 +func Resolve(c *net.UnixConn) Identity {
 +	var id Identity
 +	rc, err := c.SyscallConn()
@@ -454,135 +518,77 @@ index 0000000..398296a
 +	}); cerr != nil || uerr != nil || ucred == nil {
 +		return id
 +	}
-+	id.UID = ucred.Uid
-+	id.PID = int(ucred.Pid)
-+	if id.PID <= 1 {
++	pid := int(ucred.Pid)
++	if pid <= 1 {
 +		return id
 +	}
-+
-+	ppid, sid, _, start, ok := readStat(id.PID)
-+	if !ok {
-+		return id
-+	}
-+	// A process manager (e.g. omp) may spawn the requester via setsid(), making
-+	// it its own session leader with a session id unique to this one invocation;
-+	// keying a grant on that re-prompts every time. Resolve the enclosing session
-+	// the requester detached from so a grant tracks the launching terminal.
-+	id.SID, id.LeaderStart = resolveSession(id.PID, ppid, sid, start, func(p int) (statSnap, bool) {
-+		pp, sd, _, st, ok := readStat(p)
-+		return statSnap{ppid: pp, sid: sd, start: st}, ok
-+	})
-+	// The pid namespace separates one sandbox from another: every sbox session
-+	// runs in its own, so two sandboxes launched from the same terminal (same
-+	// SID) still get distinct grants, while repeat requests from one sandbox
-+	// share it. Non-sandboxed peers share the init namespace, leaving them
-+	// scoped by SID alone (the original per-terminal behaviour).
-+	id.PidNS = readPidNS(id.PID)
-+	id.Exe = readExe(id.PID)
-+	id.Headless = isHeadless(id.PID)
-+	id.Chain = chain(id.PID)
-+
-+	// Without the exe we cannot run the novel-binary gate, so refuse to cache.
-+	id.OK = id.Exe != ""
++	id.Ancestry = ancestryOf(pid, readStat)
++	id.Headless = isHeadless(pid)
 +	return id
 +}
 +
-+// statSnap is the subset of /proc/<pid>/stat the session walk needs.
-+type statSnap struct {
++// procStat is the subset of /proc/<pid>/stat the ancestry walk needs.
++type procStat struct {
++	name  string
 +	ppid  int
-+	sid   int
 +	start uint64
 +}
 +
-+// resolveSession returns the session a grant should be scoped to and that
-+// session leader's start time (which pins the session id against pid reuse).
-+//
-+// Normally the peer inherited its login/terminal session (sid != pid) and the
-+// loop body never runs. But a process manager may setsid() the requester,
-+// making it its own session leader (sid == pid) with an id unique to a single
-+// invocation. We then follow the parent chain past any such detached leaders to
-+// the first enclosing session, so repeat requests from the same terminal/sandbox
-+// keep matching one grant.
-+func resolveSession(pid, ppid, sid int, peerStart uint64, lookup func(int) (statSnap, bool)) (int, uint64) {
-+	for hops := 0; sid == pid && ppid > 1 && hops < maxSessionHops; hops++ {
-+		p, ok := lookup(ppid)
++// ancestryOf walks pid's parent chain via lookup, connecting process first,
++// stopping before pid 1.
++func ancestryOf(pid int, lookup func(int) (procStat, bool)) []Proc {
++	var chain []Proc
++	for len(chain) < maxAncestry && pid > 1 {
++		s, ok := lookup(pid)
 +		if !ok {
 +			break
 +		}
-+		pid, sid, ppid = ppid, p.sid, p.ppid
++		chain = append(chain, Proc{PID: pid, Start: s.start, Name: s.name})
++		pid = s.ppid
 +	}
-+	if leader, ok := lookup(sid); ok {
-+		return sid, leader.start
-+	}
-+	return sid, peerStart
++	return chain
 +}
 +
-+func readStat(pid int) (ppid, sid, pgid int, starttime uint64, ok bool) {
++func readStat(pid int) (procStat, bool) {
 +	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 +	if err != nil {
-+		return
++		return procStat{}, false
 +	}
 +	return parseStat(b)
 +}
 +
-+// parseStat extracts parent pid, session id, process-group id and start time
-+// from the contents of /proc/<pid>/stat. comm (field 2) is wrapped in
-+// parentheses and may itself contain spaces and parentheses, so anchor on the
-+// final ')'.
-+func parseStat(b []byte) (ppid, sid, pgid int, starttime uint64, ok bool) {
-+	i := bytes.LastIndexByte(b, ')')
-+	if i < 0 || i+1 >= len(b) {
-+		return
++// parseStat extracts comm, parent pid and start time from the contents of
++// /proc/<pid>/stat. comm (field 2) is wrapped in parentheses and may itself
++// contain spaces and parentheses, so anchor on the final ')'.
++func parseStat(b []byte) (procStat, bool) {
++	open := bytes.IndexByte(b, '(')
++	close := bytes.LastIndexByte(b, ')')
++	if open < 0 || close <= open || close+1 >= len(b) {
++		return procStat{}, false
 +	}
 +	// fields[0] is field 3 (state); field K maps to fields[K-3].
-+	fields := strings.Fields(string(b[i+1:]))
++	fields := strings.Fields(string(b[close+1:]))
 +	if len(fields) < 20 {
-+		return
++		return procStat{}, false
 +	}
-+	ppid, _ = strconv.Atoi(fields[1])                    // field 4
-+	pgid, _ = strconv.Atoi(fields[2])                    // field 5
-+	sid, _ = strconv.Atoi(fields[3])                     // field 6
-+	starttime, _ = strconv.ParseUint(fields[19], 10, 64) // field 22
-+	ok = true
-+	return
-+}
-+
-+// readPidNS returns the inode of the peer's pid namespace, or 0 if it cannot be
-+// read. /proc/<pid>/ns/pid is a symlink of the form "pid:[4026531836]".
-+func readPidNS(pid int) uint64 {
-+	l, err := os.Readlink(fmt.Sprintf("/proc/%d/ns/pid", pid))
-+	if err != nil {
-+		return 0
-+	}
-+	a := strings.IndexByte(l, '[')
-+	b := strings.LastIndexByte(l, ']')
-+	if a < 0 || b <= a+1 {
-+		return 0
-+	}
-+	n, _ := strconv.ParseUint(l[a+1:b], 10, 64)
-+	return n
-+}
-+
-+func readExe(pid int) string {
-+	p, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
-+	if err != nil {
-+		return ""
-+	}
-+	return p
++	ppid, _ := strconv.Atoi(fields[1])                     // field 4
++	start, _ := strconv.ParseUint(fields[19], 10, 64)      // field 22
++	return procStat{name: string(b[open+1 : close]), ppid: ppid, start: start}, true
 +}
 +
 +func isHeadless(pid int) bool {
 +	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid))
 +	if err != nil {
-+		// Can't tell; assume an interactive GUI (the common local case)
-+		// rather than silently routing to the headless PIN path.
++		// Can't tell (e.g. a sandboxed peer); assume an interactive GUI (the
++		// common local case) rather than silently routing to the headless PIN
++		// path.
 +		return false
 +	}
 +	return headlessFromEnviron(b)
 +}
 +
-+// headlessFromEnviron reports whether a NUL-separated environment block lacks a
-+// usable graphical display.
++// headlessFromEnviron reports whether a NUL-separated environment block lacks
++// a usable graphical display.
 +func headlessFromEnviron(b []byte) bool {
 +	for _, kv := range bytes.Split(b, []byte{0}) {
 +		eq := bytes.IndexByte(kv, '=')
@@ -596,144 +602,212 @@ index 0000000..398296a
 +	}
 +	return true
 +}
-+
-+func chain(pid int) string {
-+	var parts []string
-+	for i := 0; i < maxPeerChain && pid > 1; i++ {
-+		name, ppid := procName(pid)
-+		if name == "" {
-+			break
-+		}
-+		if i == 0 {
-+			name = fmt.Sprintf("%s (%d)", name, pid)
-+		}
-+		parts = append(parts, name)
-+		pid = ppid
-+	}
-+	return strings.Join(parts, " ← ")
-+}
-+
-+func procName(pid int) (name string, ppid int) {
-+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
-+	if err != nil {
-+		return
-+	}
-+	for _, line := range strings.Split(string(b), "\n") {
-+		if v, ok := strings.CutPrefix(line, "Name:"); ok {
-+			name = strings.TrimSpace(v)
-+		} else if v, ok := strings.CutPrefix(line, "PPid:"); ok {
-+			ppid, _ = strconv.Atoi(strings.TrimSpace(v))
-+			return
-+		}
-+	}
-+	return
-+}
 diff --git a/internal/peerid/peerid_test.go b/internal/peerid/peerid_test.go
 new file mode 100644
-index 0000000..b5cd95e
+index 0000000..b9270be
 --- /dev/null
 +++ b/internal/peerid/peerid_test.go
-@@ -0,0 +1,213 @@
+@@ -0,0 +1,219 @@
 +package peerid
 +
 +import (
++	"os"
 +	"testing"
 +	"time"
 +)
 +
-+func TestParseStat(t *testing.T) {
-+	// comm contains spaces and parentheses; fields after the final ')' are:
-+	// state ppid pgrp session tty ... (field 22 = starttime).
-+	// Build: pid (comm) then fields 3..22.
-+	rest := "S 1000 4242 7777 34816 4242 0 0 0 0 0 0 0 0 20 0 1 0 0 99887766"
-+	line := []byte("1234 (we (ird) proc) " + rest + "\n")
-+	ppid, sid, pgid, start, ok := parseStat(line)
-+	if !ok {
-+		t.Fatal("parseStat returned ok=false")
++// chainOf builds an identity whose ancestry is procs[0] (the peer) up to its
++// outermost ancestor.
++func chainOf(procs ...Proc) Identity {
++	return Identity{Ancestry: procs}
++}
++
++func TestGrantOnAncestorCoversDescendants(t *testing.T) {
++	g := NewGrants()
++	sbox := Proc{PID: 100, Start: 10, Name: "bwrap"}
++
++	// User approves the sandbox root.
++	g.Grant(sbox, false, 15*time.Minute)
++
++	// A later, different ssh under the same sandbox is covered.
++	ssh2 := chainOf(
++		Proc{PID: 205, Start: 55, Name: "ssh"},
++		Proc{PID: 201, Start: 51, Name: "omp"},
++		sbox,
++	)
++	if !g.Allowed(ssh2) {
++		t.Error("descendant of a granted process must be allowed")
 +	}
-+	if ppid != 1000 {
-+		t.Errorf("ppid = %d, want 1000", ppid)
-+	}
-+	if sid != 7777 {
-+		t.Errorf("sid = %d, want 7777", sid)
-+	}
-+	if pgid != 4242 {
-+		t.Errorf("pgid = %d, want 4242", pgid)
-+	}
-+	if start != 99887766 {
-+		t.Errorf("starttime = %d, want 99887766", start)
++
++	// A process outside the sandbox is not.
++	other := chainOf(
++		Proc{PID: 300, Start: 60, Name: "ssh"},
++		Proc{PID: 7, Start: 1, Name: "zsh"},
++	)
++	if g.Allowed(other) {
++		t.Error("process outside the granted subtree must re-confirm")
 +	}
 +}
 +
-+func TestParseStatTooShort(t *testing.T) {
-+	if _, _, _, _, ok := parseStat([]byte("1 (init) S 0 1 1")); ok {
++func TestGrantExpires(t *testing.T) {
++	g := NewGrants()
++	now := time.Unix(1000, 0)
++	g.now = func() time.Time { return now }
++
++	sbox := Proc{PID: 100, Start: 10, Name: "bwrap"}
++	g.Grant(sbox, false, 15*time.Minute)
++	peer := chainOf(Proc{PID: 205, Start: 55, Name: "ssh"}, sbox)
++
++	now = now.Add(14 * time.Minute)
++	if !g.Allowed(peer) {
++		t.Error("grant must still be live before ttl")
++	}
++	now = now.Add(2 * time.Minute) // 16m total > 15m ttl
++	if g.Allowed(peer) {
++		t.Error("grant must expire after ttl")
++	}
++}
++
++func TestStickyGrantNeverExpires(t *testing.T) {
++	g := NewGrants()
++	now := time.Unix(1000, 0)
++	g.now = func() time.Time { return now }
++
++	sbox := Proc{PID: 100, Start: 10, Name: "bwrap"}
++	g.Grant(sbox, true, 15*time.Minute)
++	now = now.Add(100 * time.Hour)
++	if !g.Allowed(chainOf(Proc{PID: 205, Start: 55, Name: "ssh"}, sbox)) {
++		t.Error("sticky grant must survive arbitrary time")
++	}
++}
++
++func TestReusedPidDoesNotInheritGrant(t *testing.T) {
++	g := NewGrants()
++	g.Grant(Proc{PID: 100, Start: 10, Name: "bwrap"}, true, time.Minute)
++
++	// Same pid number, different start time = a new process.
++	reused := chainOf(
++		Proc{PID: 205, Start: 55, Name: "ssh"},
++		Proc{PID: 100, Start: 999, Name: "bwrap"},
++	)
++	if g.Allowed(reused) {
++		t.Error("a reused pid with a different start time must re-confirm")
++	}
++}
++
++func TestUnidentifiedPeerNeverAllowed(t *testing.T) {
++	g := NewGrants()
++	g.Grant(Proc{PID: 100, Start: 10, Name: "bwrap"}, true, time.Minute)
++	if g.Allowed(Identity{}) {
++		t.Error("a peer with no ancestry must never be allowed")
++	}
++}
++
++func statLookup(m map[int]procStat) func(int) (procStat, bool) {
++	return func(p int) (procStat, bool) { s, ok := m[p]; return s, ok }
++}
++
++func TestAncestryWalk(t *testing.T) {
++	lookup := statLookup(map[int]procStat{
++		205: {name: "ssh", ppid: 201, start: 55},
++		201: {name: "omp", ppid: 100, start: 51},
++		100: {name: "bwrap", ppid: 7, start: 10},
++		7:   {name: "zsh", ppid: 1, start: 1},
++	})
++	got := ancestryOf(205, lookup)
++	want := []Proc{
++		{PID: 205, Start: 55, Name: "ssh"},
++		{PID: 201, Start: 51, Name: "omp"},
++		{PID: 100, Start: 10, Name: "bwrap"},
++		{PID: 7, Start: 1, Name: "zsh"},
++	}
++	if len(got) != len(want) {
++		t.Fatalf("ancestry length = %d, want %d (%v)", len(got), len(want), got)
++	}
++	for i := range want {
++		if got[i] != want[i] {
++			t.Errorf("ancestry[%d] = %+v, want %+v", i, got[i], want[i])
++		}
++	}
++}
++
++func TestAncestryWalkStopsAtUnreadableParent(t *testing.T) {
++	lookup := statLookup(map[int]procStat{
++		205: {name: "ssh", ppid: 201, start: 55},
++	})
++	got := ancestryOf(205, lookup)
++	if len(got) != 1 || got[0].PID != 205 {
++		t.Errorf("walk must keep the readable prefix, got %v", got)
++	}
++}
++
++func TestAncestryWalkRealProc(t *testing.T) {
++	// Integration against the real /proc: our own ancestry starts with this
++	// test process and has at least one parent.
++	got := ancestryOf(os.Getpid(), readStat)
++	if len(got) < 2 {
++		t.Fatalf("expected self + at least one ancestor, got %v", got)
++	}
++	if got[0].PID != os.Getpid() {
++		t.Errorf("ancestry[0].PID = %d, want %d", got[0].PID, os.Getpid())
++	}
++	if got[0].Name == "" || got[0].Start == 0 {
++		t.Errorf("ancestry[0] lacks name/start: %+v", got[0])
++	}
++}
++
++func TestChainAndChoices(t *testing.T) {
++	id := chainOf(
++		Proc{PID: 205, Start: 55, Name: "ssh"},
++		Proc{PID: 201, Start: 51, Name: "omp"},
++		Proc{PID: 100, Start: 10, Name: "bwrap"},
++		Proc{PID: 7, Start: 1, Name: "zsh"},
++		Proc{PID: 5, Start: 1, Name: "systemd"},
++	)
++	if got, want := id.Chain(), "ssh (205) ← omp ← bwrap ← zsh"; got != want {
++		t.Errorf("Chain() = %q, want %q", got, want)
++	}
++	if got := id.Choices(); len(got) != 4 {
++		t.Errorf("Choices() must cap at the displayed chain, got %d entries", len(got))
++	}
++	// Find still sees the full ancestry, beyond the displayed prefix.
++	if _, ok := id.Find(5); !ok {
++		t.Error("Find must cover the full ancestry")
++	}
++	if _, ok := id.Find(9999); ok {
++		t.Error("Find must miss unknown pids")
++	}
++}
++
++func TestParseStat(t *testing.T) {
++	// comm contains spaces and parentheses; fields after the final ')' are:
++	// state ppid pgrp session tty ... (field 22 = starttime).
++	rest := "S 1000 4242 7777 34816 4242 0 0 0 0 0 0 0 0 20 0 1 0 0 99887766"
++	s, ok := parseStat([]byte("1234 (we (ird) proc) " + rest + "\n"))
++	if !ok {
++		t.Fatal("parseStat returned ok=false")
++	}
++	if s.name != "we (ird) proc" {
++		t.Errorf("name = %q, want %q", s.name, "we (ird) proc")
++	}
++	if s.ppid != 1000 {
++		t.Errorf("ppid = %d, want 1000", s.ppid)
++	}
++	if s.start != 99887766 {
++		t.Errorf("start = %d, want 99887766", s.start)
++	}
++}
++
++func TestParseStatMalformed(t *testing.T) {
++	if _, ok := parseStat([]byte("1 (init) S 0 1 1")); ok {
 +		t.Error("expected ok=false for a truncated stat line")
 +	}
-+	if _, _, _, _, ok := parseStat([]byte("garbage without paren")); ok {
++	if _, ok := parseStat([]byte("garbage without paren")); ok {
 +		t.Error("expected ok=false when there is no comm close paren")
 +	}
 +}
 +
-+func snapLookup(m map[int]statSnap) func(int) (statSnap, bool) {
-+	return func(p int) (statSnap, bool) { s, ok := m[p]; return s, ok }
-+}
-+
-+func TestResolveSessionNormalPeer(t *testing.T) {
-+	// A peer launched from a shell inherits the shell's session (sid != pid);
-+	// the session resolves directly with no parent walk.
-+	lookup := snapLookup(map[int]statSnap{
-+		100: {ppid: 7, sid: 7, start: 999},
-+		7:   {ppid: 1, sid: 7, start: 100},
-+	})
-+	sid, ls := resolveSession(100, 7, 7, 999, lookup)
-+	if sid != 7 || ls != 100 {
-+		t.Errorf("got sid=%d leaderStart=%d, want 7,100", sid, ls)
-+	}
-+}
-+
-+func TestResolveSessionSkipsDetachedLeader(t *testing.T) {
-+	// omp setsid()s ssh, so ssh is its own session leader (sid == pid). The
-+	// session must resolve to the enclosing login session (7) of its parent,
-+	// not to the per-invocation ssh session.
-+	lookup := snapLookup(map[int]statSnap{
-+		100: {ppid: 50, sid: 100, start: 999}, // ssh, detached
-+		50:  {ppid: 40, sid: 7, start: 500},   // omp, member of session 7
-+		7:   {ppid: 1, sid: 7, start: 100},    // login shell, session leader
-+	})
-+	sid, ls := resolveSession(100, 50, 100, 999, lookup)
-+	if sid != 7 {
-+		t.Errorf("sid = %d, want 7 (enclosing session, not detached ssh)", sid)
-+	}
-+	if ls != 100 {
-+		t.Errorf("leaderStart = %d, want 100 (session-7 leader start)", ls)
-+	}
-+}
-+
-+func TestResolveSessionNestedDetached(t *testing.T) {
-+	// ssh <- git <- omp, where omp setsid()s both git and ssh. The walk must
-+	// skip both detached leaders and land on omp's session.
-+	lookup := snapLookup(map[int]statSnap{
-+		200: {ppid: 150, sid: 200, start: 30}, // ssh, detached
-+		150: {ppid: 50, sid: 150, start: 20},  // git, detached
-+		50:  {ppid: 1, sid: 7, start: 10},     // omp, session 7
-+		7:   {ppid: 1, sid: 7, start: 5},
-+	})
-+	sid, ls := resolveSession(200, 150, 200, 30, lookup)
-+	if sid != 7 || ls != 5 {
-+		t.Errorf("got sid=%d leaderStart=%d, want 7,5", sid, ls)
-+	}
-+}
-+
-+func TestResolveSessionLeaderUnreadableFallsBack(t *testing.T) {
-+	// Nothing readable up the chain: keep the peer's own session and start time
-+	// rather than inventing one (still a valid, if per-invocation, scope).
-+	sid, ls := resolveSession(100, 1, 100, 999, snapLookup(map[int]statSnap{}))
-+	if sid != 100 || ls != 999 {
-+		t.Errorf("got sid=%d leaderStart=%d, want 100,999 (peer-start fallback)", sid, ls)
-+	}
-+}
-+
-+func TestHeadlessFromEarliest(t *testing.T) {
++func TestHeadlessFromEnviron(t *testing.T) {
 +	cases := []struct {
 +		name string
 +		env  []byte
@@ -751,99 +825,5 @@ index 0000000..b5cd95e
 +				t.Errorf("headlessFromEnviron = %v, want %v", got, c.want)
 +			}
 +		})
-+	}
-+}
-+
-+func id(exe string) Identity {
-+	return Identity{UID: 1000, SID: 500, LeaderStart: 12345, Exe: exe, OK: true}
-+}
-+
-+func TestGrantTemporaryExpires(t *testing.T) {
-+	g := NewGrants()
-+	now := time.Unix(1000, 0)
-+	g.now = func() time.Time { return now }
-+
-+	g.Grant(id("/bin/ssh"), false, 15*time.Minute)
-+	if !g.Allowed(id("/bin/ssh")) {
-+		t.Fatal("grant should be live immediately")
-+	}
-+	now = now.Add(14 * time.Minute)
-+	if !g.Allowed(id("/bin/ssh")) {
-+		t.Error("grant should still be live before ttl")
-+	}
-+	now = now.Add(2 * time.Minute) // 16m total > 15m ttl
-+	if g.Allowed(id("/bin/ssh")) {
-+		t.Error("grant should have expired after ttl")
-+	}
-+}
-+
-+func TestGrantStickyNeverExpires(t *testing.T) {
-+	g := NewGrants()
-+	now := time.Unix(1000, 0)
-+	g.now = func() time.Time { return now }
-+
-+	g.Grant(id("/bin/ssh"), true, 15*time.Minute)
-+	now = now.Add(100 * time.Hour)
-+	if !g.Allowed(id("/bin/ssh")) {
-+		t.Error("sticky grant must survive arbitrary time")
-+	}
-+}
-+
-+func TestNovelExeGate(t *testing.T) {
-+	g := NewGrants()
-+	g.Grant(id("/bin/ssh"), true, time.Minute)
-+	if g.Allowed(id("/bin/evil")) {
-+		t.Error("a different binary in the same session must not inherit the grant")
-+	}
-+	if !g.Allowed(id("/bin/ssh")) {
-+		t.Error("the granted binary should still be allowed")
-+	}
-+}
-+
-+func TestDifferentSessionGate(t *testing.T) {
-+	g := NewGrants()
-+	g.Grant(id("/bin/ssh"), true, time.Minute)
-+
-+	other := id("/bin/ssh")
-+	other.SID = 999 // different terminal/session
-+	if g.Allowed(other) {
-+		t.Error("a different session must re-confirm")
-+	}
-+
-+	reused := id("/bin/ssh")
-+	reused.LeaderStart = 99999 // same sid number, new leader -> reuse-safe
-+	if g.Allowed(reused) {
-+		t.Error("a reused sid with a different leader start must re-confirm")
-+	}
-+}
-+
-+func TestDifferentSandboxGate(t *testing.T) {
-+	g := NewGrants()
-+	g.Grant(id("/bin/ssh"), true, time.Minute)
-+
-+	// Same uid/session/binary but a different pid namespace = a different
-+	// sandbox launched from the same terminal; it must re-confirm.
-+	other := id("/bin/ssh")
-+	other.PidNS = 4026533663
-+	if g.Allowed(other) {
-+		t.Error("a different sandbox (pid namespace) must re-confirm")
-+	}
-+	// The granting sandbox still matches.
-+	if !g.Allowed(id("/bin/ssh")) {
-+		t.Error("the granting sandbox should still be allowed")
-+	}
-+}
-+
-+func TestUnidentifiedNeverCached(t *testing.T) {
-+	g := NewGrants()
-+	un := id("/bin/ssh")
-+	un.OK = false
-+	g.Grant(un, true, time.Minute) // must be a no-op
-+	if g.Allowed(un) {
-+		t.Error("unidentified peers must never be allowed from cache")
-+	}
-+	// Even if a matching OK identity exists, the no-op grant means no entry.
-+	if g.Allowed(id("/bin/ssh")) {
-+		t.Error("grant on unidentified peer must not create a cache entry")
 +	}
 +}
