@@ -1,5 +1,5 @@
 diff --git a/agent/agent.go b/agent/agent.go
-index ac39d24..b76f7a8 100644
+index ac39d24..1a78498 100644
 --- a/agent/agent.go
 +++ b/agent/agent.go
 @@ -11,15 +11,17 @@ import (
@@ -79,7 +79,7 @@ index ac39d24..b76f7a8 100644
  		blob := k.AgentKey().Marshal()
  		if pub, err := ssh.ParsePublicKey(blob); err == nil {
  			if cert, ok := pub.(*ssh.Certificate); ok {
-@@ -252,44 +257,168 @@ func (a *Agent) confirmKeyUse(wantKey []byte, peer string) error {
+@@ -252,44 +257,169 @@ func (a *Agent) confirmKeyUse(wantKey []byte, peer string) error {
  		if !bytes.Equal(blob, wantKey) {
  			continue
  		}
@@ -135,10 +135,11 @@ index ac39d24..b76f7a8 100644
 +}
 +
 +// confirmGUI shows the grant dialog. The SSH_ASKPASS helper receives the
-+// peer's displayed ancestry via SSH_TPM_CHOICES (one "pid name" line per
-+// candidate, requester first) and answers "temporary <pid>" or
-+// "session <pid>" — anything else denies. The named pid must be one of the
-+// offered ancestors; the grant covers it and all of its descendants.
++// peer's displayed ancestry via SSH_TPM_CHOICES (one tab-separated
++// "pid<TAB>name<TAB>cwd" line per candidate, requester first; cwd may be
++// empty) and answers "temporary <pid>" or "session <pid>" — anything else
++// denies. The named pid must be one of the offered ancestors; the grant
++// covers it and all of its descendants.
 +func (a *Agent) confirmGUI(k key.SSHTPMKeys, id peerid.Identity) error {
 +	prompt := fmt.Sprintf("Allow use of SSH key %s?\nFingerprint %s.",
 +		k.GetDescription(), k.Fingerprint())
@@ -152,7 +153,7 @@ index ac39d24..b76f7a8 100644
 +	}
 +	var choices strings.Builder
 +	for _, p := range id.Choices() {
-+		fmt.Fprintf(&choices, "%d %s\n", p.PID, p.Name)
++		fmt.Fprintf(&choices, "%d\t%s\t%s\n", p.PID, p.Name, p.Cwd)
 +	}
 +	cmd := exec.Command(bin, prompt)
 +	cmd.Env = append(os.Environ(),
@@ -268,7 +269,7 @@ index ac39d24..b76f7a8 100644
  	if err := agent.ServeAgent(ca, c); err != io.EOF {
  		slog.Info("Agent client connection ended unsuccessfully", slog.String("error", err.Error()))
  	}
-@@ -535,6 +664,7 @@ func NewAgent(listener *net.UnixListener, agents []agent.ExtendedAgent, keyring
+@@ -535,6 +665,7 @@ func NewAgent(listener *net.UnixListener, agents []agent.ExtendedAgent, keyring
  		keys:     []key.SSHTPMKeys{},
  		hierkeys: []*key.HierSSHTPMKey{},
  		keyring:  keyring,
@@ -415,10 +416,10 @@ index 0000000..280964b
 +}
 diff --git a/internal/peerid/peerid.go b/internal/peerid/peerid.go
 new file mode 100644
-index 0000000..7ff5b6a
+index 0000000..19783db
 --- /dev/null
 +++ b/internal/peerid/peerid.go
-@@ -0,0 +1,183 @@
+@@ -0,0 +1,198 @@
 +// Package peerid identifies the process connected to the agent socket by its
 +// process ancestry and caches user-issued confirmation grants.
 +//
@@ -457,6 +458,7 @@ index 0000000..7ff5b6a
 +	PID   int
 +	Start uint64 // starttime from /proc/<pid>/stat; pins the PID against reuse
 +	Name  string // comm, display only
++	Cwd   string // working directory, display only; "" when unreadable
 +}
 +
 +// Identity describes the process at the other end of an agent connection.
@@ -523,8 +525,22 @@ index 0000000..7ff5b6a
 +		return id
 +	}
 +	id.Ancestry = ancestryOf(pid, readStat)
++	// The working directory is display-only decoration for the grant dialog;
++	// only the offered choices need it. Best effort: /proc/<pid>/cwd is
++	// ptrace-gated, so it may stay empty (e.g. some sandboxed peers).
++	for i := range id.Choices() {
++		id.Ancestry[i].Cwd = readCwd(id.Ancestry[i].PID)
++	}
 +	id.Headless = isHeadless(pid)
 +	return id
++}
++
++func readCwd(pid int) string {
++	p, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
++	if err != nil {
++		return ""
++	}
++	return p
 +}
 +
 +// procStat is the subset of /proc/<pid>/stat the ancestry walk needs.
@@ -604,13 +620,14 @@ index 0000000..7ff5b6a
 +}
 diff --git a/internal/peerid/peerid_test.go b/internal/peerid/peerid_test.go
 new file mode 100644
-index 0000000..b9270be
+index 0000000..8256a17
 --- /dev/null
 +++ b/internal/peerid/peerid_test.go
-@@ -0,0 +1,219 @@
+@@ -0,0 +1,258 @@
 +package peerid
 +
 +import (
++	"net"
 +	"os"
 +	"testing"
 +	"time"
@@ -825,5 +842,43 @@ index 0000000..b9270be
 +				t.Errorf("headlessFromEnviron = %v, want %v", got, c.want)
 +			}
 +		})
++	}
++}
++
++func TestResolveSelfIncludesCwd(t *testing.T) {
++	// End-to-end against a real socket: connect to ourselves and resolve the
++	// peer. The requester (this test process) must lead the ancestry and carry
++	// its working directory for display.
++	dir := t.TempDir()
++	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: dir + "/sock", Net: "unix"})
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer l.Close()
++
++	client, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: dir + "/sock", Net: "unix"})
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer client.Close()
++	server, err := l.AcceptUnix()
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer server.Close()
++
++	id := Resolve(server)
++	if len(id.Ancestry) == 0 {
++		t.Fatal("Resolve returned empty ancestry for a live local peer")
++	}
++	if id.Ancestry[0].PID != os.Getpid() {
++		t.Errorf("peer pid = %d, want %d", id.Ancestry[0].PID, os.Getpid())
++	}
++	wd, err := os.Getwd()
++	if err != nil {
++		t.Fatal(err)
++	}
++	if id.Ancestry[0].Cwd != wd {
++		t.Errorf("peer cwd = %q, want %q", id.Ancestry[0].Cwd, wd)
 +	}
 +}
