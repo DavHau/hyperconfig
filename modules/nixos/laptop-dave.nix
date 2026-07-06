@@ -11,6 +11,7 @@ in
     ./common.nix
     ./common-tools.nix
     ./sbox.nix
+    ./sbox-age.nix
     ./ssh-tpm-agent.nix
     ./etc-hosts.nix
     ./nix-development.nix
