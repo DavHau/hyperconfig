@@ -17,17 +17,20 @@
 let
   sshTpmAgent = import ./ssh-tpm-agent-package.nix { inherit pkgs; };
 
-  # Records every confirm dialog and grants per /tmp/grant-mode:
+  # Records every confirm dialog (and the offered choices, for the cwd
+  # assertion) and grants per /tmp/grant-mode:
   #   self  -> sticky grant on the requesting process itself (choices line 1)
   #   shell -> sticky grant on the nearest bash ancestor (the loop shell)
-  # PIN prompts (no SSH_ASKPASS_PROMPT) return an empty PIN for the no-PIN test
-  # key and are not counted.
+  # Choices are tab-separated "pid<TAB>name<TAB>cwd" lines. PIN prompts (no
+  # SSH_ASKPASS_PROMPT) return an empty PIN for the no-PIN test key and are
+  # not counted.
   askpass = pkgs.writeShellScript "test-askpass" ''
     if [ "$SSH_ASKPASS_PROMPT" = choice ]; then
       echo confirm >> /tmp/prompts
+      printf '%s' "$SSH_TPM_CHOICES" > /tmp/choices
       case "$(${pkgs.coreutils}/bin/cat /tmp/grant-mode)" in
-        self)  pid="$(printf '%s\n' "$SSH_TPM_CHOICES" | ${pkgs.gnused}/bin/sed -n '1s/ .*//p')" ;;
-        shell) pid="$(printf '%s\n' "$SSH_TPM_CHOICES" | ${pkgs.gawk}/bin/awk '$2 == "bash" { print $1; exit }')" ;;
+        self)  pid="$(printf '%s\n' "$SSH_TPM_CHOICES" | ${pkgs.gawk}/bin/awk -F'\t' 'NR == 1 { print $1; exit }')" ;;
+        shell) pid="$(printf '%s\n' "$SSH_TPM_CHOICES" | ${pkgs.gawk}/bin/awk -F'\t' '$2 == "bash" { print $1; exit }')" ;;
         *)     pid="" ;;
       esac
       if [ -n "$pid" ]; then
@@ -117,6 +120,9 @@ pkgs.testers.runNixOSTest {
         machine.succeed("runuser -u alice -- ${reqDetached}")
         n = prompts()
         assert n == 1, f"expected exactly 1 confirm prompt, got {n}"
+        # The dialog choices carry each process's working directory (readable
+        # here because the requester is not sandboxed).
+        machine.succeed("head -n1 /tmp/choices | cut -f3 | grep -q '^/'")
         machine.succeed("runuser -u alice -- ${reqDetached}")
         n = prompts()
         assert n == 2, f"a new requesting pid must re-prompt, got {n} prompts"

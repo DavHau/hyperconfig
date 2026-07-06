@@ -15,9 +15,10 @@ let
   #
   # Modes (selected by the agent via SSH_ASKPASS_PROMPT):
   #   choice  -> grant dialog. The agent passes the peer's ancestry in
-  #              SSH_TPM_CHOICES (one "pid name" line per process, requester
-  #              first). The user picks WHICH process to trust (a radiolist row;
-  #              the requester is preselected) and for how long (a button).
+  #              SSH_TPM_CHOICES (one "pid<TAB>name<TAB>cwd" line per process,
+  #              requester first; cwd may be empty for sandboxed peers). The
+  #              user picks WHICH process to trust (a radiolist row; the
+  #              requester is preselected) and for how long (a button).
   #              Prints "temporary <pid>" | "session <pid>" | "deny".
   #   (unset) -> TPM PIN passphrase entry via seahorse.
   # Headless requests never reach this script: the agent prompts for the PIN on
@@ -31,9 +32,9 @@ let
       ttl="''${SSH_TPM_CONFIRM_TTL:-15m}"
       rows=()
       checked=TRUE
-      while read -r pid name; do
+      while IFS=$'\t' read -r pid name cwd; do
         [ -n "$pid" ] || continue
-        rows+=("$checked" "$pid" "$name")
+        rows+=("$checked" "$pid" "$name" "$cwd")
         checked=FALSE
       done <<<"$SSH_TPM_CHOICES"
 
@@ -41,7 +42,7 @@ let
       # code and nothing for odd ones (Deny, Esc/close = 252).
       pid="$(${pkgs.yad}/bin/yad --list --radiolist --center --no-markup \
         --title "ssh-tpm-agent" --text "$1" \
-        --column "Trust:RD" --column "PID:NUM" --column "Process" \
+        --column "Trust:RD" --column "PID:NUM" --column "Process" --column "Directory" \
         --print-column 2 --separator "" \
         --button "Deny:1" --button "Trust $ttl:0" --button "Trust forever:2" \
         "''${rows[@]}")"

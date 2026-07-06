@@ -30,6 +30,7 @@ in
     # ./niri.nix
     ./niri-monitor-binds.nix
     ./niri-terminal-cwd.nix
+    ./niri-float-rules.nix
     ./greetd.nix
     ./pi.nix
     ./cpu-powersave-cap.nix
