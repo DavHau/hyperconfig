@@ -3,9 +3,10 @@
 #
 # wdisplays is wrapped via lassulus/wrappers so that whenever the GUI is
 # closed, scripts/save-niri-displays.py runs to snapshot the current niri
-# output configuration to ~/.config/niri/displays.kdl. niri's main config
-# `include`s that file (see modules/nixos/niri.nix), so the layout the user
-# arranged interactively survives across sessions.
+# output configuration to ~/.config/niri/displays.kdl. The include below
+# merges into the /etc/niri/config-laptop.kdl wrapper (created by
+# ./niri-monitor-binds.nix, which points NIRI_CONFIG at it), so the layout
+# the user arranged interactively survives across sessions.
 let
   saveNiriDisplays = pkgs.writers.writePython3Bin "save-niri-displays" {
     flakeIgnore = [ "E265" "E501" "W503" ];
@@ -35,4 +36,10 @@ in
     wdisplaysWrapped
     saveNiriDisplaysWrapped
   ];
+
+  # Load the persisted output layout; optional so a fresh machine (no
+  # snapshot yet) still gets a valid config.
+  environment.etc."niri/config-laptop.kdl".text = ''
+    include optional=true "~/.config/niri/displays.kdl"
+  '';
 }

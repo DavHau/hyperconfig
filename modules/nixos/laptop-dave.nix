@@ -20,14 +20,9 @@ in
     # ./hyprspace
     ./nrb
     ./nix-caches.nix
-    # niri compositor + noctalia shell now come from distro.nixosModules.spaces
-    # (above). The local ./niri.nix wired noctalia via niri's spawn-at-startup,
-    # which bypassed the systemd user unit — so anything set on
-    # systemd.user.services.noctalia-shell.environment (e.g. pi-chat's
-    # NOCTALIA_NOTIF_HISTORY_FILE redirect) never reached the running shell.
-    # Kept in-tree for reference until the distro-managed flow has been
-    # exercised on this host.
-    # ./niri.nix
+    # niri compositor + noctalia shell come from distro.nixosModules.spaces
+    # (above); host-local additions layer on the /etc/niri/config-laptop.kdl
+    # wrapper (see ./niri-monitor-binds.nix).
     ./niri-monitor-binds.nix
     ./niri-terminal-cwd.nix
     ./niri-float-rules.nix
