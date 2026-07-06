@@ -172,6 +172,10 @@
           import ./modules/nixos/ssh-tpm-agent-confirm-test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
+        niri-terminal-cwd =
+          import ./modules/nixos/niri-terminal-cwd-test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          };
       };
     };
 }
