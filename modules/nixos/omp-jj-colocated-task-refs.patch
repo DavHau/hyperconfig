@@ -184,6 +184,201 @@ index d0a9eff5b..754351b18 100644
  
  	/** Tags pointing at a ref. */
  	async tags(cwd: string, refName = "HEAD", signal?: AbortSignal): Promise<string[]> {
+diff --git a/packages/coding-agent/test/task/worktree-jj-colocated.test.ts b/packages/coding-agent/test/task/worktree-jj-colocated.test.ts
+new file mode 100644
+index 000000000..c3d646014
+--- /dev/null
++++ b/packages/coding-agent/test/task/worktree-jj-colocated.test.ts
+@@ -0,0 +1,189 @@
++/**
++ * Integration test: branch-mode isolation merge must not corrupt a COLOCATED
++ * jj checkout.
++ *
++ * Regression for the silent-destruction incident (2026-07-06): the merge
++ * pipeline used to create and delete a real git branch
++ * `refs/heads/omp/task/<id>`. In a colocated jj repo, any concurrent `jj`
++ * invocation imported that transient branch; the post-merge deletion then made
++ * jj abandon the commits the branch had pinned and auto-rebase the parent's
++ * entire stack onto a stale bookmark (`main` sitting N commits back), silently
++ * orphaning every commit in between — while the merge reported success.
++ *
++ * The test drives the REAL pipeline (captureBaseline → commitToBranch →
++ * mergeTaskBranches → cleanupTaskBranches) against a genuine jj+git colocated
++ * repo, with both aggravating conditions from the incident:
++ *   - the parent amends its stack while the "subagent" runs, and
++ *   - a `jj` command runs mid-merge (shell prompt segment, watcher, the user).
++ *
++ * Requires the `jj` binary; skipped when unavailable so CI without jj stays
++ * green. Runs in ~1s.
++ */
++import { afterEach, describe, expect, it } from "bun:test";
++import * as fs from "node:fs/promises";
++import * as os from "node:os";
++import * as path from "node:path";
++import {
++	captureBaseline,
++	cleanupTaskBranches,
++	commitToBranch,
++	mergeTaskBranches,
++} from "@oh-my-pi/pi-coding-agent/task/worktree";
++import { removeWithRetries } from "@oh-my-pi/pi-utils";
++
++async function run(cwd: string, cmd: string[]): Promise<string> {
++	const proc = Bun.spawn(cmd, {
++		cwd,
++		stdout: "pipe",
++		stderr: "pipe",
++		windowsHide: true,
++		// jj identity for CI machines without a jj user config; git identity is
++		// set per-repo in the fixtures.
++		env: { ...process.env, JJ_USER: "Test User", JJ_EMAIL: "test@example.com" },
++	});
++	const [stdout, stderr, exitCode] = await Promise.all([
++		new Response(proc.stdout).text(),
++		new Response(proc.stderr).text(),
++		proc.exited,
++	]);
++	if ((exitCode ?? 0) !== 0) {
++		throw new Error(stderr.trim() || stdout.trim() || `${cmd.join(" ")} failed with exit code ${exitCode ?? 0}`);
++	}
++	return stdout.trim();
++}
++
++const jjAvailable = await Bun.spawn(["jj", "--version"], { stdout: "ignore", stderr: "ignore" })
++	.exited.then(code => code === 0)
++	.catch(() => false);
++
++describe.skipIf(!jjAvailable)("branch merge in a colocated jj repo", () => {
++	const tempDirs: string[] = [];
++
++	afterEach(async () => {
++		await Promise.all(tempDirs.splice(0).map(dir => removeWithRetries(dir)));
++	});
++
++	async function createColocatedRepoWithStack(): Promise<string> {
++		const repo = await fs.mkdtemp(path.join(os.tmpdir(), "omp-jj-colocated-"));
++		tempDirs.push(repo);
++		await run(repo, ["git", "init", "-qb", "main"]);
++		await run(repo, ["git", "config", "user.email", "test@example.com"]);
++		await run(repo, ["git", "config", "user.name", "Test User"]);
++		await fs.writeFile(path.join(repo, "base.txt"), "base\n");
++		await run(repo, ["git", "add", "base.txt"]);
++		// Bookmark `main` stays pinned here forever — jj never advances git
++		// branches, so the stack below is reachable in git only through HEAD.
++		await run(repo, ["git", "commit", "-qm", "base - main stays pinned here"]);
++		await run(repo, ["jj", "git", "init", "--colocate"]);
++		for (let i = 1; i <= 4; i++) {
++			await fs.writeFile(path.join(repo, `stack${i}.txt`), `s${i}\n`);
++			await run(repo, ["jj", "commit", "-m", `stack commit ${i}`]);
++		}
++		return repo;
++	}
++
++	async function createIsolationClone(repo: string): Promise<string> {
++		// Same technique as worktree.test.ts: a local clone stands in for the
++		// overlay/rcopy isolation snapshot — agent commit objects live in the
++		// clone's own .git, exactly like the runtime backends arrange them.
++		const iso = await fs.mkdtemp(path.join(os.tmpdir(), "omp-jj-iso-"));
++		tempDirs.push(iso);
++		await fs.rm(iso, { recursive: true, force: true });
++		await run(path.dirname(iso), ["git", "clone", "-q", "--no-hardlinks", "--local", repo, iso]);
++		await run(iso, ["git", "config", "user.email", "agent@example.com"]);
++		await run(iso, ["git", "config", "user.name", "Agent User"]);
++		return iso;
++	}
++
++	async function jjStackDescriptions(repo: string): Promise<string> {
++		return run(repo, [
++			"jj",
++			"log",
++			"--no-graph",
++			"-r",
++			"::@",
++			"-T",
++			'if(self.conflict(), "CONFLICT ", "") ++ description.first_line() ++ "\\n"',
++		]);
++	}
++
++	it("survives a mid-merge jj import plus a parent amend without rewriting the stack", async () => {
++		const repo = await createColocatedRepoWithStack();
++		const baseline = await captureBaseline(repo);
++
++		const iso = await createIsolationClone(repo);
++		await fs.writeFile(path.join(iso, "agent.txt"), "agent work\n");
++		await run(iso, ["git", "add", "agent.txt"]);
++		await run(iso, ["git", "commit", "-qm", "agent: add agent.txt"]);
++
++		// Parent keeps working while the subagent runs: amend the stack tip.
++		// Same jj change, NEW git commit id — the captured baseline sha becomes
++		// a hidden stale commit-version (the incident's trigger commit).
++		await run(repo, ["jj", "describe", "-r", "@-", "-m", "stack commit 4 (amended while task ran)"]);
++
++		const taskId = "jj-colocated-repro";
++		const result = await commitToBranch(iso, baseline, taskId, "colocated repro task");
++		expect(result?.branchName).toBe(`omp/task/${taskId}`);
++
++		// The mechanism assertion: the task ref must be invisible to jj. A
++		// concurrent jj run between ref creation and deletion imports whatever
++		// refs/heads/* exists right now — with the hidden-namespace ref there
++		// is nothing to import, so nothing gets pinned or later abandoned.
++		await run(repo, ["jj", "log", "--limit", "2"]);
++		const bookmarks = await run(repo, ["jj", "bookmark", "list", "--all"]);
++		expect(bookmarks).not.toContain("omp/task/");
++
++		const merge = await mergeTaskBranches(repo, [
++			{ branchName: result!.branchName!, taskId, baseSha: result!.baseSha! },
++		]);
++		expect(merge.failed).toEqual([]);
++		expect(merge.merged).toEqual([result!.branchName!]);
++		await cleanupTaskBranches(repo, [result!.branchName!]);
++
++		// The next jj command triggers `import git head`/`import git refs` —
++		// the step that used to abandon the stack and rebase it onto `main`.
++		const log = await jjStackDescriptions(repo);
++		for (let i = 1; i <= 3; i++) {
++			expect(log).toContain(`stack commit ${i}`);
++		}
++		expect(log).toContain("stack commit 4 (amended while task ran)");
++		expect(log).toContain("agent: add agent.txt");
++		expect(log).not.toContain("CONFLICT");
++
++		// The incident's user-visible symptom was files vanishing from the
++		// working copy; assert the full tree survived, agent work included.
++		const files = (await fs.readdir(repo)).filter(name => name.endsWith(".txt")).sort();
++		expect(files).toEqual(["agent.txt", "base.txt", "stack1.txt", "stack2.txt", "stack3.txt", "stack4.txt"]);
++	});
++
++	it("survives without a parent amend (branch delete alone used to orphan the stack)", async () => {
++		const repo = await createColocatedRepoWithStack();
++		const baseline = await captureBaseline(repo);
++
++		const iso = await createIsolationClone(repo);
++		await fs.writeFile(path.join(iso, "agent.txt"), "agent work\n");
++		await run(iso, ["git", "add", "agent.txt"]);
++		await run(iso, ["git", "commit", "-qm", "agent: add agent.txt"]);
++
++		const taskId = "jj-colocated-noamend";
++		const result = await commitToBranch(iso, baseline, taskId, "colocated no-amend task");
++		expect(result?.branchName).toBe(`omp/task/${taskId}`);
++
++		await run(repo, ["jj", "log", "--limit", "2"]);
++
++		const merge = await mergeTaskBranches(repo, [
++			{ branchName: result!.branchName!, taskId, baseSha: result!.baseSha! },
++		]);
++		expect(merge.failed).toEqual([]);
++		await cleanupTaskBranches(repo, [result!.branchName!]);
++
++		const log = await jjStackDescriptions(repo);
++		for (let i = 1; i <= 4; i++) {
++			expect(log).toContain(`stack commit ${i}`);
++		}
++		expect(log).toContain("agent: add agent.txt");
++		expect(log).not.toContain("CONFLICT");
++		const files = (await fs.readdir(repo)).filter(name => name.endsWith(".txt")).sort();
++		expect(files).toEqual(["agent.txt", "base.txt", "stack1.txt", "stack2.txt", "stack3.txt", "stack4.txt"]);
++	});
++});
 diff --git a/packages/coding-agent/test/task/worktree.test.ts b/packages/coding-agent/test/task/worktree.test.ts
 index 3ac79ef9d..118374412 100644
 --- a/packages/coding-agent/test/task/worktree.test.ts
