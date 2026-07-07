@@ -97,10 +97,20 @@ Patch (applies to v16.3.5) changes:
     fallback for callers passing real branches);
   - `cleanupTaskBranches` deletes via `update-ref -d` with `git branch -D`
     fallback for legacy refs.
-- Regression tests: `test/task/worktree.test.ts`
-  ("task refs stay outside refs/heads (colocated jj safety)") assert the
-  ref is absent from `refs/heads/*`, still resolvable, mergeable, and
-  cleanable on all three commitToBranch paths.
+- Regression tests:
+  - `test/task/worktree.test.ts`
+    ("task refs stay outside refs/heads (colocated jj safety)") asserts the
+    ref is absent from `refs/heads/*`, still resolvable, mergeable, and
+    cleanable on all three commitToBranch paths.
+  - `test/task/worktree-jj-colocated.test.ts` is a real jj+git integration
+    test (skipped when `jj` is not installed, ~1s): it builds a colocated
+    repo with a 4-commit jj stack above a pinned `main`, runs the actual
+    captureBaseline → commitToBranch → mergeTaskBranches →
+    cleanupTaskBranches pipeline with a parent amend mid-run and a
+    concurrent `jj log` mid-merge, and asserts no `omp/task/*` bookmark is
+    ever imported, the stack survives unrewritten and conflict-free, and
+    the agent commit lands. On unpatched v16.3.5 both tests fail exactly at
+    the incident's two symptoms (bookmark imported; stack commits orphaned).
 
 With the patch, the identical repro (including the mid-merge `jj log` and
 the parent amend) ends healthy:
