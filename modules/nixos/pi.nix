@@ -80,37 +80,21 @@
         enabled: true
         thresholdMs: 10000
   '';
+  # Instructions for the TOP-LEVEL agent only. Everything relevant to
+  # subagents lives in the always-apply rules (default-rules.md, caveman.md)
+  # symlinked into $config_dir/rules/ below: omp strips AGENTS.md from
+  # subagent context (task/index.ts filters basename "agents.md"), but
+  # forwards rules unfiltered and injects alwaysApply rules into every
+  # agent's system prompt — main loop and subagents alike.
   agentsFile = pkgs.writeText "AGENTS.md" ''
     # Global Agent Instructions
 
-    ## Bash Output
-
-    Do NOT pipe command output through `tail`, `head`, or similar truncation.
-
-    ## Development Style
-
-    All implementation work is test-driven. Read the `tdd` skill
-    (`skill://tdd`) before you start implementing.
-
-    ## Nix Build Timeout
-
-    Run all `nix build` (and related nix build commands) with a timeout of **120 seconds** by default.
-    If a build fails due to a timeout, retry with the timeout doubled (e.g. 120s \u2192 240s \u2192 480s \u2192 \u2026).
-    Keep doubling on consecutive timeout failures until the build succeeds or fails for a non-timeout reason.
-
     ## Version Control
 
-    Use `jj` (Jujutsu) instead of `git` for all version control operations.
+    You are the top-level agent; the jj workflow below is yours alone
+    (subagents run no version control, per the always-apply rules).
     If the current project does not have a `.jj` directory, initialize it with
     `jj git init --colocate` before proceeding.
-
-    **Isolated subagents run no version control.** When you are an isolated
-    `task` subagent (running in a copy-on-write worktree), you MUST NOT run
-    `jj` or `git` at all — no `jj st`/`new`/`describe`, no `git
-    add`/`commit`/`rm`. Just edit files. The harness snapshots your worktree
-    and commits/merges your changes into the parent automatically; running
-    version control yourself corrupts that capture. Everything below applies
-    to the top-level agent operating directly on the repo working copy.
 
     ### Mandatory per-task workflow
 
@@ -146,34 +130,6 @@
     2. Make the formatting/fix changes.
     3. `jj squash` to fold changes into the parent (the target commit).
 
-    ## Dependency Source Code
-
-    When you need to understand how any dependency works, always get its source code rather than guessing or relying on documentation alone.
-    1. First check `$HOME/projects/` for an existing checkout of the dependency.
-    2. If not found, clone the project into `$HOME/projects/` and read the source there.
-    3. Use the source code as the primary reference for understanding behavior, APIs, and internals.
-
-    ## NixOS Module Organization
-
-    Always create new NixOS features as a separate `.nix` file in `modules/nixos/` and import it where needed.
-    Do NOT inline new features into existing files.
-
-
-    ## Nix Store
-
-    **NEVER** run `find` on the top-level `/nix/store` directory. It contains millions of entries and will hang or time out. If you need to locate a file inside a specific store path, use the full store path (e.g. `find /nix/store/<hash>-<name>/`).
-
-    **NEVER** run `find` on `/` or other large filesystem roots. It will hang or time out. To locate source code or definitions, prefer in order:
-    1. `nix eval` (e.g. `nix eval --raw nixpkgs#<pkg>.src` or `nix eval .#nixosConfigurations.<host>.config.<path>`) to resolve store paths or config values.
-    2. `git` / `jj` (e.g. `git grep`, `git ls-files`) inside the relevant repo.
-    3. `$HOME/projects/<project>` checkouts — clone there if missing and search the source tree directly.
-
-    ## Running Unavailable Programs
-
-    If a program is not currently installed, do NOT attempt to install it via `nix-env` or similar. Instead, use one of:
-    - `nix-shell -p <package> --run '<command>'`
-    - `nix shell nixpkgs#<package> -c <command>`
-
     ## Parallel work with subagents
 
     For independent sub-tasks touching disjoint files, or when the user asks to
@@ -189,8 +145,6 @@
     with the normal jj workflow above. The subagents themselves run no version
     control. Isolation requires a colocated git checkout (`jj git init
     --colocate`); do not run git worktree commands yourself.
-
-    ${builtins.readFile ./caveman.md}
   '';
   # omp 16.3.5's isolated-task branch merge creates and later deletes a real
   # git branch (refs/heads/omp/task/<id>) in the parent repo. In a COLOCATED
@@ -214,6 +168,11 @@
       mkdir -p "$config_dir"
       ln -sf ${configFile} "$config_dir/config.yml"
       ln -sf ${agentsFile} "$config_dir/AGENTS.md"
+      # Always-apply rules: injected into the system prompt of the main loop
+      # AND every subagent (omp forwards rules to subagents, unlike AGENTS.md).
+      mkdir -p "$config_dir/rules"
+      ln -sf ${./default-rules.md} "$config_dir/rules/default-rules.md"
+      ln -sf ${./caveman.md} "$config_dir/rules/caveman.md"
       ${lib.optionalString models-needed ''ln -sf ${modelsFile} "$config_dir/models.yml"''}
     '';
   };
