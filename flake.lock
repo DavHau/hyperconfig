@@ -669,7 +669,10 @@
     },
     "flake-utils_3": {
       "inputs": {
-        "systems": "systems_9"
+        "systems": [
+          "spaces",
+          "systems"
+        ]
       },
       "locked": {
         "lastModified": 1731533236,
@@ -1646,10 +1649,10 @@
     },
     "nixpkgs_7": {
       "locked": {
-        "lastModified": 1782636521,
-        "narHash": "sha256-OG8laCOGtkxlB1JH3XqOnXxnkGJme4mQdXo5hkhCQIY=",
+        "lastModified": 1783279667,
+        "narHash": "sha256-/NAkDSsve+GNM0Bt6tleJdCGfsTlK89nPjkVOzZMo0s=",
         "ref": "nixpkgs-unstable",
-        "rev": "e1c1b84752fb0897897380a3cae9dc7fcab91ca3",
+        "rev": "f205b5574fd0cb7da5b702a2da51507b7f4fdd1b",
         "shallow": true,
         "type": "git",
         "url": "https://github.com/nixos/nixpkgs"
@@ -2065,9 +2068,9 @@
         "voxtype": "voxtype"
       },
       "locked": {
-        "lastModified": 1783403962,
-        "narHash": "sha256-jBj6KKi4eegrmMonadobUMnvBtEC2gLUtMdGKvyBIlA=",
-        "path": "/home/grmpf/synced/projects/spaces-2",
+        "lastModified": 1783486908,
+        "narHash": "sha256-6JqUNc0Or5+06nkdj1ESzEVWSBKTrHTCzi4tYemYT1Y=",
+        "path": "/home/grmpf/synced/projects/spaces",
         "type": "path"
       },
       "original": {
@@ -2111,7 +2114,7 @@
           "nixpkgs"
         ],
         "nur": "nur",
-        "systems": "systems_10",
+        "systems": "systems_9",
         "tinted-foot": "tinted-foot",
         "tinted-kitty": "tinted-kitty",
         "tinted-schemes": "tinted-schemes",
@@ -2133,21 +2136,6 @@
       }
     },
     "systems": {
-      "locked": {
-        "lastModified": 1681028828,
-        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
-        "owner": "nix-systems",
-        "repo": "default",
-        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nix-systems",
-        "repo": "default",
-        "type": "github"
-      }
-    },
-    "systems_10": {
       "locked": {
         "lastModified": 1681028828,
         "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
