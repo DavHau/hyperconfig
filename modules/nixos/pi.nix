@@ -191,9 +191,23 @@
 
     ${builtins.readFile ./caveman.md}
   '';
+  # omp 16.3.5's isolated-task branch merge creates and later deletes a real
+  # git branch (refs/heads/omp/task/<id>) in the parent repo. In a COLOCATED
+  # jj checkout, any concurrent jj invocation (starship prompt, user command)
+  # imports that transient branch; the post-merge deletion then makes jj
+  # abandon the commits the branch pinned and auto-rebase the parent's whole
+  # stack onto a stale bookmark (e.g. `main` sitting N commits back) —
+  # silently orphaning every commit in between even though the merge reported
+  # success (mm incident 2026-07-06, HARNESS.md quirk 5). The patch moves
+  # task refs to refs/omp/task/* — invisible to jj import, still resolvable
+  # via the short `omp/task/<id>` name by every git command. Upstream report:
+  # see omp-jj-colocated-task-refs.issue.md next to the patch.
+  omp-patched = inputs.llm-agents.packages.${sys}.omp.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [ ./omp-jj-colocated-task-refs.patch ];
+  });
   omp-wrapped = inputs.wrappers.lib.wrapPackage {
     inherit pkgs;
-    package = inputs.llm-agents.packages.${sys}.omp;
+    package = omp-patched;
     preHook = ''
       config_dir="''${PI_CODING_AGENT_DIR:-$HOME/.omp/agent}"
       mkdir -p "$config_dir"
