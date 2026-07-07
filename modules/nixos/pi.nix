@@ -17,6 +17,7 @@
       "engineering/codebase-design"
       "engineering/domain-modeling"
       "productivity/grilling"
+      "productivity/handoff"
     ]
   );
   llamaSwapProvider = lib.concatStringsSep "\n" [
