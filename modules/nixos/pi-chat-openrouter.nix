@@ -10,6 +10,13 @@
     share = true;
     prompts.apikey.type = "hidden";
     prompts.apikey.persist = true;
+    # Re-stage /run/spaces-secrets/openrouter-api-key when the deployed key
+    # changes. Without this a key rotation leaves the boot-time copy in
+    # place and pi's openrouter provider 401s silently (incident
+    # 2026-07-08: staged copy was 2 days older than the rotated var).
+    # Running chat sessions still hold the old credential copy —
+    # Mod+Shift+A (reload pi-chat) picks up the new one.
+    files.apikey.restartUnits = [ "spaces-secrets-load.service" ];
   };
 
   services.pi-chat.openrouter = {
