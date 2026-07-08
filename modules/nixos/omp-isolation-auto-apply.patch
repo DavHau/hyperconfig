@@ -1,0 +1,146 @@
+diff --git a/packages/coding-agent/src/config/settings-schema.ts b/packages/coding-agent/src/config/settings-schema.ts
+index 2316034da..d6763ce11 100644
+--- a/packages/coding-agent/src/config/settings-schema.ts
++++ b/packages/coding-agent/src/config/settings-schema.ts
+@@ -3998,6 +3998,18 @@ export const SETTINGS_SCHEMA = {
+ 		},
+ 	},
+ 
++	"task.isolation.autoApply": {
++		type: "boolean",
++		default: true,
++		ui: {
++			tab: "tasks",
++			group: "Isolation",
++			label: "Auto-Apply Isolated Changes",
++			description:
++				"Apply isolated task changes back to the parent repo automatically on finish. Disable to keep captured changes parked (branch mode: task ref; patch mode: patch artifact) for orchestrator-driven manual merge. eval agent()'s explicit apply= argument overrides this default per call.",
++		},
++	},
++
+ 	"task.isolation.commits": {
+ 		type: "enum",
+ 		values: ["generic", "ai"] as const,
+diff --git a/packages/coding-agent/src/eval/__tests__/agent-bridge.test.ts b/packages/coding-agent/src/eval/__tests__/agent-bridge.test.ts
+index 562c96445..216d76f6b 100644
+--- a/packages/coding-agent/src/eval/__tests__/agent-bridge.test.ts
++++ b/packages/coding-agent/src/eval/__tests__/agent-bridge.test.ts
+@@ -1291,6 +1291,52 @@ describe("runEvalAgent isolation", () => {
+ 		expect(result.text).toContain("apply=false");
+ 	});
+ 
++	it("defaults to no merge when task.isolation.autoApply=false and no per-call apply arg is given", async () => {
++		mockAgents();
++		mockIsolationContext();
++		vi.spyOn(isolationRunner, "runIsolatedSubprocess").mockImplementation(async opts =>
++			singleResult(opts.baseOptions, {
++				output: "captured",
++				patchPath: "/artifacts/captured.patch",
++			}),
++		);
++		const mergeSpy = vi.spyOn(isolationRunner, "mergeIsolatedChanges");
++
++		const result = await runEvalAgent(
++			{ prompt: "scout", isolated: true },
++			{ session: isolatedSession({ "task.isolation.autoApply": false }) },
++		);
++
++		expect(mergeSpy).not.toHaveBeenCalled();
++		expect(result.details.changesApplied).toBeNull();
++		expect(result.details.patchPath).toBe("/artifacts/captured.patch");
++	});
++
++	it("explicit apply=true overrides task.isolation.autoApply=false", async () => {
++		mockAgents();
++		mockIsolationContext();
++		vi.spyOn(isolationRunner, "runIsolatedSubprocess").mockImplementation(async opts =>
++			singleResult(opts.baseOptions, {
++				output: "captured",
++				patchPath: "/artifacts/captured.patch",
++			}),
++		);
++		const mergeSpy = vi.spyOn(isolationRunner, "mergeIsolatedChanges").mockResolvedValue({
++			summary: "\n\nApplied patches: yes",
++			changesApplied: true,
++			hadAnyChanges: true,
++			mergedBranchForNestedPatches: false,
++		});
++
++		const result = await runEvalAgent(
++			{ prompt: "scout", isolated: true, apply: true },
++			{ session: isolatedSession({ "task.isolation.autoApply": false }) },
++		);
++
++		expect(mergeSpy).toHaveBeenCalled();
++		expect(result.details.changesApplied).toBe(true);
++	});
++
+ 	it("surfaces a captured branch name when apply=false and the run used branch mode", async () => {
+ 		mockAgents();
+ 		mockIsolationContext();
+diff --git a/packages/coding-agent/src/eval/agent-bridge.ts b/packages/coding-agent/src/eval/agent-bridge.ts
+index d429634c0..2b3c31552 100644
+--- a/packages/coding-agent/src/eval/agent-bridge.ts
++++ b/packages/coding-agent/src/eval/agent-bridge.ts
+@@ -357,7 +357,7 @@ export async function runEvalAgent(args: unknown, options: EvalAgentBridgeOption
+ 	const isIsolated = parsed.isolated === true;
+ 	const settingsMergeMode = options.session.settings.get("task.isolation.merge");
+ 	const mergeMode: "patch" | "branch" = parsed.merge === false ? "patch" : settingsMergeMode;
+-	const applyChanges = parsed.apply !== false;
++	const applyChanges = parsed.apply ?? options.session.settings.get("task.isolation.autoApply");
+ 
+ 	// Isolation context capture (prepareIsolationContext → captureBaseline)
+ 	// happens inside the timeout-pause closure below; on dirty/large repos the
+diff --git a/packages/coding-agent/src/task/index.ts b/packages/coding-agent/src/task/index.ts
+index 34625c069..9550ce619 100644
+--- a/packages/coding-agent/src/task/index.ts
++++ b/packages/coding-agent/src/task/index.ts
+@@ -1391,7 +1391,23 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
+ 			let mergeSummary = "";
+ 			let changesApplied: boolean | null = null;
+ 			let mergedBranchForNestedPatches = false;
+-			if (isIsolated && repoRoot) {
++			const autoApply = this.session.settings.get("task.isolation.autoApply");
++			let autoApplySkipped = false;
++			if (isIsolated && repoRoot && !autoApply) {
++				// Orchestrator-driven merge: leave captured changes parked and only
++				// announce where they live. Mirrors eval agent(apply=false).
++				autoApplySkipped = true;
++				if (result.branchName) {
++					mergeSummary = `\n\nIsolation: changes captured on branch \`${result.branchName}\` (task.isolation.autoApply=false). Not merged.`;
++				} else if (result.patchPath) {
++					mergeSummary = `\n\nIsolation: changes captured at \`${result.patchPath}\` (task.isolation.autoApply=false). Not applied.`;
++				} else {
++					mergeSummary = "\n\nIsolation: no changes captured.";
++				}
++				if (result.nestedPatches?.length) {
++					mergeSummary += ` ${result.nestedPatches.length} nested repository patch(es) captured but not applied.`;
++				}
++			} else if (isIsolated && repoRoot) {
+ 				const outcome = await mergeIsolatedChanges({ result, repoRoot, mergeMode });
+ 				mergeSummary = outcome.summary;
+ 				changesApplied = outcome.changesApplied;
+@@ -1399,7 +1415,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
+ 			}
+ 
+ 			// Apply nested repo patches (separate from parent git).
+-			if (isIsolated && repoRoot) {
++			if (isIsolated && repoRoot && !autoApplySkipped) {
+ 				mergeSummary += await applyEligibleNestedPatches({
+ 					result,
+ 					repoRoot,
+@@ -1410,9 +1426,12 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
+ 				});
+ 			}
+ 
+-			// Cleanup temp directory if used
++			// Cleanup temp directory if used. Keep it when auto-apply was skipped:
++			// a patch-mode `result.patchPath` lives inside it and the orchestrator
++			// consumes it out of band.
+ 			const shouldCleanupTempArtifacts =
+-				tempArtifactsDir && (!isIsolated || changesApplied === true || changesApplied === null);
++				tempArtifactsDir &&
++				(!isIsolated || changesApplied === true || (changesApplied === null && !autoApplySkipped));
+ 			if (shouldCleanupTempArtifacts) {
+ 				await fs.rm(tempArtifactsDir, { recursive: true, force: true });
+ 			}
