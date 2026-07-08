@@ -57,19 +57,25 @@
       task: claude-fable-5:medium
     task:
       isolation:
-        # Isolated subagents (`task` tool, `isolated: true`) each run in a
-        # copy-on-write snapshot of the repo; changes are merged back on
-        # finish. `branch` commits each subagent's changes onto a task branch
-        # and cherry-picks them onto the parent HEAD — more robust than `patch`
-        # for staged-new and binary files, and overlaps surface as real merge
-        # conflicts instead of silently dropped hunks. Requires a colocated
-        # `.git`.
+        # Isolated subagents each run in a copy-on-write snapshot of the repo.
+        # `branch` commits each subagent's changes onto a hidden task ref
+        # (refs/omp/task/<id>, see the local patch below) — more robust than
+        # `patch` for staged-new and binary files, and overlaps surface as real
+        # merge conflicts instead of silently dropped hunks. Requires a
+        # colocated `.git`.
+        # autoApply: false (local patch omp-isolation-auto-apply.patch, applies
+        # to BOTH the task tool and eval agent()): isolated changes are NOT
+        # merged automatically — they stay parked on their task ref and the
+        # main loop cherry-picks them against a clean, frozen worktree. The
+        # harness's automatic merge races concurrent parent edits and a failed
+        # merge corrupts the parent git index (mm HARNESS.md quirks 1/8).
         # Pin overlayfs (auto could otherwise pick reflink/rcopy per host): it
         # mounts the project as a read-only lower layer — zero-copy even for
         # large gitignored data, copy-up only on write — and runs in-process so
         # it works inside the sandbox namespace.
         mode: overlayfs
         merge: branch
+        autoApply: false
     bash:
       autoBackground:
         # Auto-convert any non-PTY command still running after 10s into a
@@ -132,19 +138,27 @@
 
     ## Parallel work with subagents
 
-    For independent sub-tasks touching disjoint files, or when the user asks to
-    parallelize: use the built-in `task` tool with `isolated: true` per task.
-    Each isolated subagent runs in its own copy-on-write snapshot of the repo;
-    its changes are merged back automatically when it finishes. Monitor with
-    the `job` tool, message running agents with `irc`, read results via
-    `agent://<id>`.
+    For independent sub-tasks touching disjoint files, or when the user asks
+    to parallelize: `task` tool, `isolated: true` per file-editing task.
+    Subagents run no version control.
 
-    Each subagent's changes are committed onto a task branch and cherry-picked
-    onto the parent HEAD when it finishes (branch merge mode), so they arrive as
-    ready-made commits rather than loose WIP — describe your own remaining work
-    with the normal jj workflow above. The subagents themselves run no version
-    control. Isolation requires a colocated git checkout (`jj git init
-    --colocate`); do not run git worktree commands yourself.
+    Isolated changes are NOT merged automatically
+    (`task.isolation.autoApply: false`): each finished agent parks its
+    commits on a git ref `refs/omp/task/<id>` — hidden from jj, and nothing
+    will remind you of it later. You merge:
+
+    1. Clean worktree first: `jj describe`, then `jj new` if `@` is non-empty.
+    2. `git for-each-ref refs/omp/task` — the authoritative list of pending
+       work. Also run this at session start and before the final
+       `jj describe`; non-empty output = unmerged work, adopt or discard
+       deliberately.
+    3. `git cherry-pick $(git merge-base HEAD <ref>)..<ref>`, review, test.
+    4. `git update-ref -d <ref>`.
+
+    On conflict: resolve and `git cherry-pick --continue`, or `--abort` and
+    extract files via `git show <ref>:<path>`. If the index ends up broken:
+    `rm -f .git/index && git read-tree HEAD` (index is derived state; jj and
+    worktree untouched).
   '';
   # omp 16.3.5's isolated-task branch merge creates and later deletes a real
   # git branch (refs/heads/omp/task/<id>) in the parent repo. In a COLOCATED
@@ -157,8 +171,16 @@
   # task refs to refs/omp/task/* — invisible to jj import, still resolvable
   # via the short `omp/task/<id>` name by every git command. Upstream report:
   # see omp-jj-colocated-task-refs.issue.md next to the patch.
+  # omp-isolation-auto-apply.patch adds the `task.isolation.autoApply` setting
+  # (default true; we set false above): when disabled, neither the task tool
+  # nor eval agent() merges isolated changes back automatically — refs stay
+  # parked for the orchestrator-driven merge described in AGENTS.md. An
+  # explicit agent(apply=True/False) still overrides per call.
   omp-patched = inputs.llm-agents.packages.${sys}.omp.overrideAttrs (old: {
-    patches = (old.patches or [ ]) ++ [ ./omp-jj-colocated-task-refs.patch ];
+    patches = (old.patches or [ ]) ++ [
+      ./omp-jj-colocated-task-refs.patch
+      ./omp-isolation-auto-apply.patch
+    ];
   });
   omp-wrapped = inputs.wrappers.lib.wrapPackage {
     inherit pkgs;
