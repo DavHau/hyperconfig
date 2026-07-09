@@ -61,8 +61,11 @@
         # `branch` commits each subagent's changes onto a hidden task ref
         # (refs/omp/task/<id>, see the local patch below) — more robust than
         # `patch` for staged-new and binary files, and overlaps surface as real
-        # merge conflicts instead of silently dropped hunks. Requires a
-        # colocated `.git`.
+        # merge conflicts instead of silently dropped hunks. Works in git
+        # checkouts (incl. colocated jj) and, via the local
+        # omp-jj-workspace-handle.patch, in pure jj workspaces (secondary
+        # `jj workspace add` trees, non-colocated repos) — capture goes through
+        # jj's backing git store, merges land as described jj commits.
         # autoApply: false (local patch omp-isolation-auto-apply.patch, applies
         # to BOTH the task tool and eval agent()): isolated changes are NOT
         # merged automatically — they stay parked on their task ref and the
@@ -179,15 +182,25 @@
   # omp-vcs-handle-seam.patch (PR-1 of the jj-workspace isolation plan):
   # pure refactor extracting the VCS operations of isolated task execution
   # behind a `VcsHandle` interface (src/task/vcs.ts). No behavior change —
-  # git checkouts resolve to the same machinery; the seam is where a future
-  # jj-workspace handle (capture via the shared backing git store, land via
-  # jj) plugs in without touching the isolation lifecycle. Upstreamable as a
-  # standalone refactor (IS #1597's "VCS-aware, not a jj special-case").
+  # git checkouts resolve to the same machinery; the seam is where the
+  # jj-workspace handle below plugs in without touching the isolation
+  # lifecycle. Upstreamable as a standalone refactor (IS #1597's
+  # "VCS-aware, not a jj special-case").
+  # omp-jj-workspace-handle.patch (PR-2): JjWorkspaceHandle — isolated
+  # subagents work in pure jj workspaces (secondary `jj workspace add`
+  # trees, non-colocated repos). Baseline = the `@` commit (jj
+  # auto-snapshot); capture/commit via git plumbing against jj's backing
+  # store (temp index, hidden refs/omp/task/* refs); merge-back 3-way via
+  # `git merge-tree` entirely in-store, landed as a described jj commit —
+  # conflicts leave the workspace untouched with the ref parked. The
+  # snapshot's `.jj` pointer is stripped before the subagent runs so nothing
+  # inside isolation can write through to the shared store.
   omp-patched = inputs.llm-agents.packages.${sys}.omp.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       ./omp-jj-colocated-task-refs.patch
       ./omp-isolation-auto-apply.patch
       ./omp-vcs-handle-seam.patch
+      ./omp-jj-workspace-handle.patch
     ];
   });
   omp-wrapped = inputs.wrappers.lib.wrapPackage {
