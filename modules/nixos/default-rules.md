@@ -11,12 +11,6 @@ Do NOT pipe command output through `tail`, `head`, or similar truncation.
 All implementation work is test-driven. Read the `tdd` skill
 (`skill://tdd`) before you start implementing.
 
-## Nix Build Timeout
-
-Run all `nix build` (and related nix build commands) with a timeout of **120 seconds** by default.
-If a build fails due to a timeout, retry with the timeout doubled (e.g. 120s → 240s → 480s → …).
-Keep doubling on consecutive timeout failures until the build succeeds or fails for a non-timeout reason.
-
 ## Version Control
 
 Use `jj` (Jujutsu) instead of `git` for all version control operations.
