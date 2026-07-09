@@ -19,10 +19,10 @@ index abf8bdcbe..fc2998690 100644
    - Child sessions may use whichever networked tools/models their active tool set permits.
    - MCP proxy tools can call existing parent MCP connections with a 60_000 ms timeout.
 diff --git a/packages/coding-agent/src/task/isolation-runner.ts b/packages/coding-agent/src/task/isolation-runner.ts
-index 5018ca137..24e179cff 100644
+index c6e0a58f7..781ea6418 100644
 --- a/packages/coding-agent/src/task/isolation-runner.ts
 +++ b/packages/coding-agent/src/task/isolation-runner.ts
-@@ -158,9 +158,8 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
+@@ -172,9 +172,8 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
  					nestedPatches: commitResult?.nestedPatches,
  				};
  			} catch (mergeErr) {
@@ -32,8 +32,8 @@ index 5018ca137..24e179cff 100644
 +				// Agent succeeded but branch commit failed — clean up stale task ref
 +				await cleanupTaskBranches(opts.context.repoRoot, [`omp/task/${opts.agentId}`]);
  				const msg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
- 				return { ...result, error: `Merge failed: ${msg}` };
- 			}
+ 				try {
+ 					const patchResult = await writeIsolationPatch(
 diff --git a/packages/coding-agent/src/task/worktree.ts b/packages/coding-agent/src/task/worktree.ts
 index 86cdf7314..0359a2d8a 100644
 --- a/packages/coding-agent/src/task/worktree.ts
