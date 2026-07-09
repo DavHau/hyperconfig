@@ -176,10 +176,18 @@
   # nor eval agent() merges isolated changes back automatically — refs stay
   # parked for the orchestrator-driven merge described in AGENTS.md. An
   # explicit agent(apply=True/False) still overrides per call.
+  # omp-vcs-handle-seam.patch (PR-1 of the jj-workspace isolation plan):
+  # pure refactor extracting the VCS operations of isolated task execution
+  # behind a `VcsHandle` interface (src/task/vcs.ts). No behavior change —
+  # git checkouts resolve to the same machinery; the seam is where a future
+  # jj-workspace handle (capture via the shared backing git store, land via
+  # jj) plugs in without touching the isolation lifecycle. Upstreamable as a
+  # standalone refactor (IS #1597's "VCS-aware, not a jj special-case").
   omp-patched = inputs.llm-agents.packages.${sys}.omp.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       ./omp-jj-colocated-task-refs.patch
       ./omp-isolation-auto-apply.patch
+      ./omp-vcs-handle-seam.patch
     ];
   });
   omp-wrapped = inputs.wrappers.lib.wrapPackage {
