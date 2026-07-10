@@ -176,6 +176,13 @@
           import ./modules/nixos/niri-terminal-cwd-test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
+        noctalia-anthropic-usage =
+          import ./modules/nixos/noctalia-anthropic-usage/test.nix {
+            # amy's pkgs carry the spaces overlay (noctalia-shell,
+            # quickshell) the plugin QML lints against.
+            pkgs = self.nixosConfigurations.amy.pkgs;
+            spaces = inputs.spaces;
+          };
       };
     };
 }

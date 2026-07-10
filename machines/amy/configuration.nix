@@ -11,6 +11,7 @@
     ../../modules/nixos/llama-swap.nix
     ../../modules/nixos/bluetooth-resume-fix.nix
     ../../modules/nixos/noctalia-resume-fix.nix
+    ../../modules/nixos/noctalia-anthropic-usage
     ../../modules/nixos/fw-fanctrl.nix
     ./disko.nix
   ];
