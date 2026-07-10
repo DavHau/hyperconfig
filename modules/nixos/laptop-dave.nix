@@ -65,6 +65,7 @@ in
     # ./sway
     # ./ups.nix
     ./packages.nix
+    ./deluge.nix
     ./boot.nix
     ./desktop.nix
     ./audio.nix
