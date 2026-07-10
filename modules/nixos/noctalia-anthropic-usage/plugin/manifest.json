@@ -1,0 +1,13 @@
+{
+  "id": "anthropic-usage",
+  "name": "Anthropic Fable Usage",
+  "version": "1.0.0",
+  "author": "grmpf",
+  "license": "MIT",
+  "description": "One mini bar per Anthropic account showing how much of the weekly Fable allowance is used. Fed by the anthropic-usage-poll user timer.",
+  "tags": ["Bar", "System"],
+  "entryPoints": {
+    "main": "Main.qml",
+    "barWidget": "BarWidget.qml"
+  }
+}
