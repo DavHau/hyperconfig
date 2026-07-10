@@ -240,6 +240,15 @@
   # blocked accounts are still skipped, unknown resets rank last).
   # Codex/Antigravity ranking untouched. Tests:
   # packages/ai/test/auth-storage-claude-weekly-reset-priority.test.ts.
+  # omp-statusline-anthropic-account.patch: the status-line `cost` segment
+  # (default preset, bottom bar in the editor border) appends the email of
+  # the session-sticky Anthropic OAuth account after the billing parts
+  # ($cost / ★ premium / (sub)), dimmed and truncated to 40 cols. Shown only
+  # when the active model's provider is anthropic and the session is actually
+  # attributed to an OAuth credential (getOAuthAccountIdentity returns
+  # nothing for API-key/env-override routing) — makes the account picked by
+  # the weekly-reset ranking above visible. Tests:
+  # packages/coding-agent/test/status-line-cost-account.test.ts.
   omp-patched = inputs.llm-agents.packages.${sys}.omp.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       ./omp-jj-colocated-task-refs.patch
@@ -250,6 +259,7 @@
       ./omp-bash-strip-head-tail.patch
       ./omp-bundled-virtual-modules.patch
       ./omp-anthropic-weekly-reset-priority.patch
+      ./omp-statusline-anthropic-account.patch
     ];
   });
   omp-wrapped = inputs.wrappers.lib.wrapPackage {

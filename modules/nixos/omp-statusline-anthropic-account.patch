@@ -1,0 +1,120 @@
+diff --git a/packages/coding-agent/src/modes/components/status-line/segments.ts b/packages/coding-agent/src/modes/components/status-line/segments.ts
+index 95a36814a..70eb56d95 100644
+--- a/packages/coding-agent/src/modes/components/status-line/segments.ts
++++ b/packages/coding-agent/src/modes/components/status-line/segments.ts
+@@ -402,7 +402,22 @@ const costSegment: StatusLineSegment = {
+ 		if (normalizedPremiumRequests) billingParts.push(`★ ${formatNumber(normalizedPremiumRequests)}`);
+ 		if (usingSubscription) billingParts.push("(sub)");
+ 
+-		return { content: theme.fg("statusLineCost", billingParts.join(" ")), visible: true };
++		let content = theme.fg("statusLineCost", billingParts.join(" "));
++		// Anthropic rotates between multiple OAuth accounts (session-sticky,
++		// usage-ranked); surface which account this session is billing against.
++		// The identity lookup is display-only and already returns undefined when
++		// the session is routed to an API key or env override.
++		const accountEmail =
++			state.model?.provider === "anthropic"
++				? ctx.session.modelRegistry?.authStorage?.getOAuthAccountIdentity("anthropic", ctx.session.sessionId)
++						?.email
++				: undefined;
++		if (accountEmail) {
++			const email = truncateToWidth(sanitizeStatusText(accountEmail), TRUNCATE_LENGTHS.SHORT);
++			if (email) content += ` ${theme.fg("muted", email)}`;
++		}
++
++		return { content, visible: true };
+ 	},
+ };
+ 
+diff --git a/packages/coding-agent/test/status-line-cost-account.test.ts b/packages/coding-agent/test/status-line-cost-account.test.ts
+new file mode 100644
+index 000000000..56431998f
+--- /dev/null
++++ b/packages/coding-agent/test/status-line-cost-account.test.ts
+@@ -0,0 +1,86 @@
++import { beforeAll, describe, expect, it } from "bun:test";
++import { stripVTControlCharacters } from "node:util";
++import { renderSegment } from "@oh-my-pi/pi-coding-agent/modes/components/status-line/segments";
++import type { SegmentContext } from "@oh-my-pi/pi-coding-agent/modes/components/status-line/types";
++import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
++
++beforeAll(async () => {
++	await initTheme();
++});
++
++function ctxWith(args: {
++	cost?: number;
++	provider?: string;
++	oauth?: boolean;
++	identity?: { email?: string; accountId?: string };
++}): SegmentContext {
++	return {
++		usageStats: {
++			input: 0,
++			output: 0,
++			cacheRead: 0,
++			cacheWrite: 0,
++			totalTokens: 0,
++			orchestrationInput: 0,
++			orchestrationOutput: 0,
++			orchestrationCacheRead: 0,
++			premiumRequests: 0,
++			cost: args.cost ?? 0,
++			tokensPerSecond: null,
++		},
++		session: {
++			sessionId: "session-1",
++			state: { model: args.provider ? { provider: args.provider, id: "test-model" } : undefined },
++			modelRegistry: {
++				isUsingOAuth: () => args.oauth ?? false,
++				authStorage: {
++					getOAuthAccountIdentity: (provider: string) => (provider === args.provider ? args.identity : undefined),
++				},
++			},
++		},
++	} as unknown as SegmentContext;
++}
++
++function plain(text: string): string {
++	return stripVTControlCharacters(text);
++}
++
++describe("cost status-line segment account email", () => {
++	it("appends the active Anthropic account email next to the cost", () => {
++		const result = renderSegment(
++			"cost",
++			ctxWith({ cost: 1.23, provider: "anthropic", oauth: true, identity: { email: "a@example.com" } }),
++		);
++		expect(result.visible).toBe(true);
++		const text = plain(result.content);
++		expect(text).toContain("$1.23");
++		expect(text).toContain("a@example.com");
++		expect(text.indexOf("a@example.com")).toBeGreaterThan(text.indexOf("$1.23"));
++	});
++
++	it("shows the email even at zero cost while on subscription", () => {
++		const result = renderSegment(
++			"cost",
++			ctxWith({ provider: "anthropic", oauth: true, identity: { email: "a@example.com" } }),
++		);
++		expect(result.visible).toBe(true);
++		const text = plain(result.content);
++		expect(text).toContain("(sub)");
++		expect(text).toContain("a@example.com");
++	});
++
++	it("hides the email for non-Anthropic providers", () => {
++		const result = renderSegment(
++			"cost",
++			ctxWith({ cost: 1.23, provider: "openai-codex", oauth: true, identity: { email: "a@example.com" } }),
++		);
++		expect(result.visible).toBe(true);
++		expect(plain(result.content)).not.toContain("a@example.com");
++	});
++
++	it("omits the email when no OAuth identity is attributed", () => {
++		const result = renderSegment("cost", ctxWith({ cost: 1.23, provider: "anthropic", oauth: true }));
++		expect(result.visible).toBe(true);
++		expect(plain(result.content)).not.toContain("@");
++	});
++});
