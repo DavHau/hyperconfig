@@ -1,0 +1,86 @@
+diff --git a/packages/coding-agent/src/config/settings-schema.ts b/packages/coding-agent/src/config/settings-schema.ts
+index e2f3886eb..b0a28d74d 100644
+--- a/packages/coding-agent/src/config/settings-schema.ts
++++ b/packages/coding-agent/src/config/settings-schema.ts
+@@ -3179,6 +3179,17 @@ export const SETTINGS_SCHEMA = {
+ 		},
+ 	},
+ 
++	"bash.stripTrailingHeadTail": {
++		type: "boolean",
++		default: false,
++		ui: {
++			tab: "shell",
++			group: "Bash",
++			label: "Bash Strip Trailing Head/Tail",
++			description: "Rewrite bash commands to strip trailing | head/tail pipeline stages before execution",
++		},
++	},
++
+ 	// Bash interceptor
+ 	"bashInterceptor.enabled": {
+ 		type: "boolean",
+diff --git a/packages/coding-agent/src/tools/bash.ts b/packages/coding-agent/src/tools/bash.ts
+index 14e67375b..e0894c2a3 100644
+--- a/packages/coding-agent/src/tools/bash.ts
++++ b/packages/coding-agent/src/tools/bash.ts
+@@ -23,6 +23,7 @@ import { CachedOutputBlock, markFramedBlockComponent, outputBlockContentWidth }
+ import { getSixelLineMask } from "../utils/sixel";
+ import type { ToolSession } from ".";
+ import { truncateForPrompt } from "./approval";
++import { applyBashFixups } from "./bash-command-fixup";
+ import { type BashInteractiveResult, runInteractiveBashPty } from "./bash-interactive";
+ import { checkBashInterception } from "./bash-interceptor";
+ import { canUseInteractiveBashPty } from "./bash-pty-selection";
+@@ -707,6 +708,12 @@ export class BashTool implements AgentTool<typeof bashSchemaBase | typeof bashSc
+ 		let command = rawCommand;
+ 		const env = normalizeBashEnv(rawEnv);
+ 
++		// Strip trailing `| head`/`| tail` pipeline stages before execution so
++		// the full stream reaches the output sink (opt-in via settings).
++		if (this.session.settings.get("bash.stripTrailingHeadTail")) {
++			command = applyBashFixups(command).command;
++		}
++
+ 		// Extract leading `cd <path> && ...` into cwd when the model ignores the cwd parameter.
+ 		// Constrained to a single line so a `&&` that sits on a later line of a multiline
+ 		// script can't pull the entire script into the "cwd" capture.
+diff --git a/packages/coding-agent/test/bash-failure-result.test.ts b/packages/coding-agent/test/bash-failure-result.test.ts
+index 057ab687d..fea485189 100644
+--- a/packages/coding-agent/test/bash-failure-result.test.ts
++++ b/packages/coding-agent/test/bash-failure-result.test.ts
+@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
+ import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+ import { BashTool } from "@oh-my-pi/pi-coding-agent/tools/bash";
+ 
+-function makeSession(): ToolSession {
++function makeSession(settingOverrides: Record<string, unknown> = {}): ToolSession {
+ 	return {
+ 		cwd: "/tmp",
+ 		hasUI: false,
+@@ -10,6 +10,7 @@ function makeSession(): ToolSession {
+ 		getSessionFile: () => null,
+ 		settings: {
+ 			get(key: string) {
++				if (key in settingOverrides) return settingOverrides[key];
+ 				if (key === "async.enabled") return false;
+ 				if (key === "bash.autoBackground.enabled") return false;
+ 				if (key === "bash.autoBackground.thresholdMs") return 60_000;
+@@ -71,4 +72,17 @@ describe("BashTool execution results", () => {
+ 			expect(stdout).toBe(scenario.expected);
+ 		}
+ 	});
++
++	it("strips a trailing head/tail pipeline stage when bash.stripTrailingHeadTail is enabled", async () => {
++		const tool = new BashTool(makeSession({ "bash.stripTrailingHeadTail": true }));
++
++		const result = await tool.execute("call-strip-tail", { command: "seq 1 5 | tail -n2" });
++		const text = result.content.find(c => c.type === "text")?.text ?? "";
++		const stdout = text.replace(/\n\nWall time: \d+\.\d{2} seconds$/, "").trimEnd();
++
++		// The `| tail -n2` stage is stripped before execution, so the full
++		// stream reaches the sink instead of the trimmed final stage.
++		expect(result.isError).toBeUndefined();
++		expect(stdout).toBe("1\n2\n3\n4\n5");
++	});
+ });

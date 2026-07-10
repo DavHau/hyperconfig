@@ -1,0 +1,119 @@
+diff --git a/packages/coding-agent/src/extensibility/plugins/legacy-pi-compat.ts b/packages/coding-agent/src/extensibility/plugins/legacy-pi-compat.ts
+index 20f55ad19..57bddab7d 100644
+--- a/packages/coding-agent/src/extensibility/plugins/legacy-pi-compat.ts
++++ b/packages/coding-agent/src/extensibility/plugins/legacy-pi-compat.ts
+@@ -1250,6 +1250,41 @@ function resolveTypeBoxSpecifier(): { path: string } | undefined {
+ 	return TYPEBOX_SHIM_PATH ? { path: TYPEBOX_SHIM_PATH } : undefined;
+ }
+ 
++interface LegacyPiBundledModuleResult {
++	contents: string;
++	loader: "js";
++}
++
++/**
++ * Register a runtime virtual module for every bundled registry key (except
++ * typebox, which routes through TYPEBOX_SHIM_PATH). Bun's runtime module
++ * loader never routes scheme-prefixed specifiers into plugin namespaces —
++ * `onResolve` does not fire for imports inside runtime-loaded extension
++ * modules either — so the namespace `onLoad` below is unreachable for the
++ * `omp-legacy-pi-bundled:<key>` specifiers the rewrite emits, and every
++ * compiled-binary extension import of `@oh-my-pi/*` failed with
++ * `Cannot find module 'omp-legacy-pi-bundled:...'`. `build.module()` is the
++ * documented runtime virtual-module mechanism and DOES resolve there.
++ *
++ * Exported as a test seam: `registerModule` receives each virtual specifier
++ * and its lazy source callback; `synthesize` defaults to the live registry
++ * synthesizer.
++ */
++export function __registerLegacyPiBundledVirtualModules(
++	registerModule: (specifier: string, callback: () => Promise<LegacyPiBundledModuleResult>) => void,
++	synthesize: (registryKey: string) => Promise<string> = synthesizeBundledModuleSource,
++): void {
++	for (const key of BUNDLED_PI_REGISTRY_KEYS) {
++		if (key === TYPEBOX_BUNDLED_REGISTRY_KEY) {
++			continue;
++		}
++		registerModule(bundledRegistryVirtualSpecifier(key), async () => ({
++			contents: await synthesize(key),
++			loader: "js",
++		}));
++	}
++}
++
+ export function installLegacyPiSpecifierShim(): void {
+ 	if (isLegacyPiSpecifierShimInstalled) {
+ 		return;
+@@ -1264,9 +1299,14 @@ export function installLegacyPiSpecifierShim(): void {
+ 			// Compiled-binary mode: serve `omp-legacy-pi-bundled:<key>` imports
+ 			// from the JS-heap registry. The rewrite path emits these specifiers
+ 			// in place of unreachable `file:///$bunfs/...` URLs (issue #3423).
++			// Runtime imports resolve through the `build.module` registrations;
++			// the namespace `onLoad` is kept for bundler-path consumers.
+ 			build.onLoad({ filter: /.*/, namespace: BUNDLED_VIRTUAL_NAMESPACE }, async args => {
+ 				return { contents: await synthesizeBundledModuleSource(args.path), loader: "js" };
+ 			});
++			if (IS_COMPILED_BINARY) {
++				__registerLegacyPiBundledVirtualModules((specifier, callback) => build.module(specifier, callback));
++			}
+ 		},
+ 	});
+ }
+diff --git a/packages/coding-agent/test/extensibility/legacy-pi-bundled-virtual.test.ts b/packages/coding-agent/test/extensibility/legacy-pi-bundled-virtual.test.ts
+index 0fece9ee8..d5369dffb 100644
+--- a/packages/coding-agent/test/extensibility/legacy-pi-bundled-virtual.test.ts
++++ b/packages/coding-agent/test/extensibility/legacy-pi-bundled-virtual.test.ts
+@@ -94,3 +94,53 @@ describe("legacy-pi bundled virtual module synthesizer (issue #3423)", () => {
+ 		}
+ 	});
+ });
++
++// Regression for the runtime-resolution gap behind issue #3423's fix: the
++// virtual `omp-legacy-pi-bundled:<key>` specifiers were served by a
++// namespace-scoped `onLoad`, but Bun's RUNTIME module loader (used for
++// dynamically imported extensions) never routes scheme-prefixed bare
++// specifiers into plugin namespaces — `onResolve` does not fire for imports
++// inside runtime-loaded modules either. Every compiled-binary extension
++// import of `@oh-my-pi/*` therefore failed with `Cannot find module
++// 'omp-legacy-pi-bundled:...'`. Runtime virtual modules registered via
++// `build.module(specifier, cb)` are the documented mechanism that DOES
++// resolve at runtime, so the shim must register one per bundled key.
++describe("legacy-pi bundled virtual module registration", () => {
++	it("registers a runtime virtual module for every bundled key except typebox", async () => {
++		const { __registerLegacyPiBundledVirtualModules } = await import(
++			"@oh-my-pi/pi-coding-agent/extensibility/plugins/legacy-pi-compat"
++		);
++		const { BUNDLED_PI_REGISTRY_KEYS } = await import(
++			"@oh-my-pi/pi-coding-agent/extensibility/plugins/legacy-pi-bundled-keys"
++		);
++		const registered = new Map<string, () => Promise<{ contents: string; loader: string }>>();
++		__registerLegacyPiBundledVirtualModules((specifier, callback) => {
++			registered.set(specifier, callback);
++		});
++		expect(registered.has("omp-legacy-pi-bundled:@oh-my-pi/pi-coding-agent/async/job-manager")).toBe(true);
++		expect(registered.has("omp-legacy-pi-bundled:@oh-my-pi/pi-tui")).toBe(true);
++		expect(registered.has("omp-legacy-pi-bundled:typebox")).toBe(false);
++		// one registration per non-typebox key, all scheme-prefixed
++		expect(registered.size).toBe(BUNDLED_PI_REGISTRY_KEYS.size - (BUNDLED_PI_REGISTRY_KEYS.has("typebox") ? 1 : 0));
++		for (const specifier of registered.keys()) {
++			expect(specifier.startsWith("omp-legacy-pi-bundled:")).toBe(true);
++		}
++	});
++
++	it("serves synthesized registry source through the registered callback", async () => {
++		const { __registerLegacyPiBundledVirtualModules } = await import(
++			"@oh-my-pi/pi-coding-agent/extensibility/plugins/legacy-pi-compat"
++		);
++		const registered = new Map<string, () => Promise<{ contents: string; loader: string }>>();
++		__registerLegacyPiBundledVirtualModules(
++			(specifier, callback) => {
++				registered.set(specifier, callback);
++			},
++			async key => `export const KEY = ${JSON.stringify(key)};`,
++		);
++		const callback = registered.get("omp-legacy-pi-bundled:@oh-my-pi/pi-tui")!;
++		const result = await callback();
++		expect(result.loader).toBe("js");
++		expect(result.contents).toBe('export const KEY = "@oh-my-pi/pi-tui";');
++	});
++});

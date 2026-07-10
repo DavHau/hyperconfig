@@ -84,6 +84,25 @@
         # could not spawn. Replaces the former pueue workflow.
         enabled: true
         thresholdMs: 10000
+      # Bash output crop (local patches omp-bash-*.patch below): commands
+      # must never pipe through `| tail` themselves — the harness crops.
+      # stripTrailingHeadTail re-enables the pre-16.3.7 native rewrite that
+      # strips a trailing `| tail`/`| head` stage so the FULL stream reaches
+      # the OutputSink (upstream removed the rewrite in #4562; the native
+      # applyBashFixups still ships and the local patch gates it behind this
+      # setting, default off upstream-wise).
+      stripTrailingHeadTail: true
+      # Inline tail budget in KB (local patch omp-bash-output-tail-budget):
+      # replaces the hardcoded 50KB OutputSink window, so only ~2.5KB of a
+      # command's tail lands in context; the full raw stream spills to a
+      # session artifact (`artifact://<id>` footer / jobs-hub log view).
+      outputTailKb: 2.5
+    tools:
+      # Head window (KB) for the generic large-result spill. 1KB of head +
+      # the tail window keeps enough orientation while shrinking bash
+      # results; artifactSpillThreshold stays at its 50KB default so grep/
+      # task outputs keep their full inline budget.
+      artifactHeadBytes: 1
   '';
   # Instructions for the TOP-LEVEL agent only. Everything relevant to
   # subagents lives in the always-apply rules (default-rules.md, caveman.md)
@@ -191,12 +210,34 @@
   # conflicts leave the workspace untouched with the ref parked. The
   # snapshot's `.jj` pointer is stripped before the subagent runs so nothing
   # inside isolation can write through to the shared store.
+  # omp-bash-output-tail-budget.patch: new setting `bash.outputTailKb`
+  # (default 0 = legacy 50KB) sizes the OutputSink in-memory tail window in
+  # bash-executor/bash-interactive, so inline bash output crops to ~2.5KB
+  # (config above) while the raw stream spills losslessly to a session
+  # artifact.
+  # omp-bash-strip-head-tail.patch: new setting `bash.stripTrailingHeadTail`
+  # (default false) re-gates the pi-natives applyBashFixups rewrite (removed
+  # upstream in 16.3.7, #4562) in BashTool.execute(): a trailing
+  # `| tail -n20`/`| head` stage is stripped so the full stream hits the
+  # sink and the crop above governs what stays inline.
+  # omp-bundled-virtual-modules.patch: fixes extension loading in the
+  # COMPILED binary. The legacy-pi shim rewrites extension imports of
+  # @oh-my-pi/* to virtual `omp-legacy-pi-bundled:<key>` specifiers, but
+  # served them via a namespace onLoad that Bun's runtime loader never
+  # routes to (onResolve doesn't fire inside runtime-loaded modules
+  # either) — every extension importing @oh-my-pi/* failed with "Cannot
+  # find module 'omp-legacy-pi-bundled:...'". Registers each bundled key
+  # as a Bun.plugin build.module() runtime virtual module instead.
+  # Required by the jobs-hub extension below; upstreamable.
   omp-patched = inputs.llm-agents.packages.${sys}.omp.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       ./omp-jj-colocated-task-refs.patch
       ./omp-isolation-auto-apply.patch
       ./omp-vcs-handle-seam.patch
       ./omp-jj-workspace-handle.patch
+      ./omp-bash-output-tail-budget.patch
+      ./omp-bash-strip-head-tail.patch
+      ./omp-bundled-virtual-modules.patch
     ];
   });
   omp-wrapped = inputs.wrappers.lib.wrapPackage {
@@ -212,6 +253,12 @@
       mkdir -p "$config_dir/rules"
       ln -sf ${./default-rules.md} "$config_dir/rules/default-rules.md"
       ln -sf ${./caveman.md} "$config_dir/rules/caveman.md"
+      # jobs-hub extension: background-bash-jobs widget + Ctrl+J / /bashjobs
+      # overlay with live log view (/jobs is taken by the builtin printout;
+      # source + tests in modules/nixos/jobs-hub/, tests run via bun against
+      # the ~/projects/oh-my-pi checkout).
+      mkdir -p "$config_dir/extensions"
+      ln -sf ${./jobs-hub/jobs-hub.ts} "$config_dir/extensions/jobs-hub.ts"
       ${lib.optionalString models-needed ''ln -sf ${modelsFile} "$config_dir/models.yml"''}
     '';
   };
