@@ -238,17 +238,25 @@
   # soonest-resetting account is deterministically tried first (resets within
   # 60s count as ties and keep load-balancing across sessions; exhausted or
   # blocked accounts are still skipped, unknown resets rank last).
+  # Also adds getOAuthAccountIdentity(..., { sessionStickyOnly }) so display
+  # callers can distinguish real session attribution from the pre-selection
+  # fallback to the first stored account (consumed by the statusline patch).
   # Codex/Antigravity ranking untouched. Tests:
-  # packages/ai/test/auth-storage-claude-weekly-reset-priority.test.ts.
+  # packages/ai/test/auth-storage-claude-weekly-reset-priority.test.ts,
+  # packages/ai/test/auth-storage-account-identity.test.ts.
   # omp-statusline-anthropic-account.patch: the status-line `cost` segment
   # (default preset, bottom bar in the editor border) appends the email of
   # the session-sticky Anthropic OAuth account after the billing parts
   # ($cost / ★ premium / (sub)), dimmed and truncated to 40 cols. Shown only
-  # when the active model's provider is anthropic and the session is actually
-  # attributed to an OAuth credential (getOAuthAccountIdentity returns
-  # nothing for API-key/env-override routing) — makes the account picked by
-  # the weekly-reset ranking above visible. Tests:
-  # packages/coding-agent/test/status-line-cost-account.test.ts.
+  # when the active model's provider is anthropic AND the session is actually
+  # attributed (sessionStickyOnly lookup) — before the first request the
+  # plain lookup would name the first stored account, which the ranking may
+  # not pick (wrong email at launch). StatusLineComponent warms the selection
+  # once per provider+session on first render (fire-and-forget getApiKey,
+  # repaint on completion), so the correct account appears right after launch
+  # instead of at the first prompt. Tests:
+  # packages/coding-agent/test/status-line-cost-account.test.ts,
+  # packages/coding-agent/test/status-line-auth-warmup.test.ts.
   omp-patched = inputs.llm-agents.packages.${sys}.omp.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       ./omp-jj-colocated-task-refs.patch
