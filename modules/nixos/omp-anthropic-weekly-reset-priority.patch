@@ -1,5 +1,5 @@
 diff --git a/packages/ai/src/auth-storage.ts b/packages/ai/src/auth-storage.ts
-index 315d43c48..a0b6b5918 100644
+index 315d43c48..dcf0a71e6 100644
 --- a/packages/ai/src/auth-storage.ts
 +++ b/packages/ai/src/auth-storage.ts
 @@ -58,6 +58,10 @@ import { opencodeGoUsageProvider } from "./usage/opencode-go";
@@ -22,7 +22,51 @@ index 315d43c48..a0b6b5918 100644
  	primaryUsed: number;
  	primaryDrainRate: number;
  	orderPos: number;
-@@ -3200,6 +3206,13 @@ export class AuthStorage {
+@@ -1892,7 +1898,11 @@ export class AuthStorage {
+ 		);
+ 	}
+ 
+-	#resolveActiveOAuthCredential(provider: string, sessionId?: string): OAuthCredential | undefined {
++	#resolveActiveOAuthCredential(
++		provider: string,
++		sessionId?: string,
++		sessionStickyOnly = false,
++	): OAuthCredential | undefined {
+ 		const allCredentials = this.#getCredentialsForProvider(provider);
+ 		const oauthCredentials = allCredentials.filter((c): c is OAuthCredential => c.type === "oauth");
+ 		if (oauthCredentials.length === 0) return undefined;
+@@ -1905,6 +1915,11 @@ export class AuthStorage {
+ 		const sessionPref = this.#getSessionCredential(provider, sessionId);
+ 		// If the session has been routed to a stored API key, do not inject OAuth account_uuid.
+ 		if (sessionPref !== undefined && sessionPref.type !== "oauth") return undefined;
++		// Sticky-only callers (e.g. status-line account display) want the account
++		// the session is verifiably routed to; before the first getApiKey the
++		// fallback below would name the first stored account, which usage-ranked
++		// selection may not pick.
++		if (sessionStickyOnly && !sessionPref) return undefined;
+ 
+ 		// When no session-sticky credential is recorded yet (first call before any getApiKey,
+ 		// or all stored credentials are unavailable), the request falls through to the env-key
+@@ -1939,9 +1954,16 @@ export class AuthStorage {
+ 	 * Get the OAuth account identity for a provider, preferring the credential that
+ 	 * is session-sticky for `sessionId`. This is a read-only lookup for display and
+ 	 * metadata paths; it does not refresh tokens, rank usage, or advance selection.
++	 * With `sessionStickyOnly` the pre-attribution fallback to the first stored
++	 * credential is suppressed: identity is only reported once a getApiKey has
++	 * actually routed the session to an OAuth credential.
+ 	 */
+-	getOAuthAccountIdentity(provider: string, sessionId?: string): OAuthAccountIdentity | undefined {
+-		const preferred = this.#resolveActiveOAuthCredential(provider, sessionId);
++	getOAuthAccountIdentity(
++		provider: string,
++		sessionId?: string,
++		options?: { sessionStickyOnly?: boolean },
++	): OAuthAccountIdentity | undefined {
++		const preferred = this.#resolveActiveOAuthCredential(provider, sessionId, options?.sessionStickyOnly === true);
+ 		if (!preferred) return undefined;
+ 		const identity: OAuthAccountIdentity = {};
+ 		if (typeof preferred.accountId === "string" && preferred.accountId.length > 0) {
+@@ -3200,6 +3222,13 @@ export class AuthStorage {
  			return left.planPriority - right.planPriority;
  		}
  		if (left.hasPriorityBoost !== right.hasPriorityBoost) return left.hasPriorityBoost ? -1 : 1;
@@ -36,7 +80,7 @@ index 315d43c48..a0b6b5918 100644
  		let metric = compareUsageRankingMetric(left.secondaryDrainRate, right.secondaryDrainRate);
  		if (metric !== 0) return metric;
  		metric = compareUsageRankingMetric(left.secondaryUsed, right.secondaryUsed);
-@@ -3265,15 +3278,24 @@ export class AuthStorage {
+@@ -3265,15 +3294,24 @@ export class AuthStorage {
  			priorityByCandidate.set(candidate, maxBucket === 0 ? 0 : 1 - bucket / maxBucket);
  		}
  
@@ -64,7 +108,7 @@ index 315d43c48..a0b6b5918 100644
  			cursor += 1 + (priorityByCandidate.get(candidate) ?? 0);
  			if (hit < cursor) {
  				selected = candidate;
-@@ -3380,6 +3402,7 @@ export class AuthStorage {
+@@ -3380,6 +3418,7 @@ export class AuthStorage {
  				hasPriorityBoost: strategy.hasPriorityBoost?.(primary) ?? false,
  				planPriority: getOpenAICodexPlanPriority(usage),
  				secondaryUsed: this.#normalizeUsageFraction(secondaryTarget),
@@ -106,6 +150,56 @@ index c346115ee..50102aaed 100644
 +	preferEarlierSecondaryReset: true,
  	windowDefaults: { primaryMs: 5 * 60 * 60 * 1000, secondaryMs: 7 * 24 * 60 * 60 * 1000 },
  };
+diff --git a/packages/ai/test/auth-storage-account-identity.test.ts b/packages/ai/test/auth-storage-account-identity.test.ts
+index 47022320c..f1acc1f82 100644
+--- a/packages/ai/test/auth-storage-account-identity.test.ts
++++ b/packages/ai/test/auth-storage-account-identity.test.ts
+@@ -112,6 +112,45 @@ describe("AuthStorage.getOAuthAccountIdentity", () => {
+ 		expect(rotatedIdentity?.accountId).toBe(retryKey === "access-a" ? "acc-a" : "acc-b");
+ 	});
+ 
++	test("sessionStickyOnly hides the fallback identity until the session is attributed", async () => {
++		if (!authStorage) throw new Error("test setup failed");
++		const storage = authStorage;
++		const sessionId = "session-sticky-only-test";
++		await storage.set(PROVIDER, [
++			{
++				type: "oauth",
++				access: "access-a",
++				refresh: "refresh-a",
++				expires: Date.now() + 60 * 60_000,
++				accountId: "acc-a",
++				email: "a@example.com",
++			},
++			{
++				type: "oauth",
++				access: "access-b",
++				refresh: "refresh-b",
++				expires: Date.now() + 60 * 60_000,
++				accountId: "acc-b",
++				email: "b@example.com",
++			},
++		]);
++		vi.spyOn(oauthUtils, "getOAuthApiKey").mockImplementation(async (provider, credentials) => {
++			const credential = credentials[provider];
++			if (!credential) return null;
++			return { newCredentials: credential, apiKey: credential.access };
++		});
++
++		// Before any getApiKey the plain lookup falls back to the first stored
++		// account, which selection may not pick — sticky-only must stay silent.
++		expect(storage.getOAuthAccountIdentity(PROVIDER, sessionId)).toBeDefined();
++		expect(storage.getOAuthAccountIdentity(PROVIDER, sessionId, { sessionStickyOnly: true })).toBeUndefined();
++
++		const key = await storage.getApiKey(PROVIDER, sessionId);
++		const sticky = storage.getOAuthAccountIdentity(PROVIDER, sessionId, { sessionStickyOnly: true });
++		expect(sticky?.accountId).toBe(key === "access-a" ? "acc-a" : "acc-b");
++		expect(sticky).toEqual(storage.getOAuthAccountIdentity(PROVIDER, sessionId));
++	});
++
+ 	test("config override suppresses OAuth identity attribution", async () => {
+ 		if (!authStorage) throw new Error("test setup failed");
+ 		await authStorage.set(PROVIDER, [
 diff --git a/packages/ai/test/auth-storage-claude-weekly-reset-priority.test.ts b/packages/ai/test/auth-storage-claude-weekly-reset-priority.test.ts
 new file mode 100644
 index 000000000..e335882ec

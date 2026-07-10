@@ -1,8 +1,69 @@
+diff --git a/packages/coding-agent/src/modes/components/status-line/component.ts b/packages/coding-agent/src/modes/components/status-line/component.ts
+index 195539a46..d6d75c0b5 100644
+--- a/packages/coding-agent/src/modes/components/status-line/component.ts
++++ b/packages/coding-agent/src/modes/components/status-line/component.ts
+@@ -304,6 +304,13 @@ export class StatusLineComponent implements Component {
+ 	#usageFetchedAt = 0;
+ 	#usageInFlight = false;
+ 	#usageStartTimer: Timer | null = null;
++	// OAuth attribution warm-up (one-shot per provider+session): before the
++	// first getApiKey no session-sticky credential exists, so sticky-only
++	// identity lookups (cost segment account email) stay empty and plain
++	// lookups would name the first stored account — which usage-ranked
++	// selection may not pick. Resolving the credential once at startup makes
++	// the status line show the account that will actually serve the session.
++	#authWarmupKey: string | null = null;
+ 	// Context-usage memo. The status line redraws on every agent event, so the
+ 	// hot path must not recompute context tokens unless an input changed.
+ 	// `getContextUsage()` anchors on the last assistant's real prompt-token
+@@ -778,6 +785,34 @@ export class StatusLineComponent implements Component {
+ 		return [activeProvider, identity?.accountId ?? "", identity?.email ?? "", identity?.projectId ?? ""].join("\0");
+ 	}
+ 
++	/**
++	 * One-shot per provider+session: resolve the OAuth credential the session
++	 * will use so sticky-only identity lookups (cost segment account email)
++	 * answer right after launch instead of at the first prompt. getApiKey runs
++	 * the same usage-ranked selection the first request would, records the
++	 * session-sticky credential, and is a no-op for API-key/env routing.
++	 */
++	#warmOAuthAttribution(): void {
++		const session = this.session;
++		const provider = session.state.model?.provider ?? session.model?.provider;
++		const authStorage = session.modelRegistry?.authStorage;
++		if (!provider || !authStorage) return;
++		const key = `${provider}\0${session.sessionId ?? ""}`;
++		if (this.#authWarmupKey === key) return;
++		// Nothing to attribute: no OAuth credential in play (API key, env
++		// override, or nothing stored) — the identity lookup is authoritative.
++		if (!authStorage.getOAuthAccountIdentity(provider, session.sessionId)) return;
++		this.#authWarmupKey = key;
++		if (authStorage.getOAuthAccountIdentity(provider, session.sessionId, { sessionStickyOnly: true })) return;
++		const modelId = session.state.model?.id ?? session.model?.id;
++		void authStorage
++			.getApiKey(provider, session.sessionId, modelId !== undefined ? { modelId } : undefined)
++			.catch(() => {})
++			.finally(() => {
++				if (!this.#disposed && this.session === session) this.#onBranchChange?.();
++			});
++	}
++
+ 	/**
+ 	 * Startup redraws only arm a short-delayed task; timeout releases the render
+ 	 * cadence while a late successful fetch can still refresh the cached segment.
+@@ -991,6 +1026,7 @@ export class StatusLineComponent implements Component {
+ 
+ 		// Trigger background fetch (5-min TTL); render uses cached value
+ 		this.refreshUsageInBackground();
++		this.#warmOAuthAttribution();
+ 
+ 		// Get usage statistics
+ 		const aggregateUsageStats = this.session.sessionManager?.getUsageStatistics() ?? {
 diff --git a/packages/coding-agent/src/modes/components/status-line/segments.ts b/packages/coding-agent/src/modes/components/status-line/segments.ts
-index 95a36814a..70eb56d95 100644
+index 95a36814a..fa849ecb1 100644
 --- a/packages/coding-agent/src/modes/components/status-line/segments.ts
 +++ b/packages/coding-agent/src/modes/components/status-line/segments.ts
-@@ -402,7 +402,22 @@ const costSegment: StatusLineSegment = {
+@@ -402,7 +402,26 @@ const costSegment: StatusLineSegment = {
  		if (normalizedPremiumRequests) billingParts.push(`★ ${formatNumber(normalizedPremiumRequests)}`);
  		if (usingSubscription) billingParts.push("(sub)");
  
@@ -10,12 +71,16 @@ index 95a36814a..70eb56d95 100644
 +		let content = theme.fg("statusLineCost", billingParts.join(" "));
 +		// Anthropic rotates between multiple OAuth accounts (session-sticky,
 +		// usage-ranked); surface which account this session is billing against.
-+		// The identity lookup is display-only and already returns undefined when
-+		// the session is routed to an API key or env override.
++		// sessionStickyOnly: before the first request no attribution exists and
++		// the plain lookup would name the first stored account, which selection
++		// may not pick — show nothing until the session is actually routed.
++		// (StatusLineComponent warms the selection at startup so this resolves
++		// right after launch instead of at the first prompt.)
 +		const accountEmail =
 +			state.model?.provider === "anthropic"
-+				? ctx.session.modelRegistry?.authStorage?.getOAuthAccountIdentity("anthropic", ctx.session.sessionId)
-+						?.email
++				? ctx.session.modelRegistry?.authStorage?.getOAuthAccountIdentity("anthropic", ctx.session.sessionId, {
++						sessionStickyOnly: true,
++					})?.email
 +				: undefined;
 +		if (accountEmail) {
 +			const email = truncateToWidth(sanitizeStatusText(accountEmail), TRUNCATE_LENGTHS.SHORT);
@@ -26,12 +91,144 @@ index 95a36814a..70eb56d95 100644
  	},
  };
  
+diff --git a/packages/coding-agent/test/status-line-auth-warmup.test.ts b/packages/coding-agent/test/status-line-auth-warmup.test.ts
+new file mode 100644
+index 000000000..e4f9db9f4
+--- /dev/null
++++ b/packages/coding-agent/test/status-line-auth-warmup.test.ts
+@@ -0,0 +1,126 @@
++import { beforeAll, describe, expect, it } from "bun:test";
++import { stripVTControlCharacters } from "node:util";
++import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
++import { StatusLineComponent } from "@oh-my-pi/pi-coding-agent/modes/components/status-line";
++import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
++
++beforeAll(async () => {
++	resetSettingsForTest();
++	await Settings.init({ inMemory: true });
++	await initTheme();
++});
++
++interface WarmupHarness {
++	component: StatusLineComponent;
++	getApiKeyCalls: Array<{ provider: string; sessionId?: string; options?: { modelId?: string } }>;
++	renderRequests: () => number;
++}
++
++function makeHarness(args: { provider?: string; oauthStored?: boolean; email?: string }): WarmupHarness {
++	const provider = args.provider ?? "anthropic";
++	const oauthStored = args.oauthStored ?? true;
++	const email = args.email ?? "ranked@example.com";
++	let attributed = false;
++	const getApiKeyCalls: WarmupHarness["getApiKeyCalls"] = [];
++	const component = new StatusLineComponent({
++		sessionId: "session-warmup",
++		state: { messages: [], model: { contextWindow: 1000, provider, id: "test-model" } },
++		model: { contextWindow: 1000, provider, id: "test-model" },
++		sessionManager: {
++			getUsageStatistics: () => ({
++				input: 0,
++				output: 0,
++				cacheRead: 0,
++				cacheWrite: 0,
++				totalTokens: 0,
++				orchestrationInput: 0,
++				orchestrationOutput: 0,
++				orchestrationCacheRead: 0,
++				premiumRequests: 0,
++				cost: 0,
++			}),
++		},
++		fetchUsageReports: async () => [],
++		modelRegistry: {
++			isUsingOAuth: () => oauthStored,
++			authStorage: {
++				getOAuthAccountIdentity: (
++					requestedProvider: string,
++					_sessionId?: string,
++					options?: { sessionStickyOnly?: boolean },
++				) => {
++					if (!oauthStored || requestedProvider !== provider) return undefined;
++					if (options?.sessionStickyOnly === true && !attributed) return undefined;
++					return { accountId: "acc-ranked", email };
++				},
++				getApiKey: async (requestedProvider: string, sessionId?: string, options?: { modelId?: string }) => {
++					getApiKeyCalls.push({ provider: requestedProvider, sessionId, options });
++					// Real selection ranks usage before recording stickiness; keep
++					// the flip asynchronous so the pre-warm-up render is observable.
++					await Promise.resolve();
++					attributed = true;
++					return "oat-ranked";
++				},
++			},
++		},
++		getAsyncJobSnapshot: () => ({ running: [] }),
++		getContextUsage: () => undefined,
++	} as unknown as ConstructorParameters<typeof StatusLineComponent>[0]);
++	component.updateSettings({
++		preset: "custom",
++		leftSegments: [],
++		rightSegments: ["cost"],
++		sessionAccent: false,
++	});
++	let renders = 0;
++	component.watchBranch(() => {
++		renders += 1;
++	});
++	return { component, getApiKeyCalls, renderRequests: () => renders };
++}
++
++// The warm-up chain is promise-only (mock getApiKey resolves immediately);
++// draining microtasks is deterministic — no wall-clock timers needed.
++async function flushAsync(): Promise<void> {
++	for (let i = 0; i < 8; i += 1) {
++		await Promise.resolve();
++	}
++}
++
++describe("status-line OAuth attribution warm-up", () => {
++	it("resolves the session credential once on first render", async () => {
++		const h = makeHarness({});
++		h.component.getTopBorder(200);
++		h.component.getTopBorder(200);
++		await flushAsync();
++		h.component.getTopBorder(200);
++
++		expect(h.getApiKeyCalls).toHaveLength(1);
++		expect(h.getApiKeyCalls[0]).toEqual({
++			provider: "anthropic",
++			sessionId: "session-warmup",
++			options: { modelId: "test-model" },
++		});
++	});
++
++	it("shows the attributed account email right after the warm-up resolves", async () => {
++		const h = makeHarness({});
++		const before = stripVTControlCharacters(h.component.getTopBorder(200).content);
++		expect(before).not.toContain("ranked@example.com");
++
++		await flushAsync();
++		const after = stripVTControlCharacters(h.component.getTopBorder(200).content);
++		expect(after).toContain("ranked@example.com");
++		// Warm-up completion must request a repaint so the email appears
++		// without waiting for the next unrelated UI event.
++		expect(h.renderRequests()).toBeGreaterThan(0);
++	});
++
++	it("skips the warm-up when no OAuth credential is in play", async () => {
++		const h = makeHarness({ oauthStored: false });
++		h.component.getTopBorder(200);
++		await flushAsync();
++
++		expect(h.getApiKeyCalls).toHaveLength(0);
++	});
++});
 diff --git a/packages/coding-agent/test/status-line-cost-account.test.ts b/packages/coding-agent/test/status-line-cost-account.test.ts
 new file mode 100644
-index 000000000..56431998f
+index 000000000..9e21c56c7
 --- /dev/null
 +++ b/packages/coding-agent/test/status-line-cost-account.test.ts
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,113 @@
 +import { beforeAll, describe, expect, it } from "bun:test";
 +import { stripVTControlCharacters } from "node:util";
 +import { renderSegment } from "@oh-my-pi/pi-coding-agent/modes/components/status-line/segments";
@@ -47,6 +244,8 @@ index 000000000..56431998f
 +	provider?: string;
 +	oauth?: boolean;
 +	identity?: { email?: string; accountId?: string };
++	/** Session-sticky attribution exists (default true). */
++	attributed?: boolean;
 +}): SegmentContext {
 +	return {
 +		usageStats: {
@@ -68,7 +267,15 @@ index 000000000..56431998f
 +			modelRegistry: {
 +				isUsingOAuth: () => args.oauth ?? false,
 +				authStorage: {
-+					getOAuthAccountIdentity: (provider: string) => (provider === args.provider ? args.identity : undefined),
++					getOAuthAccountIdentity: (
++						provider: string,
++						_sessionId?: string,
++						options?: { sessionStickyOnly?: boolean },
++					) => {
++						if (provider !== args.provider) return undefined;
++						if (options?.sessionStickyOnly === true && args.attributed === false) return undefined;
++						return args.identity;
++					},
 +				},
 +			},
 +		},
@@ -116,5 +323,22 @@ index 000000000..56431998f
 +		const result = renderSegment("cost", ctxWith({ cost: 1.23, provider: "anthropic", oauth: true }));
 +		expect(result.visible).toBe(true);
 +		expect(plain(result.content)).not.toContain("@");
++	});
++
++	it("hides the first-account fallback email before the session is attributed", () => {
++		const result = renderSegment(
++			"cost",
++			ctxWith({
++				cost: 1.23,
++				provider: "anthropic",
++				oauth: true,
++				identity: { email: "a@example.com" },
++				attributed: false,
++			}),
++		);
++		expect(result.visible).toBe(true);
++		const text = plain(result.content);
++		expect(text).toContain("$1.23");
++		expect(text).not.toContain("a@example.com");
 +	});
 +});
