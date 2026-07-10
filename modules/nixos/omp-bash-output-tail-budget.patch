@@ -1,0 +1,93 @@
+diff --git a/packages/coding-agent/src/config/settings-schema.ts b/packages/coding-agent/src/config/settings-schema.ts
+index c632057bf..e2f3886eb 100644
+--- a/packages/coding-agent/src/config/settings-schema.ts
++++ b/packages/coding-agent/src/config/settings-schema.ts
+@@ -3168,6 +3168,17 @@ export const SETTINGS_SCHEMA = {
+ 		},
+ 	},
+ 
++	"bash.outputTailKb": {
++		type: "number",
++		default: 0,
++		ui: {
++			tab: "shell",
++			group: "Bash",
++			label: "Bash Output Tail Budget (KB)",
++			description: "Rolling tail window budget in KB for inline bash output; 0 keeps the default 50KB window",
++		},
++	},
++
+ 	// Bash interceptor
+ 	"bashInterceptor.enabled": {
+ 		type: "boolean",
+diff --git a/packages/coding-agent/src/exec/bash-executor.ts b/packages/coding-agent/src/exec/bash-executor.ts
+index fc7d7dc69..ac0e846f4 100644
+--- a/packages/coding-agent/src/exec/bash-executor.ts
++++ b/packages/coding-agent/src/exec/bash-executor.ts
+@@ -225,10 +225,12 @@ export async function executeBash(command: string, options?: BashExecutorOptions
+ 			: prefixedCommand;
+ 
+ 	// Create output sink for truncation and artifact handling
++	const outputTailKb = settings.get("bash.outputTailKb");
+ 	const sink = new OutputSink({
+ 		onChunk: options?.onChunk,
+ 		artifactPath: options?.artifactPath,
+ 		artifactId: options?.artifactId,
++		spillThreshold: outputTailKb > 0 ? Math.round(outputTailKb * 1024) : undefined,
+ 		headBytes: resolveOutputSinkHeadBytes(settings),
+ 		maxColumns: resolveOutputMaxColumns(settings),
+ 		chunkThrottleMs: options?.onChunk ? (options.chunkThrottleMs ?? 50) : 0,
+diff --git a/packages/coding-agent/src/tools/bash-interactive.ts b/packages/coding-agent/src/tools/bash-interactive.ts
+index fc39cb0c8..e5d7dbfed 100644
+--- a/packages/coding-agent/src/tools/bash-interactive.ts
++++ b/packages/coding-agent/src/tools/bash-interactive.ts
+@@ -311,9 +311,11 @@ export async function runInteractiveBashPty(
+ 	// Load the xterm Terminal ctor here (async boundary) — the ui.custom factory below is sync.
+ 	const XtermTerminal = await loadXtermTerminal();
+ 	const { shell: resolvedShell } = settings.getShellConfig();
++	const outputTailKb = settings.get("bash.outputTailKb");
+ 	const sink = new OutputSink({
+ 		artifactPath: options.artifactPath,
+ 		artifactId: options.artifactId,
++		spillThreshold: outputTailKb > 0 ? Math.round(outputTailKb * 1024) : undefined,
+ 		headBytes: resolveOutputSinkHeadBytes(settings),
+ 		maxColumns: resolveOutputMaxColumns(settings),
+ 	});
+diff --git a/packages/coding-agent/test/bash-executor.test.ts b/packages/coding-agent/test/bash-executor.test.ts
+index b11a15f96..6c66a1a2c 100644
+--- a/packages/coding-agent/test/bash-executor.test.ts
++++ b/packages/coding-agent/test/bash-executor.test.ts
+@@ -758,6 +758,33 @@ exit 64
+ 		expect(elapsed).toBeLessThan(10_000);
+ 	}, 15_000);
+ 
++	it("honors bash.outputTailKb as the inline tail budget", async () => {
++		if (process.platform === "win32") return;
++
++		// 2KB rolling tail window + 1KB head budget — far below the 50KB default.
++		Settings.instance.set("bash.outputTailKb", 2);
++		Settings.instance.set("tools.artifactHeadBytes", 1);
++
++		const lineCount = 20_000;
++		const result = await executeBash(`seq 1 ${lineCount}`, {
++			cwd: tempDir,
++			timeout: 10_000,
++		});
++
++		expect(result.exitCode).toBe(0);
++		expect(result.truncated).toBe(true);
++
++		// Line accounting still reflects the full stream.
++		expect(result.totalLines).toBeGreaterThanOrEqual(lineCount);
++
++		// Inline output is bounded by head (1KB) + tail (2KB) + marker overhead,
++		// not the legacy 50KB window.
++		expect(result.outputBytes).toBeLessThanOrEqual(3 * 1024 + 512);
++
++		// The tail END of the stream survives the shrunken window.
++		expect(result.output).toContain(String(lineCount));
++	});
++
+ 	it("sources snapshot env vars across session commands", async () => {
+ 		if (process.platform === "win32") {
+ 			return;
