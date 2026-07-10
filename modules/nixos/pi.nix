@@ -1,25 +1,22 @@
 {pkgs, inputs, lib, config, ...}: let
   sys = pkgs.stdenv.hostPlatform.system;
   llama-swap-enabled = (config.services.llama-swap.enable or false);
-  # Selected skills from github:mattpocock/skills, curated into a tree that
-  # preserves the upstream engineering/ + productivity/ grouping. omp's skill
-  # discovery is non-recursive (skills/<name>/SKILL.md), so the nested upstream
-  # taxonomy is surfaced by pointing skills.customDirectories (see config.yml)
-  # at each category dir. Includes the three requested skills plus the skill
-  # dependencies they invoke via /skill prose (codebase-design, domain-modeling).
-  mattpocockSkillsTree = pkgs.linkFarm "mattpocock-skills" (
-    let skill = name: { inherit name; path = "${inputs.mattpocock-skills}/skills/${name}"; };
-    in map skill [
-      "engineering/diagnosing-bugs"
-      "engineering/improve-codebase-architecture"
-      "engineering/grill-with-docs"
-      "engineering/tdd"
-      "engineering/codebase-design"
-      "engineering/domain-modeling"
-      "productivity/grilling"
-      "productivity/handoff"
-    ]
-  );
+  # The whole skill collection from github:mattpocock/skills. omp's skill
+  # discovery is non-recursive (skills/<name>/SKILL.md), so the nested
+  # upstream taxonomy (skills/<category>/<name>/SKILL.md) is surfaced by
+  # pointing skills.customDirectories (see config.yml) at every category
+  # directory. Categories are discovered at eval time, so upstream bumps
+  # picking up new categories need no edits here. `deprecated` is excluded:
+  # upstream marks those as superseded by current skills (design-an-interface
+  # -> codebase-design, ubiquitous-language -> domain-modeling) and shipping
+  # both would duplicate semantics.
+  mattpocockSkillCategories = let
+    skillsRoot = "${inputs.mattpocock-skills}/skills";
+    entries = builtins.readDir skillsRoot;
+    categories = lib.filter
+      (name: entries.${name} == "directory" && name != "deprecated")
+      (builtins.attrNames entries);
+  in map (c: "${skillsRoot}/${c}") categories;
   llamaSwapProvider = lib.concatStringsSep "\n" [
     "  llama-swap:"
     "    baseUrl: http://127.0.0.1:${toString config.services.llama-swap.port}/v1"
@@ -44,8 +41,7 @@
       setupWizard: false
     skills:
       customDirectories:
-        - ${mattpocockSkillsTree}/engineering
-        - ${mattpocockSkillsTree}/productivity
+    ${lib.concatMapStringsSep "\n" (dir: "    - ${dir}") mattpocockSkillCategories}
     modelRoles:
       default: claude-fable-5:medium
       # Subagents (`task` tool) run the bundled `task` agent. Default them to the
