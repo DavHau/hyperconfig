@@ -1,0 +1,366 @@
+diff --git a/packages/ai/src/auth-storage.ts b/packages/ai/src/auth-storage.ts
+index 315d43c48..a0b6b5918 100644
+--- a/packages/ai/src/auth-storage.ts
++++ b/packages/ai/src/auth-storage.ts
+@@ -58,6 +58,10 @@ import { opencodeGoUsageProvider } from "./usage/opencode-go";
+ import { zaiUsageProvider } from "./usage/zai";
+ 
+ const USAGE_RANKING_METRIC_EPSILON = 1e-9;
++// Secondary-window resets within this span count as simultaneous for
++// preferEarlierSecondaryReset ranking, so near-identical reset schedules keep
++// load-balancing instead of pinning on millisecond skew.
++const SECONDARY_RESET_TIE_TOLERANCE_MS = 60_000;
+ 
+ // ─────────────────────────────────────────────────────────────────────────────
+ // Credential Types
+@@ -938,6 +942,8 @@ type RankedOAuthCandidate = OAuthCandidate & {
+ 	planPriority: number;
+ 	secondaryUsed: number;
+ 	secondaryDrainRate: number;
++	/** Secondary-window reset (epoch ms); +Infinity when unknown. */
++	secondaryResetAt: number;
+ 	primaryUsed: number;
+ 	primaryDrainRate: number;
+ 	orderPos: number;
+@@ -3200,6 +3206,13 @@ export class AuthStorage {
+ 			return left.planPriority - right.planPriority;
+ 		}
+ 		if (left.hasPriorityBoost !== right.hasPriorityBoost) return left.hasPriorityBoost ? -1 : 1;
++		if (
++			this.#rankingStrategyResolver?.(provider)?.preferEarlierSecondaryReset === true &&
++			// NaN (both Infinity) and near-simultaneous resets fall through as ties.
++			Math.abs(left.secondaryResetAt - right.secondaryResetAt) > SECONDARY_RESET_TIE_TOLERANCE_MS
++		) {
++			return left.secondaryResetAt < right.secondaryResetAt ? -1 : 1;
++		}
+ 		let metric = compareUsageRankingMetric(left.secondaryDrainRate, right.secondaryDrainRate);
+ 		if (metric !== 0) return metric;
+ 		metric = compareUsageRankingMetric(left.secondaryUsed, right.secondaryUsed);
+@@ -3265,15 +3278,24 @@ export class AuthStorage {
+ 			priorityByCandidate.set(candidate, maxBucket === 0 ? 0 : 1 - bucket / maxBucket);
+ 		}
+ 
++		// Providers that pin ranking to the secondary reset (see
++		// CredentialRankingStrategy.preferEarlierSecondaryReset) must always try
++		// the top-priority candidate first: session-weighted sampling only
++		// balances load across candidates tied at the top priority.
++		const pool =
++			this.#rankingStrategyResolver?.(provider)?.preferEarlierSecondaryReset === true
++				? unblocked.filter(candidate => (bucketByCandidate.get(candidate) ?? 0) === 0)
++				: unblocked;
++
+ 		let totalWeight = 0;
+-		for (const candidate of unblocked) {
++		for (const candidate of pool) {
+ 			totalWeight += 1 + (priorityByCandidate.get(candidate) ?? 0);
+ 		}
+ 
+ 		const hit = ((Bun.hash.xxHash32(sessionId) >>> 0) / 2 ** 32) * totalWeight;
+ 		let cursor = 0;
+-		let selected = unblocked[unblocked.length - 1];
+-		for (const candidate of unblocked) {
++		let selected = pool[pool.length - 1];
++		for (const candidate of pool) {
+ 			cursor += 1 + (priorityByCandidate.get(candidate) ?? 0);
+ 			if (hit < cursor) {
+ 				selected = candidate;
+@@ -3380,6 +3402,7 @@ export class AuthStorage {
+ 				hasPriorityBoost: strategy.hasPriorityBoost?.(primary) ?? false,
+ 				planPriority: getOpenAICodexPlanPriority(usage),
+ 				secondaryUsed: this.#normalizeUsageFraction(secondaryTarget),
++				secondaryResetAt: this.#resolveWindowResetAt(secondaryTarget?.window) ?? Number.POSITIVE_INFINITY,
+ 				secondaryDrainRate: this.#computeWindowDrainRate(
+ 					secondaryTarget,
+ 					nowMs,
+diff --git a/packages/ai/src/usage.ts b/packages/ai/src/usage.ts
+index 166a616cc..1b1d62d4a 100644
+--- a/packages/ai/src/usage.ts
++++ b/packages/ai/src/usage.ts
+@@ -323,6 +323,13 @@ export interface CredentialRankingStrategy {
+ 	 * not block unrelated families on the same OAuth credential.
+ 	 */
+ 	blockScope?(context?: CredentialRankingContext): string | undefined;
++	/**
++	 * Rank unblocked credentials by earlier secondary-window reset before any
++	 * pressure metric, and restrict session-weighted sampling to the
++	 * top-priority bucket so the soonest-resetting credential is always tried
++	 * first. Credentials without a known secondary reset sort last.
++	 */
++	preferEarlierSecondaryReset?: boolean;
+ 	/** Fallback window durations (ms) when limits don't specify durationMs. */
+ 	windowDefaults: {
+ 		primaryMs: number;
+diff --git a/packages/ai/src/usage/claude.ts b/packages/ai/src/usage/claude.ts
+index c346115ee..50102aaed 100644
+--- a/packages/ai/src/usage/claude.ts
++++ b/packages/ai/src/usage/claude.ts
+@@ -711,5 +711,11 @@ export const claudeRankingStrategy: CredentialRankingStrategy = {
+ 		const kind = getClaudeModelKind(context);
+ 		return kind === "fable" || kind === "mythos" ? `tier:${kind}` : undefined;
+ 	},
++	/**
++	 * Anthropic weekly windows recover on a fixed schedule: burning down the
++	 * account whose 7d window resets soonest wastes the least quota if it is
++	 * exhausted, so it always ranks first regardless of pressure metrics.
++	 */
++	preferEarlierSecondaryReset: true,
+ 	windowDefaults: { primaryMs: 5 * 60 * 60 * 1000, secondaryMs: 7 * 24 * 60 * 60 * 1000 },
+ };
+diff --git a/packages/ai/test/auth-storage-claude-weekly-reset-priority.test.ts b/packages/ai/test/auth-storage-claude-weekly-reset-priority.test.ts
+new file mode 100644
+index 000000000..e335882ec
+--- /dev/null
++++ b/packages/ai/test/auth-storage-claude-weekly-reset-priority.test.ts
+@@ -0,0 +1,182 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
++import {
++	type AuthCredential,
++	type AuthCredentialStore,
++	AuthStorage,
++	type StoredAuthCredential,
++} from "@oh-my-pi/pi-ai/auth-storage";
++import type { UsageReport } from "@oh-my-pi/pi-ai/usage";
++import * as claudeUsage from "@oh-my-pi/pi-ai/usage/claude";
++
++interface ObservableStore extends AuthCredentialStore {
++	cache: Map<string, { value: string; expiresAtSec: number }>;
++}
++
++function makeStore(rows: StoredAuthCredential[]): ObservableStore {
++	const cache = new Map<string, { value: string; expiresAtSec: number }>();
++	return {
++		cache,
++		close() {},
++		listAuthCredentials() {
++			return rows;
++		},
++		updateAuthCredential() {},
++		deleteAuthCredential() {},
++		tryDisableAuthCredentialIfMatches() {
++			return false;
++		},
++		replaceAuthCredentialsForProvider() {
++			return rows;
++		},
++		upsertAuthCredentialForProvider() {
++			return rows;
++		},
++		deleteAuthCredentialsForProvider() {},
++		getCache(key) {
++			const entry = cache.get(key);
++			if (!entry) return null;
++			if (entry.expiresAtSec * 1000 <= Date.now()) return null;
++			return entry.value;
++		},
++		setCache(key, value, expiresAtSec) {
++			cache.set(key, { value, expiresAtSec });
++		},
++		cleanExpiredCache() {},
++	};
++}
++
++function oauthRow(id: number, email: string): StoredAuthCredential {
++	const credential: AuthCredential = {
++		type: "oauth",
++		access: `oat-${id}`,
++		refresh: `refresh-${id}`,
++		expires: Date.now() + 3_600_000,
++		accountId: `account-${id}`,
++		email,
++	};
++	return { id, provider: "anthropic", credential, disabledCause: null };
++}
++
++function report(email: string, args: { weeklyUsed: number; weeklyResetsAt?: number; sessionUsed?: number }): UsageReport {
++	const sessionUsed = args.sessionUsed ?? 0.1;
++	return {
++		provider: "anthropic",
++		fetchedAt: Date.now(),
++		limits: [
++			{
++				id: "anthropic:5h",
++				label: "Claude 5 Hour",
++				scope: { provider: "anthropic", windowId: "5h", shared: true },
++				window: { id: "5h", label: "5 Hour" },
++				amount: { used: sessionUsed * 100, limit: 100, usedFraction: sessionUsed, unit: "percent" },
++				status: sessionUsed >= 1 ? "exhausted" : "ok",
++			},
++			{
++				id: "anthropic:7d",
++				label: "Claude 7 Day",
++				scope: { provider: "anthropic", windowId: "7d", shared: true },
++				window: {
++					id: "7d",
++					label: "7 Day",
++					durationMs: 7 * 24 * 60 * 60 * 1000,
++					...(args.weeklyResetsAt === undefined ? {} : { resetsAt: args.weeklyResetsAt }),
++				},
++				amount: { used: args.weeklyUsed * 100, limit: 100, usedFraction: args.weeklyUsed, unit: "percent" },
++				status: args.weeklyUsed >= 1 ? "exhausted" : "ok",
++			},
++		],
++		metadata: { email, accountId: email },
++	};
++}
++
++function mockUsage(reportsByAccess: Record<string, UsageReport>): void {
++	vi.spyOn(claudeUsage.claudeUsageProvider, "fetchUsage").mockImplementation(async params => {
++		const access = params.credential.type === "oauth" ? params.credential.accessToken : undefined;
++		if (!access) return null;
++		return reportsByAccess[access] ?? null;
++	});
++}
++
++describe("AuthStorage Claude weekly reset priority", () => {
++	let store: ObservableStore;
++	let storage: AuthStorage;
++
++	beforeEach(async () => {
++		store = makeStore([oauthRow(1, "a@example.com"), oauthRow(2, "b@example.com")]);
++		storage = new AuthStorage(store, {
++			usageProviderResolver: provider => (provider === "anthropic" ? claudeUsage.claudeUsageProvider : undefined),
++		});
++		await storage.reload();
++	});
++
++	afterEach(() => {
++		storage.close();
++		vi.restoreAllMocks();
++	});
++
++	it("always prefers the account whose weekly window resets sooner, for every session", async () => {
++		const now = Date.now();
++		mockUsage({
++			// Account 1: weekly resets tomorrow, heavily used (high drain rate).
++			"oat-1": report("a@example.com", { weeklyUsed: 0.8, weeklyResetsAt: now + 24 * 60 * 60 * 1000 }),
++			// Account 2: weekly resets in six days, barely used (low drain rate).
++			"oat-2": report("b@example.com", { weeklyUsed: 0.1, weeklyResetsAt: now + 6 * 24 * 60 * 60 * 1000 }),
++		});
++
++		// Session-sticky selection is weighted-random across priority buckets;
++		// "always" means every session must land on the sooner-reset account.
++		for (let n = 0; n < 16; n += 1) {
++			const key = await storage.getApiKey("anthropic", `session-reset-${n}`);
++			expect(key).toBe("oat-1");
++		}
++	});
++
++	it("skips an exhausted sooner-reset account instead of pinning to it", async () => {
++		const now = Date.now();
++		mockUsage({
++			// Sooner weekly reset, but the shared session window is exhausted.
++			"oat-1": report("a@example.com", {
++				weeklyUsed: 0.9,
++				weeklyResetsAt: now + 24 * 60 * 60 * 1000,
++				sessionUsed: 1.0,
++			}),
++			"oat-2": report("b@example.com", { weeklyUsed: 0.1, weeklyResetsAt: now + 6 * 24 * 60 * 60 * 1000 }),
++		});
++
++		const key = await storage.getApiKey("anthropic", "session-exhausted");
++
++		expect(key).toBe("oat-2");
++	});
++
++	it("ranks an account with an unknown weekly reset after one with a known reset", async () => {
++		const now = Date.now();
++		mockUsage({
++			// No resetsAt reported at all, otherwise idle.
++			"oat-1": report("a@example.com", { weeklyUsed: 0.0 }),
++			// Known reset far out, busier.
++			"oat-2": report("b@example.com", { weeklyUsed: 0.5, weeklyResetsAt: now + 6 * 24 * 60 * 60 * 1000 }),
++		});
++
++		for (let n = 0; n < 16; n += 1) {
++			const key = await storage.getApiKey("anthropic", `session-unknown-${n}`);
++			expect(key).toBe("oat-2");
++		}
++	});
++
++	it("keeps balancing sessions across accounts whose weekly resets tie", async () => {
++		const now = Date.now();
++		const resetsAt = now + 3 * 24 * 60 * 60 * 1000;
++		mockUsage({
++			"oat-1": report("a@example.com", { weeklyUsed: 0.3, weeklyResetsAt: resetsAt }),
++			"oat-2": report("b@example.com", { weeklyUsed: 0.3, weeklyResetsAt: resetsAt }),
++		});
++
++		const picked = new Set<string>();
++		for (let n = 0; n < 32; n += 1) {
++			const key = await storage.getApiKey("anthropic", `session-tie-${n}`);
++			if (key) picked.add(key);
++		}
++
++		expect(picked).toEqual(new Set(["oat-1", "oat-2"]));
++	});
++});
+diff --git a/packages/ai/test/auth-storage-codex-selection.test.ts b/packages/ai/test/auth-storage-codex-selection.test.ts
+index 6bf0ff584..1da8c7bac 100644
+--- a/packages/ai/test/auth-storage-codex-selection.test.ts
++++ b/packages/ai/test/auth-storage-codex-selection.test.ts
+@@ -1169,7 +1169,7 @@ describe("AuthStorage claude oauth ranking", () => {
+ 		}
+ 	});
+ 
+-	test("weights lower secondary drain rate account", async () => {
++	test("always selects the account whose weekly window resets sooner", async () => {
+ 		if (!authStorage) throw new Error("test setup failed");
+ 
+ 		await authStorage.set("anthropic", [
+@@ -1195,7 +1195,8 @@ describe("AuthStorage claude oauth ranking", () => {
+ 		);
+ 
+ 		const counts = await countApiKeySelections(authStorage, "anthropic", "weighted-claude-near");
+-		expectWeightedPreference(counts, "api-acct-near", "api-acct-far");
++		expect(countFor(counts, "api-acct-near")).toBe(150);
++		expect(countFor(counts, "api-acct-far")).toBe(0);
+ 	});
+ 
+ 	test("balances equal-priority accounts evenly", async () => {
+@@ -1221,7 +1222,7 @@ describe("AuthStorage claude oauth ranking", () => {
+ 		expect(Math.abs(countFor(counts, "api-acct-a") - countFor(counts, "api-acct-b"))).toBeLessThanOrEqual(25);
+ 	});
+ 
+-	test("caps the strongest priority bucket at about 2x baseline weight", async () => {
++	test("samples only within the soonest-reset priority bucket", async () => {
+ 		if (!authStorage) throw new Error("test setup failed");
+ 
+ 		await authStorage.set("anthropic", [
+@@ -1250,10 +1251,13 @@ describe("AuthStorage claude oauth ranking", () => {
+ 		}
+ 
+ 		const counts = await countApiKeySelections(authStorage, "anthropic", "claude-cap", 300);
+-		expectWeightedPreference(counts, "api-acct-best", "api-acct-base-a");
+-		expectWeightedPreference(counts, "api-acct-best", "api-acct-base-b");
++		// acct-best has the most headroom but the latest weekly reset: it must
++		// never be sampled while sooner-resetting accounts are serviceable.
++		expect(countFor(counts, "api-acct-best")).toBe(0);
++		expect(countFor(counts, "api-acct-base-a")).toBeGreaterThan(0);
++		expect(countFor(counts, "api-acct-base-b")).toBeGreaterThan(0);
+ 		expect(Math.abs(countFor(counts, "api-acct-base-a") - countFor(counts, "api-acct-base-b"))).toBeLessThanOrEqual(
+-			15,
++			40,
+ 		);
+ 	});
+ 
+@@ -1315,7 +1319,7 @@ describe("AuthStorage claude oauth ranking", () => {
+ 		expect(apiKey).toBe("api-acct-soon");
+ 	});
+ 
+-	test("weights 3 accounts by secondary drain rate", async () => {
++	test("always selects the soonest weekly reset regardless of drain rate", async () => {
+ 		if (!authStorage) throw new Error("test setup failed");
+ 
+ 		await authStorage.set("anthropic", [
+@@ -1350,8 +1354,9 @@ describe("AuthStorage claude oauth ranking", () => {
+ 		);
+ 
+ 		const counts = await countApiKeySelections(authStorage, "anthropic", "weighted-claude-three");
+-		expect(countFor(counts, "api-acct-slow")).toBeGreaterThan(countFor(counts, "api-acct-medium"));
+-		expect(countFor(counts, "api-acct-slow")).toBeGreaterThan(countFor(counts, "api-acct-fast"));
++		expect(countFor(counts, "api-acct-fast")).toBe(150);
++		expect(countFor(counts, "api-acct-medium")).toBe(0);
++		expect(countFor(counts, "api-acct-slow")).toBe(0);
+ 	});
+ 
+ 	test("selects the account with lower Fable weekly usage for Claude Fable requests", async () => {

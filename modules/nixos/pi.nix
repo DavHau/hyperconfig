@@ -229,6 +229,17 @@
   # find module 'omp-legacy-pi-bundled:...'". Registers each bundled key
   # as a Bun.plugin build.module() runtime virtual module instead.
   # Required by the jobs-hub extension below; upstreamable.
+  # omp-anthropic-weekly-reset-priority.patch: with multiple Anthropic OAuth
+  # accounts, always pick the one whose weekly (7d) window resets soonest.
+  # Adds CredentialRankingStrategy.preferEarlierSecondaryReset (packages/ai),
+  # set on claudeRankingStrategy: unblocked candidates rank by earlier
+  # secondary resetsAt before drain-rate/used-fraction metrics, and the
+  # session-weighted sampler is restricted to the top-priority bucket so the
+  # soonest-resetting account is deterministically tried first (resets within
+  # 60s count as ties and keep load-balancing across sessions; exhausted or
+  # blocked accounts are still skipped, unknown resets rank last).
+  # Codex/Antigravity ranking untouched. Tests:
+  # packages/ai/test/auth-storage-claude-weekly-reset-priority.test.ts.
   omp-patched = inputs.llm-agents.packages.${sys}.omp.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       ./omp-jj-colocated-task-refs.patch
@@ -238,6 +249,7 @@
       ./omp-bash-output-tail-budget.patch
       ./omp-bash-strip-head-tail.patch
       ./omp-bundled-virtual-modules.patch
+      ./omp-anthropic-weekly-reset-priority.patch
     ];
   });
   omp-wrapped = inputs.wrappers.lib.wrapPackage {
