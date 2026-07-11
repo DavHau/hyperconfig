@@ -270,6 +270,19 @@
   # the override; a rate-limited pick can still rotate away on a live 429.
   # Status bar email updates immediately. Tests:
   # packages/coding-agent/test/account-choice.test.ts.
+  # omp-stranded-async-result-delivery.patch: background-job completions
+  # (task/bash) that land on the session yield queue with no flush left to
+  # run stayed invisible until the next user prompt ("job completed a long
+  # time ago"). Three stranding windows: enqueued mid-stream after the agent
+  # loop's final aside poll (turn unwind), skipped by an abort (loop exit
+  # drains bypassed), and a scheduled idle flush whose post-prompt task was
+  # aborted (latched #idleFlushPending suppressed all later scheduling).
+  # Adds YieldQueue.notifyIdle() (resets the latch, reschedules when eligible
+  # entries exist), calls it at every session settle point next to the
+  # stranded-IRC recovery, and tracks idle-flush wake turns in-flight so a
+  # completion landing during a wake turn is re-drained at its settle. Tests:
+  # packages/coding-agent/test/agent-session-stranded-async-result.test.ts,
+  # packages/coding-agent/test/async-yield-queue.test.ts.
   omp-patched = inputs.llm-agents.packages.${sys}.omp.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       ./omp-jj-colocated-task-refs.patch
@@ -282,6 +295,7 @@
       ./omp-anthropic-weekly-reset-priority.patch
       ./omp-statusline-anthropic-account.patch
       ./omp-account-override.patch
+      ./omp-stranded-async-result-delivery.patch
     ];
   });
   omp-wrapped = inputs.wrappers.lib.wrapPackage {
