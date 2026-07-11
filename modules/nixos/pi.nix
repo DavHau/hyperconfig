@@ -240,10 +240,14 @@
   # blocked accounts are still skipped, unknown resets rank last).
   # Also adds getOAuthAccountIdentity(..., { sessionStickyOnly }) so display
   # callers can distinguish real session attribution from the pre-selection
-  # fallback to the first stored account (consumed by the statusline patch).
+  # fallback to the first stored account (consumed by the statusline patch),
+  # and pinSessionCredential(provider, sessionId, credentialId) — records the
+  # standard persisted session-sticky preference and clears reactive blocks
+  # on the target (consumed by the account-override patch's /account).
   # Codex/Antigravity ranking untouched. Tests:
   # packages/ai/test/auth-storage-claude-weekly-reset-priority.test.ts,
-  # packages/ai/test/auth-storage-account-identity.test.ts.
+  # packages/ai/test/auth-storage-account-identity.test.ts,
+  # packages/ai/test/auth-storage-pin-credential.test.ts.
   # omp-statusline-anthropic-account.patch: the status-line `cost` segment
   # (default preset, bottom bar in the editor border) appends the email of
   # the session-sticky Anthropic OAuth account after the billing parts
@@ -257,6 +261,15 @@
   # instead of at the first prompt. Tests:
   # packages/coding-agent/test/status-line-cost-account.test.ts,
   # packages/coding-agent/test/status-line-auth-warmup.test.ts.
+  # omp-account-override.patch: /account slash command to manually override
+  # which stored OAuth account the current session uses (works for any OAuth
+  # provider, driven by the active model's provider). /account alone opens a
+  # picker (reuses the /logout account list, active account marked);
+  # /account <email|unique substring|1-based #> pins directly. Pinning uses
+  # the persisted session-sticky mechanism, so resumed conversations keep
+  # the override; a rate-limited pick can still rotate away on a live 429.
+  # Status bar email updates immediately. Tests:
+  # packages/coding-agent/test/account-choice.test.ts.
   omp-patched = inputs.llm-agents.packages.${sys}.omp.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       ./omp-jj-colocated-task-refs.patch
@@ -268,6 +281,7 @@
       ./omp-bundled-virtual-modules.patch
       ./omp-anthropic-weekly-reset-priority.patch
       ./omp-statusline-anthropic-account.patch
+      ./omp-account-override.patch
     ];
   });
   omp-wrapped = inputs.wrappers.lib.wrapPackage {

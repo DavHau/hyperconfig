@@ -1,5 +1,5 @@
 diff --git a/packages/ai/src/auth-storage.ts b/packages/ai/src/auth-storage.ts
-index 315d43c48..dcf0a71e6 100644
+index 315d43c48..f338930ac 100644
 --- a/packages/ai/src/auth-storage.ts
 +++ b/packages/ai/src/auth-storage.ts
 @@ -58,6 +58,10 @@ import { opencodeGoUsageProvider } from "./usage/opencode-go";
@@ -116,6 +116,32 @@ index 315d43c48..dcf0a71e6 100644
  				secondaryDrainRate: this.#computeWindowDrainRate(
  					secondaryTarget,
  					nowMs,
+@@ -4166,6 +4205,25 @@ export class AuthStorage {
+ 		}));
+ 	}
+ 
++	/**
++	 * Manually pin a session to a specific stored OAuth credential (e.g. the
++	 * `/account` slash command). Records the same session-sticky preference a
++	 * successful getApiKey would — persisted with the standard 30-day TTL, so
++	 * resumed sessions keep the override — and clears any reactive rate-limit
++	 * blocks on the target so the next request actually tries it (a live 429
++	 * re-blocks and rotates as usual). Returns the pinned identity, or
++	 * undefined when `credentialId` does not name a stored OAuth credential
++	 * for `provider`.
++	 */
++	pinSessionCredential(provider: string, sessionId: string, credentialId: number): OAuthAccountIdentity | undefined {
++		const stored = this.#getStoredCredentials(provider);
++		const index = stored.findIndex(row => row.id === credentialId);
++		if (index === -1 || stored[index]?.credential.type !== "oauth") return undefined;
++		this.#recordSessionCredential(provider, sessionId, "oauth", index);
++		this.#clearCredentialBlocks(provider, credentialId);
++		return this.getOAuthAccountIdentity(provider, sessionId, { sessionStickyOnly: true });
++	}
++
+ 	/**
+ 	 * Resolve every stored OAuth credential for `provider` independently.
+ 	 *
 diff --git a/packages/ai/src/usage.ts b/packages/ai/src/usage.ts
 index 166a616cc..1b1d62d4a 100644
 --- a/packages/ai/src/usage.ts
@@ -458,3 +484,115 @@ index 6bf0ff584..1da8c7bac 100644
  	});
  
  	test("selects the account with lower Fable weekly usage for Claude Fable requests", async () => {
+diff --git a/packages/ai/test/auth-storage-pin-credential.test.ts b/packages/ai/test/auth-storage-pin-credential.test.ts
+new file mode 100644
+index 000000000..480362a11
+--- /dev/null
++++ b/packages/ai/test/auth-storage-pin-credential.test.ts
+@@ -0,0 +1,106 @@
++import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
++import * as fs from "node:fs/promises";
++import * as os from "node:os";
++import * as path from "node:path";
++import { type AuthCredentialStore, AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai/auth-storage";
++import * as oauthUtils from "@oh-my-pi/pi-ai/registry/oauth";
++import { removeWithRetries } from "../../utils/src/temp";
++
++const PROVIDER = "unit-oauth-pin";
++
++describe("AuthStorage.pinSessionCredential", () => {
++	let tempDir = "";
++	let store: AuthCredentialStore | null = null;
++	let authStorage: AuthStorage | null = null;
++
++	beforeEach(async () => {
++		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-ai-auth-pin-"));
++		store = await SqliteAuthCredentialStore.open(path.join(tempDir, "agent.db"));
++		authStorage = new AuthStorage(store);
++	});
++
++	afterEach(async () => {
++		vi.restoreAllMocks();
++		store?.close();
++		store = null;
++		authStorage = null;
++		if (tempDir) {
++			await removeWithRetries(tempDir);
++			tempDir = "";
++		}
++	});
++
++	async function seedTwoAccounts(storage: AuthStorage): Promise<void> {
++		await storage.set(PROVIDER, [
++			{
++				type: "oauth",
++				access: "access-a",
++				refresh: "refresh-a",
++				expires: Date.now() + 60 * 60_000,
++				accountId: "acc-a",
++				email: "a@example.com",
++			},
++			{
++				type: "oauth",
++				access: "access-b",
++				refresh: "refresh-b",
++				expires: Date.now() + 60 * 60_000,
++				accountId: "acc-b",
++				email: "b@example.com",
++			},
++		]);
++		vi.spyOn(oauthUtils, "getOAuthApiKey").mockImplementation(async (provider, credentials) => {
++			const credential = credentials[provider];
++			if (!credential) return null;
++			return { newCredentials: credential, apiKey: credential.access };
++		});
++	}
++
++	test("pins the session to the chosen account and getApiKey honors it", async () => {
++		if (!authStorage) throw new Error("test setup failed");
++		const storage = authStorage;
++		const sessionId = "session-pin-fresh";
++		await seedTwoAccounts(storage);
++
++		const target = storage.listOAuthAccounts(PROVIDER).find(account => account.email === "b@example.com");
++		if (!target) throw new Error("expected stored account b");
++
++		const pinned = storage.pinSessionCredential(PROVIDER, sessionId, target.credentialId);
++		expect(pinned?.email).toBe("b@example.com");
++		expect(storage.getOAuthAccountIdentity(PROVIDER, sessionId, { sessionStickyOnly: true })?.email).toBe(
++			"b@example.com",
++		);
++
++		expect(await storage.getApiKey(PROVIDER, sessionId)).toBe("access-b");
++	});
++
++	test("rejects credential ids that do not name a stored OAuth credential", async () => {
++		if (!authStorage) throw new Error("test setup failed");
++		const storage = authStorage;
++		const sessionId = "session-pin-invalid";
++		await seedTwoAccounts(storage);
++
++		expect(storage.pinSessionCredential(PROVIDER, sessionId, 999_999)).toBeUndefined();
++		expect(storage.getOAuthAccountIdentity(PROVIDER, sessionId, { sessionStickyOnly: true })).toBeUndefined();
++	});
++
++	test("overrides a previously attributed account", async () => {
++		if (!authStorage) throw new Error("test setup failed");
++		const storage = authStorage;
++		const sessionId = "session-pin-switch";
++		await seedTwoAccounts(storage);
++
++		const firstKey = await storage.getApiKey(PROVIDER, sessionId);
++		const other = storage
++			.listOAuthAccounts(PROVIDER)
++			.find(account => account.email !== storage.getOAuthAccountIdentity(PROVIDER, sessionId)?.email);
++		if (!other) throw new Error("expected a sibling account");
++
++		const pinned = storage.pinSessionCredential(PROVIDER, sessionId, other.credentialId);
++		expect(pinned?.email).toBe(other.email);
++
++		const nextKey = await storage.getApiKey(PROVIDER, sessionId);
++		expect(nextKey).not.toBe(firstKey);
++		expect(nextKey).toBe(other.email === "a@example.com" ? "access-a" : "access-b");
++	});
++});

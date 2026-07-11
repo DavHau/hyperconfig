@@ -1,0 +1,292 @@
+diff --git a/packages/coding-agent/src/modes/components/logout-account-selector.ts b/packages/coding-agent/src/modes/components/logout-account-selector.ts
+index 6e3d90272..39e5b442f 100644
+--- a/packages/coding-agent/src/modes/components/logout-account-selector.ts
++++ b/packages/coding-agent/src/modes/components/logout-account-selector.ts
+@@ -6,7 +6,10 @@ import { DynamicBorder } from "./dynamic-border";
+ 
+ const LOGOUT_SELECTOR_MAX_VISIBLE = 10;
+ 
+-/** Account picker for `/logout` after the provider has been selected. */
++/**
++ * Account picker for `/logout` and `/account` after the provider is known.
++ * Defaults to logout wording; `labels` retargets title and action verb.
++ */
+ export class LogoutAccountSelectorComponent extends Container {
+ 	#listContainer: Container;
+ 	#accounts: LogoutAccount[];
+@@ -14,14 +17,20 @@ export class LogoutAccountSelectorComponent extends Container {
+ 	#statusMessage: string | undefined;
+ 	#onSelectCallback: (account: LogoutAccount) => void;
+ 	#onCancelCallback: () => void;
++	#labels: { title: string; action: string };
+ 
+ 	constructor(
+ 		providerName: string,
+ 		accounts: LogoutAccount[],
+ 		onSelect: (account: LogoutAccount) => void,
+ 		onCancel: () => void,
++		labels?: { title?: string; action?: string },
+ 	) {
+ 		super();
++		this.#labels = {
++			title: labels?.title ?? `Select ${providerName} account to log out:`,
++			action: labels?.action ?? "log out account",
++		};
+ 		this.#accounts = accounts;
+ 		this.#onSelectCallback = onSelect;
+ 		this.#onCancelCallback = onCancel;
+@@ -30,7 +39,7 @@ export class LogoutAccountSelectorComponent extends Container {
+ 
+ 		this.addChild(new DynamicBorder());
+ 		this.addChild(new Spacer(1));
+-		this.addChild(new TruncatedText(theme.bold(`Select ${providerName} account to log out:`)));
++		this.addChild(new TruncatedText(theme.bold(this.#labels.title)));
+ 		this.addChild(new Spacer(1));
+ 		this.#listContainer = new Container();
+ 		this.addChild(this.#listContainer);
+@@ -79,7 +88,7 @@ export class LogoutAccountSelectorComponent extends Container {
+ 		}
+ 
+ 		this.#listContainer.addChild(
+-			new TruncatedText(theme.fg("muted", "  ↑/↓ select · ↵ log out account · Esc cancel"), 0, 0),
++			new TruncatedText(theme.fg("muted", `  ↑/↓ select · ↵ ${this.#labels.action} · Esc cancel`), 0, 0),
+ 		);
+ 
+ 		if (this.#statusMessage) {
+diff --git a/packages/coding-agent/src/modes/controllers/selector-controller.ts b/packages/coding-agent/src/modes/controllers/selector-controller.ts
+index 8e06c5887..28ec7ef47 100644
+--- a/packages/coding-agent/src/modes/controllers/selector-controller.ts
++++ b/packages/coding-agent/src/modes/controllers/selector-controller.ts
+@@ -39,6 +39,7 @@ import type { ResetCreditAccountStatus, ResetCreditRedeemOutcome } from "../../s
+ import type { SessionInfo } from "../../session/session-listing";
+ import { SessionManager } from "../../session/session-manager";
+ import { FileSessionStorage } from "../../session/session-storage";
++import { resolveAccountChoice } from "../../slash-commands/helpers/account";
+ import { type LogoutAccount, toLogoutAccounts } from "../../slash-commands/helpers/logout";
+ import {
+ 	describeRedeemOutcome,
+@@ -1268,6 +1269,78 @@ export class SelectorController {
+ 		});
+ 	}
+ 
++	/**
++	 * `/account`: pin this session to a specific stored OAuth account of the
++	 * active model's provider. With `query` (email, unique substring, or
++	 * 1-based position) pins directly; otherwise shows a picker. The pin uses
++	 * the standard session-sticky mechanism, so resumed sessions keep it.
++	 */
++	async showAccountSelector(query?: string): Promise<void> {
++		const session = this.ctx.session;
++		const providerId = session.model?.provider;
++		if (!providerId) {
++			this.ctx.showError("No active model; cannot determine which provider's account to switch.");
++			return;
++		}
++		const authStorage = session.modelRegistry.authStorage;
++		try {
++			await authStorage.reload();
++		} catch (error: unknown) {
++			this.ctx.showError(
++				`Could not load stored credentials: ${error instanceof Error ? error.message : String(error)}`,
++			);
++			return;
++		}
++		const accounts = toLogoutAccounts(providerId, authStorage.listStoredCredentials(providerId), {
++			activeIdentity: authStorage.getOAuthAccountIdentity(providerId, session.sessionId),
++		}).filter(account => account.type === "oauth");
++		if (accounts.length === 0) {
++			this.ctx.showError(`No stored OAuth accounts for ${providerId}; use /login to add one.`);
++			return;
++		}
++
++		const pin = (account: LogoutAccount): void => {
++			const identity = authStorage.pinSessionCredential(providerId, session.sessionId, account.credentialId);
++			if (identity) {
++				this.ctx.showStatus(`Session now using ${identity.email ?? account.label} for ${providerId}.`);
++			} else {
++				this.ctx.showError(`Could not pin ${account.label}; the credential may have been removed.`);
++			}
++			this.ctx.ui.requestRender();
++		};
++
++		if (query !== undefined) {
++			const choice = resolveAccountChoice(accounts, query);
++			if (!choice.account) {
++				this.ctx.showError(choice.error ?? `No stored account matches "${query}".`);
++				return;
++			}
++			pin(choice.account);
++			return;
++		}
++
++		const provider = getOAuthProviders().find(candidate => candidate.id === providerId);
++		this.showSelector(done => {
++			const selector = new LogoutAccountSelectorComponent(
++				provider?.name ?? providerId,
++				accounts,
++				account => {
++					done();
++					pin(account);
++				},
++				() => {
++					done();
++					this.ctx.ui.requestRender();
++				},
++				{
++					title: `Select ${provider?.name ?? providerId} account for this session:`,
++					action: "use account",
++				},
++			);
++			return { component: selector, focus: selector };
++		});
++	}
++
+ 	async showOAuthSelector(mode: "login" | "logout", providerId?: string): Promise<void> {
+ 		if (providerId) {
+ 			if (mode === "login") {
+diff --git a/packages/coding-agent/src/modes/interactive-mode.ts b/packages/coding-agent/src/modes/interactive-mode.ts
+index 78bec222b..d0226e178 100644
+--- a/packages/coding-agent/src/modes/interactive-mode.ts
++++ b/packages/coding-agent/src/modes/interactive-mode.ts
+@@ -4094,6 +4094,10 @@ export class InteractiveMode implements InteractiveModeContext {
+ 		return this.#selectorController.showOAuthSelector(mode, providerId);
+ 	}
+ 
++	showAccountSelector(query?: string): Promise<void> {
++		return this.#selectorController.showAccountSelector(query);
++	}
++
+ 	showResetUsageSelector(): Promise<void> {
+ 		return this.#selectorController.showResetUsageSelector();
+ 	}
+diff --git a/packages/coding-agent/src/modes/types.ts b/packages/coding-agent/src/modes/types.ts
+index 6eb2c0f4a..e3d0e1d58 100644
+--- a/packages/coding-agent/src/modes/types.ts
++++ b/packages/coding-agent/src/modes/types.ts
+@@ -358,6 +358,7 @@ export interface InteractiveModeContext {
+ 	handleResumeSession(sessionPath: string): Promise<void>;
+ 	handleSessionDeleteCommand(): Promise<void>;
+ 	showOAuthSelector(mode: "login" | "logout", providerId?: string): Promise<void>;
++	showAccountSelector(query?: string): Promise<void>;
+ 	showResetUsageSelector(): Promise<void>;
+ 	showProviderSetup(): Promise<void>;
+ 	showHookConfirm(title: string, message: string): Promise<boolean>;
+diff --git a/packages/coding-agent/src/slash-commands/builtin-registry.ts b/packages/coding-agent/src/slash-commands/builtin-registry.ts
+index 5f9bdfc2e..89d97d14f 100644
+--- a/packages/coding-agent/src/slash-commands/builtin-registry.ts
++++ b/packages/coding-agent/src/slash-commands/builtin-registry.ts
+@@ -1196,6 +1196,17 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
+ 			runtime.ctx.editor.setText("");
+ 		},
+ 	},
++	{
++		name: "account",
++		description: "Switch the OAuth account used by this session",
++		inlineHint: "[email|#]",
++		allowArgs: true,
++		handleTui: (command, runtime) => {
++			const query = command.args.trim();
++			void runtime.ctx.showAccountSelector(query.length > 0 ? query : undefined);
++			runtime.ctx.editor.setText("");
++		},
++	},
+ 	{
+ 		name: "login",
+ 		description: "Login with OAuth provider",
+diff --git a/packages/coding-agent/src/slash-commands/helpers/account.ts b/packages/coding-agent/src/slash-commands/helpers/account.ts
+new file mode 100644
+index 000000000..2130f7472
+--- /dev/null
++++ b/packages/coding-agent/src/slash-commands/helpers/account.ts
+@@ -0,0 +1,37 @@
++import type { LogoutAccount } from "./logout";
++
++export interface AccountChoiceResult {
++	account?: LogoutAccount;
++	error?: string;
++}
++
++/**
++ * Resolve a `/account <query>` argument against the stored OAuth accounts:
++ * a 1-based position as rendered by the account selector, an exact label
++ * (email) match, or a unique case-insensitive substring of label/detail.
++ * Ambiguity is an error naming the candidates — never a guess.
++ */
++export function resolveAccountChoice(accounts: LogoutAccount[], query: string): AccountChoiceResult {
++	const trimmed = query.trim();
++	if (trimmed.length === 0) return { error: "Empty account query." };
++
++	if (/^\d+$/.test(trimmed)) {
++		const position = Number.parseInt(trimmed, 10);
++		const account = accounts[position - 1];
++		if (!account) return { error: `No account #${position}; valid positions are 1-${accounts.length}.` };
++		return { account };
++	}
++
++	const lowered = trimmed.toLowerCase();
++	const exact = accounts.filter(account => account.label.toLowerCase() === lowered);
++	if (exact.length === 1) return { account: exact[0] };
++
++	const matches = accounts.filter(
++		account => account.label.toLowerCase().includes(lowered) || account.detail.toLowerCase().includes(lowered),
++	);
++	if (matches.length === 1) return { account: matches[0] };
++	if (matches.length > 1) {
++		return { error: `"${trimmed}" is ambiguous: ${matches.map(match => match.label).join(", ")}.` };
++	}
++	return { error: `No stored account matches "${trimmed}".` };
++}
+diff --git a/packages/coding-agent/test/account-choice.test.ts b/packages/coding-agent/test/account-choice.test.ts
+new file mode 100644
+index 000000000..e65f0d5d9
+--- /dev/null
++++ b/packages/coding-agent/test/account-choice.test.ts
+@@ -0,0 +1,48 @@
++import { describe, expect, it } from "bun:test";
++import type { LogoutAccount } from "@oh-my-pi/pi-coding-agent/slash-commands/helpers/logout";
++import { resolveAccountChoice } from "@oh-my-pi/pi-coding-agent/slash-commands/helpers/account";
++
++function account(credentialId: number, label: string, active = false): LogoutAccount {
++	return { credentialId, provider: "anthropic", label, detail: label, type: "oauth", active };
++}
++
++const ACCOUNTS: LogoutAccount[] = [
++	account(1, "alice@example.com", true),
++	account(2, "bob@example.com"),
++	account(3, "bob@corp.example.com"),
++];
++
++describe("resolveAccountChoice", () => {
++	it("resolves a 1-based position", () => {
++		expect(resolveAccountChoice(ACCOUNTS, "2").account?.credentialId).toBe(2);
++	});
++
++	it("rejects out-of-range positions", () => {
++		const result = resolveAccountChoice(ACCOUNTS, "4");
++		expect(result.account).toBeUndefined();
++		expect(result.error).toContain("1-3");
++	});
++
++	it("resolves an exact label match ahead of substring hits", () => {
++		// "bob@example.com" is also a substring-adjacent hit for account 3's
++		// domain; the exact label must win outright.
++		expect(resolveAccountChoice(ACCOUNTS, "bob@example.com").account?.credentialId).toBe(2);
++	});
++
++	it("resolves a unique case-insensitive substring", () => {
++		expect(resolveAccountChoice(ACCOUNTS, "ALICE").account?.credentialId).toBe(1);
++	});
++
++	it("reports ambiguous substrings instead of guessing", () => {
++		const result = resolveAccountChoice(ACCOUNTS, "bob");
++		expect(result.account).toBeUndefined();
++		expect(result.error).toContain("bob@example.com");
++		expect(result.error).toContain("bob@corp.example.com");
++	});
++
++	it("reports unknown queries", () => {
++		const result = resolveAccountChoice(ACCOUNTS, "nobody");
++		expect(result.account).toBeUndefined();
++		expect(result.error).toBeDefined();
++	});
++});
