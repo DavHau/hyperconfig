@@ -1,0 +1,347 @@
+diff --git a/packages/coding-agent/src/session/agent-session.ts b/packages/coding-agent/src/session/agent-session.ts
+index 85e544ca1..d5b7c9ae2 100644
+--- a/packages/coding-agent/src/session/agent-session.ts
++++ b/packages/coding-agent/src/session/agent-session.ts
+@@ -1922,6 +1922,12 @@ export class AgentSession {
+ 		}
+ 		this.#scheduleQueuedMessageDrain();
+ 		this.#resumeStrandedIrcAsides();
++		// Yield-queue entries can strand the same way IRC asides do: staged after
++		// the loop's final aside poll (turn unwind), skipped by an abort's exit
++		// drains, or left by a scheduled idle flush that never ran. Recover them
++		// now that the session settled — otherwise a background-job completion
++		// sits invisible until the next user prompt.
++		this.yieldQueue.notifyIdle();
+ 	}
+ 
+ 	/** IRC records that arrive after the loop's final aside poll — or while an abort skipped that
+@@ -2149,7 +2155,14 @@ export class AgentSession {
+ 			injectIdle: async messages => {
+ 				const first = messages[0];
+ 				if (!first) return;
+-				await this.agent.prompt(messages.length === 1 ? first : messages);
++				// Track the wake turn like #wakeForIrc: its settle re-drains anything
++				// that stranded during it (a second job completing mid-wake-turn).
++				this.#beginInFlight();
++				try {
++					await this.agent.prompt(messages.length === 1 ? first : messages);
++				} finally {
++					this.#endInFlight();
++				}
+ 			},
+ 			scheduleIdleFlush: run => {
+ 				this.#schedulePostPromptTask(
+diff --git a/packages/coding-agent/src/session/yield-queue.ts b/packages/coding-agent/src/session/yield-queue.ts
+index 9afe4fb14..3afd31c54 100644
+--- a/packages/coding-agent/src/session/yield-queue.ts
++++ b/packages/coding-agent/src/session/yield-queue.ts
+@@ -135,6 +135,32 @@ export class YieldQueue {
+ 		this.#idleFlushPending = false;
+ 	}
+ 
++	/**
++	 * Recover entries stranded at a turn boundary. Three ways entries survive
++	 * with no flush scheduled: enqueued mid-stream after the loop's final aside
++	 * poll (turn unwind), skipped by an abort (the loop bypasses its exit
++	 * drains), or a scheduled idle flush that never ran (an aborted post-prompt
++	 * task would otherwise latch #idleFlushPending forever). Call when the
++	 * session settles to idle; no-op while streaming or without eligible
++	 * entries. Racing an already-pending flush is safe — the second flush
++	 * drains nothing and injects nothing.
++	 */
++	notifyIdle(): void {
++		if (this.#options.isStreaming()) return;
++		if (!this.#hasIdleFlushWork()) return;
++		this.#idleFlushPending = false;
++		this.#scheduleIdleFlush();
++	}
++
++	#hasIdleFlushWork(): boolean {
++		for (const [kind, entries] of this.#entries) {
++			if (entries.length === 0) continue;
++			if (this.#dispatchers.get(kind)?.skipIdleFlush) continue;
++			return true;
++		}
++		return false;
++	}
++
+ 	#scheduleIdleFlush(): void {
+ 		if (this.#idleFlushPending) return;
+ 		this.#idleFlushPending = true;
+diff --git a/packages/coding-agent/test/agent-session-stranded-async-result.test.ts b/packages/coding-agent/test/agent-session-stranded-async-result.test.ts
+new file mode 100644
+index 000000000..d83a99667
+--- /dev/null
++++ b/packages/coding-agent/test/agent-session-stranded-async-result.test.ts
+@@ -0,0 +1,208 @@
++/**
++ * Regression: a background-job completion that lands on the yield queue while
++ * the turn's FINAL provider call is streaming has no step boundary left to
++ * drain it, and no idle flush was scheduled (the session was streaming at
++ * enqueue time). Turn settle must recover such stranded entries and wake a
++ * delivery turn — otherwise the result sits invisible until the next user
++ * prompt ("job completed a long time ago").
++ */
++import { afterEach, describe, expect, it } from "bun:test";
++import * as path from "node:path";
++import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
++import { z } from "@oh-my-pi/pi-ai";
++import { createMockModel, type MockResponse } from "@oh-my-pi/pi-ai/providers/mock";
++import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
++import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
++import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
++import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
++import { convertToLlm, type CustomMessage } from "@oh-my-pi/pi-coding-agent/session/messages";
++import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
++import { TempDir } from "@oh-my-pi/pi-utils";
++
++type AsyncEntry = { jobId: string; result: string };
++
++function buildAsyncMessage(entries: AsyncEntry[]): CustomMessage<{ jobs: string[] }> | null {
++	if (entries.length === 0) return null;
++	return {
++		role: "custom",
++		customType: "async-result",
++		content: entries.map(entry => `Background job ${entry.jobId} completed:\n${entry.result}`).join("\n"),
++		display: true,
++		attribution: "agent",
++		details: { jobs: entries.map(entry => entry.jobId) },
++		timestamp: 0,
++	};
++}
++
++function textStop(text: string): MockResponse {
++	return { content: [{ type: "text", text }], stopReason: "stop" };
++}
++
++type Harness = { session: AgentSession; authStorage: AuthStorage; tempDir: TempDir };
++const activeHarnesses: Harness[] = [];
++
++async function createHarness(
++	responses: MockResponse[],
++	onProviderCall: (callIndex: number, session: () => AgentSession) => void,
++	tools: AgentTool[] = [],
++) {
++	const tempDir = TempDir.createSync("@pi-stranded-async-");
++	const authStorage = await AuthStorage.create(path.join(tempDir.path(), "auth.db"));
++	authStorage.setRuntimeApiKey("mock", "test-key");
++
++	const mock = createMockModel({ responses });
++	const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
++	const settings = Settings.isolated({
++		"compaction.enabled": false,
++		"retry.enabled": false,
++		"todo.enabled": false,
++		"todo.reminders": false,
++	});
++	settings.setModelRole("default", `${mock.provider}/${mock.id}`);
++
++	const sessionManager = SessionManager.inMemory(tempDir.path());
++	let callIndex = 0;
++	const agent = new Agent({
++		getApiKey: () => "test-key",
++		initialState: {
++			model: mock,
++			systemPrompt: ["Test"],
++			tools,
++			messages: [],
++		},
++		convertToLlm,
++		streamFn: ((...args: Parameters<typeof mock.stream>) => {
++			callIndex += 1;
++			onProviderCall(callIndex, () => session);
++			return mock.stream(...args);
++		}) as typeof mock.stream,
++	});
++
++	const session = new AgentSession({
++		agent,
++		sessionManager,
++		settings,
++		modelRegistry,
++		toolRegistry: new Map(tools.map(tool => [tool.name, tool])),
++	});
++	activeHarnesses.push({ session, authStorage, tempDir });
++	return { session, mock };
++}
++
++async function waitUntil(predicate: () => boolean, message: string): Promise<void> {
++	const deadline = Date.now() + 3_000;
++	while (!predicate()) {
++		if (Date.now() >= deadline) throw new Error(message);
++		await Bun.sleep(10);
++	}
++}
++
++afterEach(async () => {
++	for (const harness of activeHarnesses.splice(0)) {
++		await harness.session.dispose();
++		harness.authStorage.close();
++		harness.tempDir.removeSync();
++	}
++});
++
++describe("stranded async-result recovery at turn settle", () => {
++	it("delivers a completion staged during the turn's final provider call without user input", async () => {
++		const { session, mock } = await createHarness(
++			[textStop("still waiting for jobs"), textStop("job bg_1 acknowledged")],
++			(callIndex, getSession) => {
++				if (callIndex !== 1) return;
++				// The final provider call of turn 1 is in flight: the loop's last
++				// aside poll has passed and the session reports streaming, so this
++				// enqueue schedules nothing.
++				getSession().yieldQueue.enqueue<AsyncEntry>("async-result", {
++					jobId: "bg_1",
++					result: "background work finished",
++				});
++			},
++		);
++		session.yieldQueue.register<AsyncEntry>("async-result", { build: buildAsyncMessage });
++
++		await session.prompt("start work");
++		await waitUntil(
++			() => mock.calls.length >= 2,
++			"Timed out: stranded async result never woke a delivery turn",
++		);
++
++		expect(session.yieldQueue.has("async-result")).toBe(false);
++		// Turn 2 (the wake turn) must carry the async-result payload.
++		const transcript = session.agent.state.messages;
++		const asyncMessage = transcript.find(
++			message => message.role === "custom" && (message as CustomMessage).customType === "async-result",
++		);
++		expect(asyncMessage).toBeDefined();
++	});
++
++	it("recovers entries whose scheduled idle flush was skipped (latched pending flag)", async () => {
++		// Direct YieldQueue-level check lives in async-yield-queue.test.ts; here we
++		// only pin the end-to-end contract: a completion staged while idle between
++		// turns is still delivered after the next turn settles.
++		const { session, mock } = await createHarness(
++			[textStop("first turn done"), textStop("noted")],
++			() => {},
++		);
++		session.yieldQueue.register<AsyncEntry>("async-result", { build: buildAsyncMessage });
++
++		await session.prompt("first");
++		await session.waitForIdle();
++		expect(mock.calls.length).toBe(1);
++
++		session.yieldQueue.enqueue<AsyncEntry>("async-result", { jobId: "bg_2", result: "late result" });
++		await waitUntil(() => mock.calls.length >= 2, "Timed out: idle completion never woke a delivery turn");
++		expect(session.yieldQueue.has("async-result")).toBe(false);
++	});
++
++	it("recovers a completion stranded by an abort (exit drains skipped)", async () => {
++		const toolStarted = Promise.withResolvers<void>();
++		const waitTool: AgentTool = {
++			name: "wait",
++			label: "Wait",
++			description: "Blocks until aborted",
++			parameters: z.object({}),
++			async execute(_toolCallId, _params, signal) {
++				toolStarted.resolve();
++				await new Promise<void>(resolve => {
++					if (signal?.aborted) return resolve();
++					signal?.addEventListener("abort", () => resolve(), { once: true });
++				});
++				return { content: [{ type: "text", text: "interrupted" }] };
++			},
++		};
++		const { session, mock } = await createHarness(
++			[
++				{
++					content: [{ type: "toolCall", id: "call-wait", name: "wait", arguments: {} }],
++					stopReason: "toolUse",
++				},
++				textStop("job bg_3 acknowledged"),
++			],
++			() => {},
++			[waitTool],
++		);
++		session.yieldQueue.register<AsyncEntry>("async-result", { build: buildAsyncMessage });
++
++		const promptPromise = session.prompt("start blocking work");
++		await toolStarted.promise;
++		// Staged while the turn streams; the abort below skips the loop's exit
++		// drains, so only settle-time recovery can deliver it.
++		session.yieldQueue.enqueue<AsyncEntry>("async-result", { jobId: "bg_3", result: "finished during abort" });
++		await session.abort();
++		await promptPromise;
++
++		// The abort tail may schedule its own continuation turn first; the
++		// contract is that the stranded entry reaches the transcript without
++		// user input, however many settle rounds that takes.
++		await waitUntil(
++			() =>
++				!session.yieldQueue.has("async-result") &&
++				session.agent.state.messages.some(
++					message => message.role === "custom" && (message as CustomMessage).customType === "async-result",
++				),
++			"Timed out: abort-stranded async result never delivered",
++		);
++	});
++});
+diff --git a/packages/coding-agent/test/async-yield-queue.test.ts b/packages/coding-agent/test/async-yield-queue.test.ts
+index e4ad7a146..6445e5029 100644
+--- a/packages/coding-agent/test/async-yield-queue.test.ts
++++ b/packages/coding-agent/test/async-yield-queue.test.ts
+@@ -171,4 +171,58 @@ describe("async result yield queue delivery", () => {
+ 		expect(harness.prompts[0]).toHaveLength(1);
+ 		expect(asyncDetails(harness.prompts[0]![0]!).jobs.map(job => job.jobId)).toEqual([jobId]);
+ 	});
++
++	test("notifyIdle recovers entries staged while streaming once the turn settles", async () => {
++		const harness = createHarness(true);
++		const jobId = harness.manager.register("task", "late task", async () => "task result");
++
++		await harness.manager.waitForAll();
++		expect(await harness.manager.drainDeliveries({ timeoutMs: 2_000 })).toBe(true);
++		// Staged mid-stream: no idle flush was scheduled.
++		expect(harness.scheduledFlushes).toHaveLength(0);
++
++		harness.setStreaming(false);
++		harness.queue.notifyIdle();
++
++		expect(harness.scheduledFlushes).toHaveLength(1);
++		await harness.scheduledFlushes[0]!();
++		expect(harness.prompts).toHaveLength(1);
++		expect(asyncDetails(harness.prompts[0]![0]!).jobs.map(job => job.jobId)).toEqual([jobId]);
++	});
++
++	test("notifyIdle unlatches a pending flag left by a skipped scheduled flush", async () => {
++		const harness = createHarness(false);
++		const firstJobId = harness.manager.register("bash", "first idle", async () => "first");
++		await harness.manager.waitForAll();
++		expect(await harness.manager.drainDeliveries({ timeoutMs: 2_000 })).toBe(true);
++		// Scheduled but never run — the post-prompt task was aborted. Without
++		// recovery the pending flag suppresses every later schedule.
++		expect(harness.scheduledFlushes).toHaveLength(1);
++
++		const secondJobId = harness.manager.register("bash", "second idle", async () => "second");
++		await harness.manager.waitForAll();
++		expect(await harness.manager.drainDeliveries({ timeoutMs: 2_000 })).toBe(true);
++		expect(harness.scheduledFlushes).toHaveLength(1);
++
++		harness.queue.notifyIdle();
++		expect(harness.scheduledFlushes).toHaveLength(2);
++		await harness.scheduledFlushes[1]!();
++
++		expect(harness.prompts).toHaveLength(1);
++		expect(
++			asyncDetails(harness.prompts[0]![0]!)
++				.jobs.map(job => job.jobId)
++				.sort(),
++		).toEqual([firstJobId, secondJobId].sort());
++	});
++
++	test("notifyIdle no-ops while streaming or without entries", () => {
++		const harness = createHarness(true);
++		harness.queue.notifyIdle();
++		expect(harness.scheduledFlushes).toHaveLength(0);
++
++		harness.setStreaming(false);
++		harness.queue.notifyIdle();
++		expect(harness.scheduledFlushes).toHaveLength(0);
++	});
+ });
