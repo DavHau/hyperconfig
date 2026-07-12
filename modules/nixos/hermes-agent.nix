@@ -10,7 +10,7 @@
 #
 # Host CLI: addToSystemPackages puts `hermes` on PATH and routes every
 # invocation into the container (needs docker group membership).
-{ config, inputs, ... }:
+{ config, lib, inputs, ... }:
 {
   imports = [ inputs.hermes-agent.nixosModules.default ];
 
@@ -41,4 +41,10 @@
   # Host CLI talks to the rootful docker socket when routing into the
   # container; hostUsers only grants the hermes group, not docker.
   users.users.grmpf.extraGroups = [ "docker" ];
+
+  # virtualisation.nix (via laptop-dave) sets DOCKER_HOST to the rootless
+  # socket session-wide; that steers `docker`/hermes CLI routing at the
+  # wrong daemon ("No such container: hermes-agent"). Force it off here —
+  # the rootless daemon stays usable via an explicit context/--host.
+  virtualisation.docker.rootless.setSocketVariable = lib.mkForce false;
 }
