@@ -10,7 +10,25 @@
 #
 # Host CLI: addToSystemPackages puts `hermes` on PATH and routes every
 # invocation into the container (needs docker group membership).
-{ config, lib, inputs, ... }:
+{ config, lib, pkgs, inputs, ... }:
+let
+  # Shadow copy of the bundled simplex platform plugin with the DM send
+  # fixed. Upstream addresses DMs as `@<contactId> <text>`, but the daemon
+  # parses that as a display-name lookup — simplex-chat >=6.3 returns
+  # contactNotFound and the fire-and-forget send swallows it, so pairing
+  # codes and agent replies silently vanish. The structured
+  # `/_send @<id> json [...]` form addresses by numeric id (same as the
+  # group path) and escapes newlines correctly. User plugins override
+  # bundled ones by manifest name, so this replaces the broken adapter
+  # until it is fixed upstream; drop it then.
+  simplexPlatformFixed = pkgs.runCommand "simplex-platform" { } ''
+    cp -r ${inputs.hermes-agent}/plugins/platforms/simplex $out
+    chmod -R u+w $out
+    substituteInPlace $out/adapter.py \
+      --replace-fail 'cmd_str = f"@{chat_id} {content}"' \
+        'cmd_str = "/_send @" + chat_id + " json " + json.dumps([{"msgContent": {"type": "text", "text": content}}])'
+  '';
+in
 {
   imports = [ inputs.hermes-agent.nixosModules.default ];
 
@@ -36,6 +54,7 @@
     addToSystemPackages = true;
     environmentFiles = [ config.clan.core.vars.generators.hermes-env.files.env.path ];
     settings.model.default = "anthropic/claude-sonnet-4";
+    extraPlugins = [ simplexPlatformFixed ];
   };
 
   # Host CLI talks to the rootful docker socket when routing into the
