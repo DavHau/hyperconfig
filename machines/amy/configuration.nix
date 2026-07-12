@@ -13,6 +13,7 @@
     ../../modules/nixos/noctalia-resume-fix.nix
     ../../modules/nixos/noctalia-anthropic-usage
     ../../modules/nixos/fw-fanctrl.nix
+    ../../modules/nixos/hermes-agent.nix
     ./disko.nix
   ];
 
