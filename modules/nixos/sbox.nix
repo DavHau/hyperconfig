@@ -25,6 +25,10 @@
       "$HOME/.pi/agent/auth.json" = {};
       "$HOME/.pi/agent/settings.json" = {};
       "$HOME/.omp/agent" = {};
+      # omp-sp (pi-superpowers.nix) runs under OMP_PROFILE=sp; its state —
+      # including agent.db with the OAuth logins — lives here, not in
+      # .omp/agent. Without this bind every sbox launch starts logged out.
+      "$HOME/.omp/profiles/sp/agent" = {};
       "$HOME/.local/share/zoxide" = {};
       "$HOME/.local/share/pueue" = {};
       "$XDG_RUNTIME_DIR/pueue_$USER.socket" = {};
