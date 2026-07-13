@@ -43,6 +43,25 @@ Do NOT inline new features into existing files.
 2. `git` / `jj` (e.g. `git grep`, `git ls-files`) inside the relevant repo.
 3. `$HOME/projects/<project>` checkouts — clone there if missing and search the source tree directly.
 
+## Nix Devshells (auto-loaded)
+
+The project devshell is already active: a direnv extension applies the
+`.envrc` environment (`direnv export json`) to the agent process at
+session start and again after every bash command. Devshell tools are on
+PATH in every command you run.
+
+- Do NOT prefix commands with `nix develop -c`, `nix develop --command`,
+  or `nix-shell --run` to reach project devshell tools — that re-evaluates
+  the flake per command (seconds of overhead) for an environment you
+  already have.
+- If an expected devshell tool is missing, the directory likely has no
+  allowed `.envrc`: check `direnv status`, then `direnv allow` once.
+- After editing `.envrc`/`flake.nix`, the refreshed env reaches newly
+  spawned processes; the harness's persistent shell may briefly keep the
+  old env.
+- The "Running Unavailable Programs" rule below still applies to programs
+  outside the project devshell.
+
 ## Running Unavailable Programs
 
 If a program is not currently installed, do NOT attempt to install it via `nix-env` or similar. Instead, use one of:

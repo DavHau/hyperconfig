@@ -1,0 +1,3 @@
+# Dev-only module resolution for `bun test` / tsgo: symlink to the
+# ~/projects/oh-my-pi checkout's node_modules (see jobs-hub.test.ts header).
+node_modules
