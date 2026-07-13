@@ -1033,17 +1033,19 @@
     "mattpocock-skills": {
       "flake": false,
       "locked": {
-        "lastModified": 1783672815,
-        "narHash": "sha256-+J1S881TsvA2+0cSBKpv6RSthdukpT/Hia1Jxw57jCI=",
-        "owner": "mattpocock",
-        "repo": "skills",
-        "rev": "e4722b8e656b5fbcf0d13d0067d9ba30a168077f",
-        "type": "github"
+        "lastModified": 1783938435,
+        "narHash": "sha256-YpAg/v1jMjt9+yRxwf8VpHUH+eOuQ+PzJqo9Jp9wb9I=",
+        "ref": "main",
+        "rev": "04fee67571bc52ac58a0e59fc4924a13f61b50a6",
+        "shallow": true,
+        "type": "git",
+        "url": "https://github.com/mattpocock/skills.git"
       },
       "original": {
-        "owner": "mattpocock",
-        "repo": "skills",
-        "type": "github"
+        "ref": "main",
+        "shallow": true,
+        "type": "git",
+        "url": "https://github.com/mattpocock/skills.git"
       }
     },
     "messaging-daemon": {
