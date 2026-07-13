@@ -317,6 +317,13 @@
       # the ~/projects/oh-my-pi checkout).
       mkdir -p "$config_dir/extensions"
       ln -sf ${./jobs-hub/jobs-hub.ts} "$config_dir/extensions/jobs-hub.ts"
+      # direnv extension: port of Mic92's pi direnv extension — applies
+      # `direnv export json` to process.env on session start and after each
+      # bash command, so commands run in the devshell without per-command
+      # `nix develop -c` re-evals (pair with nix-direnv for cached exports).
+      # Source + tests in modules/nixos/direnv/, same bun test setup as
+      # jobs-hub. Requires direnv on PATH and an allowed .envrc.
+      ln -sf ${./direnv/direnv.ts} "$config_dir/extensions/direnv.ts"
       ${lib.optionalString models-needed ''ln -sf ${modelsFile} "$config_dir/models.yml"''}
     '';
   };
