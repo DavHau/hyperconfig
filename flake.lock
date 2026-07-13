@@ -1957,6 +1957,7 @@
         "spaces": "spaces",
         "srvos": "srvos",
         "stylix": "stylix",
+        "superpowers": "superpowers",
         "wrappers": "wrappers"
       }
     },
@@ -2097,6 +2098,24 @@
         "owner": "nix-community",
         "repo": "stylix",
         "type": "github"
+      }
+    },
+    "superpowers": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1783029415,
+        "narHash": "sha256-kHdQ9e44doBk2yYW88tMSCqVG8ycYcvJSZlrIziXhpA=",
+        "ref": "main",
+        "rev": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+        "shallow": true,
+        "type": "git",
+        "url": "https://github.com/obra/superpowers.git"
+      },
+      "original": {
+        "ref": "main",
+        "shallow": true,
+        "type": "git",
+        "url": "https://github.com/obra/superpowers.git"
       }
     },
     "systems": {
