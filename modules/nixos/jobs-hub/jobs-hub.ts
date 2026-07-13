@@ -2,8 +2,12 @@
  * jobs-hub — background bash-jobs overview for omp.
  *
  * Widget: one row per running bash job (spinner, label, elapsed, last
- * output line) while any run. Overlay (Ctrl+J or /jobs): list of running
- * + recent bash jobs; Enter opens a full-screen live log; x cancels.
+ * output line) while any run. Overlay (Ctrl+J or /bashjobs): list of
+ * running + recent bash jobs; Enter prints the selected job's log into
+ * the chat transcript — it rides omp's normal append-only commit path
+ * into native terminal scrollback (like pi's own transcript), so the
+ * log scrolls with the conversation instead of taking over the screen.
+ * x cancels.
  *
  * Loaded from $config_dir/extensions/jobs-hub.ts; the @oh-my-pi/*
  * imports are remapped by omp's legacy-pi specifier shim onto the
@@ -14,7 +18,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
-import { type KeyId, matchesKey, ScrollView } from "@oh-my-pi/pi-tui";
+import { type KeyId, matchesKey, Text } from "@oh-my-pi/pi-tui";
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 /** Structural subset of AsyncJob the hub renders. */
@@ -134,13 +138,11 @@ export interface JobsHubDeps {
 	tails: TailStore;
 	done: () => void;
 	requestRender: () => void;
-	/** Spill artifact file path for a job, when it exists on disk. */
-	artifactFile?: (jobId: string) => string | undefined;
+	/** Print the job's log into the chat transcript (native scrollback). */
+	openLog: (jobId: string) => void;
 	/** Chord that toggles the hub closed (besides escape). */
 	toggleKey?: KeyId;
 	now?: () => number;
-	/** Rows available to the overlay (log viewport sizing). */
-	height?: () => number;
 }
 
 const RECENT_LIMIT = 10;
@@ -153,15 +155,13 @@ const STATUS_GLYPHS: Record<JobLike["status"], string> = {
 };
 
 /**
- * Ctrl+J / `/jobs` overlay: bash-job list; Enter → full-screen live log.
- * Standalone pi-tui Component (render/handleInput/dispose).
+ * Ctrl+J / `/bashjobs` overlay: bash-job list. Enter dispatches the
+ * selected job's log to `openLog` (chat-transcript dump) and closes the
+ * hub. Standalone pi-tui Component (render/handleInput/dispose).
  */
 export class JobsHubOverlay {
 	#deps: JobsHubDeps;
 	#selectedId: string | undefined;
-	#logJobId: string | undefined;
-	#scroll: ScrollView | undefined;
-	#follow = true;
 
 	constructor(deps: JobsHubDeps) {
 		this.#deps = deps;
@@ -178,32 +178,7 @@ export class JobsHubOverlay {
 		return index >= 0 ? index : 0;
 	}
 
-	#viewportHeight(): number {
-		return Math.max(3, (this.#deps.height?.() ?? 24) - 3);
-	}
-
-	#logText(jobId: string): string {
-		const file = this.#deps.artifactFile?.(jobId);
-		if (file !== undefined) {
-			try {
-				const raw = readFileSync(file, "utf8");
-				return raw.length > DEFAULT_TAIL_BYTES ? raw.slice(raw.length - DEFAULT_TAIL_BYTES) : raw;
-			} catch {
-				// fall through to the in-memory tail
-			}
-		}
-		return this.#tailFallback(jobId);
-	}
-
-	#tailFallback(jobId: string): string {
-		const tail = this.#deps.tails.text(jobId);
-		if (tail !== undefined) return tail;
-		const job = this.#deps.manager.getJob(jobId);
-		return job?.resultText ?? "(no output yet)";
-	}
-
-	render(width: number): string[] {
-		if (this.#logJobId !== undefined) return this.#renderLog(width, this.#logJobId);
+	render(_width: number): string[] {
 		const jobs = this.#jobs();
 		const selected = this.#selectedIndex(jobs);
 		const now = this.#deps.now?.() ?? Date.now();
@@ -218,31 +193,7 @@ export class JobsHubOverlay {
 		return lines;
 	}
 
-	/** Create/refresh the log ScrollView with current content and follow state. */
-	#syncScroll(jobId: string): ScrollView {
-		const scroll = this.#scroll ?? new ScrollView([], { height: this.#viewportHeight() });
-		this.#scroll = scroll;
-		scroll.setHeight(this.#viewportHeight());
-		scroll.setLines(this.#logText(jobId).split("\n"));
-		if (this.#follow) scroll.scrollToBottom();
-		return scroll;
-	}
-
-	#renderLog(width: number, jobId: string): string[] {
-		const job = this.#deps.manager.getJob(jobId);
-		const scroll = this.#syncScroll(jobId);
-		const title = ` Log ${STATUS_GLYPHS[job?.status ?? "running"]} ${job?.label ?? jobId}`;
-		const footer = this.#follow
-			? " following · ↑/PgUp scroll · esc back"
-			: " paused · G/End resume · esc back";
-		return [title, ...scroll.render(width), footer];
-	}
-
 	handleInput(data: string): void {
-		if (this.#logJobId !== undefined) {
-			this.#handleLogInput(data);
-			return;
-		}
 		const jobs = this.#jobs();
 		if (matchesKey(data, "escape") || (this.#deps.toggleKey && matchesKey(data, this.#deps.toggleKey))) {
 			this.#deps.done();
@@ -257,33 +208,12 @@ export class JobsHubOverlay {
 		} else if (data === "x") {
 			this.#deps.manager.cancel(jobs[selected].id);
 		} else if (matchesKey(data, "enter") || data === "\r" || data === "\n") {
-			this.#selectedId = jobs[selected].id;
-			this.#logJobId = jobs[selected].id;
-			this.#scroll = undefined;
-			this.#follow = true;
+			this.#deps.openLog(jobs[selected].id);
+			this.#deps.done();
+			return;
 		} else {
 			return;
 		}
-		this.#deps.requestRender();
-	}
-
-	#handleLogInput(data: string): void {
-		if (matchesKey(data, "escape")) {
-			this.#logJobId = undefined;
-			this.#scroll = undefined;
-			this.#follow = true;
-			this.#deps.requestRender();
-			return;
-		}
-		const scroll = this.#syncScroll(this.#logJobId!);
-		if (data === "g") {
-			scroll.scrollToTop();
-		} else if (data === "G") {
-			scroll.scrollToBottom();
-		} else if (!scroll.handleScrollKey(data)) {
-			return;
-		}
-		this.#follow = scroll.getScrollOffset() >= scroll.getMaxScrollOffset();
 		this.#deps.requestRender();
 	}
 
@@ -344,6 +274,73 @@ export function findArtifactFile(
 	return undefined;
 }
 
+/** customType of the chat message that carries a dumped job log. */
+export const LOG_MESSAGE_TYPE = "jobs-hub:log";
+
+export interface LogMessageDetails {
+	label: string;
+	status: JobLike["status"];
+	log: string;
+}
+
+/** Payload for `pi.sendMessage` carrying a job log dump. */
+export interface LogMessage {
+	customType: string;
+	content: string;
+	display: boolean;
+	details: LogMessageDetails;
+}
+
+export interface JobLogDeps {
+	manager: JobManagerLike;
+	tails: TailStore;
+	/** Spill artifact file path for a job, when it exists on disk. */
+	artifactFile?: (jobId: string) => string | undefined;
+}
+
+/** Resolve a job's log: spill artifact file > in-memory tail > result text. */
+export function jobLogText(jobId: string, deps: JobLogDeps): string {
+	const file = deps.artifactFile?.(jobId);
+	if (file !== undefined) {
+		try {
+			const raw = readFileSync(file, "utf8");
+			return raw.length > DEFAULT_TAIL_BYTES ? raw.slice(raw.length - DEFAULT_TAIL_BYTES) : raw;
+		} catch {
+			// fall through to the in-memory tail
+		}
+	}
+	const tail = deps.tails.text(jobId);
+	if (tail !== undefined) return tail;
+	return deps.manager.getJob(jobId)?.resultText ?? "(no output yet)";
+}
+
+/**
+ * Build the chat message for a log dump. The LLM only ever sees the short
+ * `content` line (custom messages are forwarded as developer messages);
+ * the full log rides `details`, which never reaches the model.
+ */
+export function buildLogMessage(job: JobLike, log: string): LogMessage {
+	return {
+		customType: LOG_MESSAGE_TYPE,
+		content: `[jobs-hub] Showed the user the log of bash job "${job.label}" (${job.status}). No action needed.`,
+		display: true,
+		details: { label: job.label, status: job.status, log },
+	};
+}
+
+/**
+ * Transcript renderer for LOG_MESSAGE_TYPE: header + raw log as plain
+ * text (no markdown mangling). Returning undefined falls back to omp's
+ * default custom-message card (e.g. entries reloaded without details).
+ */
+export function renderLogMessage(message: { details?: Partial<LogMessageDetails> }): Text | undefined {
+	const details = message.details;
+	if (details?.log === undefined) return undefined;
+	const glyph = details.status !== undefined ? STATUS_GLYPHS[details.status] : undefined;
+	const header = [glyph, details.label ?? "bash job"].filter(Boolean).join(" ");
+	return new Text(`${header}\n\n${details.log}`, 1, 0);
+}
+
 /** Narrow structural view of ExtensionAPI — keeps tests dependency-free. */
 export interface JobsHubPi {
 	registerShortcut(
@@ -355,6 +352,14 @@ export interface JobsHubPi {
 		opts: { description?: string; handler: (args: string, ctx: JobsHubCtx) => void | Promise<void> },
 	): void;
 	on(event: string, handler: (event: unknown, ctx: JobsHubCtx) => void): void;
+	sendMessage(
+		message: LogMessage,
+		options?: { deliverAs?: "steer" | "followUp" | "nextTurn"; triggerTurn?: boolean },
+	): void;
+	registerMessageRenderer(
+		customType: string,
+		renderer: (message: { details?: Partial<LogMessageDetails> }, options: unknown, theme: unknown) => unknown,
+	): void;
 }
 
 /** Narrow structural view of ExtensionContext. */
@@ -372,7 +377,6 @@ export interface JobsHubCtx {
 
 export interface JobsHubTui {
 	requestRender(): void;
-	terminal: { rows: number };
 }
 
 export interface JobsHubOptions {
@@ -420,6 +424,25 @@ export function createJobsHub(pi: JobsHubPi, opts: JobsHubOptions): void {
 		}
 	};
 
+	const openLog = (ctx: JobsHubCtx, jobId: string): void => {
+		const manager = opts.manager() ?? EMPTY_MANAGER;
+		const job = manager.getJob(jobId);
+		if (!job) return;
+		const log = jobLogText(jobId, {
+			manager,
+			tails,
+			artifactFile: id => {
+				const j = manager.getJob(id);
+				if (!j) return undefined;
+				return findArtifactFile(j, {
+					artifactsDir: ctx.sessionManager?.getArtifactsDir?.(),
+					tailText: tails.text(id),
+				});
+			},
+		});
+		pi.sendMessage(buildLogMessage(job, log));
+	};
+
 	const openHub = async (ctx: JobsHubCtx): Promise<void> => {
 		if (!ctx.hasUI) return;
 		await ctx.ui.custom(
@@ -429,17 +452,9 @@ export function createJobsHub(pi: JobsHubPi, opts: JobsHubOptions): void {
 					tails,
 					done: () => done(),
 					requestRender: () => tui.requestRender(),
-					height: () => tui.terminal.rows,
 					now,
 					toggleKey: TOGGLE_KEY,
-					artifactFile: id => {
-						const job = opts.manager()?.getJob(id);
-						if (!job) return undefined;
-						return findArtifactFile(job, {
-							artifactsDir: ctx.sessionManager?.getArtifactsDir?.(),
-							tailText: tails.text(id),
-						});
-					},
+					openLog: id => openLog(ctx, id),
 				}),
 			{ overlay: true },
 		);
@@ -448,7 +463,8 @@ export function createJobsHub(pi: JobsHubPi, opts: JobsHubOptions): void {
 	pi.registerShortcut(TOGGLE_KEY, { description: "Bash jobs hub", handler: openHub });
 	// "/jobs" is taken by omp's builtin (plain status printout); builtins
 	// shadow extension commands, so use a distinct name.
-	pi.registerCommand("bashjobs", { description: "Bash jobs hub (live logs)", handler: (_args, ctx) => openHub(ctx) });
+	pi.registerCommand("bashjobs", { description: "Bash jobs hub (logs, cancel)", handler: (_args, ctx) => openHub(ctx) });
+	pi.registerMessageRenderer(LOG_MESSAGE_TYPE, message => renderLogMessage(message));
 	pi.on("tool_execution_update", (event, ctx) => {
 		tails.ingest(event);
 		refreshWidget(ctx);
