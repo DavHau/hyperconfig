@@ -104,6 +104,9 @@
     mattpocock-skills.url = "git+https://github.com/mattpocock/skills.git?ref=main&shallow=1";
     mattpocock-skills.flake = false;
 
+    superpowers.url = "git+https://github.com/obra/superpowers.git?ref=main&shallow=1";
+    superpowers.flake = false;
+
     wrappers.url = "github:lassulus/wrappers";
     wrappers.inputs.nixpkgs.follows = "nixpkgs";
 

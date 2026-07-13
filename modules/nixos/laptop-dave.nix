@@ -28,6 +28,7 @@ in
     ./niri-float-rules.nix
     ./greetd.nix
     ./pi.nix
+    ./pi-superpowers.nix
     ./cpu-powersave-cap.nix
     ./amd-pstate-resume-fix.nix
     ./omr.nix

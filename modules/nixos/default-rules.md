@@ -6,11 +6,6 @@ alwaysApply: true
 
 Do NOT pipe command output through `tail`, `head`, or similar truncation.
 
-## Development Style
-
-All implementation work is test-driven. Read the `tdd` skill
-(`skill://tdd`) before you start implementing.
-
 ## Version Control
 
 Use `jj` (Jujutsu) instead of `git` for all version control operations.
