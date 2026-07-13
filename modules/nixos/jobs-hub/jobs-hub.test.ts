@@ -9,13 +9,18 @@ import { describe, expect, it } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { loadExtensions } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
 import {
+	buildLogMessage,
 	createJobsHub,
 	findArtifactFile,
+	jobLogText,
 	type JobsHubCtx,
 	type JobsHubDeps,
 	JobsHubOverlay,
 	type JobsHubPi,
+	LOG_MESSAGE_TYPE,
+	type LogMessage,
 	renderJobsWidget,
+	renderLogMessage,
 	TailStore,
 } from "./jobs-hub";
 
@@ -25,6 +30,7 @@ interface TestJob {
 	status: "running" | "completed" | "failed" | "cancelled";
 	startTime: number;
 	label: string;
+	resultText?: string;
 }
 
 const NOW = 1_800_000_000_000;
@@ -133,8 +139,8 @@ function makeOverlay(jobs: TestJob[], over: Partial<JobsHubDeps> = {}) {
 			doneCalls++;
 		},
 		requestRender: () => {},
+		openLog: () => {},
 		now: () => NOW,
-		height: () => 12,
 		...over,
 	});
 	return { overlay, manager, doneCalls: () => doneCalls };
@@ -186,63 +192,69 @@ describe("JobsHubOverlay list", () => {
 	});
 });
 
-describe("JobsHubOverlay log view", () => {
-	function overlayWithTail(lines: string[], over: Partial<JobsHubDeps> = {}) {
-		const tails = new TailStore();
-		tails.ingest(updateEvent("a", lines.join("\n")));
-		return makeOverlay([job({ id: "a", label: "builder" })], { tails, ...over });
+describe("JobsHubOverlay log dispatch", () => {
+	it("enter dispatches openLog with the selected job and closes the hub", () => {
+		const opened: string[] = [];
+		const jobs = [job({ id: "a", label: "first cmd" }), job({ id: "b", label: "second cmd" })];
+		const { overlay, doneCalls } = makeOverlay(jobs, { openLog: id => opened.push(id) });
+		overlay.handleInput("j");
+		overlay.handleInput("\r");
+		expect(opened).toEqual(["b"]);
+		expect(doneCalls()).toBe(1);
+	});
+});
+
+describe("jobLogText", () => {
+	function deps(jobs: TestJob[], over: Partial<{ tails: TailStore; artifactFile: (id: string) => string | undefined }> = {}) {
+		return { manager: makeManager(jobs), tails: new TailStore(), ...over };
 	}
-
-	it("enter opens the selected job's log; esc returns to the list", () => {
-		const { overlay, doneCalls } = overlayWithTail(["hello from log"]);
-		overlay.handleInput("\r");
-		expect(view(overlay)).toContain("hello from log");
-		expect(view(overlay)).not.toContain("Bash Jobs");
-		overlay.handleInput("\x1b");
-		expect(view(overlay)).toContain("Bash Jobs");
-		expect(doneCalls()).toBe(0);
-	});
-
-	it("follows the tail by default and keeps following new output", () => {
-		const lines = Array.from({ length: 40 }, (_, i) => `line ${i}`);
-		const tails = new TailStore();
-		tails.ingest(updateEvent("a", lines.join("\n")));
-		const { overlay } = makeOverlay([job({ id: "a", label: "builder" })], { tails, height: () => 10 });
-		overlay.handleInput("\r");
-		expect(view(overlay)).toContain("line 39");
-		expect(view(overlay)).not.toContain("line 0\n");
-		tails.ingest(updateEvent("a", [...lines, "line 40 fresh"].join("\n")));
-		expect(view(overlay)).toContain("line 40 fresh");
-	});
-
-	it("pageUp pauses follow; End resumes it", () => {
-		const lines = Array.from({ length: 40 }, (_, i) => `line ${i}`);
-		const tails = new TailStore();
-		tails.ingest(updateEvent("a", lines.join("\n")));
-		const { overlay } = makeOverlay([job({ id: "a", label: "builder" })], { tails, height: () => 10 });
-		overlay.handleInput("\r");
-		overlay.handleInput("\x1b[5~"); // pageUp
-		const paused = view(overlay);
-		expect(paused).not.toContain("line 39");
-		tails.ingest(updateEvent("a", [...lines, "line 40 fresh"].join("\n")));
-		expect(view(overlay)).not.toContain("line 40 fresh");
-		overlay.handleInput("\x1b[F"); // End
-		expect(view(overlay)).toContain("line 40 fresh");
-	});
 
 	it("prefers the spill artifact file over the in-memory tail", async () => {
 		const file = `${process.env.TMPDIR ?? "/tmp"}/jobs-hub-test-${Date.now()}.log`;
 		await Bun.write(file, "full history from artifact\n");
 		try {
-			const { overlay } = overlayWithTail(["short tail"], {
-				artifactFile: (id: string) => (id === "a" ? file : undefined),
-			});
-			overlay.handleInput("\r");
-			expect(view(overlay)).toContain("full history from artifact");
-			expect(view(overlay)).not.toContain("short tail");
+			const tails = new TailStore();
+			tails.ingest(updateEvent("a", "short tail"));
+			const text = jobLogText("a", deps([job({ id: "a" })], { tails, artifactFile: id => (id === "a" ? file : undefined) }));
+			expect(text).toContain("full history from artifact");
+			expect(text).not.toContain("short tail");
 		} finally {
 			await Bun.file(file).delete();
 		}
+	});
+
+	it("falls back to the in-memory tail, then to the job result text", () => {
+		const tails = new TailStore();
+		tails.ingest(updateEvent("a", "tail text"));
+		expect(jobLogText("a", deps([job({ id: "a" })], { tails }))).toBe("tail text");
+		const finished = job({ id: "b", status: "completed", resultText: "result text" });
+		expect(jobLogText("b", deps([finished]))).toBe("result text");
+		expect(jobLogText("c", deps([]))).toBe("(no output yet)");
+	});
+});
+
+describe("log message", () => {
+	it("keeps the full log out of the LLM-visible content", () => {
+		const msg = buildLogMessage(job({ label: "builder", status: "completed" }), "secret log body\nline two");
+		expect(msg.customType).toBe(LOG_MESSAGE_TYPE);
+		expect(msg.display).toBe(true);
+		expect(msg.content).toContain("builder");
+		expect(msg.content).not.toContain("secret log body");
+		expect(msg.details.log).toBe("secret log body\nline two");
+	});
+
+	it("renders the full log into the transcript component", () => {
+		const msg = buildLogMessage(job({ label: "builder" }), "line one\nline two");
+		const component = renderLogMessage(msg);
+		expect(component).toBeDefined();
+		const text = Bun.stripANSI(component!.render(80).join("\n"));
+		expect(text).toContain("builder");
+		expect(text).toContain("line one");
+		expect(text).toContain("line two");
+	});
+
+	it("falls back to the default card when details are missing", () => {
+		expect(renderLogMessage({})).toBeUndefined();
 	});
 });
 
@@ -289,6 +301,8 @@ describe("createJobsHub", () => {
 		const shortcuts = new Map<string, (ctx: JobsHubCtx) => void | Promise<void>>();
 		const commands = new Map<string, (args: string, ctx: JobsHubCtx) => void | Promise<void>>();
 		const events = new Map<string, Array<(event: unknown, ctx: JobsHubCtx) => void>>();
+		const sent: LogMessage[] = [];
+		const renderers = new Set<string>();
 		const pi: JobsHubPi = {
 			registerShortcut: (key, opts) => {
 				shortcuts.set(key, opts.handler);
@@ -301,10 +315,15 @@ describe("createJobsHub", () => {
 				list.push(handler);
 				events.set(event, list);
 			},
+			sendMessage: message => {
+				sent.push(message);
+			},
+			registerMessageRenderer: customType => {
+				renderers.add(customType);
+			},
 		};
-		return { pi, shortcuts, commands, events };
+		return { pi, shortcuts, commands, events, sent, renderers };
 	}
-
 	function makeCtx() {
 		const widgets: Array<string[] | undefined> = [];
 		let customCall: { factory: CustomFactory; options: { overlay?: boolean } | undefined } | undefined;
@@ -362,6 +381,26 @@ describe("createJobsHub", () => {
 			handler({}, ctx);
 		}
 		expect(widgets.at(-1)).toBeUndefined();
+	});
+
+	it("enter in the overlay dumps the log into chat via sendMessage", async () => {
+		const { pi, shortcuts, events, sent, renderers } = makePi();
+		const jobs = [job({ id: "job_l", label: "npm run build" })];
+		createJobsHub(pi, { manager: () => makeManager(jobs) });
+		expect(renderers.has(LOG_MESSAGE_TYPE)).toBe(true);
+		const { ctx, customCall } = makeCtx();
+		for (const handler of events.get("tool_execution_update") ?? []) {
+			handler(updateEvent("job_l", "Compiling hyper v1.0\n"), ctx);
+		}
+		await shortcuts.get("ctrl+j")!(ctx);
+		const fakeTui = { requestRender: () => {}, terminal: { rows: 24 } };
+		const overlay = customCall()!.factory(fakeTui, {}, {}, () => {}) as JobsHubOverlay;
+		overlay.handleInput("\r");
+		expect(sent).toHaveLength(1);
+		expect(sent[0].customType).toBe(LOG_MESSAGE_TYPE);
+		expect(sent[0].display).toBe(true);
+		expect(sent[0].content).not.toContain("Compiling hyper v1.0");
+		expect(sent[0].details.log).toContain("Compiling hyper v1.0");
 	});
 });
 

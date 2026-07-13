@@ -312,9 +312,10 @@
       ln -sf ${./default-rules.md} "$config_dir/rules/default-rules.md"
       ln -sf ${./caveman.md} "$config_dir/rules/caveman.md"
       # jobs-hub extension: background-bash-jobs widget + Ctrl+J / /bashjobs
-      # overlay with live log view (/jobs is taken by the builtin printout;
-      # source + tests in modules/nixos/jobs-hub/, tests run via bun against
-      # the ~/projects/oh-my-pi checkout).
+      # overlay; Enter prints a job's log into the chat transcript (native
+      # scrollback). /jobs is taken by the builtin printout; source + tests
+      # in modules/nixos/jobs-hub/, tests run via bun against the
+      # ~/projects/oh-my-pi checkout.
       mkdir -p "$config_dir/extensions"
       ln -sf ${./jobs-hub/jobs-hub.ts} "$config_dir/extensions/jobs-hub.ts"
       # direnv extension: port of Mic92's pi direnv extension — applies
