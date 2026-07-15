@@ -874,11 +874,11 @@
         "uv2nix": "uv2nix"
       },
       "locked": {
-        "lastModified": 1783853536,
-        "narHash": "sha256-g0LXbzPr4poTpQ5yL9EhzxCnihG+bhadQAo+m6Rzdpo=",
+        "lastModified": 1784122708,
+        "narHash": "sha256-MB0KA/jtLjZlFimDSA4Noyov3NFPGHbZNdecU4Of1SI=",
         "owner": "NousResearch",
         "repo": "hermes-agent",
-        "rev": "2d9fd870b6d105e3b367aaa97477931b6671192e",
+        "rev": "306e2d2318745b48d0c9d249958b0190f65a07c9",
         "type": "github"
       },
       "original": {
@@ -2036,8 +2036,8 @@
         "voxtype": "voxtype"
       },
       "locked": {
-        "lastModified": 1784112065,
-        "narHash": "sha256-RBYjryVStJxxMAcRZVORjUy7zChsDB84MEWcv1kQyAE=",
+        "lastModified": 1784122005,
+        "narHash": "sha256-gHT9OzByfCu49QmLlgWy6TiuK+pxBEL7JEz6QhMYHKE=",
         "path": "/home/grmpf/synced/projects/spaces",
         "type": "path"
       },

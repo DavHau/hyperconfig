@@ -41,9 +41,22 @@ in
 
   clan.core.vars.generators.hermes-env = {
     dependencies = [ "openrouter" ];
+    prompts.telegram_token.type = "hidden";
+    prompts.telegram_token.persist = true;
+    prompts.telegram_allowed_users.type = "hidden";
+    prompts.telegram_allowed_users.persist = true;
+    # Rebuild rewrites $HERMES_HOME/.env in the activation script, but the
+    # long-running hermes process only reads it at startup. sops-nix restarts
+    # the unit when this secret's decrypted content changes; the restart runs
+    # after activation scripts, so the freshly rendered .env is already on disk.
     files.env.secret = true;
+    files.env.restartUnits = [ "hermes-agent.service" ];
     script = ''
-      printf 'OPENROUTER_API_KEY=%s\n' "$(cat $in/openrouter/apikey)" > $out/env
+      {
+        printf 'OPENROUTER_API_KEY=%s\n' "$(cat $in/openrouter/apikey)"
+        printf 'TELEGRAM_BOT_TOKEN=%s\n' "$(cat $prompts/telegram_token)"
+        printf 'TELEGRAM_ALLOWED_USERS=%s\n' "$(cat $prompts/telegram_allowed_users)"
+      } > $out/env
     '';
   };
 
