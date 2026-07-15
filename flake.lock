@@ -937,11 +937,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1780099287,
-        "narHash": "sha256-efIPwVGtIWIjWcznhaop6XN6HxnOL8800hF6CBNvlqQ=",
+        "lastModified": 1783823409,
+        "narHash": "sha256-OI4IkRjRXa1e7hYmCGJDPDq5H/kPwhsyoS80cNUF9fI=",
         "owner": "nix-community",
         "repo": "home-manager",
-        "rev": "7d8127d308c3fb9664f7e643eec944be74ebb37d",
+        "rev": "7566825d4652a1b885bd4ce65bd9e8def432fec9",
         "type": "github"
       },
       "original": {
@@ -2036,8 +2036,8 @@
         "voxtype": "voxtype"
       },
       "locked": {
-        "lastModified": 1783498476,
-        "narHash": "sha256-ShRc4wOhWj0s0K4HCTkldCgNax59835M021IZHO9+4I=",
+        "lastModified": 1784112065,
+        "narHash": "sha256-RBYjryVStJxxMAcRZVORjUy7zChsDB84MEWcv1kQyAE=",
         "path": "/home/grmpf/synced/projects/spaces",
         "type": "path"
       },
@@ -2490,11 +2490,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1775636079,
-        "narHash": "sha256-pc20NRoMdiar8oPQceQT47UUZMBTiMdUuWrYu2obUP0=",
+        "lastModified": 1780220602,
+        "narHash": "sha256-eynAfOmbmxJnkp7YewvCEbShNnnYJ9gLLqkzsYtBPeM=",
         "owner": "numtide",
         "repo": "treefmt-nix",
-        "rev": "790751ff7fd3801feeaf96d7dc416a8d581265ba",
+        "rev": "db947814a175b7ca6ded66e21383d938df01c227",
         "type": "github"
       },
       "original": {
@@ -2611,15 +2611,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1780607114,
-        "narHash": "sha256-2AVR9CTNLuCE5tl1EU3Mgb1AdGlxYFiYOeATKfpgkz4=",
-        "owner": "peteonrails",
+        "lastModified": 1782916837,
+        "narHash": "sha256-dKoofIB9ZYdcpG8jr0X/lBWoTeARkfIN2CT1cRApzuw=",
+        "owner": "a-kenji",
         "repo": "voxtype",
-        "rev": "978c4ed2a26a1f5fdff409767a697e4c28fbc4bc",
+        "rev": "29c9f93d12b98a6437684c283cdb232cf822cf66",
         "type": "github"
       },
       "original": {
-        "owner": "peteonrails",
+        "owner": "a-kenji",
+        "ref": "ke-init-nemotron-support-streaming",
         "repo": "voxtype",
         "type": "github"
       }
