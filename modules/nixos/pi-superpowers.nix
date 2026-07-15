@@ -49,6 +49,9 @@
       ln -sf ${./jobs-hub/jobs-hub.ts} "$config_dir/extensions/jobs-hub.ts"
       ln -sf ${./direnv/direnv.ts} "$config_dir/extensions/direnv.ts"
       ln -sf ${./superpowers/superpowers.ts} "$config_dir/extensions/superpowers.ts"
+      # spaces MCP server (shared mcpFile): stdio bridge to the per-user
+      # spaces-integration-gateway socket. See omp-common.nix for rationale.
+      ln -sf ${common.mcpFile} "$config_dir/mcp.json"
       ${lib.optionalString common.models-needed ''ln -sf ${common.modelsFile} "$config_dir/models.yml"''}
     '';
   };

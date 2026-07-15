@@ -12,6 +12,15 @@
 # invocation into the container (needs docker group membership).
 { config, lib, pkgs, inputs, ... }:
 let
+  sys = pkgs.stdenv.hostPlatform.system;
+  # stdio<->unix-socket bridge from the spaces flake. Referenced by absolute
+  # /nix/store path (not PATH): the container is Ubuntu with only /nix/store
+  # bind-mounted read-only, so `spaces-mcp-connect` is not otherwise reachable.
+  spacesConnect = inputs.spaces.packages.${sys}.spaces-integration-gateway.connect;
+  # The per-user spaces-integration-gateway socket (grmpf = uid 1000) on the
+  # host, and the fixed path it is bind-mounted to inside the container.
+  spacesSocketHost = "/run/user/1000/spaces-integration-gateway.sock";
+  spacesSocketContainer = "/run/spaces-integration-gateway.sock";
   # Shadow copy of the bundled simplex platform plugin with the DM send
   # fixed. Upstream addresses DMs as `@<contactId> <text>`, but the daemon
   # parses that as a display-name lookup — simplex-chat >=6.3 returns
@@ -64,6 +73,28 @@ in
     enable = true;
     container.enable = true; # backend defaults to docker
     container.hostUsers = [ "grmpf" ];
+    # Run the in-container agent as grmpf (uid 1000, gid 100/users) so it can
+    # open the per-user spaces gateway socket (0700, owner-only). createUser is
+    # off (grmpf/users already exist); group tracks grmpf's primary group so the
+    # host tmpfiles/activation and the container's HERMES_UID:HERMES_GID chown
+    # agree (no ownership ping-pong). The container FS stays isolated — only
+    # /nix/store, the stateDir, home, and the one socket are mounted.
+    user = "grmpf";
+    group = "users";
+    createUser = false;
+    # Bind-mount the gateway socket in. `--mount type=bind` (not the module's
+    # `--volume`) FAILS if the source is missing instead of docker creating a
+    # root-owned directory at the socket path (which would break the gateway);
+    # the preStart wait below ensures it exists first.
+    container.extraOptions = [
+      "--mount"
+      "type=bind,source=${spacesSocketHost},target=${spacesSocketContainer}"
+    ];
+    # spaces MCP server: stdio bridge to the aggregating gateway.
+    mcpServers.spaces = {
+      command = "${spacesConnect}/bin/spaces-mcp-connect";
+      args = [ spacesSocketContainer ];
+    };
     addToSystemPackages = true;
     environmentFiles = [ config.clan.core.vars.generators.hermes-env.files.env.path ];
     settings.model.default = "anthropic/claude-sonnet-4";
@@ -73,6 +104,26 @@ in
   # Host CLI talks to the rootful docker socket when routing into the
   # container; hostUsers only grants the hermes group, not docker.
   users.users.grmpf.extraGroups = [ "docker" ];
+
+  # The spaces gateway is a per-user (grmpf) --user service bound in grmpf's
+  # runtime dir. hermes is a headless bot that starts at boot before any
+  # interactive login, so linger brings grmpf's user manager (hence the
+  # gateway) up at boot; the container service is ordered after it and waits
+  # for the socket so `docker start`'s bind-mount finds the real socket.
+  users.users.grmpf.linger = true;
+  systemd.services.hermes-agent = {
+    after = [ "user@1000.service" ];
+    wants = [ "user@1000.service" ];
+    preStart = lib.mkBefore ''
+      # Block until the per-user spaces gateway socket exists (grmpf lingers, so
+      # it comes up at boot). Bounded so a disabled/broken gateway cannot wedge
+      # hermes forever; the --mount then fails cleanly and systemd retries.
+      for _i in $(seq 1 120); do
+        [ -S ${spacesSocketHost} ] && break
+        sleep 1
+      done
+    '';
+  };
 
   # virtualisation.nix (via laptop-dave) sets DOCKER_HOST to the rootless
   # socket session-wide; that steers `docker`/hermes CLI routing at the
