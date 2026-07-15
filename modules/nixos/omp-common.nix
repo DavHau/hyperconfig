@@ -97,6 +97,20 @@ in rec {
       # task outputs keep their full inline budget.
       artifactHeadBytes: 1
   '';
+  # Shared MCP servers for both wrappers (symlinked to $config_dir/mcp.json).
+  # `spaces` reaches the always-on per-user spaces-integration-gateway --user
+  # service (socket $XDG_RUNTIME_DIR/spaces-integration-gateway.sock, 0700 and
+  # owner-only) through the stdio<->socket bridge `spaces-mcp-connect` — on PATH
+  # from inputs.spaces.nixosModules.spaces-integration-gateway (default-enabled
+  # via services.pi-chat). omp runs as the human user, so it connects to the
+  # owner-only socket directly; OMP expands ${XDG_RUNTIME_DIR} at discovery time.
+  mcpFile = pkgs.writeText "mcp.json" (builtins.toJSON {
+    "$schema" = "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json";
+    mcpServers.spaces = {
+      command = "spaces-mcp-connect";
+      args = [ "\${XDG_RUNTIME_DIR}/spaces-integration-gateway.sock" ];
+    };
+  });
   # Instructions for the TOP-LEVEL agent only. Everything relevant to
   # subagents lives in the always-apply rules symlinked into
   # $config_dir/rules/ by each wrapper: omp strips AGENTS.md from

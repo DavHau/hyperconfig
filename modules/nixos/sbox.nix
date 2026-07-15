@@ -44,6 +44,12 @@
       # tmpfs, so a tmux server started inside a sandbox stays private to that
       # sandbox rather than joining (and exposing) the host's tmux server.
       "$HOME/.config/cctl" = {};
+    } // lib.optionalAttrs (config.services.spaces-integrations.enable or false) {
+      # spaces integration gateway socket: lets the omp/omp-sp harnesses'
+      # `spaces` MCP server (spaces-mcp-connect) reach the per-user gateway
+      # --user service from inside the sandbox. Gated on the integrations
+      # feature so headless hosts without it don't bind a nonexistent socket.
+      "$XDG_RUNTIME_DIR/spaces-integration-gateway.sock" = {};
     };
     bindReadOnly = {
       "$HOME/.pi/agent/skills" = {};

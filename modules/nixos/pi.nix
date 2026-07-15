@@ -48,6 +48,9 @@
       # Source + tests in modules/nixos/direnv/, same bun test setup as
       # jobs-hub. Requires direnv on PATH and an allowed .envrc.
       ln -sf ${./direnv/direnv.ts} "$config_dir/extensions/direnv.ts"
+      # spaces MCP server (shared mcpFile): stdio bridge to the per-user
+      # spaces-integration-gateway socket. See omp-common.nix for rationale.
+      ln -sf ${common.mcpFile} "$config_dir/mcp.json"
       ${lib.optionalString common.models-needed ''ln -sf ${common.modelsFile} "$config_dir/models.yml"''}
     '';
   };
