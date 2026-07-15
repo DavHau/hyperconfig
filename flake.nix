@@ -2,8 +2,8 @@
   description = "nas home server";
 
   inputs = {
-    # systems.url = "path:./flake.systems.nix";
-    # systems.flake = false;
+    systems.url = "path:./flake.systems.nix";
+    systems.flake = false;
     flake-parts.url = "github:hercules-ci/flake-parts";
     flake-parts.inputs.nixpkgs-lib.follows = "nixpkgs";
     flake-compat = {
@@ -96,6 +96,7 @@
     llm-agents.url = "github:numtide/llm-agents.nix";
     llm-agents.inputs.nixpkgs.follows = "nixpkgs";
     llm-agents.inputs.flake-parts.follows = "flake-parts";
+    llm-agents.inputs.systems.follows = "systems";
 
     mics-skills.url = "github:Mic92/mics-skills";
     mics-skills.inputs.nixpkgs.follows = "nixpkgs";
