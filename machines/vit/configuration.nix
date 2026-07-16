@@ -14,6 +14,12 @@
   # Enable all hardware support
   hardware.enableAllHardware = true;
 
+  # Kernel >= 6.18.38 triggers a correctable-AER error storm on the RTS525A
+  # card reader link (0000:2c:00.0) when ASPM L0s/L1 is active, livelocking
+  # boot before the LUKS prompt. Disabling ASPM stops the errors at the
+  # source (verified on 26.11 gen 78). Revisit on future kernel bumps.
+  boot.kernelParams = [ "pcie_aspm=off" ];
+
   # VM settings
   virtualisation.vmVariant = {
     users.users.dave.hashedPasswordFile = lib.mkForce null;
