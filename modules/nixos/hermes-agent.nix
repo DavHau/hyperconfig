@@ -69,7 +69,7 @@ in
     # opens vit's port on the ygg interface). "custom" = any
     # OpenAI-compatible endpoint; llama-swap runs default-allow, so no key.
     settings.model = {
-      default = "qwen3.6:35b";
+      default = "qwen3.6:35b-iq4_xs";
       provider = "custom";
       base_url = "http://vit.d:8012/v1";
     };
