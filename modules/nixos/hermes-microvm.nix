@@ -22,6 +22,13 @@
 #   - spaces MCP: guest socat -> slirp host alias 10.0.2.2:<spacesPort> ->
 #     host socat (running as the owner) -> the per-user gateway socket in
 #     /run/user/<uid>.
+#   - voice mode (per-user opt-in `audio.enable`): the hermes package
+#     already ships the `voice` group (sounddevice/numpy/faster-whisper);
+#     what NixOS/VMs lack is libportaudio discovery and a sound card. The
+#     guest gets LD_LIBRARY_PATH with portaudio (+ ld/gcc for ctypes
+#     find_library) and a virtio-sound device whose qemu `pa` backend
+#     connects to a host socket proxy (systemd-socket-proxyd running as
+#     the owner) in front of the user's pipewire-pulse socket.
 #
 # Isolation between users: ssh keys and dashboard passwords are owner-only
 # files, and iptables OUTPUT owner-match rules reject other local users on
@@ -55,6 +62,9 @@ let
   dashboardGuestPort = 9119;
   # slirp's alias for the host's loopback
   slirpHostAlias = "10.0.2.2";
+  # Host-side proxy socket in front of the owner's pipewire-pulse socket;
+  # mode 0660 root:kvm so only qemu (microvm user) can connect.
+  audioProxySocket = user: "/run/hermes-microvm-audio/${user}.sock";
 
   # Locally-administered unicast MAC derived from the uid (unique per VM).
   macFor = uid:
@@ -67,10 +77,12 @@ let
   baseGuestPackages = with pkgs; [
     # vcs / basics
     git curl wget jq ripgrep fd file unzip zip gnutar xz
-    # build toolchain so pip can compile the odd sdist
-    gcc gnumake pkg-config
+    # build toolchain so pip can compile the odd sdist; binutils also
+    # provides the `ld` that ctypes.util.find_library needs to resolve
+    # libraries from LD_LIBRARY_PATH (portaudio for voice mode)
+    gcc gnumake pkg-config binutils
     # documents / media / research helpers
-    pandoc poppler-utils ffmpeg imagemagick sqlite yt-dlp w3m
+    pandoc poppler-utils ffmpeg imagemagick sqlite yt-dlp w3m alsa-utils
     # runtimes & package managers agents reach for
     nodejs uv
   ];
@@ -90,6 +102,8 @@ let
     ncurses
     fontconfig
     freetype
+    portaudio
+    alsa-lib
   ];
 
   # Root ExecStartPre of microvm@hermes-<user>: per-user keys, dashboard
@@ -232,7 +246,34 @@ let
       ];
       # Writable store overlay so `nix` works inside the guest.
       writableStoreOverlay = "/nix/.rw-store";
+
+      # Voice mode: virtio sound card, backed by the owner's PipeWire via
+      # the host-side pulse proxy socket. The default qemu is minimized
+      # (`optimize.enable` pipes ANY qemu.package through
+      # nixosTestRunner=true, the "for-vm-tests" build) and ships no audio
+      # backends — qemu then dies instantly on `-audiodev pa`. So for
+      # audio VMs use stock qemu_kvm and turn the qemu minimization off;
+      # the guest-side optimize defaults are pinned explicitly below.
+      optimize.enable = lib.mkIf ucfg.audio.enable false;
+      qemu.package = lib.mkIf ucfg.audio.enable pkgs.qemu_kvm;
+      qemu.extraArgs = lib.optionals ucfg.audio.enable [
+        "-audiodev"
+        "pa,id=hermes-snd,server=unix:${audioProxySocket user}"
+        "-device"
+        "virtio-sound-pci,audiodev=hermes-snd"
+      ];
     };
+
+    # Keep the guest-visible microvm.optimize defaults stable whether or
+    # not audio disabled the optimize module (values identical to
+    # microvm.nix nixos-modules/microvm/optimization.nix).
+    documentation.enable = lib.mkDefault false;
+    boot.initrd.systemd.enable = lib.mkDefault true;
+    boot.kernelParams = [ "8250.nr_uarts=1" ];
+    boot.swraid.enable = lib.mkDefault false;
+    networking.useNetworkd = lib.mkDefault true;
+    systemd.network.wait-online.enable = lib.mkDefault false;
+    system.switch.enable = lib.mkDefault false;
 
     # The hermes activation script (config.yaml/.env seeding) runs before
     # systemd — these must already be mounted in the initrd.
@@ -274,7 +315,7 @@ let
       group = "users";
       home = "/home/${user}";
       createHome = false;
-      extraGroups = [ "wheel" ];
+      extraGroups = [ "wheel" ] ++ lib.optional ucfg.audio.enable "audio";
     };
     # Self-modification parity with the old container (sudo NOPASSWD).
     security.sudo.wheelNeedsPassword = false;
@@ -305,6 +346,8 @@ let
       unitConfig.RequiresMountsFor = [ guestStateDir "/home/${user}" ];
       # venv first so python/pip resolve to the writable interpreter
       path = [ "${guestVenv}/bin" ];
+      # sounddevice (voice mode) resolves libportaudio via LD_LIBRARY_PATH
+      environment.LD_LIBRARY_PATH = lib.makeLibraryPath [ pkgs.portaudio ];
       # The upstream unit only allows stateDir+workspace; the agent must
       # also reach the owner's shared home.
       serviceConfig.ReadWritePaths = [ "/home/${user}" ];
@@ -349,6 +392,8 @@ let
         HOME = guestStateDir;
         HERMES_HOME = "${guestStateDir}/.hermes";
         HERMES_MANAGED = "true";
+        # streaming TTS uses sounddevice too
+        LD_LIBRARY_PATH = lib.makeLibraryPath [ pkgs.portaudio ];
       };
       path = [
         config.services.hermes-agent.package
@@ -382,9 +427,11 @@ let
     programs.nix-ld.libraries = nixLdLibraries;
 
     environment.systemPackages = [ pkgs.socat ];
-    # interactive ssh/TUI shells also get the writable venv first
+    # interactive ssh/TUI shells also get the writable venv first, and
+    # libportaudio for voice mode (sounddevice ships no linux binaries)
     environment.extraInit = ''
       export PATH="${guestVenv}/bin:$PATH"
+      export LD_LIBRARY_PATH="${lib.makeLibraryPath [ pkgs.portaudio ]}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     '';
   };
 
@@ -416,7 +463,17 @@ let
     base="/var/lib/hermes-microvm/$u"
     tty_flag=""
     if [ -t 0 ] && [ -t 1 ]; then tty_flag="-t"; fi
-    remote_cmd="cd ${guestWorkspace} && export HERMES_HOME=${guestStateDir}/.hermes && exec /run/current-system/sw/bin/hermes"
+    # ssh only carries TERM; the old docker-exec routing also passed
+    # COLORTERM/LANG/LC_ALL (TUI colors + UTF-8 glyphs). Embed them into
+    # the remote command, shell-quoted.
+    env_exports=""
+    for v in COLORTERM LANG LC_ALL; do
+      eval "val=\''${$v:-}"
+      if [ -n "$val" ]; then
+        env_exports="$env_exports export $v=$(printf '%q' "$val") &&"
+      fi
+    done
+    remote_cmd="$env_exports cd ${guestWorkspace} && export HERMES_HOME=${guestStateDir}/.hermes && exec /run/current-system/sw/bin/hermes"
     # printf %q with zero args would still emit one empty-string argument
     if [ "$#" -gt 0 ]; then remote_cmd="$remote_cmd $(printf '%q ' "$@")"; fi
     exec ${pkgs.openssh}/bin/ssh $tty_flag \
@@ -592,6 +649,14 @@ in
             default = [ ];
             description = "Host paths of secret env files, assembled into the guest's hermes .env.";
           };
+          audio = {
+            enable = mkEnableOption "a virtio sound card backed by the user's PipeWire (hermes voice mode)";
+            pulseSocket = mkOption {
+              type = types.str;
+              default = "/run/user/${toString config.uid}/pulse/native";
+              description = "The user's pipewire-pulse socket on the host.";
+            };
+          };
           spacesGateway = {
             enable = mkEnableOption "bridging the user's spaces integration gateway into the VM";
             socket = mkOption {
@@ -634,9 +699,25 @@ in
       "microvm@${vmName user}" = {
         # "+" = run with full privileges (the unit itself runs as `microvm`)
         serviceConfig.ExecStartPre = [ "+${provisionScript user ucfg}" ];
-      } // lib.optionalAttrs ucfg.spacesGateway.enable {
+      } // lib.optionalAttrs (ucfg.spacesGateway.enable || ucfg.audio.enable) {
+        # both the spaces gateway socket and pipewire-pulse live in the
+        # owner's user session
         after = [ "user@${toString ucfg.uid}.service" ];
         wants = [ "user@${toString ucfg.uid}.service" ];
+      };
+
+      # voice mode: socket-activated proxy (running as the owner) in front
+      # of the user's pipewire-pulse socket; qemu's `pa` audiodev connects
+      # to the 0660 root:kvm proxy socket.
+      "hermes-audio-proxy-${user}" = lib.mkIf ucfg.audio.enable {
+        description = "PipeWire-Pulse proxy for ${vmName user} audio";
+        after = [ "user@${toString ucfg.uid}.service" ];
+        wants = [ "user@${toString ucfg.uid}.service" ];
+        serviceConfig = {
+          User = user;
+          ExecStart = "${config.systemd.package}/lib/systemd/systemd-socket-proxyd ${ucfg.audio.pulseSocket}";
+          PrivateTmp = true;
+        };
       };
 
       # spaces gateway bridge: guest socat -> 10.0.2.2:<port> -> this unit
@@ -659,6 +740,21 @@ in
       };
     });
 
+    # Activation sockets for the audio proxies. 0660 root:kvm: only qemu
+    # (the `microvm` user) reaches the owner's audio (same cross-VM
+    # caveat as the spaces bridge — see header).
+    systemd.sockets = forEachUser (user: ucfg: {
+      "hermes-audio-proxy-${user}" = lib.mkIf ucfg.audio.enable {
+        wantedBy = [ "sockets.target" ];
+        listenStreams = [ (audioProxySocket user) ];
+        socketConfig = {
+          SocketUser = "root";
+          SocketGroup = "kvm";
+          SocketMode = "0660";
+        };
+      };
+    });
+
     # Share sources must exist before virtiofsd starts; contents are
     # filled by the provisioning ExecStartPre.
     systemd.tmpfiles.rules =
@@ -671,9 +767,10 @@ in
         "d ${baseDir user}/guest/secrets 0700 root root - -"
       ]) cfg.users);
 
-    # The per-user gateway socket must exist at boot, before any login.
+    # The per-user gateway/pipewire sockets must exist at boot, before any
+    # interactive login.
     users.users = forEachUser (user: ucfg:
-      lib.optionalAttrs ucfg.spacesGateway.enable {
+      lib.optionalAttrs (ucfg.spacesGateway.enable || ucfg.audio.enable) {
         ${user}.linger = true;
       });
   };

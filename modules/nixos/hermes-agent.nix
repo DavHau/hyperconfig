@@ -69,6 +69,11 @@ in
       uid = 1000;
       environmentFiles = [ config.clan.core.vars.generators.hermes-env.files.env.path ];
       spacesGateway.enable = true;
+      # voice mode: virtio sound card wired to grmpf's PipeWire — only on
+      # machines that run a desktop audio session (laptops), never servers.
+      # SECURITY: while enabled and the VM runs, the guest holds standing
+      # capture access to the session's audio (mic + monitor sources).
+      audio.enable = config.services.pipewire.enable;
       # The simplex daemon listens on the host's loopback; guests reach it
       # through slirp's host alias. (Shared host service: not isolated
       # between VMs — single-user setup.)
