@@ -29,6 +29,7 @@ in
     ./greetd.nix
     ./pi.nix
     ./pi-superpowers.nix
+    ./afk.nix
     ./cpu-powersave-cap.nix
     ./amd-pstate-resume-fix.nix
     ./omr.nix
