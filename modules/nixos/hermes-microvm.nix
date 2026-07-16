@@ -121,8 +121,9 @@ let
     set -eu
     export PATH=${lib.makeBinPath (with pkgs; [ coreutils gawk openssh openssl ])}
     base=${baseDir user}
-    install -d -m 0755 "$base" "$base/ssh" "$base/guest" "$base/guest/ssh"
-    install -d -m 0700 "$base/guest/secrets"
+    # dirs come from the tmpfiles rules (virtiofsd needs them before this
+    # script ever runs); everything below is secret material that cannot
+    # live in the world-readable nix store, so it is generated here.
 
     # ssh client key: the owner's credential for `hermes` CLI routing
     if [ ! -f "$base/ssh/client_ed25519" ]; then
@@ -158,12 +159,9 @@ let
     } > "$base/guest/secrets/dashboard.env"
     : > "$base/guest/secrets/hermes.env.tmp"
     ${lib.concatMapStrings (f: ''
-      if [ -f ${f} ]; then
-        cat ${f} >> "$base/guest/secrets/hermes.env.tmp"
-        printf '\n' >> "$base/guest/secrets/hermes.env.tmp"
-      else
-        echo "hermes-microvm: missing environment file ${f}" >&2
-      fi
+      cat ${f} >> "$base/guest/secrets/hermes.env.tmp" 2>/dev/null \
+        && printf '\n' >> "$base/guest/secrets/hermes.env.tmp" \
+        || echo "hermes-microvm: missing environment file ${f}" >&2
     '') ucfg.environmentFiles}
     mv "$base/guest/secrets/hermes.env.tmp" "$base/guest/secrets/hermes.env"
 
