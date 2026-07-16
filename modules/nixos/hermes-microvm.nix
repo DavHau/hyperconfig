@@ -172,6 +172,10 @@ let
       chmod 0750 /var/lib/microvms/${vmName user}
     fi
 
+    # Seed the guest timezone mirror before boot (kept fresh afterwards by
+    # the hermes-microvm-timezone path unit).
+    ${tzSyncScript}
+
     ${lib.optionalString ucfg.spacesGateway.enable ''
       # Bounded wait for the owner's spaces gateway socket (linger brings
       # the user manager up at boot). Non-fatal: MCP reconnects later.
@@ -180,6 +184,25 @@ let
         sleep 1
       done
     ''}
+  '';
+
+  # Mirror the host's /etc/localtime (deref'd TZif bytes, atomic replace)
+  # into every user's shared guest dir. A pure mount can't do this: the
+  # host timezone is a symlink in /etc (virtiofs shares directories only,
+  # and sharing /etc would leak secrets). Runs at provisioning and on every
+  # /etc/localtime swap (timedatectl, automatic-timezoned, rebuild).
+  tzSyncScript = pkgs.writeShellScript "hermes-microvm-tz-sync" ''
+    set -eu
+    export PATH=${lib.makeBinPath [ pkgs.coreutils ]}
+    src=/etc/localtime
+    [ -e "$src" ] || src=${pkgs.tzdata}/share/zoneinfo/UTC
+    ${lib.concatMapStrings (u: ''
+      d=${baseDir u}/guest/tz
+      mkdir -p "$d"
+      cp -Lf "$src" "$d/.localtime.tmp"
+      chmod 0644 "$d/.localtime.tmp"
+      mv "$d/.localtime.tmp" "$d/localtime"
+    '') (lib.attrNames cfg.users)}
   '';
 
   # ── Guest NixOS configuration (fully declarative microvm) ────────────
@@ -312,6 +335,15 @@ let
         }
       ];
     };
+
+    # Timezone tracks the host: /etc/localtime points into the live host
+    # share; the host path unit re-mirrors it on change. New processes see
+    # the new zone immediately; already-running daemons keep their cached
+    # TZ (normal glibc behavior, same as on the host).
+    time.timeZone = null;
+    systemd.tmpfiles.rules = [
+      "L+ /etc/localtime - - - - ${guestHostDir}/tz/localtime"
+    ];
 
     # Same name/uid as on the host so the shared home keeps ownership.
     users.users.${user} = {
@@ -749,7 +781,24 @@ in
       }
     ) cfg.users;
 
-    systemd.services = forEachUser (user: ucfg: {
+    # Re-mirror the timezone whenever the host's /etc/localtime symlink is
+    # swapped (timedatectl, automatic-timezoned, rebuild activation).
+    systemd.paths.hermes-microvm-timezone = {
+      wantedBy = [ "multi-user.target" ];
+      pathConfig.PathChanged = "/etc/localtime";
+    };
+
+    systemd.services = lib.mkMerge [
+      {
+        hermes-microvm-timezone = {
+          description = "Mirror host timezone into hermes microvm shares";
+          serviceConfig = {
+            Type = "oneshot";
+            ExecStart = "${tzSyncScript}";
+          };
+        };
+      }
+      (forEachUser (user: ucfg: {
       "microvm@${vmName user}" = {
         # "+" = run with full privileges (the unit itself runs as `microvm`)
         serviceConfig.ExecStartPre = [ "+${provisionScript user ucfg}" ];
@@ -792,7 +841,8 @@ in
           RestartSec = 5;
         };
       };
-    });
+      }))
+    ];
 
     # Activation sockets for the audio proxies. 0660 root:kvm: only qemu
     # (the `microvm` user) reaches the owner's audio (same cross-VM
