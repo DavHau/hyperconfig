@@ -1082,6 +1082,27 @@
         "type": "github"
       }
     },
+    "microvm": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "spectrum": "spectrum"
+      },
+      "locked": {
+        "lastModified": 1784114346,
+        "narHash": "sha256-K7vhRb7e4Np6sti8EfcIr/YgpBEPc7owxBeETE4T3PE=",
+        "owner": "microvm-nix",
+        "repo": "microvm.nix",
+        "rev": "a8ddffe21a84b533b38c16cf63e9c5fda4a19743",
+        "type": "github"
+      },
+      "original": {
+        "owner": "microvm-nix",
+        "repo": "microvm.nix",
+        "type": "github"
+      }
+    },
     "mics-skills": {
       "inputs": {
         "flake-parts": [
@@ -1938,6 +1959,7 @@
         "llm-agents": "llm-agents",
         "mattpocock-skills": "mattpocock-skills",
         "messaging-daemon": "messaging-daemon",
+        "microvm": "microvm",
         "mics-skills": "mics-skills",
         "ncps": "ncps",
         "nil": "nil",
@@ -2036,8 +2058,8 @@
         "voxtype": "voxtype"
       },
       "locked": {
-        "lastModified": 1784168273,
-        "narHash": "sha256-V1X+7bqJHCCfU5g8p9qAWD2oUMB+9oQHzBWbR3NtFXc=",
+        "lastModified": 1784171211,
+        "narHash": "sha256-0MkTpAEb17uMMAFqCM4A89EgUhOE0AQPnpogx9DZKnY=",
         "path": "/home/grmpf/synced/projects/spaces",
         "type": "path"
       },
@@ -2045,6 +2067,22 @@
         "owner": "generational-infrastructure",
         "repo": "distro",
         "type": "github"
+      }
+    },
+    "spectrum": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1783694892,
+        "narHash": "sha256-xO8f7Qng+18FK2UlB9vcrkxCaQMCt5WjCH24aW/11eg=",
+        "ref": "refs/heads/main",
+        "rev": "24c4346e30fdea8d8e80f34aec3554a15a667d24",
+        "revCount": 1410,
+        "type": "git",
+        "url": "https://spectrum-os.org/git/spectrum"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://spectrum-os.org/git/spectrum"
       }
     },
     "srvos": {
