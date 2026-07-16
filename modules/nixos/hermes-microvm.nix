@@ -511,6 +511,13 @@ let
   # Host CLI shim: routes every `hermes` invocation into the caller's VM
   # (microvm equivalent of the old .container-mode docker-exec seam).
   hermesShim = pkgs.writeShellScriptBin "hermes" ''
+    # The desktop app is a host-side GUI (guests are headless): route the
+    # upstream `hermes desktop` subcommand to the hermes-desktop wrapper
+    # instead of ssh-execing it into the VM.
+    if [ "''${1:-}" = "desktop" ]; then
+      shift
+      exec ${hermesDesktop}/bin/hermes-desktop "$@"
+    fi
     u="$(${pkgs.coreutils}/bin/id -un)"
     case "$u" in
     ${userCaseArms}
