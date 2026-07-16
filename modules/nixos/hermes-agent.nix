@@ -9,7 +9,8 @@
 # handed into grmpf's guest and merged into $HERMES_HOME/.env there.
 #
 # Interfaces (as grmpf): `hermes` (CLI/TUI via ssh into the VM),
-# `hermes-vm-info` (dashboard URL + credentials).
+# `hermes-desktop` (upstream Electron app on the VM's backend),
+# `hermes-vm-info` (dashboard URL).
 { config, lib, pkgs, inputs, ... }:
 let
   # Shadow copy of the bundled simplex platform plugin with the DM send
