@@ -1,28 +1,19 @@
-# Hermes Agent (NousResearch) gateway, upstream NixOS module in container
-# mode: persistent Ubuntu container on rootful docker with /nix/store
-# bind-mounted read-only. The agent can apt/pip/npm install inside the
-# container; installs persist across restarts and rebuilds (lost only when
-# the container identity changes: image/volumes/options).
+# Hermes Agent (NousResearch), one microvm per user (see
+# hermes-microvm.nix for the machinery). Replaces the old docker container
+# mode: the upstream NixOS module now runs natively INSIDE each guest, the
+# host only keeps the ssh-routed `hermes` shim, the forwarded dashboard
+# port and the spaces bridge.
 #
 # API key: reuses the shared `openrouter` clan var (same one pi-chat uses).
-# The hermes-env generator renders it into the KEY=value env file that the
-# hermes module merges into $HERMES_HOME/.env at activation time.
+# The hermes-env generator renders it into the KEY=value env file that is
+# handed into grmpf's guest and merged into $HERMES_HOME/.env there.
 #
-# Host CLI: addToSystemPackages puts `hermes` on PATH and routes every
-# invocation into the container (needs docker group membership).
+# Interfaces (as grmpf): `hermes` (CLI/TUI via ssh into the VM),
+# `hermes-vm-info` (dashboard URL + credentials).
 { config, lib, pkgs, inputs, ... }:
 let
-  sys = pkgs.stdenv.hostPlatform.system;
-  # stdio<->unix-socket bridge from the spaces flake. Referenced by absolute
-  # /nix/store path (not PATH): the container is Ubuntu with only /nix/store
-  # bind-mounted read-only, so `spaces-mcp-connect` is not otherwise reachable.
-  spacesConnect = inputs.spaces.packages.${sys}.spaces-integration-gateway.connect;
-  # The per-user spaces-integration-gateway socket (grmpf = uid 1000) on the
-  # host, and the fixed path it is bind-mounted to inside the container.
-  spacesSocketHost = "/run/user/1000/spaces-integration-gateway.sock";
-  spacesSocketContainer = "/run/spaces-integration-gateway.sock";
   # Shadow copy of the bundled simplex platform plugin with the DM send
-  # fixed. Upstream addresses DMs as `@<contactId> <text>`, but the daemon
+  # fixed. Upstream addresses DMs as `@<chat_id> <text>`, but the daemon
   # parses that as a display-name lookup — simplex-chat >=6.3 returns
   # contactNotFound and the fire-and-forget send swallows it, so pairing
   # codes and agent replies silently vanish. The structured
@@ -37,9 +28,10 @@ let
       --replace-fail 'cmd_str = f"@{chat_id} {content}"' \
         'cmd_str = "/_send @" + chat_id + " json " + json.dumps([{"msgContent": {"type": "text", "text": content}}])'
   '';
+  simplexCfg = config.services.simplex-chat-daemon;
 in
 {
-  imports = [ inputs.hermes-agent.nixosModules.default ];
+  imports = [ ./hermes-microvm.nix ];
 
   # Same declaration as pi-chat-openrouter.nix; identical values merge.
   clan.core.vars.generators.openrouter = {
@@ -54,12 +46,11 @@ in
     prompts.telegram_token.persist = true;
     prompts.telegram_allowed_users.type = "hidden";
     prompts.telegram_allowed_users.persist = true;
-    # Rebuild rewrites $HERMES_HOME/.env in the activation script, but the
-    # long-running hermes process only reads it at startup. sops-nix restarts
-    # the unit when this secret's decrypted content changes; the restart runs
-    # after activation scripts, so the freshly rendered .env is already on disk.
+    # The guest reads the assembled .env at boot; restarting the VM re-runs
+    # the provisioning ExecStartPre, which re-assembles it from the freshly
+    # decrypted secret.
     files.env.secret = true;
-    files.env.restartUnits = [ "hermes-agent.service" ];
+    files.env.restartUnits = [ "microvm@hermes-grmpf.service" ];
     script = ''
       {
         printf 'OPENROUTER_API_KEY=%s\n' "$(cat $in/openrouter/apikey)"
@@ -69,65 +60,26 @@ in
     '';
   };
 
-  services.hermes-agent = {
+  services.hermes-microvm = {
     enable = true;
-    container.enable = true; # backend defaults to docker
-    container.hostUsers = [ "grmpf" ];
-    # Run the in-container agent as grmpf (uid 1000, gid 100/users) so it can
-    # open the per-user spaces gateway socket (0700, owner-only). createUser is
-    # off (grmpf/users already exist); group tracks grmpf's primary group so the
-    # host tmpfiles/activation and the container's HERMES_UID:HERMES_GID chown
-    # agree (no ownership ping-pong). The container FS stays isolated — only
-    # /nix/store, the stateDir, home, and the one socket are mounted.
-    user = "grmpf";
-    group = "users";
-    createUser = false;
-    # Bind-mount the gateway socket in. `--mount type=bind` (not the module's
-    # `--volume`) FAILS if the source is missing instead of docker creating a
-    # root-owned directory at the socket path (which would break the gateway);
-    # the preStart wait below ensures it exists first.
-    container.extraOptions = [
-      "--mount"
-      "type=bind,source=${spacesSocketHost},target=${spacesSocketContainer}"
-    ];
-    # spaces MCP server: stdio bridge to the aggregating gateway.
-    mcpServers.spaces = {
-      command = "${spacesConnect}/bin/spaces-mcp-connect";
-      args = [ spacesSocketContainer ];
-    };
-    addToSystemPackages = true;
-    environmentFiles = [ config.clan.core.vars.generators.hermes-env.files.env.path ];
     settings.model.default = "anthropic/claude-sonnet-4";
     extraPlugins = [ simplexPlatformFixed ];
+
+    users.grmpf = {
+      uid = 1000;
+      environmentFiles = [ config.clan.core.vars.generators.hermes-env.files.env.path ];
+      spacesGateway.enable = true;
+      # The simplex daemon listens on the host's loopback; guests reach it
+      # through slirp's host alias. (Shared host service: not isolated
+      # between VMs — single-user setup.)
+      environment = lib.optionalAttrs simplexCfg.enable (
+        {
+          SIMPLEX_WS_URL = "ws://10.0.2.2:${toString simplexCfg.port}";
+        }
+        // lib.optionalAttrs (simplexCfg.allowedUsers != [ ]) {
+          SIMPLEX_ALLOWED_USERS = lib.concatStringsSep "," simplexCfg.allowedUsers;
+        }
+      );
+    };
   };
-
-  # Host CLI talks to the rootful docker socket when routing into the
-  # container; hostUsers only grants the hermes group, not docker.
-  users.users.grmpf.extraGroups = [ "docker" ];
-
-  # The spaces gateway is a per-user (grmpf) --user service bound in grmpf's
-  # runtime dir. hermes is a headless bot that starts at boot before any
-  # interactive login, so linger brings grmpf's user manager (hence the
-  # gateway) up at boot; the container service is ordered after it and waits
-  # for the socket so `docker start`'s bind-mount finds the real socket.
-  users.users.grmpf.linger = true;
-  systemd.services.hermes-agent = {
-    after = [ "user@1000.service" ];
-    wants = [ "user@1000.service" ];
-    preStart = lib.mkBefore ''
-      # Block until the per-user spaces gateway socket exists (grmpf lingers, so
-      # it comes up at boot). Bounded so a disabled/broken gateway cannot wedge
-      # hermes forever; the --mount then fails cleanly and systemd retries.
-      for _i in $(seq 1 120); do
-        [ -S ${spacesSocketHost} ] && break
-        sleep 1
-      done
-    '';
-  };
-
-  # virtualisation.nix (via laptop-dave) sets DOCKER_HOST to the rootless
-  # socket session-wide; that steers `docker`/hermes CLI routing at the
-  # wrong daemon ("No such container: hermes-agent"). Force it off here —
-  # the rootless daemon stays usable via an explicit context/--host.
-  virtualisation.docker.rootless.setSocketVariable = lib.mkForce false;
 }

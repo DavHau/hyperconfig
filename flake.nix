@@ -127,6 +127,8 @@
     nixos-example.inputs.wrappers.follows = "wrappers";
 
     hermes-agent.url = "github:NousResearch/hermes-agent";
+    microvm.url = "github:microvm-nix/microvm.nix";
+    microvm.inputs.nixpkgs.follows = "nixpkgs";
     messaging-daemon.url = "github:vbuterin/messaging-daemon";
     messaging-daemon.flake = false;
   };
