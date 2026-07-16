@@ -15,10 +15,15 @@
 #     dedicated per-user keypair (0600, owner-only) — same seam as the old
 #     docker-exec routing. State never crosses the VM boundary, so the
 #     gateway/CLI sqlite+lockfile coordination stays inside one kernel.
-#   - Web dashboard: guest `hermes dashboard` on 0.0.0.0:9119, forwarded to
-#     127.0.0.1:<dashboardPort>. Non-loopback binds require an auth
-#     provider upstream; a per-user basic-auth password is generated on the
-#     host (`hermes-vm-info` prints URL + credentials).
+#   - Web dashboard: guest `hermes dashboard` on 127.0.0.1:9118 in loopback
+#     mode (upstream's non-loopback auth gate is cookie-only — no static
+#     token contract), bridged by a guest socat to the NIC-facing 9119
+#     slirp forward, then to host 127.0.0.1:<dashboardPort>. Auth: a fixed
+#     per-user HERMES_DASHBOARD_SESSION_TOKEN generated on the host; the
+#     real boundary is the iptables owner match on the forwarded port.
+#   - Hermes Desktop: host `hermes-desktop` wrapper launches the upstream
+#     Electron app against the owner's forwarded dashboard via
+#     HERMES_DESKTOP_REMOTE_URL/_TOKEN (token file 0400 owner-only).
 #   - spaces MCP: guest socat -> slirp host alias 10.0.2.2:<spacesPort> ->
 #     host socat (running as the owner) -> the per-user gateway socket in
 #     /run/user/<uid>.
@@ -30,7 +35,7 @@
 #     connects to a host socket proxy (systemd-socket-proxyd running as
 #     the owner) in front of the user's pipewire-pulse socket.
 #
-# Isolation between users: ssh keys and dashboard passwords are owner-only
+# Isolation between users: ssh keys and dashboard tokens are owner-only
 # files, and iptables OUTPUT owner-match rules reject other local users on
 # every forwarded loopback port. Residual caveat: all VMs' qemu processes
 # run as the shared `microvm` user, so one user's *guest* could reach
@@ -59,7 +64,10 @@ let
   guestHostDir = "/run/hermes-host"; # ro virtiofs: ssh keys + secrets
   guestVenv = "${guestStateDir}/.venv";
   guestWorkspace = "${guestStateDir}/workspace";
+  # NIC-facing port the slirp forward targets (guest socat listens here)
   dashboardGuestPort = 9119;
+  # loopback bind of `hermes dashboard` behind the socat bridge
+  dashboardGuestBackendPort = 9118;
   # slirp's alias for the host's loopback
   slirpHostAlias = "10.0.2.2";
   # Host-side proxy socket in front of the owner's pipewire-pulse socket;
@@ -134,22 +142,19 @@ let
       "$base/guest/ssh/ssh_host_ed25519_key.pub" > "$base/ssh/known_hosts"
     chmod 0644 "$base/ssh/known_hosts"
 
-    # dashboard basic-auth credentials (password readable by the owner)
-    if [ ! -f "$base/dashboard-password" ]; then
-      (umask 277; openssl rand -base64 24 | tr -d '\n' > "$base/dashboard-password")
+    # dashboard session token: fixed HERMES_DASHBOARD_SESSION_TOKEN for the
+    # loopback-mode dashboard; owner-readable (0400) copy so the
+    # hermes-desktop wrapper can pass it as HERMES_DESKTOP_REMOTE_TOKEN.
+    if [ ! -f "$base/desktop-token" ]; then
+      (umask 277; openssl rand -hex 32 | tr -d '\n' > "$base/desktop-token")
     fi
-    chown ${user} "$base/dashboard-password"
-    chmod 0400 "$base/dashboard-password"
-    if [ ! -f "$base/dashboard-secret" ]; then
-      (umask 277; openssl rand -hex 32 | tr -d '\n' > "$base/dashboard-secret")
-    fi
+    chown ${user} "$base/desktop-token"
+    chmod 0400 "$base/desktop-token"
 
     # secrets handed to the guest (root-only inside the ro mount)
     umask 077
     {
-      printf 'HERMES_DASHBOARD_BASIC_AUTH_USERNAME=%s\n' ${user}
-      printf 'HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=%s\n' "$(cat "$base/dashboard-password")"
-      printf 'HERMES_DASHBOARD_BASIC_AUTH_SECRET=%s\n' "$(cat "$base/dashboard-secret")"
+      printf 'HERMES_DASHBOARD_SESSION_TOKEN=%s\n' "$(cat "$base/desktop-token")"
     } > "$base/guest/secrets/dashboard.env"
     : > "$base/guest/secrets/hermes.env.tmp"
     ${lib.concatMapStrings (f: ''
@@ -379,9 +384,11 @@ let
     };
 
     # Web dashboard (SPA + JSON-RPC/WS backend). Separate process from the
-    # gateway by upstream design; shares state via HERMES_HOME. Non-loopback
-    # bind requires an auth provider -> basic auth from the host-generated
-    # per-user credentials.
+    # gateway by upstream design; shares state via HERMES_HOME. Loopback
+    # bind: non-loopback binds engage the upstream cookie-only auth gate,
+    # which the desktop's static remote token cannot pass — so the
+    # dashboard runs in loopback mode with the host-fixed session token,
+    # and the socat bridge below fronts the slirp forward.
     systemd.services.hermes-dashboard = {
       description = "Hermes Agent web dashboard";
       wantedBy = [ "multi-user.target" ];
@@ -411,14 +418,34 @@ let
           "dashboard"
           "--no-open"
           "--host"
-          "0.0.0.0"
+          "127.0.0.1"
           "--port"
-          (toString dashboardGuestPort)
+          (toString dashboardGuestBackendPort)
         ];
         WorkingDirectory = guestWorkspace;
         Restart = "always";
         RestartSec = 5;
         UMask = "0007";
+      };
+    };
+
+    # slirp hostfwd can only target the guest NIC, so bridge NIC:9119 to
+    # the loopback dashboard. Every forwarded client thus looks "loopback"
+    # to upstream; the real boundary is the host's iptables owner match on
+    # the forwarded port (owner uid + root only).
+    systemd.services.hermes-dashboard-proxy = {
+      description = "Hermes dashboard guest-side proxy for the slirp forward";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "hermes-dashboard.service" ];
+      serviceConfig = {
+        DynamicUser = true;
+        ExecStart = lib.concatStringsSep " " [
+          "${pkgs.socat}/bin/socat"
+          "TCP-LISTEN:${toString dashboardGuestPort},fork,reuseaddr"
+          "TCP:127.0.0.1:${toString dashboardGuestBackendPort}"
+        ];
+        Restart = "always";
+        RestartSec = 5;
       };
     };
 
@@ -496,11 +523,38 @@ let
       ;;
     esac
     base="/var/lib/hermes-microvm/$u"
+    token="$(${pkgs.coreutils}/bin/cat "$base/desktop-token" 2>/dev/null || echo "<unreadable>")"
     echo "VM:            microvm@hermes-$u.service"
     echo "CLI/TUI:       hermes (routed via ssh, port $ssh_port)"
-    echo "Dashboard:     http://127.0.0.1:$dashboard_port/"
-    echo "  username:    $u"
-    echo "  password:    $(${pkgs.coreutils}/bin/cat "$base/dashboard-password" 2>/dev/null || echo "<unreadable — not your VM?>")"
+    echo "Dashboard:     http://127.0.0.1:$dashboard_port/?token=$token"
+    echo "Desktop:       hermes-desktop (upstream Electron app -> this VM's backend)"
+  '';
+
+  # Upstream Electron desktop app (nixpkgs electron + npm-built renderer).
+  desktopPackage = inputs.hermes-agent.packages.${pkgs.stdenv.hostPlatform.system}.desktop;
+
+  # Host desktop launcher: the upstream app in remote-backend mode against
+  # the owner's forwarded dashboard instead of spawning a local python
+  # backend. Token file is 0400 owner-only and the port is uid-gated by
+  # iptables, so the exported token stays owner-confined.
+  hermesDesktop = pkgs.writeShellScriptBin "hermes-desktop" ''
+    u="$(${pkgs.coreutils}/bin/id -un)"
+    case "$u" in
+    ${userCaseArms}
+    *)
+      echo "hermes-desktop: no hermes microvm configured for user $u" >&2
+      exit 1
+      ;;
+    esac
+    base="/var/lib/hermes-microvm/$u"
+    token="$(${pkgs.coreutils}/bin/cat "$base/desktop-token" 2>/dev/null || true)"
+    if [ -z "$token" ]; then
+      echo "hermes-desktop: cannot read $base/desktop-token (VM not provisioned yet?)" >&2
+      exit 1
+    fi
+    export HERMES_DESKTOP_REMOTE_URL="http://127.0.0.1:$dashboard_port"
+    export HERMES_DESKTOP_REMOTE_TOKEN="$token"
+    exec ${desktopPackage}/bin/hermes-desktop "$@"
   '';
 
   # Only the owner (and root) may connect to a VM's forwarded loopback
@@ -671,7 +725,7 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    environment.systemPackages = [ hermesShim hermesInfo ];
+    environment.systemPackages = [ hermesShim hermesInfo hermesDesktop ];
 
     networking.firewall.extraCommands = ''
       iptables -w -N hermes-microvm 2>/dev/null || true
