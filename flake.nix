@@ -98,6 +98,14 @@
     llm-agents.inputs.flake-parts.follows = "flake-parts";
     llm-agents.inputs.systems.follows = "systems";
 
+    # afk: locally checked-out omp harness wrapper (jj patches + Superpowers).
+    # Absolute path input: machines need this checkout at the same path to
+    # re-lock/rebuild (vit: create it or symlink). llm-agents/superpowers stay
+    # pinned by afk's own lock — its patches are validated against those exact
+    # revs; only nixpkgs is deduplicated.
+    afk.url = "path:/home/grmpf/projects/afk";
+    afk.inputs.nixpkgs.follows = "nixpkgs";
+
     mics-skills.url = "github:Mic92/mics-skills";
     mics-skills.inputs.nixpkgs.follows = "nixpkgs";
     mics-skills.inputs.flake-parts.follows = "flake-parts";

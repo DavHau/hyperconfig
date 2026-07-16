@@ -27,6 +27,13 @@
 #   - spaces MCP: guest socat -> slirp host alias 10.0.2.2:<spacesPort> ->
 #     host socat (running as the owner) -> the per-user gateway socket in
 #     /run/user/<uid>.
+#   - clipboard (per-user opt-in `clipboard.enable`): hermes image paste
+#     shells out to wl-paste, which cannot work in a headless guest. A
+#     guest wl-paste shim forwards two whitelisted read-only requests via
+#     slirp to a host socat (running as the owner) that runs the real
+#     wl-paste against the session compositor. The WAYLAND_DISPLAY gate in
+#     hermes/the TUI is satisfied by the host value the `hermes` shim
+#     forwards over ssh.
 #   - voice mode (per-user opt-in `audio.enable`): the hermes package
 #     already ships the `voice` group (sounddevice/numpy/faster-whisper);
 #     what NixOS/VMs lack is libportaudio discovery and a sound card. The
@@ -124,6 +131,76 @@ let
     portaudio
     alsa-lib
   ];
+
+  # Guest-side `wl-paste` for the clipboard bridge: hermes image paste
+  # (hermes_cli/clipboard.py) and the TUI's text-clipboard read both shell
+  # out to wl-paste, so a shim with the same CLI surface is the whole guest
+  # integration. Protocol: one request line ("list-types" | "type <mime>"),
+  # response = wl-paste's exit code on the first line + the raw payload.
+  clipboardShimFor = ucfg: pkgs.writeShellScriptBin "wl-paste" ''
+    set -eu
+    case "''${1:-}" in
+      --list-types|-l) req="list-types" ;;
+      --type|-t) req="type ''${2:?wl-paste: --type needs an argument}" ;;
+      *)
+        echo "wl-paste (hermes clipboard bridge): unsupported arguments: $*" >&2
+        exit 1
+        ;;
+    esac
+    exec 3<>/dev/tcp/${slirpHostAlias}/${toString ucfg.clipboardPort}
+    printf '%s\n' "$req" >&3
+    IFS= read -r rc <&3
+    cat <&3
+    case "$rc" in "" | *[!0-9]*) exit 1 ;; esac
+    exit "$rc"
+  '';
+
+  # Host side of the clipboard bridge (one process per connection, spawned
+  # by the socat listener as the owning user). The request line is never
+  # passed through verbatim: wl-paste has argument forms that execute
+  # commands (--watch), so only the two read-only invocations the guest
+  # shim emits are allowed.
+  clipboardServer = user: ucfg: pkgs.writeShellScript "hermes-clipboard-server-${user}" ''
+    set -eu
+    export PATH=${lib.makeBinPath (with pkgs; [ coreutils gnugrep wl-clipboard ])}
+    export XDG_RUNTIME_DIR=/run/user/${toString ucfg.uid}
+    # System service, no session env: find the compositor socket ourselves.
+    # No graphical session -> wl-paste fails -> rc=1 reaches the guest,
+    # which reports the ordinary "No image found in clipboard".
+    if [ -z "''${WAYLAND_DISPLAY:-}" ]; then
+      for s in "$XDG_RUNTIME_DIR"/wayland-*; do
+        [ -S "$s" ] || continue
+        WAYLAND_DISPLAY="''${s##*/}"
+        export WAYLAND_DISPLAY
+        break
+      done
+    fi
+    reply() {
+      tmp=$(mktemp)
+      trap 'rm -f "$tmp"' EXIT
+      rc=0
+      timeout 10 wl-paste "$@" > "$tmp" 2>/dev/null || rc=$?
+      printf '%s\n' "$rc"
+      cat "$tmp"
+    }
+    IFS= read -r req || exit 0
+    case "$req" in
+      list-types)
+        reply --list-types
+        ;;
+      "type "*)
+        mime="''${req#type }"
+        if printf '%s' "$mime" | grep -Eq '^[A-Za-z][A-Za-z0-9/.+-]*$'; then
+          reply --type "$mime"
+        else
+          printf '1\n'
+        fi
+        ;;
+      *)
+        printf '1\n'
+        ;;
+    esac
+  '';
 
   # Root ExecStartPre of microvm@hermes-<user>: per-user keys, dashboard
   # credentials, guest secret env files, VM state dir lockdown, and a
@@ -504,7 +581,8 @@ let
     programs.nix-ld.enable = true;
     programs.nix-ld.libraries = nixLdLibraries;
 
-    environment.systemPackages = [ pkgs.socat ];
+    environment.systemPackages = [ pkgs.socat ]
+      ++ lib.optional ucfg.clipboard.enable (clipboardShimFor ucfg);
     # interactive ssh/TUI shells also get the writable venv first, and
     # libportaudio for voice mode (sounddevice ships no linux binaries)
     environment.extraInit = ''
@@ -556,9 +634,11 @@ let
     if [ -t 0 ] && [ -t 1 ]; then tty_flag="-t"; fi
     # ssh only carries TERM; the old docker-exec routing also passed
     # COLORTERM/LANG/LC_ALL (TUI colors + UTF-8 glyphs). Embed them into
-    # the remote command, shell-quoted.
+    # the remote command, shell-quoted. WAYLAND_DISPLAY gates hermes's
+    # wayland clipboard path in the guest (served by the bridged wl-paste
+    # shim, which ignores the value).
     env_exports=""
-    for v in COLORTERM LANG LC_ALL; do
+    for v in COLORTERM LANG LC_ALL WAYLAND_DISPLAY; do
       eval "val=\''${$v:-}"
       if [ -n "$val" ]; then
         env_exports="$env_exports export $v=$(printf '%q' "$val") &&"
@@ -646,6 +726,10 @@ let
     ${lib.optionalString ucfg.spacesGateway.enable ''
       iptables -w -A hermes-microvm -p tcp --dport ${toString ucfg.spacesPort} -m owner --uid-owner microvm -j RETURN
       ${ownerOnlyRules ucfg.spacesPort ucfg.uid}
+    ''}
+    ${lib.optionalString ucfg.clipboard.enable ''
+      iptables -w -A hermes-microvm -p tcp --dport ${toString ucfg.clipboardPort} -m owner --uid-owner microvm -j RETURN
+      ${ownerOnlyRules ucfg.clipboardPort ucfg.uid}
     ''}
   '') cfg.users);
 in
@@ -768,6 +852,11 @@ in
             default = 22200 + config.uid - 1000;
             description = "Host 127.0.0.1 port of the spaces gateway TCP bridge.";
           };
+          clipboardPort = mkOption {
+            type = types.port;
+            default = 22300 + config.uid - 1000;
+            description = "Host 127.0.0.1 port of the clipboard bridge.";
+          };
           environment = mkOption {
             type = types.attrsOf types.str;
             default = { };
@@ -785,6 +874,9 @@ in
               default = "/run/user/${toString config.uid}/pulse/native";
               description = "The user's pipewire-pulse socket on the host.";
             };
+          };
+          clipboard = {
+            enable = mkEnableOption "bridging the user's Wayland clipboard into the VM, read-only (TUI image paste)";
           };
           spacesGateway = {
             enable = mkEnableOption "bridging the user's spaces integration gateway into the VM";
@@ -884,6 +976,25 @@ in
             "${pkgs.socat}/bin/socat"
             "TCP-LISTEN:${toString ucfg.spacesPort},bind=127.0.0.1,fork,reuseaddr"
             "UNIX-CONNECT:${ucfg.spacesGateway.socket}"
+          ];
+          Restart = "always";
+          RestartSec = 5;
+        };
+      };
+
+      # clipboard bridge: guest wl-paste shim -> slirp 10.0.2.2:<port> ->
+      # this unit (as the owner) -> real wl-paste against the session
+      # compositor. Read-only by construction (paste only, whitelisted
+      # request forms).
+      "hermes-clipboard-bridge-${user}" = lib.mkIf ucfg.clipboard.enable {
+        description = "host clipboard bridge for ${vmName user}";
+        wantedBy = [ "multi-user.target" ];
+        serviceConfig = {
+          User = user;
+          ExecStart = lib.concatStringsSep " " [
+            "${pkgs.socat}/bin/socat"
+            "TCP-LISTEN:${toString ucfg.clipboardPort},bind=127.0.0.1,fork,reuseaddr"
+            "EXEC:${clipboardServer user ucfg}"
           ];
           Restart = "always";
           RestartSec = 5;

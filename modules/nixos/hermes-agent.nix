@@ -84,6 +84,11 @@ in
       # SECURITY: while enabled and the VM runs, the guest holds standing
       # capture access to the session's audio (mic + monitor sources).
       audio.enable = config.services.pipewire.enable;
+      # TUI image paste: bridge the host Wayland clipboard into the guest
+      # (read-only wl-paste shim over slirp). Same "has a desktop session"
+      # gate as audio; without a session every paste degrades to the normal
+      # "No image found in clipboard".
+      clipboard.enable = config.services.pipewire.enable;
       # The simplex daemon listens on the host's loopback; guests reach it
       # through slirp's host alias. (Shared host service: not isolated
       # between VMs — single-user setup.)
