@@ -37,10 +37,21 @@
 #
 # Isolation between users: ssh keys and dashboard tokens are owner-only
 # files, and iptables OUTPUT owner-match rules reject other local users on
-# every forwarded loopback port. Residual caveat: all VMs' qemu processes
-# run as the shared `microvm` user, so one user's *guest* could reach
-# another user's spaces bridge port (and host loopback services like the
-# simplex daemon) — acceptable for now with a single configured user.
+# every forwarded loopback port. Residual caveats:
+#   - all VMs' qemu processes run as the shared `microvm` user, so one
+#     user's *guest* could reach another user's spaces bridge port (and
+#     host loopback services like the simplex daemon);
+#   - owner-match gates CONNECTS, not LISTENS: while a VM is down, any
+#     local user can squat its free forwarded port. ssh fails closed
+#     (pinned host key); the shim/desktop wrappers refuse to talk unless
+#     the VM unit is active, but a browser can still be phished into
+#     sending the dashboard token to a squatter. Full fix would be a
+#     vsock backend behind a root-held socket;
+#   - the guest is trusted with the owner's HOST account: rw home means a
+#     hostile agent can plant dotfiles that run at the next interactive
+#     login — and where the owner is a nix trusted-user, that is
+#     root-equivalent. Deliberate (container parity), but know it.
+# All acceptable for now with a single configured user.
 #
 # pip: guests get a venv at /var/lib/hermes/.venv created from a nixpkgs
 # python-with-packages interpreter with --system-site-packages, so the
@@ -296,14 +307,19 @@ let
     };
 
     # Keep the guest-visible microvm.optimize defaults stable whether or
-    # not audio disabled the optimize module (values identical to
-    # microvm.nix nixos-modules/microvm/optimization.nix).
+    # not audio disabled the optimize module (mirrors microvm.nix
+    # nixos-modules/microvm/optimization.nix; one deliberate divergence:
+    # upstream keeps system.switch enabled when sshd + a store share make
+    # switching viable — these guests are fully declarative, so it stays
+    # off).
     documentation.enable = lib.mkDefault false;
     boot.initrd.systemd.enable = lib.mkDefault true;
+    boot.initrd.systemd.tpm2.enable = lib.mkDefault false;
     boot.kernelParams = [ "8250.nr_uarts=1" ];
     boot.swraid.enable = lib.mkDefault false;
     networking.useNetworkd = lib.mkDefault true;
     systemd.network.wait-online.enable = lib.mkDefault false;
+    systemd.tpm2.enable = lib.mkDefault false;
     system.switch.enable = lib.mkDefault false;
 
     # The hermes activation script (config.yaml/.env seeding) runs before
@@ -529,6 +545,12 @@ let
       exit 1
       ;;
     esac
+    # Fail fast while the VM is down (ssh would fail closed on the pinned
+    # host key anyway, but with a less helpful error).
+    ${pkgs.systemd}/bin/systemctl is-active --quiet "microvm@hermes-$u.service" || {
+      echo "hermes: microvm@hermes-$u is not running (systemctl status microvm@hermes-$u)" >&2
+      exit 1
+    }
     base="/var/lib/hermes-microvm/$u"
     tty_flag=""
     if [ -t 0 ] && [ -t 1 ]; then tty_flag="-t"; fi
@@ -564,11 +586,16 @@ let
       exit 1
       ;;
     esac
+    ${pkgs.systemd}/bin/systemctl is-active --quiet "microvm@hermes-$u.service" \
+      || { echo "hermes-vm-info: microvm@hermes-$u is not running" >&2; exit 1; }
     base="/var/lib/hermes-microvm/$u"
-    token="$(${pkgs.coreutils}/bin/cat "$base/desktop-token" 2>/dev/null || echo "<unreadable>")"
     echo "VM:            microvm@hermes-$u.service"
     echo "CLI/TUI:       hermes (routed via ssh, port $ssh_port)"
-    echo "Dashboard:     http://127.0.0.1:$dashboard_port/?token=$token"
+    # Loopback mode serves the SPA unauthenticated and injects the session
+    # token itself; a ?token= URL would only leak the secret into shell
+    # history. Point at the file instead.
+    echo "Dashboard:     http://127.0.0.1:$dashboard_port/"
+    echo "  token file:  $base/desktop-token (for API/WS clients)"
     echo "Desktop:       hermes-desktop (upstream Electron app -> this VM's backend)"
   '';
 
@@ -589,6 +616,12 @@ let
       ;;
     esac
     base="/var/lib/hermes-microvm/$u"
+    # Refuse while the VM is down: its loopback port is then free for any
+    # local user to squat (owner-match gates connects, not listens).
+    ${pkgs.systemd}/bin/systemctl is-active --quiet "microvm@hermes-$u.service" || {
+      echo "hermes-desktop: microvm@hermes-$u is not running — refusing to send the token to a possibly squatted port" >&2
+      exit 1
+    }
     token="$(${pkgs.coreutils}/bin/cat "$base/desktop-token" 2>/dev/null || true)"
     if [ -z "$token" ]; then
       echo "hermes-desktop: cannot read $base/desktop-token (VM not provisioned yet?)" >&2
@@ -767,6 +800,11 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    assertions = lib.mapAttrsToList (user: ucfg: {
+      assertion = lib.count (u: u.uid == ucfg.uid) (lib.attrValues cfg.users) == 1;
+      message = "services.hermes-microvm: duplicate uid ${toString ucfg.uid} (${user}) — uids derive ports, MAC and firewall identity and must be unique";
+    }) cfg.users;
+
     environment.systemPackages = [ hermesShim hermesInfo hermesDesktop ];
 
     networking.firewall.extraCommands = ''
@@ -883,9 +921,16 @@ in
 
     # The per-user gateway/pipewire sockets must exist at boot, before any
     # interactive login.
-    users.users = forEachUser (user: ucfg:
-      lib.optionalAttrs (ucfg.spacesGateway.enable || ucfg.audio.enable) {
-        ${user}.linger = true;
-      });
+    users.users = forEachUser (user: ucfg: {
+      ${user} = {
+        # Pin the host uid to the configured one: firewall owner-match,
+        # guest account, home-share ownership and port/MAC derivation all
+        # assume they agree. A drifted auto-allocated uid would authorize
+        # the wrong account silently.
+        uid = ucfg.uid;
+      } // lib.optionalAttrs (ucfg.spacesGateway.enable || ucfg.audio.enable) {
+        linger = true;
+      };
+    });
   };
 }
