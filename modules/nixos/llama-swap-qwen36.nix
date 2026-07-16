@@ -84,10 +84,10 @@ let
 in
 {
   services.llama-swap.settings.models = {
-    # Name is referenced by amy's hermes VMs (vit.d:8012) -- keep stable.
     "qwen3.6:35b" = {
       cmd = mkCmd { model = q4kxl; nCpuMoe = 24; };
     };
+    # Name is referenced by amy's hermes VMs (vit.d:8012) -- keep stable.
     "qwen3.6:35b-iq4_xs" = {
       cmd = mkCmd { model = iq4xs; nCpuMoe = 16; };
     };
