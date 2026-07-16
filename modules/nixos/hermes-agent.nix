@@ -63,7 +63,16 @@ in
 
   services.hermes-microvm = {
     enable = true;
-    settings.model.default = "anthropic/claude-sonnet-4";
+    # Default brain: qwen3.6 on vit's llama-swap, reached over yggdrasil
+    # (vit.d resolves via the clan /etc/hosts; the guest's slirp DNS
+    # proxies the host resolver, and modules/nixos/llama-swap-yggdrasil.nix
+    # opens vit's port on the ygg interface). "custom" = any
+    # OpenAI-compatible endpoint; llama-swap runs default-allow, so no key.
+    settings.model = {
+      default = "qwen3.6:35b";
+      provider = "custom";
+      base_url = "http://vit.d:8012/v1";
+    };
     extraPlugins = [ simplexPlatformFixed ];
 
     users.grmpf = {
