@@ -2036,8 +2036,8 @@
         "voxtype": "voxtype"
       },
       "locked": {
-        "lastModified": 1784122005,
-        "narHash": "sha256-gHT9OzByfCu49QmLlgWy6TiuK+pxBEL7JEz6QhMYHKE=",
+        "lastModified": 1784168273,
+        "narHash": "sha256-V1X+7bqJHCCfU5g8p9qAWD2oUMB+9oQHzBWbR3NtFXc=",
         "path": "/home/grmpf/synced/projects/spaces",
         "type": "path"
       },
