@@ -193,12 +193,17 @@ let
   # /etc/localtime swap (timedatectl, automatic-timezoned, rebuild).
   tzSyncScript = pkgs.writeShellScript "hermes-microvm-tz-sync" ''
     set -eu
+    # Own the umask: the provisioning script calls this after `umask 077`,
+    # which once produced an untraversable 0700 tz dir (guest fell back to
+    # UTC). chmod repairs dirs created by that bug.
+    umask 022
     export PATH=${lib.makeBinPath [ pkgs.coreutils ]}
     src=/etc/localtime
     [ -e "$src" ] || src=${pkgs.tzdata}/share/zoneinfo/UTC
     ${lib.concatMapStrings (u: ''
       d=${baseDir u}/guest/tz
       mkdir -p "$d"
+      chmod 0755 "$d"
       cp -Lf "$src" "$d/.localtime.tmp"
       chmod 0644 "$d/.localtime.tmp"
       mv "$d/.localtime.tmp" "$d/localtime"
