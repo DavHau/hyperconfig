@@ -8,6 +8,7 @@
     ../../modules/nixos/nvidia.nix
     ../../modules/nixos/llama-swap.nix
     ../../modules/nixos/llama-swap-qwen36.nix
+    ../../modules/nixos/llama-swap-yggdrasil.nix
   ];
 
   # Enable all hardware support
