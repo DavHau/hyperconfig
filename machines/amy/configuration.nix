@@ -2,6 +2,7 @@
 {
   imports = [
     inputs.nixos-hardware.nixosModules.framework-amd-ai-300-series
+    inputs.home-manager.nixosModules.home-manager
     # inputs.nixos-hardware.nixosModules.framework-13-7040-amd
     # inputs.nixos-hardware.nixosModules.lenovo-yoga-7-14ARH7-amdgpu
     # inputs.nixos-hardware.nixosModules.tuxedo-pulse-14-gen3
@@ -16,6 +17,10 @@
     ../../modules/nixos/hermes-agent.nix
     ../../modules/nixos/simplex-chat.nix
     ./disko.nix
+  ];
+
+  home-manager.users.grmpf.imports = [
+    ../../modules/home-manager/houses.nix
   ];
 
   networking.extraHosts = "10.0.0.1 127.0.0.0";

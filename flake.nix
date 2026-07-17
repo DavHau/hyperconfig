@@ -139,6 +139,12 @@
     microvm.inputs.nixpkgs.follows = "nixpkgs";
     messaging-daemon.url = "github:vbuterin/messaging-daemon";
     messaging-daemon.flake = false;
+
+    nix-housing.url = "github:decentstates/nix-housing";
+    nix-housing.inputs.nixpkgs.follows = "nixpkgs";
+    nix-housing.inputs.home-manager.follows = "home-manager";
+
+
   };
 
   outputs = inputs@{ self, flake-parts, nixpkgs, ... }:
