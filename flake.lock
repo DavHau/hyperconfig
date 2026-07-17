@@ -10,9 +10,9 @@
         "wrappers": "wrappers"
       },
       "locked": {
-        "lastModified": 1784274370,
-        "narHash": "sha256-EwQ/bhmGL71CFJHRNYShh8FW4V4KL50eZvmtEZOBuGM=",
-        "path": "/home/grmpf/synced/projects/afk",
+        "lastModified": 1784285466,
+        "narHash": "sha256-TlAMZrMKhBwGtzCsc1a3KxHsE29SdBjW9TZmDAr58B8=",
+        "path": "/home/grmpf/projects/afk",
         "type": "path"
       },
       "original": {
