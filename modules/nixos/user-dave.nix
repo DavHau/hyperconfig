@@ -8,6 +8,7 @@
       ../home-manager/htop
       ../home-manager/firefox.nix
       ../home-manager/fish-ai.nix
+      ../home-manager/houses.nix
     ];
   };
 
