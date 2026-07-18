@@ -9,7 +9,6 @@
     ../../modules/nixos/llama-swap.nix
     ../../modules/nixos/llama-swap-qwen36.nix
     ../../modules/nixos/llama-swap-yggdrasil.nix
-    ../../modules/nixos/vibepn.nix
   ];
 
   # Enable all hardware support
