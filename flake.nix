@@ -57,6 +57,9 @@
     srvos.url = "github:nix-community/srvos";
     srvos.inputs.nixpkgs.follows = "nixpkgs";
 
+    vibepn.url = "git+file:///home/grmpf/projects/VibePN";
+    vibepn.inputs.nixpkgs.follows = "nixpkgs";
+
     # nether.url = "github:Lassulus/nether";
     # nether.inputs.nixpkgs.follows = "nixpkgs";
 
