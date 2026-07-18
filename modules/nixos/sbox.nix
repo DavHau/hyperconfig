@@ -30,6 +30,8 @@
       # .omp/agent. Without this bind every sbox launch starts logged out.
       "$HOME/.omp/profiles/sp/agent" = {};
       "$HOME/.omp/profiles/oml/agent" = {};
+      # afk (afk.nix) runs under OMP_PROFILE=afk; same reasoning as sp/oml.
+      "$HOME/.omp/profiles/afk/agent" = {};
       "$HOME/.local/share/zoxide" = {};
       "$HOME/.local/share/pueue" = {};
       "$XDG_RUNTIME_DIR/pueue_$USER.socket" = {};
