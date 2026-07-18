@@ -5,6 +5,7 @@
     ../../modules/nixos/sbox.nix
     ../../modules/nixos/common.nix
     ../../modules/nixos/dyndns-porkbun.nix
+    ../../modules/nixos/vibepn.nix
     ./reverse-proxy.nix
     ./nginx-file-server.nix
     ./reverse-proxy-maker.nix
