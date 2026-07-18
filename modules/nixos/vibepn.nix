@@ -8,11 +8,12 @@
     inputs.vibepn.packages.${pkgs.stdenv.hostPlatform.system}.vpnd
   ];
 
-  # The upstream VM tests run firewall-free; on real machines the default
-  # NixOS firewall breaks discovery. Open:
-  #   5353/udp  mDNS local peer discovery
+  # The host firewall blocked VibePN's post-discovery dials (verified: 4001 was
+  # closed on amy/bam pre-integration; 5353 was already open via the shared
+  # module stack, so mDNS discovery itself worked). Open:
   #   4001      libp2p control plane (tcp + quic) - descriptor rendezvous, hole punching
   #   51820/udp data plane ([[network]] listen)
+  # Remove once VibePN handles firewalled hosts (VibePN backlog/lan-firewalled-hosts.md).
   networking.firewall.allowedTCPPorts = [ 4001 ];
-  networking.firewall.allowedUDPPorts = [ 5353 4001 51820 ];
+  networking.firewall.allowedUDPPorts = [ 4001 51820 ];
 }
