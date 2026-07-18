@@ -10,12 +10,15 @@
     ./nextcloud.nix
     ./vikunja.nix
     ./ollama.nix
-    ./zfs.nix
     ../../modules/nixos/vibepn.nix
   ];
 
   nixpkgs.hostPlatform = "x86_64-linux";
   boot.binfmt.emulatedSystems = ["aarch64-linux"];
+
+  # Kept from the removed vault pool config (machines/bam/zfs.nix): a changed
+  # hostId would make re-importing the pool need -f when vault is re-set up.
+  networking.hostId = "b411ca35";
 
   nix.settings.max-jobs = 16;
   nix.settings.sandbox = "relaxed";
