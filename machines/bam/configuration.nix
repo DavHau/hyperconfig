@@ -11,6 +11,7 @@
     ./vikunja.nix
     ./ollama.nix
     ./zfs.nix
+    ../../modules/nixos/vibepn.nix
   ];
 
   nixpkgs.hostPlatform = "x86_64-linux";

@@ -2132,6 +2132,7 @@
         "stylix": "stylix",
         "superpowers": "superpowers_2",
         "systems": "systems_11",
+        "vibepn": "vibepn",
         "wrappers": "wrappers_2"
       }
     },
@@ -2857,6 +2858,25 @@
         "owner": "pyproject-nix",
         "repo": "uv2nix",
         "type": "github"
+      }
+    },
+    "vibepn": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1784078278,
+        "narHash": "sha256-8/VHUKsiAjb23WoxtBh8IaQ6zmCZj/kRvWuJZVeRSoo=",
+        "rev": "bebcb2a13100c08802d1938f90565ea7c60bc62d",
+        "revCount": 84,
+        "type": "git",
+        "url": "file:///home/grmpf/projects/VibePN"
+      },
+      "original": {
+        "type": "git",
+        "url": "file:///home/grmpf/projects/VibePN"
       }
     },
     "voxtype": {

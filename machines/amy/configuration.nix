@@ -16,6 +16,7 @@
     ../../modules/nixos/fw-fanctrl.nix
     ../../modules/nixos/hermes-agent.nix
     ../../modules/nixos/simplex-chat.nix
+    ../../modules/nixos/vibepn.nix
     ./disko.nix
   ];
 
