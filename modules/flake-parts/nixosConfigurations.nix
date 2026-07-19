@@ -78,6 +78,17 @@ in {
                 "7c29125877"
               ];
             };
+            # VibePN mesh: instance name = network name; the service module
+            # mints the shared invite phrase (generator vibepn-vibe) and
+            # enables services.vibepn on every peer. Port/firewall settings
+            # live in modules/nixos/vibepn.nix on the member machines.
+            vibe = {
+              module.name = "vibepn";
+              module.input = "vibepn";
+              roles.peer.machines.amy = {};
+              roles.peer.machines.bam = {};
+              roles.peer.machines.edi = {};
+            };
             importer.roles.default.extraModules = [
               ../../modules/nixos/common.nix
             ];

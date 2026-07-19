@@ -59,6 +59,7 @@
 
     vibepn.url = "git+file:///home/grmpf/projects/VibePN";
     vibepn.inputs.nixpkgs.follows = "nixpkgs";
+    vibepn.inputs.clan-core.follows = "clan-core";
 
     # nether.url = "github:Lassulus/nether";
     # nether.inputs.nixpkgs.follows = "nixpkgs";
