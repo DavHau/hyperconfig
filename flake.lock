@@ -2862,15 +2862,18 @@
     },
     "vibepn": {
       "inputs": {
+        "clan-core": [
+          "clan-core"
+        ],
         "nixpkgs": [
           "nixpkgs"
         ]
       },
       "locked": {
-        "lastModified": 1784426355,
-        "narHash": "sha256-FSkq+CIWMs6thR0f53zP40/nKOyYJ4CvazmiXp5BO6Q=",
-        "rev": "793d44e25578a30f07a11cfeb51d59d41ac93439",
-        "revCount": 115,
+        "lastModified": 1784447049,
+        "narHash": "sha256-QPT71IFt1Zjyh9o4hnh5ol5CqhQFJb3dUzUrNsLZJzk=",
+        "rev": "28c83ec15ebd671a67c6902dfa9a92f5d9672722",
+        "revCount": 120,
         "type": "git",
         "url": "file:///home/grmpf/projects/VibePN"
       },
