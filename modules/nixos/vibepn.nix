@@ -1,15 +1,27 @@
 # VibePN p2p mesh VPN - upstream NixOS module (services.vibepn) runs vpnd
-# and joins the network declaratively. Creation stays imperative: run
-# `vpn network create hyper` once, then store the invite phrase in the
-# shared clan var below (`clan vars generate --generator vibepn`).
-{ config, inputs, ... }:
+# and joins the network declaratively. Open networks are a pure function of
+# the invite phrase (deterministic network key), so the shared generator
+# below mints the whole network: no imperative `vpn network create`, no
+# prompt. All members are born resolved from the same phrase.
+{ config, inputs, pkgs, ... }:
 {
   imports = [ inputs.vibepn.nixosModules.default ];
 
   clan.core.vars.generators.vibepn = {
     share = true;
-    prompts.invite.type = "hidden";
-    prompts.invite.persist = true;
+    files.invite.secret = true;
+    runtimeInputs = [
+      inputs.vibepn.packages.${pkgs.stdenv.hostPlatform.system}.vibepn
+      pkgs.gnused
+    ];
+    # Throwaway state dir: only the phrase matters; the identity minted for
+    # `network create` is discarded (every node derives its own at boot).
+    script = ''
+      state=$(mktemp -d)
+      vpn --state-dir "$state" identity init > /dev/null
+      vpn --state-dir "$state" network create hyper \
+        | sed -n 's/^invite: //p' | tr -d '\n' > "$out"/invite
+    '';
   };
 
   services.vibepn = {

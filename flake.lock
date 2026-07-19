@@ -2867,10 +2867,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1784387680,
-        "narHash": "sha256-Jc9twaA0o8lNHGNKbwygLEftPFN6N555+cOsJ07koIc=",
-        "rev": "2da38b9a36ca9894a95126db2d1ef0686ab74a3d",
-        "revCount": 104,
+        "lastModified": 1784426355,
+        "narHash": "sha256-FSkq+CIWMs6thR0f53zP40/nKOyYJ4CvazmiXp5BO6Q=",
+        "rev": "793d44e25578a30f07a11cfeb51d59d41ac93439",
+        "revCount": 115,
         "type": "git",
         "url": "file:///home/grmpf/projects/VibePN"
       },
