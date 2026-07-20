@@ -711,6 +711,44 @@ let
     export HERMES_DESKTOP_REMOTE_TOKEN="$token"
     exec ${desktopPackage}/bin/hermes-desktop "$@"
   '';
+  # Launcher visibility: neither the upstream desktop package nor the
+  # shims above ship .desktop files, so app launchers (fuzzel drun) never
+  # list Hermes. Two entries, both against the host wrappers (absolute
+  # store paths — launchers don't inherit a useful PATH):
+  #   - Hermes Desktop: the Electron app via the token-injecting wrapper.
+  #   - Hermes TUI: Terminal=true; fuzzel's default `terminal=$TERMINAL -e`
+  #     resolves via desktop.nix's TERMINAL=alacritty. Wrapped so a fast
+  #     failure (VM down) doesn't just flash and vanish with the window.
+  hermesIcon = "${desktopPackage}/share/hermes-desktop/dist/hermes.png";
+
+  hermesTuiLauncher = pkgs.writeShellScriptBin "hermes-tui" ''
+    ${hermesShim}/bin/hermes "$@"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+      printf '\nhermes exited with status %d — press Enter to close\n' "$rc"
+      read -r _
+    fi
+    exit "$rc"
+  '';
+
+  hermesDesktopItem = pkgs.makeDesktopItem {
+    name = "hermes-desktop";
+    desktopName = "Hermes Desktop";
+    comment = "Hermes Agent desktop app (microvm backend)";
+    exec = "${hermesDesktop}/bin/hermes-desktop";
+    icon = hermesIcon;
+    categories = [ "Network" "Chat" ];
+  };
+
+  hermesTuiItem = pkgs.makeDesktopItem {
+    name = "hermes-tui";
+    desktopName = "Hermes TUI";
+    comment = "Hermes Agent terminal UI (ssh into the microvm)";
+    exec = "${hermesTuiLauncher}/bin/hermes-tui";
+    icon = hermesIcon;
+    terminal = true;
+    categories = [ "Network" "ConsoleOnly" ];
+  };
 
   # Only the owner (and root) may connect to a VM's forwarded loopback
   # ports; only qemu (`microvm` user), the owner, and root may reach the
@@ -897,7 +935,10 @@ in
       message = "services.hermes-microvm: duplicate uid ${toString ucfg.uid} (${user}) — uids derive ports, MAC and firewall identity and must be unique";
     }) cfg.users;
 
-    environment.systemPackages = [ hermesShim hermesInfo hermesDesktop ];
+    environment.systemPackages = [
+      hermesShim hermesInfo hermesDesktop
+      hermesDesktopItem hermesTuiItem
+    ];
 
     networking.firewall.extraCommands = ''
       iptables -w -N hermes-microvm 2>/dev/null || true
