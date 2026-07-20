@@ -73,6 +73,11 @@ in
       default = "qwen3.6:35b-iq4_xs";
       provider = "custom";
       base_url = "http://vit.d:8012/v1";
+      # llama-swap's /v1/models omits context_length, so hermes probe-downs
+      # to its 131,072 fallback. Pin the real window: vit's llama-server
+      # runs `-c 204800` (llama-swap-qwen36.nix; model native max 262,144).
+      # Keep in sync with the -c flag there.
+      context_length = 204800;
     };
     extraPlugins = [ simplexPlatformFixed ];
 

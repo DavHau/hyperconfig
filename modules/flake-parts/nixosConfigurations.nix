@@ -62,14 +62,14 @@ in {
                 };
               };
             };
-            zt-home = {
-              module.name = "zerotier";
-              roles.peer.tags.all = {};
-              roles.controller.machines.nas = {};
-              roles.controller.settings.allowedIps = [
-                "7c29125877"
-              ];
-            };
+            # zt-home = {
+            #   module.name = "zerotier";
+            #   roles.peer.tags.all = {};
+            #   roles.controller.machines.nas = {};
+            #   roles.controller.settings.allowedIps = [
+            #     "7c29125877"
+            #   ];
+            # };
             zt-eu = {
               module.name = "zerotier";
               roles.peer.tags.all = {};
