@@ -19,17 +19,6 @@
         "nixos"
       ]
     },
-    "test": {
-      "name": "test",
-      "description": "test",
-      "tags": [
-        "all",
-        "nixos"
-      ],
-      "deploy": {
-        "targetHost": "localhost:22001"
-      }
-    },
     "bam": {
       "name": "bam",
       "tags": [],
