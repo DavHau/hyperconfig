@@ -53,12 +53,10 @@
 #     root-equivalent. Deliberate (container parity), but know it.
 # All acceptable for now with a single configured user.
 #
-# pip: guests get a venv at /var/lib/hermes/.venv created from a nixpkgs
-# python-with-packages interpreter with --system-site-packages, so the
-# preinstalled scientific stack is importable AND `pip install` works
-# (writable venv; wheel shared-lib deps resolve via LD_LIBRARY_PATH below
-# — nix-ld only covers pip-installed *executables*, not extension modules
-# dlopen'd by the nix-built interpreter).
+# pip: guests get a venv at /var/lib/hermes/.venv with the preinstalled
+# scientific stack importable AND `pip install` working — see
+# ./hermes-guest-python.nix (shared module, pinned by the
+# `hermes-guest-python` flake check).
 #
 # Hardware acceleration: the iGPU cannot be passed through (the host
 # desktop owns it), so computation acceleration is CPU-side: openblas-
@@ -73,7 +71,6 @@ let
   # Fixed guest paths
   guestStateDir = "/var/lib/hermes";
   guestHostDir = "/run/hermes-host"; # ro virtiofs: ssh keys + secrets
-  guestVenv = "${guestStateDir}/.venv";
   guestWorkspace = "${guestStateDir}/workspace";
   # NIC-facing port the slirp forward targets (guest socat listens here)
   dashboardGuestPort = 9119;
@@ -87,8 +84,6 @@ let
     let h = lib.toLower (lib.fixedWidthString 4 "0" (lib.toHexString uid));
     in "02:00:00:00:${builtins.substring 0 2 h}:${builtins.substring 2 2 h}";
 
-  pythonEnv = pkgs.python3.withPackages cfg.pythonPackages;
-
   # Tools the agent sees on PATH (service, ssh shells, cron, skills).
   baseGuestPackages = with pkgs; [
     # vcs / basics
@@ -101,27 +96,6 @@ let
     # runtimes & package managers agents reach for
     nodejs uv
   ];
-
-  # Shared libs for `pip install`ed manylinux wheels. Served two ways:
-  # nix-ld (standalone executables whose ELF interpreter is
-  # /lib64/ld-linux) and LD_LIBRARY_PATH (extension modules dlopen'd by
-  # the nix-built venv python, which nix-ld never sees).
-  nixLdLibraries = with pkgs; [
-    stdenv.cc.cc
-    zlib
-    zstd
-    openssl
-    curl
-    expat
-    libxml2
-    libxslt
-    libffi
-    bzip2
-    ncurses
-    fontconfig
-    freetype
-  ];
-  wheelLibraryPath = lib.makeLibraryPath nixLdLibraries;
 
   # Guest-side `wl-paste` for the clipboard bridge: hermes image paste
   # (hermes_cli/clipboard.py) and the TUI's text-clipboard read both shell
@@ -289,7 +263,17 @@ let
 
   # ── Guest NixOS configuration (fully declarative microvm) ────────────
   guestConfig = user: ucfg: { config, lib, pkgs, ... }: {
-    imports = [ inputs.hermes-agent.nixosModules.default ];
+    imports = [
+      inputs.hermes-agent.nixosModules.default
+      ./hermes-guest-python.nix
+    ];
+
+    services.hermes-python = {
+      enable = true;
+      inherit user;
+      stateDir = guestStateDir;
+      packages = cfg.pythonPackages;
+    };
 
     networking.hostName = vmName user;
     system.stateVersion = "26.05";
@@ -455,11 +439,11 @@ let
       # NOTE: systemd `path` string entries get /bin appended — pass the
       # venv ROOT, not its bin dir (".venv/bin" rendered as ".venv/bin/bin"
       # and silently dropped the venv from the unit's PATH).
-      path = [ guestVenv ];
+      path = [ config.services.hermes-python.venv ];
       # pip-installed manylinux extension modules (.so) are loaded by the
       # nix-built interpreter, so their NEEDED libs resolve via
       # LD_LIBRARY_PATH — nix-ld doesn't apply to dlopen.
-      environment.LD_LIBRARY_PATH = wheelLibraryPath;
+      environment.LD_LIBRARY_PATH = config.services.hermes-python.wheelLibraryPath;
       # Defensive: strip interpreter-hijacking keys from the writable .env.
       # load_hermes_dotenv() imports that file into the gateway's process
       # env, which the terminal tool passes into every subprocess — a
@@ -478,31 +462,6 @@ let
       # The upstream unit only allows stateDir+workspace; the agent must
       # also reach the owner's shared home.
       serviceConfig.ReadWritePaths = [ "/home/${user}" ];
-    };
-
-    # Writable python: venv over the nixpkgs scientific interpreter.
-    # --system-site-packages exposes every preinstalled library while
-    # `pip install` lands in the venv. Recreated when the interpreter
-    # changes (pip-installed extras are lost then — same lifecycle as the
-    # old container's writable layer).
-    systemd.services.hermes-python-venv = {
-      description = "Hermes agent python venv (pip-writable)";
-      wantedBy = [ "multi-user.target" ];
-      unitConfig.RequiresMountsFor = [ guestStateDir ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-      };
-      script = ''
-        venv=${guestVenv}
-        if [ ! -x "$venv/bin/python" ] \
-           || [ "$(cat "$venv/.nix-python" 2>/dev/null || true)" != "${pythonEnv}" ]; then
-          rm -rf "$venv"
-          ${pythonEnv}/bin/python -m venv --system-site-packages "$venv"
-          printf '%s' "${pythonEnv}" > "$venv/.nix-python"
-          chown -R ${user}:users "$venv"
-        fi
-      '';
     };
 
     # Web dashboard (SPA + JSON-RPC/WS backend). Separate process from the
@@ -527,7 +486,7 @@ let
         pkgs.bash
         pkgs.coreutils
         pkgs.git
-        "${guestVenv}/bin"
+        config.services.hermes-python.venv
       ] ++ baseGuestPackages ++ cfg.extraPackages;
       serviceConfig = {
         User = user;
@@ -569,18 +528,8 @@ let
       };
     };
 
-    # manylinux wheels from pip need a link-loader + common shared libs
-    programs.nix-ld.enable = true;
-    programs.nix-ld.libraries = nixLdLibraries;
-
     environment.systemPackages = [ pkgs.socat ]
       ++ lib.optional ucfg.clipboard.enable (clipboardShimFor ucfg);
-    # interactive ssh/TUI shells also get the writable venv first, and the
-    # wheel shared libs (same LD_LIBRARY_PATH rationale as the gateway unit)
-    environment.extraInit = ''
-      export PATH="${guestVenv}/bin:$PATH"
-      export LD_LIBRARY_PATH="${wheelLibraryPath}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    '';
   };
 
   # ── Host-side wiring per user ─────────────────────────────────────────
