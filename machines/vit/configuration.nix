@@ -18,7 +18,28 @@
   # card reader link (0000:2c:00.0) when ASPM L0s/L1 is active, livelocking
   # boot before the LUKS prompt. Disabling ASPM stops the errors at the
   # source (verified on 26.11 gen 78). Revisit on future kernel bumps.
-  boot.kernelParams = [ "pcie_aspm=off" ];
+  # nmi_watchdog: hard-lockup detector (2026-07-20 freeze mitigation below).
+  boot.kernelParams = [ "pcie_aspm=off" "nmi_watchdog=1" ];
+
+  # 2026-07-20: hard freeze with zero kernel trace (journal just stops),
+  # hours after a suspend/resume cycle under llama.cpp load — classic
+  # nvidia-after-resume wedge. vit serves qwen3.6 to the hermes VMs
+  # (vit.d:8012), so a hang takes the agents' brain offline until someone
+  # walks to the machine. Make it self-recover and self-document instead:
+  # hardware watchdog reboots a wedged kernel, hung tasks escalate to a
+  # panic (which the watchdog then catches).
+  systemd.watchdog.runtimeTime = "30s";
+  boot.kernel.sysctl = {
+    "kernel.hung_task_timeout_secs" = 120;
+    "kernel.hung_task_panic" = 1;
+  };
+  # Inference-server duty: sleeping breaks vit.d for every consumer, and
+  # the resume path is the prime suspect for the freeze. This machine is a
+  # laptop, but it must not sleep — lid close no longer suspends.
+  systemd.targets.sleep.enable = false;
+  systemd.targets.suspend.enable = false;
+  systemd.targets.hibernate.enable = false;
+  systemd.targets.hybrid-sleep.enable = false;
 
   # VM settings
   virtualisation.vmVariant = {
