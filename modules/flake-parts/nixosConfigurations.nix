@@ -219,8 +219,8 @@ in {
                 port = 51821;
               };
               roles.peer.machines = lib.genAttrs [
-                "amy" "bam" "cat" "cm-pi" "dom" "joy" "manu-nas" "nas"
-                "sir" "test" "tossa-pi" "vit" "v-machine" "installer"
+                "amy" "bam" "cat" "cm-pi" "joy" "nas"
+                "tossa-pi" "vit" "v-machine" "installer"
               ] (_: { });
             };
             # easytier
