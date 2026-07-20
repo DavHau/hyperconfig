@@ -56,9 +56,9 @@
 # pip: guests get a venv at /var/lib/hermes/.venv created from a nixpkgs
 # python-with-packages interpreter with --system-site-packages, so the
 # preinstalled scientific stack is importable AND `pip install` works
-# (writable venv + nix-ld for manylinux wheels; see
-# ../../../nixos-example/devShells/phi3 for the LD_LIBRARY_PATH variant
-# this replaces).
+# (writable venv; wheel shared-lib deps resolve via LD_LIBRARY_PATH below
+# — nix-ld only covers pip-installed *executables*, not extension modules
+# dlopen'd by the nix-built interpreter).
 #
 # Hardware acceleration: the iGPU cannot be passed through (the host
 # desktop owns it), so computation acceleration is CPU-side: openblas-
@@ -102,7 +102,10 @@ let
     nodejs uv
   ];
 
-  # Shared libs for `pip install`ed manylinux wheels (nix-ld).
+  # Shared libs for `pip install`ed manylinux wheels. Served two ways:
+  # nix-ld (standalone executables whose ELF interpreter is
+  # /lib64/ld-linux) and LD_LIBRARY_PATH (extension modules dlopen'd by
+  # the nix-built venv python, which nix-ld never sees).
   nixLdLibraries = with pkgs; [
     stdenv.cc.cc
     zlib
@@ -118,6 +121,7 @@ let
     fontconfig
     freetype
   ];
+  wheelLibraryPath = lib.makeLibraryPath nixLdLibraries;
 
   # Guest-side `wl-paste` for the clipboard bridge: hermes image paste
   # (hermes_cli/clipboard.py) and the TUI's text-clipboard read both shell
@@ -447,8 +451,30 @@ let
       after = [ "hermes-python-venv.service" ];
       wants = [ "hermes-python-venv.service" ];
       unitConfig.RequiresMountsFor = [ guestStateDir "/home/${user}" ];
-      # venv first so python/pip resolve to the writable interpreter
-      path = [ "${guestVenv}/bin" ];
+      # venv first so python/pip resolve to the writable interpreter.
+      # NOTE: systemd `path` string entries get /bin appended — pass the
+      # venv ROOT, not its bin dir (".venv/bin" rendered as ".venv/bin/bin"
+      # and silently dropped the venv from the unit's PATH).
+      path = [ guestVenv ];
+      # pip-installed manylinux extension modules (.so) are loaded by the
+      # nix-built interpreter, so their NEEDED libs resolve via
+      # LD_LIBRARY_PATH — nix-ld doesn't apply to dlopen.
+      environment.LD_LIBRARY_PATH = wheelLibraryPath;
+      # Defensive: strip interpreter-hijacking keys from the writable .env.
+      # load_hermes_dotenv() imports that file into the gateway's process
+      # env, which the terminal tool passes into every subprocess — a
+      # persisted PYTHONPATH shadows the venv's site-packages with the
+      # gateway's own sealed cp312 venv (wrong-ABI imports). Upstream's
+      # env writer denylists exactly these keys; a sudo-wielding agent can
+      # still hand-edit them in, so drop them before every start.
+      preStart = ''
+        env_file=${guestStateDir}/.hermes/.env
+        if [ -f "$env_file" ]; then
+          ${pkgs.gnused}/bin/sed -i -E \
+            '/^(export[[:space:]]+)?(PYTHONPATH|PYTHONHOME|PYTHONSTARTUP|NIX_PYTHONPATH)=/d' \
+            "$env_file"
+        fi
+      '';
       # The upstream unit only allows stateDir+workspace; the agent must
       # also reach the owner's shared home.
       serviceConfig.ReadWritePaths = [ "/home/${user}" ];
@@ -549,9 +575,11 @@ let
 
     environment.systemPackages = [ pkgs.socat ]
       ++ lib.optional ucfg.clipboard.enable (clipboardShimFor ucfg);
-    # interactive ssh/TUI shells also get the writable venv first
+    # interactive ssh/TUI shells also get the writable venv first, and the
+    # wheel shared libs (same LD_LIBRARY_PATH rationale as the gateway unit)
     environment.extraInit = ''
       export PATH="${guestVenv}/bin:$PATH"
+      export LD_LIBRARY_PATH="${wheelLibraryPath}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     '';
   };
 
