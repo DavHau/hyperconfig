@@ -10,7 +10,8 @@
 #
 # Interfaces (as grmpf): `hermes` (CLI/TUI via ssh into the VM),
 # `hermes-desktop` (upstream Electron app on the VM's backend),
-# `hermes-vm-info` (dashboard URL).
+# `hermes-vm-info` (dashboard URL). Both GUI/TUI entry points also ship
+# .desktop entries, so they show up in app launchers (fuzzel).
 { config, lib, pkgs, inputs, ... }:
 let
   # Shadow copy of the bundled simplex platform plugin with the DM send
