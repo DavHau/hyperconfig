@@ -73,6 +73,40 @@
   systemd.targets.hibernate.enable = false;
   systemd.targets.hybrid-sleep.enable = false;
 
+  # Belt-and-braces on top of the disabled sleep targets above: logind's
+  # default HandleLidSwitch=suspend still fires a (failing) suspend attempt
+  # on every lid close. Ignore the lid switch entirely — closed lid never
+  # suspends or powers off, on AC, battery, or docked.
+  services.logind.settings.Login = {
+    HandleLidSwitch = "ignore";
+    HandleLidSwitchExternalPower = "ignore";
+    HandleLidSwitchDocked = "ignore";
+  };
+
+  # Turn off the "Slash" LED array on the back of the lid. asusd (enabled by
+  # the nixos-hardware gu605cw module) owns the ledbar, but the NixOS asusd
+  # module has no declarative slash.ron option, so apply it via asusctl at
+  # boot. --disable kills the runtime animation; the show-on-* flags are
+  # firmware-persisted and cover boot/shutdown/sleep/low-battery, where the
+  # lid would otherwise still light up outside asusd's control.
+  systemd.services.disable-slash-led = {
+    description = "Disable the lid Slash LED array";
+    wantedBy = [ "multi-user.target" ];
+    wants = [ "asusd.service" ];
+    after = [ "asusd.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = lib.concatStringsSep " " [
+        "${config.services.asusd.package}/bin/asusctl slash --disable"
+        "--show-on-boot false"
+        "--show-on-shutdown false"
+        "--show-on-sleep false"
+        "--show-on-battery false"
+        "--show-battery-warning false"
+      ];
+    };
+  };
+
   # VM settings
   virtualisation.vmVariant = {
     users.users.dave.hashedPasswordFile = lib.mkForce null;
