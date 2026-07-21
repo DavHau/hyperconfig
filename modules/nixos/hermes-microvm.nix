@@ -6,7 +6,7 @@
 # UPSTREAM hermes NixOS module runs in native mode as a guest account with
 # the same name/uid as the host user, so the virtiofs-shared home keeps
 # consistent ownership. The guest gets the host's /nix/store read-only, a
-# private ext4 volume for HERMES state (sqlite WAL stays off virtiofs), the
+# namespace-hidden virtiofs share for HERMES state (see below), the
 # owner's home read-write, and passwordless sudo (parity with the old
 # container's self-modification support).
 #
@@ -53,20 +53,46 @@
 #     root-equivalent. Deliberate (container parity), but know it.
 # All acceptable for now with a single configured user.
 #
+# HERMES state (/var/lib/hermes in the guest) is a virtiofs share. The
+# real data lives in a root-only vault on the host,
+#   /var/lib/hermes-microvm/<user>/state-vault/state   (vault 0700 root),
+# while the share's `source` points at an EMPTY decoy dir under
+# /run/hermes-microvm-shares/<user>/. Only the per-VM virtiofsd unit sees
+# the data: it runs with PrivateMounts plus an ExecStartPre bind mount
+# vault -> share-source inside its private mount namespace. INVARIANT:
+# the host must never open the state sqlite DBs — a host-side reader
+# would reintroduce exactly the cross-kernel sqlite coordination that
+# virtiofs cannot provide (no remote locks, unsafe WAL mmap). Inspect
+# state through the guest (`hermes`/ssh) or via
+#   nsenter -m -t "$(systemctl show -p MainPID --value microvm-virtiofsd@hermes-<user>)"
+# sqlite safety on virtiofs: WAL needs a MAP_SHARED -shm mapping whose
+# FUSE cache invalidation is unreliable, so the guest runs a patched
+# hermes package (hermesPackageNoWal below) that forces
+# journal_mode=DELETE for every DB family. fcntl/flock locking is
+# guest-local and safe: all lockers of a given DB live in one guest
+# kernel.
+#
 # pip: guests get a venv at /var/lib/hermes/.venv with the preinstalled
 # scientific stack importable AND `pip install` working — see
 # ./hermes-guest-python.nix (shared module, pinned by the
 # `hermes-guest-python` flake check).
 #
-# Hardware acceleration: the iGPU cannot be passed through (the host
-# desktop owns it), so computation acceleration is CPU-side: openblas-
-# backed numpy/scipy, CPU torch with AVX-512, numba JIT.
+# Hardware acceleration: the host desktop owns the iGPU, so no
+# passthrough — instead `gpu.enable` gives every guest Vulkan via QEMU
+# Venus (virtio-gpu-gl-pci + egl-headless on the host render node; the
+# iGPU is time-shared with the host compositor). Computation is
+# otherwise CPU-side: openblas-backed numpy/scipy, CPU torch with
+# AVX-512, numba JIT.
 { config, lib, pkgs, inputs, ... }:
 let
   cfg = config.services.hermes-microvm;
 
   vmName = user: "hermes-${user}";
   baseDir = user: "/var/lib/hermes-microvm/${user}";
+  # Share `source`s for the state vault: empty decoy dirs in the host
+  # namespace; the real vault is bind-mounted over them only inside the
+  # virtiofsd unit's private mount namespace (see the drop-in below).
+  shareSourceDir = user: "/run/hermes-microvm-shares/${user}";
 
   # Fixed guest paths
   guestStateDir = "/var/lib/hermes";
@@ -218,7 +244,9 @@ let
     '') ucfg.environmentFiles}
     mv "$base/guest/secrets/hermes.env.tmp" "$base/guest/secrets/hermes.env"
 
-    # VM state dir holds the hermes state volume image — no world access
+    # VM runtime dir (virtiofsd sockets, current-system symlink) — no
+    # world access. The hermes state itself lives in the state-vault,
+    # hidden from the host; see the virtiofsd drop-in.
     if [ -d /var/lib/microvms/${vmName user} ]; then
       chmod 0750 /var/lib/microvms/${vmName user}
     fi
@@ -259,6 +287,107 @@ let
       chmod 0644 "$d/.localtime.tmp"
       mv "$d/.localtime.tmp" "$d/localtime"
     '') (lib.attrNames cfg.users)}
+  '';
+
+  # ── Guest hermes package: sqlite WAL disabled ────────────────────────
+  # /var/lib/hermes is a virtiofs share now. Guest-local fcntl/flock (the
+  # gateway/CLI seam, .dispatch.lock) are fine on rust virtiofsd, but
+  # sqlite WAL mode needs a MAP_SHARED mmap of the -shm index whose FUSE
+  # page-cache invalidation is not reliable — a corruption risk, not a
+  # clean failure: on virtiofs (cache=auto) `PRAGMA journal_mode=WAL`
+  # SUCCEEDS, so upstream's WAL->DELETE fallback
+  # (hermes_state.apply_wal_with_fallback, which only matches "locking
+  # protocol"/"not authorized" errors) never fires, and
+  # agent/verification_evidence.py sets WAL with no fallback at all.
+  # There is no config/env knob for the journal mode, so the wheel is
+  # patched to force rollback-journal (DELETE) deterministically:
+  #   - apply_wal_with_fallback() returns "delete" always; that covers
+  #     state.db, kanban*.db, projects.db, response_store.db and the
+  #     holographic memory store (they all call the helper);
+  #   - agent/verification_evidence.py and tools/async_delegation.py
+  #     (raw WAL pragmas, no fallback) set journal_mode=DELETE directly.
+  # The upstream package is a bin-wrapper around a sealed uv2nix venv,
+  # itself a symlink farm over per-wheel store paths — so: copy the farm,
+  # embed a patched copy of the hermes wheel, retarget the farm's links,
+  # and re-point the wrapper. A build-time grep proves no WAL set-pragma
+  # survives anywhere in the wheel.
+  hermesPackageBase = inputs.hermes-agent.packages.${pkgs.stdenv.hostPlatform.system}.default;
+
+  hermesVenvNoWal = pkgs.runCommand "${hermesPackageBase.hermesVenv.name}-nowal" { } ''
+    orig=${hermesPackageBase.hermesVenv}
+    sp=$(cd "$orig" && echo lib/python3.*/site-packages)
+    wheel=$(readlink "$orig/$sp/hermes_state.py")
+    wheel=''${wheel%/lib/*}
+
+    mkdir $out
+    cp -a "$orig/." "$out/"
+    chmod u+w "$out"
+    cp -a "$wheel" "$out/pkg"
+    chmod -R u+w "$out"
+
+    # Neuter the keep-existing-WAL probe, then turn the WAL set-pragma
+    # into DELETE + early return (the rest of the function goes dead).
+    substituteInPlace "$out/pkg/$sp/hermes_state.py" \
+      --replace-fail 'if current_mode and current_mode[0] == "wal":' \
+                     'if False and current_mode and current_mode[0] == "wal":  # hyperconfig: DELETE-only on virtiofs' \
+      --replace-fail 'conn.execute("PRAGMA journal_mode=WAL")' \
+                     'conn.execute("PRAGMA journal_mode=DELETE"); return "delete"  # hyperconfig: DELETE-only on virtiofs'
+    substituteInPlace "$out/pkg/$sp/agent/verification_evidence.py" \
+      --replace-fail 'conn.execute("PRAGMA journal_mode=WAL")' \
+                     'conn.execute("PRAGMA journal_mode=DELETE")'
+    substituteInPlace "$out/pkg/$sp/tools/async_delegation.py" \
+      --replace-fail 'conn.execute("PRAGMA journal_mode=WAL")' \
+                     'conn.execute("PRAGMA journal_mode=DELETE")'
+    # Stale bytecode would shadow the patched sources.
+    rm -f "$out/pkg/$sp/__pycache__/hermes_state."*.pyc \
+          "$out/pkg/$sp/agent/__pycache__/verification_evidence."*.pyc \
+          "$out/pkg/$sp/tools/__pycache__/async_delegation."*.pyc
+    if grep -RF 'execute("PRAGMA journal_mode=WAL")' "$out/pkg" --include='*.py'; then
+      echo "hermes-microvm: unpatched WAL set-pragma sites remain" >&2
+      exit 1
+    fi
+
+    # Retarget every farm symlink from the original wheel to the patch.
+    find "$out" -type l | while read -r l; do
+      t=$(readlink "$l")
+      case "$t" in
+        "$wheel"/*) ln -sfT "$out/pkg''${t#"$wheel"}" "$l" ;;
+        "$wheel")   ln -sfT "$out/pkg" "$l" ;;
+      esac
+    done
+    # Symlinks to the .pyc files removed above are now dangling — drop
+    # them (python stats the pyc, misses, and compiles from source).
+    find "$out" -xtype l -delete
+    # Venv self-references (console-script shebangs, activate scripts).
+    (grep -rlI "$orig" "$out" || true) | while read -r f; do
+      sed -i "s|$orig|$out|g" "$f"
+    done
+  '';
+
+  # Same bin wrappers (skills/plugins/web_dist untouched), exec line +
+  # HERMES_PYTHON re-pointed at the WAL-free venv.
+  hermesPackageNoWal = pkgs.runCommand hermesPackageBase.name { } ''
+    mkdir $out
+    cp -a ${hermesPackageBase}/. $out/
+    chmod -R u+w $out
+    (grep -rlI ${hermesPackageBase.hermesVenv} "$out" || true) | while read -r f; do
+      sed -i "s|${hermesPackageBase.hermesVenv}|${hermesVenvNoWal}|g" "$f"
+    done
+  '';
+
+  # Bind the state vault over the empty share-source dir INSIDE the
+  # virtiofsd unit's private mount namespace (PrivateMounts on the
+  # drop-in below; all Exec* lines of a unit share one namespace). Every
+  # unit start gets a fresh namespace, hence the idempotent re-assertion
+  # of the tmpfiles layout before mounting.
+  vaultBindScript = user: pkgs.writeShellScript "hermes-vault-bind-${user}" ''
+    set -eu
+    export PATH=${lib.makeBinPath (with pkgs; [ coreutils util-linux ])}
+    install -d -m 0700 -o root -g root ${baseDir user}/state-vault
+    install -d -m 0700 -o ${user} -g users ${baseDir user}/state-vault/state
+    mkdir -p ${shareSourceDir user}
+    install -d -m 0700 -o root -g root ${shareSourceDir user}/state
+    mount --bind ${baseDir user}/state-vault/state ${shareSourceDir user}/state
   '';
 
   # ── Guest NixOS configuration (fully declarative microvm) ────────────
@@ -327,26 +456,47 @@ let
           mountPoint = guestHostDir;
           readOnly = true;
         }
-      ];
-      # Private ext4 volume for HERMES state: keeps the gateway's sqlite
-      # WAL + flock coordination on a real local fs, persists across guest
-      # rebuilds, and lives under /var/lib/microvms/<vm> (0750) on the host.
-      volumes = [
         {
-          image = "hermes-state.img";
+          # HERMES state: virtiofs from the namespace-hidden vault (the
+          # source is an empty decoy dir in the host namespace — the
+          # virtiofsd unit bind-mounts the real vault over it; see the
+          # drop-in). cache stays "auto" (the default): the guest never
+          # uses sqlite WAL (hermesPackageNoWal), and exec/MAP_PRIVATE
+          # mmaps in .venv and node caches need the page cache. Persists
+          # across guest rebuilds; sqlite + lockfile coordination stays
+          # guest-local.
+          proto = "virtiofs";
+          tag = "hermes-state";
+          source = "${shareSourceDir user}/state";
           mountPoint = guestStateDir;
-          size = cfg.stateSize;
         }
       ];
       # Writable store overlay so `nix` works inside the guest.
       writableStoreOverlay = "/nix/.rw-store";
+
+      # Venus (Vulkan-in-guest): qemu renders on the host iGPU's render
+      # node via egl-headless; the guest sees a virtio-gpu-gl PCI device
+      # with venus+blob. hostmem is a PCI BAR address window for mapped
+      # blobs, not a RAM reservation. Appended after the runner's
+      # `-nographic` (which only pre-sets display "none"; the later
+      # -display wins and the serial console redirection is kept).
+      qemu.extraArgs = lib.optionals cfg.gpu.enable [
+        "-display" "egl-headless,rendernode=/dev/dri/renderD128"
+        "-device" "virtio-gpu-gl-pci,hostmem=${cfg.gpu.hostmem},blob=true,venus=true"
+      ];
+      # microvm.optimize (default on) swaps in a qemu built with
+      # nixosTestRunner=true, which strips SDL -> OpenGL -> virgl ->
+      # venus. Disable it when gpu is on; everything else it would have
+      # set is pinned explicitly below.
+      optimize.enable = !cfg.gpu.enable;
     };
 
-    # Guest-visible microvm.optimize defaults, pinned explicitly (mirrors
-    # microvm.nix nixos-modules/microvm/optimization.nix; one deliberate
-    # divergence: upstream keeps system.switch enabled when sshd + a store
-    # share make switching viable — these guests are fully declarative, so
-    # it stays off).
+    # Guest-visible microvm.optimize defaults, pinned explicitly so that
+    # switching optimize.enable off (gpu) regresses nothing (mirrors
+    # microvm.nix nixos-modules/microvm/optimization.nix at the pinned
+    # rev; one deliberate divergence: upstream keeps system.switch
+    # enabled when sshd + a store share make switching viable — these
+    # guests are fully declarative, so it stays off).
     documentation.enable = lib.mkDefault false;
     boot.initrd.systemd.enable = lib.mkDefault true;
     boot.initrd.systemd.tpm2.enable = lib.mkDefault false;
@@ -356,6 +506,15 @@ let
     systemd.network.wait-online.enable = lib.mkDefault false;
     systemd.tpm2.enable = lib.mkDefault false;
     system.switch.enable = lib.mkDefault false;
+
+    # Venus guest side: virtio-gpu DRM device + the mesa Vulkan ICD
+    # (hardware.graphics pulls in mesa, which ships the virtio "venus"
+    # driver). microvm.nix blacklists drm whenever its own graphics
+    # option is off — take the blacklist over minus drm (rest reproduced
+    # from nixos-modules/microvm/system.nix at the pinned rev).
+    boot.blacklistedKernelModules = lib.mkIf cfg.gpu.enable (lib.mkForce [ "rfkill" "intel_pstate" ]);
+    boot.kernelModules = lib.optionals cfg.gpu.enable [ "virtio_gpu" ];
+    hardware.graphics.enable = cfg.gpu.enable;
 
     # The hermes activation script (config.yaml/.env seeding) runs before
     # systemd — these must already be mounted in the initrd.
@@ -406,13 +565,16 @@ let
       group = "users";
       home = "/home/${user}";
       createHome = false;
-      extraGroups = [ "wheel" ];
+      # render/video: Vulkan on the virtio-gpu render node (Venus).
+      extraGroups = [ "wheel" ] ++ lib.optionals cfg.gpu.enable [ "render" "video" ];
     };
     # Self-modification parity with the old container (sudo NOPASSWD).
     security.sudo.wheelNeedsPassword = false;
 
     services.hermes-agent = {
       enable = true;
+      # WAL-free build: state.db & friends live on virtiofs (see header).
+      package = hermesPackageNoWal;
       user = user;
       group = "users";
       createUser = false;
@@ -529,6 +691,8 @@ let
     };
 
     environment.systemPackages = [ pkgs.socat ]
+      # vulkaninfo/vkcube for smoke-testing venus
+      ++ lib.optionals cfg.gpu.enable [ pkgs.vulkan-tools ]
       ++ lib.optional ucfg.clipboard.enable (clipboardShimFor ucfg);
   };
 
@@ -801,10 +965,24 @@ in
       description = "Guest RAM in MiB.";
     };
 
-    stateSize = mkOption {
-      type = types.int;
-      default = 20480;
-      description = "Size of the per-user hermes state volume in MiB.";
+    gpu = {
+      enable = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Vulkan in every guest via QEMU Venus (virtio-gpu-gl on the host
+          iGPU's render node). The GPU is time-shared with the host
+          desktop, not passed through.
+        '';
+      };
+      hostmem = mkOption {
+        type = types.str;
+        default = "4G";
+        description = ''
+          virtio-gpu hostmem: PCI BAR window for mapped host blobs
+          (address space, not a RAM reservation).
+        '';
+      };
     };
 
     users = mkOption {
@@ -886,6 +1064,16 @@ in
       iptables -w -X hermes-microvm 2>/dev/null || true
     '';
 
+    # Venus host side: qemu (user `microvm`) opens the iGPU render node
+    # and /dev/udmabuf (guest blob mappings). /dev/udmabuf is root-only
+    # by default — hand it to the render group. Neither microvm@ nor
+    # microvm-virtiofsd@ sets a DevicePolicy upstream, so no DeviceAllow
+    # lines are needed. (The group grants live in the users.users merge
+    # at the bottom of this file.)
+    services.udev.extraRules = lib.mkIf cfg.gpu.enable ''
+      KERNEL=="udmabuf", GROUP="render", MODE="0660"
+    '';
+
     microvm.vms = lib.mapAttrs' (user: ucfg:
       lib.nameValuePair (vmName user) {
         config = guestConfig user ucfg;
@@ -920,6 +1108,23 @@ in
         # the spaces gateway socket lives in the owner's user session
         after = [ "user@${toString ucfg.uid}.service" ];
         wants = [ "user@${toString ucfg.uid}.service" ];
+      };
+
+      # State-vault hiding: virtiofsd (and ONLY virtiofsd) sees the
+      # hermes state. PrivateMounts gives the unit a private mount
+      # namespace with slave propagation (the /nix/store and /home shares
+      # served by this same unit keep receiving host mounts); the
+      # ExecStartPre bind-mounts the vault over the empty share-source
+      # dir inside that namespace. Deliberately NO "+" prefix: a
+      # full-privilege Exec line skips the namespacing options and would
+      # leak the mount into the host namespace. (Upstream defines this
+      # per-VM unit with overrideStrategy=asDropin; these settings merge
+      # into the same drop-in.)
+      "microvm-virtiofsd@${vmName user}" = {
+        serviceConfig = {
+          PrivateMounts = true;
+          ExecStartPre = [ "${vaultBindScript user}" ];
+        };
       };
 
       # spaces gateway bridge: guest socat -> 10.0.2.2:<port> -> this unit
@@ -962,30 +1167,46 @@ in
       }))
     ];
 
-    # Share sources must exist before virtiofsd starts; contents are
-    # filled by the provisioning ExecStartPre.
+    # Share sources must exist before virtiofsd starts; guest/* contents
+    # are filled by the provisioning ExecStartPre. The state vault is a
+    # 0700 root door with the user-owned data dir inside (guest uid ==
+    # host uid, virtiofsd maps 1:1); the share-source decoys under /run
+    # stay empty in the host namespace by design.
     systemd.tmpfiles.rules =
-      [ "d /var/lib/hermes-microvm 0755 root root - -" ]
+      [
+        "d /var/lib/hermes-microvm 0755 root root - -"
+        "d /run/hermes-microvm-shares 0755 root root - -"
+      ]
       ++ lib.concatLists (lib.mapAttrsToList (user: _: [
         "d ${baseDir user} 0755 root root - -"
         "d ${baseDir user}/ssh 0755 root root - -"
         "d ${baseDir user}/guest 0755 root root - -"
         "d ${baseDir user}/guest/ssh 0755 root root - -"
         "d ${baseDir user}/guest/secrets 0700 root root - -"
+        "d ${baseDir user}/state-vault 0700 root root - -"
+        "d ${baseDir user}/state-vault/state 0700 ${user} users - -"
+        "d ${shareSourceDir user} 0755 root root - -"
+        "d ${shareSourceDir user}/state 0700 root root - -"
       ]) cfg.users);
 
     # The per-user gateway socket must exist at boot, before any
     # interactive login.
-    users.users = forEachUser (user: ucfg: {
-      ${user} = {
-        # Pin the host uid to the configured one: firewall owner-match,
-        # guest account, home-share ownership and port/MAC derivation all
-        # assume they agree. A drifted auto-allocated uid would authorize
-        # the wrong account silently.
-        uid = ucfg.uid;
-      } // lib.optionalAttrs ucfg.spacesGateway.enable {
-        linger = true;
-      };
-    });
+    users.users = lib.mkMerge [
+      (forEachUser (user: ucfg: {
+        ${user} = {
+          # Pin the host uid to the configured one: firewall owner-match,
+          # guest account, home-share ownership and port/MAC derivation all
+          # assume they agree. A drifted auto-allocated uid would authorize
+          # the wrong account silently.
+          uid = ucfg.uid;
+        } // lib.optionalAttrs ucfg.spacesGateway.enable {
+          linger = true;
+        };
+      }))
+      # Venus: render node + udmabuf access for the qemu processes.
+      (lib.mkIf cfg.gpu.enable {
+        microvm.extraGroups = [ "render" "video" ];
+      })
+    ];
   };
 }

@@ -81,6 +81,11 @@ in
     };
     extraPlugins = [ simplexPlatformFixed ];
 
+    # Vulkan in the guests via QEMU Venus on amy's Radeon 890M (shared
+    # with the host desktop, no passthrough). Smoke test from the guest:
+    # `vulkaninfo --summary` should list the venus driver.
+    gpu.enable = true;
+
     users.grmpf = {
       uid = 1000;
       environmentFiles = [ config.clan.core.vars.generators.hermes-env.files.env.path ];
