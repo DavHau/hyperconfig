@@ -63,13 +63,14 @@ in
 
   services.hermes-microvm = {
     enable = true;
-    # Default brain: qwen3.6 on vit's llama-swap, reached over yggdrasil
-    # (vit.d resolves via the clan /etc/hosts; the guest's slirp DNS
-    # proxies the host resolver, and modules/nixos/llama-swap-yggdrasil.nix
-    # opens vit's port on the ygg interface). "custom" = any
-    # OpenAI-compatible endpoint; llama-swap runs default-allow, so no key.
+    # Default brain: qwen3.6 uncensored (HauhauCS Aggressive) on vit's
+    # llama-swap, reached over yggdrasil (vit.d resolves via the clan
+    # /etc/hosts; the guest's slirp DNS proxies the host resolver, and
+    # modules/nixos/llama-swap-yggdrasil.nix opens vit's port on the ygg
+    # interface). "custom" = any OpenAI-compatible endpoint; llama-swap
+    # runs default-allow, so no key.
     settings.model = {
-      default = "qwen3.6:35b-iq4_xs";
+      default = "qwen3.6:35b-uncensored-iq4_xs";
       provider = "custom";
       base_url = "http://vit.d:8012/v1";
       # llama-swap's /v1/models omits context_length, so hermes probe-downs
