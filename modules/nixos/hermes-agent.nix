@@ -30,7 +30,6 @@ let
       --replace-fail 'cmd_str = f"@{chat_id} {content}"' \
         'cmd_str = "/_send @" + chat_id + " json " + json.dumps([{"msgContent": {"type": "text", "text": content}}])'
   '';
-  simplexCfg = config.services.simplex-chat-daemon;
 in
 {
   imports = [ ./hermes-microvm.nix ];
@@ -86,26 +85,14 @@ in
     # `vulkaninfo --summary` should list the venus driver.
     gpu.enable = true;
 
+    # SimpleX runs inside the VM; pairing is unchanged (journalctl inside
+    # the guest shows the simplex:/ address link).
+    simplex.enable = true;
+
     users.grmpf = {
       uid = 1000;
       environmentFiles = [ config.clan.core.vars.generators.hermes-env.files.env.path ];
       spacesGateway.enable = true;
-      # TUI image paste: bridge the host Wayland clipboard into the guest
-      # (read-only wl-paste shim over slirp). Gated on "has a desktop
-      # session"; without a session every paste degrades to the normal
-      # "No image found in clipboard".
-      clipboard.enable = config.services.pipewire.enable;
-      # The simplex daemon listens on the host's loopback; guests reach it
-      # through slirp's host alias. (Shared host service: not isolated
-      # between VMs — single-user setup.)
-      environment = lib.optionalAttrs simplexCfg.enable (
-        {
-          SIMPLEX_WS_URL = "ws://10.0.2.2:${toString simplexCfg.port}";
-        }
-        // lib.optionalAttrs (simplexCfg.allowedUsers != [ ]) {
-          SIMPLEX_ALLOWED_USERS = lib.concatStringsSep "," simplexCfg.allowedUsers;
-        }
-      );
     };
   };
 }

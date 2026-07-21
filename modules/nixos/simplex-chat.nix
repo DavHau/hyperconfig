@@ -12,8 +12,9 @@
 #   3. bot replies with a pairing code → `hermes pairing approve simplex <CODE>`
 #      (or pre-authorize via services.simplex-chat-daemon.allowedUsers)
 #
-# Hermes side: hermes-agent.nix injects SIMPLEX_WS_URL into the hermes
-# microvm; the guest reaches the daemon via slirp's host alias (10.0.2.2).
+# Hermes side: this module runs INSIDE the hermes microvm guest
+# (services.hermes-microvm.simplex.enable); hermes reaches it on the
+# guest's own 127.0.0.1.
 # Ad-hoc daemon commands while it runs: `simplex-cmd "/chats"` (WS API;
 # never run `simplex-chat` one-shots against a live daemon's db).
 { config, lib, pkgs, ... }:

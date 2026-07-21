@@ -1,6 +1,6 @@
 # Hermes VM sharing hardening — design
 
-Date: 2026-07-21. Status: approved, pending implementation.
+Date: 2026-07-21. Status: implemented (docs/plans/2026-07-21-hermes-vm-sharing-hardening.md); pending deploy.
 Scope: `modules/nixos/hermes-microvm.nix`, `modules/nixos/hermes-agent.nix`,
 `machines/amy/configuration.nix`.
 
@@ -30,9 +30,16 @@ host than it needs:
 | `/nix/.ro-store` | `/nix/store` | ro + guest rw overlay | n/a (unchanged) |
 | `/run/hermes-host` | `…/guest/` (ssh keys, secrets env, tz) | ro | n/a (unchanged) |
 | `/var/lib/hermes` | state vault (namespace-hidden) | rw | 🔒 deliberately not (unchanged) |
-| `/home/grmpf` | **`~/hermes/home`** (new share) | rw | ✅ |
 | `/var/lib/hermes/workspace` | **`~/hermes/workspace`** (new share, nested) | rw | ✅ |
 | ~~`/home/grmpf` ⇄ host `/home/grmpf`~~ | **removed** | — | — |
+
+Amendment (same day): the initially planned `~/hermes/home` ⇄ guest
+`/home/grmpf` share was dropped again. Verified upstream: the gateway runs
+with `HOME = stateDir` and `MESSAGING_CWD/WorkingDirectory = workspace`
+(hermes-agent nixosModules.nix:883-892), so the agent never uses
+`/home/<user>` — instead the guest account's `home` is now the state dir,
+making services, ssh logins and sudo shells agree on one HOME. Artifacts →
+workspace (visible); dotfiles/caches → vault (hidden noise).
 
 Principle: **persist by purpose, not by mount point.** The guest's mutable
 state decomposes into: agent DBs/config (`.hermes`) and `.venv` → stay in the
@@ -47,8 +54,8 @@ Host layout, tmpfiles-provisioned, all uid-1000:
 
 ```
 ~/hermes/
-  home/        ⇄ guest /home/grmpf   (agent dotfiles, caches — auditable)
-  workspace/   ⇄ guest /var/lib/hermes/workspace  (artifact exchange)
+  workspace/   ⇄ guest /var/lib/hermes/workspace  (artifact exchange;
+                 also the default session cwd — files land here)
 ```
 
 Notes:
@@ -125,5 +132,4 @@ all unchanged.
 - Post-deploy smoke: generate a file via the agent → appears in
   `~/hermes/workspace/`; guest `curl 10.0.2.2:<non-spaces-port>` fails,
   spaces MCP still works; simplex pairing works from inside the guest;
-  clipboard paste degrades gracefully; host `ls ~/hermes/home` shows agent
-  dotfiles.
+  clipboard paste degrades gracefully.

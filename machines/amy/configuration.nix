@@ -15,7 +15,6 @@
     ../../modules/nixos/noctalia-anthropic-usage
     ../../modules/nixos/fw-fanctrl.nix
     ../../modules/nixos/hermes-agent.nix
-    ../../modules/nixos/simplex-chat.nix
     ../../modules/nixos/vibepn.nix
     ./disko.nix
   ];
@@ -25,8 +24,6 @@
   ];
 
   networking.extraHosts = "10.0.0.1 127.0.0.0";
-
-  services.simplex-chat-daemon.enable = true;
 
   virtualisation.vmVariant = {
     imports = [ ../../modules/nixos/user-dave.nix ];
