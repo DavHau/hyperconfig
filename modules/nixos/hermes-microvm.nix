@@ -4,11 +4,12 @@
 #
 # One VM per configured user ("hermes-<user>"). Inside each guest the
 # UPSTREAM hermes NixOS module runs in native mode as a guest account with
-# the same name/uid as the host user, so the virtiofs-shared home keeps
-# consistent ownership. The guest gets the host's /nix/store read-only, a
-# namespace-hidden virtiofs share for HERMES state (see below), the
-# owner's home read-write, and passwordless sudo (parity with the old
-# container's self-modification support).
+# the same name/uid as the host user. The guest gets the host's /nix/store
+# read-only, a namespace-hidden virtiofs share for HERMES state (see
+# below), an artifact workspace exposed on the host as ~/hermes/workspace,
+# and passwordless sudo inside the guest. The guest account's HOME is the
+# state dir (upstream convention): artifacts land in the workspace
+# (default session cwd), dotfiles/caches in the hidden vault.
 #
 # Host <-> guest interfaces (per user, all on 127.0.0.1):
 #   - `hermes` CLI/TUI: host shim ssh-execs into the owner's VM with a
@@ -27,30 +28,23 @@
 #   - spaces MCP: guest socat -> slirp host alias 10.0.2.2:<spacesPort> ->
 #     host socat (running as the owner) -> the per-user gateway socket in
 #     /run/user/<uid>.
-#   - clipboard (per-user opt-in `clipboard.enable`): hermes image paste
-#     shells out to wl-paste, which cannot work in a headless guest. A
-#     guest wl-paste shim forwards two whitelisted read-only requests via
-#     slirp to a host socat (running as the owner) that runs the real
-#     wl-paste against the session compositor. The WAYLAND_DISPLAY gate in
-#     hermes/the TUI is satisfied by the host value the `hermes` shim
-#     forwards over ssh.
 #
 # Isolation between users: ssh keys and dashboard tokens are owner-only
 # files, and iptables OUTPUT owner-match rules reject other local users on
 # every forwarded loopback port. Residual caveats:
-#   - all VMs' qemu processes run as the shared `microvm` user, so one
-#     user's *guest* could reach another user's spaces bridge port (and
-#     host loopback services like the simplex daemon);
+#   - all VMs' qemu processes run as the shared `microvm` user; the
+#     loopback allowlist (spaces ports + DNS, REJECT otherwise) keeps
+#     guests off arbitrary host loopback services, but one user's guest
+#     can still reach ANOTHER user's spaces bridge port;
 #   - owner-match gates CONNECTS, not LISTENS: while a VM is down, any
 #     local user can squat its free forwarded port. ssh fails closed
 #     (pinned host key); the shim/desktop wrappers refuse to talk unless
 #     the VM unit is active, but a browser can still be phished into
 #     sending the dashboard token to a squatter. Full fix would be a
 #     vsock backend behind a root-held socket;
-#   - the guest is trusted with the owner's HOST account: rw home means a
-#     hostile agent can plant dotfiles that run at the next interactive
-#     login — and where the owner is a nix trusted-user, that is
-#     root-equivalent. Deliberate (container parity), but know it.
+#   - the guest never sees the owner's real home. Its persistence surface
+#     is ~/hermes/workspace (owner-auditable) plus the hidden state vault;
+#     host dotfile-planting via a shared home is no longer possible.
 # All acceptable for now with a single configured user.
 #
 # HERMES state (/var/lib/hermes in the guest) is a virtiofs share. The
@@ -122,76 +116,6 @@ let
     # runtimes & package managers agents reach for
     nodejs uv
   ];
-
-  # Guest-side `wl-paste` for the clipboard bridge: hermes image paste
-  # (hermes_cli/clipboard.py) and the TUI's text-clipboard read both shell
-  # out to wl-paste, so a shim with the same CLI surface is the whole guest
-  # integration. Protocol: one request line ("list-types" | "type <mime>"),
-  # response = wl-paste's exit code on the first line + the raw payload.
-  clipboardShimFor = ucfg: pkgs.writeShellScriptBin "wl-paste" ''
-    set -eu
-    case "''${1:-}" in
-      --list-types|-l) req="list-types" ;;
-      --type|-t) req="type ''${2:?wl-paste: --type needs an argument}" ;;
-      *)
-        echo "wl-paste (hermes clipboard bridge): unsupported arguments: $*" >&2
-        exit 1
-        ;;
-    esac
-    exec 3<>/dev/tcp/${slirpHostAlias}/${toString ucfg.clipboardPort}
-    printf '%s\n' "$req" >&3
-    IFS= read -r rc <&3
-    cat <&3
-    case "$rc" in "" | *[!0-9]*) exit 1 ;; esac
-    exit "$rc"
-  '';
-
-  # Host side of the clipboard bridge (one process per connection, spawned
-  # by the socat listener as the owning user). The request line is never
-  # passed through verbatim: wl-paste has argument forms that execute
-  # commands (--watch), so only the two read-only invocations the guest
-  # shim emits are allowed.
-  clipboardServer = user: ucfg: pkgs.writeShellScript "hermes-clipboard-server-${user}" ''
-    set -eu
-    export PATH=${lib.makeBinPath (with pkgs; [ coreutils gnugrep wl-clipboard ])}
-    export XDG_RUNTIME_DIR=/run/user/${toString ucfg.uid}
-    # System service, no session env: find the compositor socket ourselves.
-    # No graphical session -> wl-paste fails -> rc=1 reaches the guest,
-    # which reports the ordinary "No image found in clipboard".
-    if [ -z "''${WAYLAND_DISPLAY:-}" ]; then
-      for s in "$XDG_RUNTIME_DIR"/wayland-*; do
-        [ -S "$s" ] || continue
-        WAYLAND_DISPLAY="''${s##*/}"
-        export WAYLAND_DISPLAY
-        break
-      done
-    fi
-    reply() {
-      tmp=$(mktemp)
-      trap 'rm -f "$tmp"' EXIT
-      rc=0
-      timeout 10 wl-paste "$@" > "$tmp" 2>/dev/null || rc=$?
-      printf '%s\n' "$rc"
-      cat "$tmp"
-    }
-    IFS= read -r req || exit 0
-    case "$req" in
-      list-types)
-        reply --list-types
-        ;;
-      "type "*)
-        mime="''${req#type }"
-        if printf '%s' "$mime" | grep -Eq '^[A-Za-z][A-Za-z0-9/.+-]*$'; then
-          reply --type "$mime"
-        else
-          printf '1\n'
-        fi
-        ;;
-      *)
-        printf '1\n'
-        ;;
-    esac
-  '';
 
   # Root ExecStartPre of microvm@hermes-<user>: per-user keys, dashboard
   # credentials, guest secret env files, VM state dir lockdown, and a
@@ -385,6 +309,7 @@ let
     export PATH=${lib.makeBinPath (with pkgs; [ coreutils util-linux ])}
     install -d -m 0700 -o root -g root ${baseDir user}/state-vault
     install -d -m 0700 -o ${user} -g users ${baseDir user}/state-vault/state
+    install -d -m 0755 ${baseDir user}/state-vault/state/simplex
     mkdir -p ${shareSourceDir user}
     install -d -m 0700 -o root -g root ${shareSourceDir user}/state
     mount --bind ${baseDir user}/state-vault/state ${shareSourceDir user}/state
@@ -395,7 +320,23 @@ let
     imports = [
       inputs.hermes-agent.nixosModules.default
       ./hermes-guest-python.nix
+      ./simplex-chat.nix
     ];
+
+    # SimpleX daemon lives INSIDE the guest (no host loopback exposure).
+    # Its SQLite state must persist -> bind /var/lib/simplex-chat onto the
+    # vault share. Known amber risk: simplex runs its own SQLite (likely
+    # WAL) on virtiofs; guest-only access keeps the host out, the residual
+    # FUSE-mmap hazard is accepted — worst case is re-pairing contacts.
+    services.simplex-chat-daemon = lib.mkIf cfg.simplex.enable {
+      enable = true;
+      allowedUsers = cfg.simplex.allowedUsers;
+    };
+    fileSystems."/var/lib/simplex-chat" = lib.mkIf cfg.simplex.enable {
+      device = "${guestStateDir}/simplex";
+      fsType = "none";
+      options = [ "bind" ];
+    };
 
     services.hermes-python = {
       enable = true;
@@ -444,10 +385,15 @@ let
           mountPoint = "/nix/.ro-store";
         }
         {
+          # Artifact exchange: one flat dir shared by ALL hermes sessions,
+          # never GC'd by hermes — cleanup is the owner's manual call.
+          # Mounted over the state share (nested). Do not open live SQLite
+          # DBs the agent creates here while the VM runs (cross-kernel
+          # locking is not coordinated over virtiofs).
           proto = "virtiofs";
-          tag = "home";
-          source = "/home/${user}";
-          mountPoint = "/home/${user}";
+          tag = "hermes-workspace";
+          source = "/home/${user}/hermes/workspace";
+          mountPoint = guestWorkspace;
         }
         {
           proto = "virtiofs";
@@ -558,12 +504,17 @@ let
       "L+ /etc/localtime - - - - ${guestHostDir}/tz/localtime"
     ];
 
-    # Same name/uid as on the host so the shared home keeps ownership.
+    # Same name/uid as on the host so shared-dir ownership maps 1:1. HOME
+    # is the state dir — matching the upstream gateway service (it sets
+    # HOME=stateDir), so services, ssh logins and sudo shells agree on one
+    # home. Dotfiles/caches land in the (hidden) vault; user-facing output
+    # lands in the workspace (default cwd, host-visible at
+    # ~/hermes/workspace via MESSAGING_CWD/WorkingDirectory upstream).
     users.users.${user} = {
       isNormalUser = true;
       uid = ucfg.uid;
       group = "users";
-      home = "/home/${user}";
+      home = guestStateDir;
       createHome = false;
       # render/video: Vulkan on the virtio-gpu render node (Venus).
       extraGroups = [ "wheel" ] ++ lib.optionals cfg.gpu.enable [ "render" "video" ];
@@ -581,7 +532,15 @@ let
       stateDir = guestStateDir;
       addToSystemPackages = true;
       settings = cfg.settings;
-      environment = cfg.environment // ucfg.environment;
+      environment = cfg.environment // ucfg.environment
+        // lib.optionalAttrs cfg.simplex.enable (
+          {
+            SIMPLEX_WS_URL = "ws://127.0.0.1:${toString config.services.simplex-chat-daemon.port}";
+          }
+          // lib.optionalAttrs (cfg.simplex.allowedUsers != [ ]) {
+            SIMPLEX_ALLOWED_USERS = lib.concatStringsSep "," cfg.simplex.allowedUsers;
+          }
+        );
       environmentFiles = [ "${guestHostDir}/secrets/hermes.env" ];
       extraPlugins = cfg.extraPlugins;
       extraPackages = baseGuestPackages ++ cfg.extraPackages;
@@ -596,7 +555,7 @@ let
     systemd.services.hermes-agent = {
       after = [ "hermes-python-venv.service" ];
       wants = [ "hermes-python-venv.service" ];
-      unitConfig.RequiresMountsFor = [ guestStateDir "/home/${user}" ];
+      unitConfig.RequiresMountsFor = [ guestStateDir guestWorkspace ];
       # venv first so python/pip resolve to the writable interpreter.
       # NOTE: systemd `path` string entries get /bin appended — pass the
       # venv ROOT, not its bin dir (".venv/bin" rendered as ".venv/bin/bin"
@@ -621,9 +580,8 @@ let
             "$env_file"
         fi
       '';
-      # The upstream unit only allows stateDir+workspace; the agent must
-      # also reach the owner's shared home.
-      serviceConfig.ReadWritePaths = [ "/home/${user}" ];
+      # The upstream unit only allows stateDir+workspace; guestWorkspace is
+      # under stateDir, so no extra ReadWritePaths are needed.
     };
 
     # Web dashboard (SPA + JSON-RPC/WS backend). Separate process from the
@@ -637,7 +595,7 @@ let
       wantedBy = [ "multi-user.target" ];
       after = [ "network-online.target" "hermes-python-venv.service" ];
       wants = [ "network-online.target" ];
-      unitConfig.RequiresMountsFor = [ guestStateDir guestHostDir ];
+      unitConfig.RequiresMountsFor = [ guestStateDir guestWorkspace guestHostDir ];
       environment = {
         HOME = guestStateDir;
         HERMES_HOME = "${guestStateDir}/.hermes";
@@ -692,8 +650,7 @@ let
 
     environment.systemPackages = [ pkgs.socat ]
       # vulkaninfo/vkcube for smoke-testing venus
-      ++ lib.optionals cfg.gpu.enable [ pkgs.vulkan-tools ]
-      ++ lib.optional ucfg.clipboard.enable (clipboardShimFor ucfg);
+      ++ lib.optionals cfg.gpu.enable [ pkgs.vulkan-tools ];
   };
 
   # ── Host-side wiring per user ─────────────────────────────────────────
@@ -739,11 +696,12 @@ let
     if [ -t 0 ] && [ -t 1 ]; then tty_flag="-t"; fi
     # ssh only carries TERM; the old docker-exec routing also passed
     # COLORTERM/LANG/LC_ALL (TUI colors + UTF-8 glyphs). Embed them into
-    # the remote command, shell-quoted. WAYLAND_DISPLAY gates hermes's
-    # wayland clipboard path in the guest (served by the bridged wl-paste
-    # shim, which ignores the value).
+    # the remote command, shell-quoted. Deliberately NOT WAYLAND_DISPLAY:
+    # the host clipboard is never bridged into the VM; without the variable
+    # hermes's clipboard path stays disabled and paste degrades to
+    # "No image found in clipboard".
     env_exports=""
-    for v in COLORTERM LANG LC_ALL WAYLAND_DISPLAY; do
+    for v in COLORTERM LANG LC_ALL; do
       eval "val=\''${$v:-}"
       if [ -n "$val" ]; then
         env_exports="$env_exports export $v=$(printf '%q' "$val") &&"
@@ -870,11 +828,16 @@ let
       iptables -w -A hermes-microvm -p tcp --dport ${toString ucfg.spacesPort} -m owner --uid-owner microvm -j RETURN
       ${ownerOnlyRules ucfg.spacesPort ucfg.uid}
     ''}
-    ${lib.optionalString ucfg.clipboard.enable ''
-      iptables -w -A hermes-microvm -p tcp --dport ${toString ucfg.clipboardPort} -m owner --uid-owner microvm -j RETURN
-      ${ownerOnlyRules ucfg.clipboardPort ucfg.uid}
-    ''}
-  '') cfg.users);
+  '') cfg.users) + ''
+    # Guest -> host loopback allowlist: everything a guest sends to slirp's
+    # 10.0.2.2 egresses here as uid microvm. The per-user spaces-bridge
+    # RETURNs above are the only sanctioned services; DNS stays open for
+    # slirp's resolver forwarding; the rest of the host's loopback is
+    # rejected (it used to be a wildcard).
+    iptables -w -A hermes-microvm -p tcp --dport 53 -m owner --uid-owner microvm -j RETURN
+    iptables -w -A hermes-microvm -p udp --dport 53 -m owner --uid-owner microvm -j RETURN
+    iptables -w -A hermes-microvm -m owner --uid-owner microvm -j REJECT
+  '';
 in
 {
   imports = [ inputs.microvm.nixosModules.host ];
@@ -985,6 +948,15 @@ in
       };
     };
 
+    simplex = {
+      enable = mkEnableOption "a SimpleX Chat daemon inside each guest (state on the vault share)";
+      allowedUsers = mkOption {
+        type = types.listOf types.str;
+        default = [ ];
+        description = "SIMPLEX_ALLOWED_USERS passed to hermes (contactIds or display names).";
+      };
+    };
+
     users = mkOption {
       default = { };
       description = "Users that get their own Hermes microvm.";
@@ -1009,11 +981,6 @@ in
             default = 22200 + config.uid - 1000;
             description = "Host 127.0.0.1 port of the spaces gateway TCP bridge.";
           };
-          clipboardPort = mkOption {
-            type = types.port;
-            default = 22300 + config.uid - 1000;
-            description = "Host 127.0.0.1 port of the clipboard bridge.";
-          };
           environment = mkOption {
             type = types.attrsOf types.str;
             default = { };
@@ -1023,9 +990,6 @@ in
             type = types.listOf types.str;
             default = [ ];
             description = "Host paths of secret env files, assembled into the guest's hermes .env.";
-          };
-          clipboard = {
-            enable = mkEnableOption "bridging the user's Wayland clipboard into the VM, read-only (TUI image paste)";
           };
           spacesGateway = {
             enable = mkEnableOption "bridging the user's spaces integration gateway into the VM";
@@ -1057,9 +1021,12 @@ in
       ${firewallRules}
       iptables -w -C OUTPUT -o lo -p tcp -m conntrack --ctstate NEW -j hermes-microvm 2>/dev/null \
         || iptables -w -A OUTPUT -o lo -p tcp -m conntrack --ctstate NEW -j hermes-microvm
+      iptables -w -C OUTPUT -o lo -p udp -m conntrack --ctstate NEW -j hermes-microvm 2>/dev/null \
+        || iptables -w -A OUTPUT -o lo -p udp -m conntrack --ctstate NEW -j hermes-microvm
     '';
     networking.firewall.extraStopCommands = ''
       iptables -w -D OUTPUT -o lo -p tcp -m conntrack --ctstate NEW -j hermes-microvm 2>/dev/null || true
+      iptables -w -D OUTPUT -o lo -p udp -m conntrack --ctstate NEW -j hermes-microvm 2>/dev/null || true
       iptables -w -F hermes-microvm 2>/dev/null || true
       iptables -w -X hermes-microvm 2>/dev/null || true
     '';
@@ -1146,24 +1113,6 @@ in
         };
       };
 
-      # clipboard bridge: guest wl-paste shim -> slirp 10.0.2.2:<port> ->
-      # this unit (as the owner) -> real wl-paste against the session
-      # compositor. Read-only by construction (paste only, whitelisted
-      # request forms).
-      "hermes-clipboard-bridge-${user}" = lib.mkIf ucfg.clipboard.enable {
-        description = "host clipboard bridge for ${vmName user}";
-        wantedBy = [ "multi-user.target" ];
-        serviceConfig = {
-          User = user;
-          ExecStart = lib.concatStringsSep " " [
-            "${pkgs.socat}/bin/socat"
-            "TCP-LISTEN:${toString ucfg.clipboardPort},bind=127.0.0.1,fork,reuseaddr"
-            "EXEC:${clipboardServer user ucfg}"
-          ];
-          Restart = "always";
-          RestartSec = 5;
-        };
-      };
       }))
     ];
 
@@ -1187,6 +1136,8 @@ in
         "d ${baseDir user}/state-vault/state 0700 ${user} users - -"
         "d ${shareSourceDir user} 0755 root root - -"
         "d ${shareSourceDir user}/state 0700 root root - -"
+        "d /home/${user}/hermes 0755 ${user} users - -"
+        "d /home/${user}/hermes/workspace 0755 ${user} users - -"
       ]) cfg.users);
 
     # The per-user gateway socket must exist at boot, before any
