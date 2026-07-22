@@ -137,6 +137,7 @@
     nixos-example.inputs.llm-agents.follows = "llm-agents";
     nixos-example.inputs.sbox.follows = "sbox";
     nixos-example.inputs.wrappers.follows = "wrappers";
+    nixos-example.inputs.hermes-agent.follows = "hermes-agent";
 
     hermes-agent.url = "github:NousResearch/hermes-agent";
     microvm.url = "github:microvm-nix/microvm.nix";
@@ -201,7 +202,7 @@
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
         hermes-guest-python =
-          import ./modules/nixos/hermes-guest-python-test.nix {
+          import ./modules/nixos/hermes/guest-python-test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
         noctalia-anthropic-usage =

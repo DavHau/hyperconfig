@@ -1,5 +1,5 @@
-# VM test for hermes-guest-python.nix — the exact scenario the hermes
-# agent kept fighting inside its microvm (see hermes-microvm.nix):
+# VM test for guest-python.nix — the exact scenario the hermes
+# agent kept fighting inside its microvm (see ./guest.nix):
 #
 #   1. login shells resolve python3/pip from the writable venv;
 #   2. the nix-preinstalled stack imports through --system-site-packages
@@ -27,7 +27,7 @@ pkgs.testers.runNixOSTest {
   name = "hermes-guest-python";
 
   nodes.machine = { pkgs, ... }: {
-    imports = [ ./hermes-guest-python.nix ];
+    imports = [ ./guest-python.nix ];
 
     services.hermes-python = {
       enable = true;

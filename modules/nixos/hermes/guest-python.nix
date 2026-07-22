@@ -16,8 +16,8 @@
 #     pass through nix-ld, and their NEEDED libs (libstdc++, libz, ...)
 #     are on the manylinux whitelist, i.e. assumed present on the system.
 #
-# Used by hermes-microvm.nix guests; behavior is pinned by the
-# `hermes-guest-python` flake check (./hermes-guest-python-test.nix).
+# Used by the hermes microvm guests (./guest.nix); behavior is pinned by
+# the `hermes-guest-python` flake check (./guest-python-test.nix).
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.hermes-python;

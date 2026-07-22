@@ -1,15 +1,15 @@
 # Hermes Agent (NousResearch), one microvm per user — see
-# hermes-microvm.nix for the machinery. The host keeps only the
+# ./default.nix and siblings for the machinery. The host keeps only the
 # ssh-routed `hermes` shim, the forwarded dashboard port and the spaces
 # bridge.
 #
-# API key: reuses the shared `openrouter` clan var (same one pi-chat
-# uses); the hermes-env generator renders the KEY=value env file handed
-# into the guest and merged into $HERMES_HOME/.env there.
+# Secrets: per-secret clan vars (shared `openrouter` apikey — same var
+# pi-chat uses — plus the `telegram` generator), each riding its own
+# systemd credential into the guest via secretEnv (see ./default.nix).
 #
-# Entry points (as grmpf): `hermes` (CLI/TUI via ssh into the VM),
-# `hermes-desktop` (Electron app on the VM's backend), `hermes-vm-info`;
-# GUI/TUI also ship .desktop entries for app launchers.
+# Entry points (as grmpf): `hermes` (CLI/TUI via ssh into the VM) and
+# `hermes-desktop` (Electron app on the VM's backend); GUI/TUI also ship
+# .desktop entries for app launchers.
 { config, lib, pkgs, inputs, ... }:
 let
   # Shadow copy of the bundled simplex platform plugin with the DM send
@@ -28,42 +28,38 @@ let
   '';
 in
 {
-  imports = [ ./hermes-microvm.nix ];
+  imports = [ ./default.nix ];
 
   # Same declaration as pi-chat-openrouter.nix; identical values merge.
   clan.core.vars.generators.openrouter = {
     share = true;
     prompts.apikey.type = "hidden";
     prompts.apikey.persist = true;
+    # Rotation: restarting the VM re-resolves LoadCredential= from the
+    # freshly decrypted var.
+    files.apikey.restartUnits = [ "microvm@hermes-grmpf.service" ];
   };
 
-  clan.core.vars.generators.hermes-env = {
-    dependencies = [ "openrouter" ];
-    prompts.telegram_token.type = "hidden";
-    prompts.telegram_token.persist = true;
-    prompts.telegram_allowed_users.type = "hidden";
-    prompts.telegram_allowed_users.persist = true;
-    # Restarting the VM re-runs the provisioning ExecStartPre, which
-    # re-assembles the guest .env from the freshly decrypted secret.
-    files.env.secret = true;
-    files.env.restartUnits = [ "microvm@hermes-grmpf.service" ];
-    script = ''
-      {
-        printf 'OPENROUTER_API_KEY=%s\n' "$(cat $in/openrouter/apikey)"
-        printf 'TELEGRAM_BOT_TOKEN=%s\n' "$(cat $prompts/telegram_token)"
-        printf 'TELEGRAM_ALLOWED_USERS=%s\n' "$(cat $prompts/telegram_allowed_users)"
-      } > $out/env
-    '';
+  # Telegram platform secrets, one file per value (persist prompts
+  # auto-materialize as files.<name> — same pattern as `openrouter`,
+  # cf. pi-chat-openrouter.nix).
+  clan.core.vars.generators.telegram = {
+    prompts.token.type = "hidden";
+    prompts.token.persist = true;
+    prompts.allowed_users.type = "hidden";
+    prompts.allowed_users.persist = true;
+    files.token.restartUnits = [ "microvm@hermes-grmpf.service" ];
+    files.allowed_users.restartUnits = [ "microvm@hermes-grmpf.service" ];
   };
 
   services.hermes-microvm = {
     enable = true;
-    # Default brain: qwen3.6 uncensored (heretic) on vit's llama-swap,
+    # Default brain: qwen3.6 (unsloth UD-IQ4_XS) on vit's llama-swap,
     # reached over yggdrasil (vit.d from the clan /etc/hosts; slirp DNS
     # proxies the host resolver). "custom" = any OpenAI-compatible
     # endpoint; llama-swap runs default-allow, so no key.
     settings.model = {
-      default = "qwen3.6:35b-heretic-iq4_xs";
+      default = "qwen3.6:35b-iq4_xs";
       provider = "custom";
       base_url = "http://vit.d:8012/v1";
       # llama-swap's /v1/models omits context_length, so hermes falls back
@@ -83,7 +79,11 @@ in
 
     users.grmpf = {
       uid = 1000;
-      environmentFiles = [ config.clan.core.vars.generators.hermes-env.files.env.path ];
+      secretEnv = {
+        OPENROUTER_API_KEY = config.clan.core.vars.generators.openrouter.files.apikey.path;
+        TELEGRAM_BOT_TOKEN = config.clan.core.vars.generators.telegram.files.token.path;
+        TELEGRAM_ALLOWED_USERS = config.clan.core.vars.generators.telegram.files.allowed_users.path;
+      };
       spacesGateway.enable = true;
     };
   };
