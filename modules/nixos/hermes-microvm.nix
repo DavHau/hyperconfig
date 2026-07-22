@@ -1025,7 +1025,6 @@ in
     systemd.tmpfiles.rules =
       [
         "d /var/lib/hermes-microvm 0755 root root - -"
-        "d /run/hermes-microvm-shares 0755 root root - -"
       ]
       ++ lib.concatLists (lib.mapAttrsToList (user: _: [
         "d ${baseDir user} 0755 root root - -"
