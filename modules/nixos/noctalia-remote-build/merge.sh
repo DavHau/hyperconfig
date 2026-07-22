@@ -12,7 +12,7 @@ mkdir -p "$cfgDir"
 
 widget='{
   "id": "CustomButton",
-  "icon": "cloud_upload",
+  "icon": "cloud-upload",
   "leftClickExec": "/run/current-system/sw/bin/remote-build-toggle toggle",
   "leftClickUpdateText": true,
   "textCommand": "/run/current-system/sw/bin/remote-build-toggle status",
