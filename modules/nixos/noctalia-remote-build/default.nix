@@ -21,9 +21,9 @@ let
       case "''${1:-}" in
         status)
           if systemctl is-active --quiet "$unit"; then
-            printf '{"icon":"cloud_upload","iconColor":"primary","tooltip":"Remote builds: ON — click to build locally"}\n'
+            printf '{"icon":"cloud-upload","iconColor":"primary","tooltip":"Remote builds: ON — click to build locally"}\n'
           else
-            printf '{"icon":"cloud_off","tooltip":"Remote builds: OFF — click to offload"}\n'
+            printf '{"icon":"cloud-off","tooltip":"Remote builds: OFF — click to offload"}\n'
           fi
           ;;
         toggle)

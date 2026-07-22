@@ -143,9 +143,11 @@ No QML plugin — uses noctalia's built-in **CustomButton** widget.
 
 - **`remote-build-toggle` script** (in `environment.systemPackages`):
   - `status`: prints CustomButton JSON on one line, e.g.
-    `{"icon":"cloud_upload","tooltip":"Remote builds: on (bam)"}` when
+    `{"icon":"cloud-upload","tooltip":"Remote builds: on (bam)"}` when
     `remote-builders.service` is active,
-    `{"icon":"cloud_off","tooltip":"Remote builds: off"}` otherwise.
+    `{"icon":"cloud-off","tooltip":"Remote builds: off"}` otherwise.
+    Icon names are noctalia's Tabler set (hyphenated); Material-style
+    underscore names (`cloud_upload`) silently render a fallback glyph.
   - `toggle`: `systemctl stop` if active else `start` (passwordless via
     the polkit rule).
 - **Config seeding:** an append-only merge script run as
@@ -153,7 +155,7 @@ No QML plugin — uses noctalia's built-in **CustomButton** widget.
   (`lib.mkAfter`, same slot and idempotence contract as
   `noctalia-anthropic-usage/merge.sh`): if no CustomButton with our
   command exists in `bar.widgets.right`, append
-  `{ id: "CustomButton", icon: "cloud_upload",
+  `{ id: "CustomButton", icon: "cloud-upload",
      leftClickExec: "remote-build-toggle toggle",
      textCommand: "remote-build-toggle status",
      parseJson: true, textIntervalMs: 3000 }`.
