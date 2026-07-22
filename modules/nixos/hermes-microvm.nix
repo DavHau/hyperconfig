@@ -174,6 +174,11 @@ let
   # symlink farm over per-wheel store paths): copy the farm, embed a
   # patched wheel, retarget the farm's links, re-point the wrapper. A
   # build-time grep proves no WAL set-pragma survives.
+  #
+  # REMOVE-WHEN virtiofs DAX lands upstream (QEMU vhost-user SHMEM_MAP
+  # series + virtiofsd#216): DAX makes the -shm mmap host-coherent, so
+  # WAL is safe again — drop this patch chain. The header's "host never
+  # opens the DBs" lock invariant stays regardless.
   hermesPackageBase = inputs.hermes-agent.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
   hermesVenvNoWal = pkgs.runCommand "${hermesPackageBase.hermesVenv.name}-nowal" { } ''
