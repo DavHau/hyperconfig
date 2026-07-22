@@ -137,11 +137,9 @@
     nixos-example.inputs.llm-agents.follows = "llm-agents";
     nixos-example.inputs.sbox.follows = "sbox";
     nixos-example.inputs.wrappers.follows = "wrappers";
-    nixos-example.inputs.hermes-agent.follows = "hermes-agent";
-
-    hermes-agent.url = "github:NousResearch/hermes-agent";
-    microvm.url = "github:microvm-nix/microvm.nix";
-    microvm.inputs.nixpkgs.follows = "nixpkgs";
+    # hermes-agent moved into the spaces flake (nixosModules.hermes);
+    # nixos-example keeps its own hermes-agent pin (it declares the input
+    # itself — no follows needed here anymore).
     messaging-daemon.url = "github:vbuterin/messaging-daemon";
     messaging-daemon.flake = false;
 
@@ -199,10 +197,6 @@
           };
         niri-terminal-cwd =
           import ./modules/nixos/niri-terminal-cwd-test.nix {
-            pkgs = nixpkgs.legacyPackages.x86_64-linux;
-          };
-        hermes-guest-python =
-          import ./modules/nixos/hermes/guest-python-test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
         noctalia-anthropic-usage =

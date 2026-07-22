@@ -1,34 +1,22 @@
-# Hermes Agent (NousResearch), one microvm per user — see
-# ./default.nix and siblings for the machinery. The host keeps only the
-# ssh-routed `hermes` shim, the forwarded dashboard port and the spaces
-# bridge.
+# Hermes Agent (NousResearch), one microvm per user — the machinery now
+# lives in the spaces flake (nixosModules.hermes); this file keeps only
+# amy's site wiring: clan-var secrets and the vit.d model seed.
 #
 # Secrets: per-secret clan vars (shared `openrouter` apikey — same var
 # pi-chat uses — plus the `telegram` generator), each riding its own
-# systemd credential into the guest via secretEnv (see ./default.nix).
+# systemd credential into the guest via secretEnv.
 #
 # Entry points (as grmpf): `hermes` (CLI/TUI via ssh into the VM) and
 # `hermes-desktop` (Electron app on the VM's backend); GUI/TUI also ship
 # .desktop entries for app launchers.
 { config, lib, pkgs, inputs, ... }:
-let
-  # Shadow copy of the bundled simplex platform plugin with the DM send
-  # fixed: upstream addresses DMs as `@<chat_id> <text>`, which the
-  # daemon parses as a display-name lookup — simplex-chat >=6.3 returns
-  # contactNotFound and the fire-and-forget send swallows it. The
-  # structured `/_send @<id> json [...]` form addresses by numeric id and
-  # escapes newlines. User plugins override bundled ones by manifest
-  # name; drop this once fixed upstream.
-  simplexPlatformFixed = pkgs.runCommand "simplex-platform" { } ''
-    cp -r ${inputs.hermes-agent}/plugins/platforms/simplex $out
-    chmod -R u+w $out
-    substituteInPlace $out/adapter.py \
-      --replace-fail 'cmd_str = f"@{chat_id} {content}"' \
-        'cmd_str = "/_send @" + chat_id + " json " + json.dumps([{"msgContent": {"type": "text", "text": content}}])'
-  '';
-in
 {
-  imports = [ ./default.nix ];
+  imports = [ inputs.spaces.nixosModules.hermes ];
+
+  # The module derives ports/CID/MAC from the uid and asserts it matches
+  # users.users.grmpf.uid — declare it (userborn allocated 1000 for the
+  # first normal user).
+  users.users.grmpf.uid = 1000;
 
   # Same declaration as pi-chat-openrouter.nix; identical values merge.
   clan.core.vars.generators.openrouter = {
@@ -52,38 +40,37 @@ in
     files.allowed_users.restartUnits = [ "microvm@hermes-grmpf.service" ];
   };
 
+  # Shared key: same var pi-chat uses.
+  spaces.openrouter = {
+    enable = true;
+    apiKeyFile = config.clan.core.vars.generators.openrouter.files.apikey.path;
+  };
+
   services.hermes-microvm = {
     enable = true;
-    # Default brain: qwen3.6 (unsloth UD-IQ4_XS) on vit's llama-swap,
-    # reached over yggdrasil (vit.d from the clan /etc/hosts; slirp DNS
-    # proxies the host resolver). "custom" = any OpenAI-compatible
-    # endpoint; llama-swap runs default-allow, so no key.
-    settings.model = {
-      default = "qwen3.6:35b-iq4_xs";
+    # amy has a second normal user (dave, no declared uid — the clan
+    # user role) that must not get a VM; keep the pre-port behavior of
+    # explicitly declared users only.
+    provisionNormalUsers = false;
+    # Default brain: qwen3.6 on vit's llama-swap over yggdrasil. Seeded
+    # ONCE into a fresh guest config; runtime /model switches persist
+    # (amy's existing guest already has a model — the seed never fires).
+    initialModel = {
       provider = "custom";
       base_url = "http://vit.d:8012/v1";
-      # llama-swap's /v1/models omits context_length, so hermes falls back
-      # to 131,072. Pin the real window: vit's llama-server runs
-      # `-c 204800` (llama-swap-qwen36.nix) — keep in sync with that flag.
-      context_length = 204800;
+      default = "qwen3.6:35b-iq4_xs";
     };
-    extraPlugins = [ simplexPlatformFixed ];
-
-    # Vulkan in the guests via QEMU Venus (shared iGPU, no passthrough).
-    # Smoke test in the guest: `vulkaninfo --summary` lists venus.
     gpu.enable = true;
-
-    # SimpleX runs inside the VM; the pairing address link shows in the
-    # guest's simplex-chat journal.
-    simplex.enable = true;
-
     users.grmpf = {
-      uid = 1000;
       secretEnv = {
+        # secretEnv definition replaces the openrouter default set —
+        # OPENROUTER_API_KEY must be re-listed alongside telegram.
         OPENROUTER_API_KEY = config.clan.core.vars.generators.openrouter.files.apikey.path;
         TELEGRAM_BOT_TOKEN = config.clan.core.vars.generators.telegram.files.token.path;
         TELEGRAM_ALLOWED_USERS = config.clan.core.vars.generators.telegram.files.allowed_users.path;
       };
+      # amy does not run services.spaces-integrations (the option's new
+      # default source) — keep the bridge on explicitly, as before.
       spacesGateway.enable = true;
     };
   };

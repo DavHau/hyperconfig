@@ -134,10 +134,12 @@ def make_db(path, creds, cache_rows=()):
             " VALUES ('anthropic', 'oauth', ?, ?, ?, ?)",
             (json.dumps(c["data"]), c.get("disabled_cause"), c.get("identity_key"), c.get("updated_at", 0)),
         )
-    for k, v in cache_rows:
+    for row in cache_rows:
+        k, v = row[0], row[1]
+        expires_at = row[2] if len(row) > 2 else int(time.time()) + 86400
         db.execute(
             "INSERT INTO cache (key, value, expires_at) VALUES (?, ?, ?)",
-            (k, json.dumps(v), int(time.time()) + 86400),
+            (k, json.dumps(v), expires_at),
         )
     db.commit()
     db.close()
@@ -175,9 +177,10 @@ def claude_code_store(tmp, access, refresh, expires_in_ms=3_600_000, extra=None)
 
 def run_poller(tmp, db_path, state_path, url, claude_code=None):
     base = url.removesuffix("/api/oauth/usage")
+    dbs = db_path if isinstance(db_path, (list, tuple)) else [db_path]
     env = dict(os.environ)
     env.update(
-        OMP_AGENT_DB=db_path,
+        OMP_AGENT_DB=os.pathsep.join(dbs),
         ANTHROPIC_USAGE_STATE=state_path,
         ANTHROPIC_USAGE_URL=url,
         ANTHROPIC_PROFILE_URL=base + "/api/oauth/profile",
@@ -227,10 +230,11 @@ def test_happy_path_two_accounts(tmp, url):
     check("updatedAt present", isinstance(got.get("updatedAt"), int) and got["updatedAt"] > 0)
 
 
-def omp_cache_row(email, account_id, fable_used, resets_at_ms=1784131200000):
+def omp_cache_row(email, account_id, fable_used, resets_at_ms=1784131200000,
+                  scope="https://api.anthropic.com"):
     """omp's own usage_cache report row (shape observed in agent.db)."""
     key = (
-        "usage_cache:report:anthropic:https://api.anthropic.com:oauth"
+        f"usage_cache:report:anthropic:{scope}:oauth"
         f"|account:{account_id}|email:{email}"
     )
     value = {
@@ -272,6 +276,82 @@ def test_unauthorized_falls_back_to_omp_cache(tmp, url):
     check("bob percent from omp cache", bob["percent"] == 42, f"got {bob!r}")
     check("bob marked stale", bob["stale"] is True, f"got {bob!r}")
     check("alice unaffected", accounts["alice@example.com"]["percent"] == 11)
+
+
+def test_freshest_omp_cache_row_wins(tmp, url):
+    """Multiple omp cache rows per account (one per endpoint scope): the
+    poller must surface the one with the latest `expires_at`, not an
+    arbitrary row. Regression — last-wins iteration once showed a
+    ~20h-old 44% while a fresher 77% row sat beside it.
+    """
+    db = os.path.join(tmp, "agent.db")
+    state = os.path.join(tmp, "state.json")
+    now = int(time.time())
+    acct = "acct-bob@example.com"
+    stale_key, stale_val = omp_cache_row("bob@example.com", acct, 44, scope="default")
+    fresh_key, fresh_val = omp_cache_row("bob@example.com", acct, 77, scope="https://api.anthropic.com")
+    make_db(
+        db,
+        [cred("bob@example.com", "tok-bob-dead")],
+        cache_rows=[
+            (fresh_key, fresh_val, now + 7200),   # fresher: later expiry
+            (stale_key, stale_val, now + 3600),   # staler, but inserted last
+        ],
+    )
+    StubApi.responses = {}  # bob -> 401
+
+    got = run_poller(tmp, db, state, url)
+
+    bob = {a["email"]: a for a in got["accounts"]}["bob@example.com"]
+    check("freshest cache row wins", bob["percent"] == 77, f"got {bob!r}")
+    check("bob marked stale", bob["stale"] is True, f"got {bob!r}")
+
+
+def test_profile_token_beats_expired_main(tmp, url):
+    """A profile the user drives day-to-day (e.g. `afk`) can hold a
+    still-valid token while the main profile's has expired. The poller
+    reads every profile db and keeps the credential that expires latest,
+    so the live token wins and the account reports fresh, non-stale usage.
+    """
+    main_db = os.path.join(tmp, "agent.db")
+    afk_db = os.path.join(tmp, "afk.db")
+    state = os.path.join(tmp, "state.json")
+    make_db(main_db, [cred("bob@example.com", "tok-main-expired", expires_in_ms=-3_600_000)])
+    make_db(afk_db, [cred("bob@example.com", "tok-afk-valid", expires_in_ms=3_600_000)])
+    StubApi.responses = {
+        "tok-main-expired": 401,
+        "tok-afk-valid": usage_response(98),
+    }
+
+    got = run_poller(tmp, [main_db, afk_db], state, url)
+
+    check("one merged account", len(got["accounts"]) == 1, f"got {got['accounts']!r}")
+    bob = got["accounts"][0]
+    check("live profile token used", bob["percent"] == 98, f"got {bob!r}")
+    check("fresh via profile token", bob["stale"] is False, f"got {bob!r}")
+
+
+def test_freshest_cache_across_profiles_wins(tmp, url):
+    """Both profiles' tokens are dead; the freshest omp usage cache wins
+    regardless of which profile db holds it."""
+    main_db = os.path.join(tmp, "agent.db")
+    afk_db = os.path.join(tmp, "afk.db")
+    state = os.path.join(tmp, "state.json")
+    now = int(time.time())
+    acct = "acct-bob@example.com"
+    stale_key, stale_val = omp_cache_row("bob@example.com", acct, 44, scope="default")
+    fresh_key, fresh_val = omp_cache_row("bob@example.com", acct, 98)
+    make_db(main_db, [cred("bob@example.com", "tok-main-dead")],
+            cache_rows=[(stale_key, stale_val, now + 3600)])
+    make_db(afk_db, [cred("bob@example.com", "tok-afk-dead")],
+            cache_rows=[(fresh_key, fresh_val, now + 7200)])
+    StubApi.responses = {}  # both -> 401
+
+    got = run_poller(tmp, [main_db, afk_db], state, url)
+
+    bob = got["accounts"][0]
+    check("freshest cross-profile cache wins", bob["percent"] == 98, f"got {bob!r}")
+    check("marked stale", bob["stale"] is True, f"got {bob!r}")
 
 
 def test_unauthorized_keeps_previous_state(tmp, url):
@@ -404,6 +484,9 @@ def main():
     tests = [
         test_happy_path_two_accounts,
         test_unauthorized_falls_back_to_omp_cache,
+        test_freshest_omp_cache_row_wins,
+        test_profile_token_beats_expired_main,
+        test_freshest_cache_across_profiles_wins,
         test_unauthorized_keeps_previous_state,
         test_newest_credential_per_email_wins,
         test_claude_code_covers_dead_omp_token,

@@ -1,4 +1,5 @@
-# Enable pi-chat's OpenRouter provider.
+# Enable the shared OpenRouter key (spaces.openrouter — consumed by
+# pi-chat's provider staging and the hermes microvms).
 #
 # The API key is stored as a clan var (`openrouter/apikey`), prompted on
 # `clan vars generate` and persisted in the clan secret store. The host
@@ -19,7 +20,7 @@
     files.apikey.restartUnits = [ "spaces-secrets-load.service" ];
   };
 
-  services.pi-chat.openrouter = {
+  spaces.openrouter = {
     enable = true;
     apiKeyFile = config.clan.core.vars.generators.openrouter.files.apikey.path;
   };
