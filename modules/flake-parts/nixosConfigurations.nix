@@ -41,6 +41,7 @@ in {
           ncps = inputs.ncps + "/clanServices/ncps";
           monitoring = inputs.clan-core-monitoring + "/modules/monitoring";
           cctl = ../../modules/clan/cctl;
+          remote-building = ../../modules/clan/remote-building;
         };
 
         # add machines to their hosts
@@ -149,6 +150,14 @@ in {
                 "phone" = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJwzL0rt4J+kzggV4pFXf9yh9zBF6n4hdXXVbCB7p1x6";
               };
               roles.client.tags.all = {};
+            };
+            remote-building = {
+              module.name = "remote-building";
+              module.input = "self";
+              roles.builder.machines.bam = {};
+              # barToggle stays false until Task 3 lands the widget module;
+              # Task 4 flips it to true.
+              roles.client.machines.amy = {};
             };
 
             p2p-ssh-iroh = {
