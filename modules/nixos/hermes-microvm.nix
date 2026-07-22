@@ -6,7 +6,7 @@
 # with passwordless sudo. /home/<user>/hermes is the path-identity
 # exchange dir (same absolute path on both sides, also the guest HOME);
 # artifacts land in /home/<user>/hermes/workspace, hermes state (.hermes
-# DBs, .venv) in a hidden vault.
+# DBs, .venv) in a root-only vault.
 #
 # Host <-> guest interfaces (per user, all on 127.0.0.1):
 #   - `hermes` CLI/TUI: host shim ssh-execs into the VM (per-user keypair).
@@ -22,12 +22,10 @@
 # squatted (ssh/wrappers fail closed; a browser could still be phished).
 #
 # State vault: guest /var/lib/hermes is virtiofs from the host's
-# /var/lib/hermes-microvm/<user>/state-vault/state (0700 root), which only
-# the virtiofsd unit sees (bind mount in its private mount namespace over
-# an empty decoy source under /run/hermes-microvm-shares/<user>/).
+# /var/lib/hermes-microvm/<user>/state-vault/state; the 0700 root parent
+# keeps the owner out.
 # INVARIANT: the host must NEVER open the state sqlite DBs (virtiofs: no
-# cross-kernel locks, unsafe WAL mmap) — inspect via the guest, or:
-#   nsenter -m -t "$(systemctl show -p MainPID --value microvm-virtiofsd@hermes-<user>)"
+# cross-kernel locks, unsafe WAL mmap) — inspect via the guest.
 # The guest runs hermesPackageNoWal (journal_mode=DELETE everywhere).
 #
 # pip venv: see ./hermes-guest-python.nix (pinned by a flake check).
@@ -38,9 +36,6 @@ let
 
   vmName = user: "hermes-${user}";
   baseDir = user: "/var/lib/hermes-microvm/${user}";
-  # State-vault share sources: empty decoy dirs in the host namespace; the
-  # real vault is bind-mounted over them only inside the virtiofsd unit.
-  shareSourceDir = user: "/run/hermes-microvm-shares/${user}";
 
   # Fixed guest paths
   guestStateDir = "/var/lib/hermes";
@@ -249,18 +244,15 @@ let
     done
   '';
 
-  # ExecStartPre of the per-VM virtiofsd unit: bind the state vault over
-  # the decoy inside the unit's private mount namespace, and re-assert
-  # EVERY share source so a state wipe can't wedge the Type=notify unit
-  # (tmpfiles only runs at boot/rebuild; this runs at every start).
-  vaultBindScript = user: pkgs.writeShellScript "hermes-vault-bind-${user}" ''
+  # ExecStartPre of the per-VM virtiofsd unit: re-assert EVERY share
+  # source so a state wipe can't wedge the Type=notify unit (tmpfiles
+  # only runs at boot/rebuild; this runs at every start).
+  sharePrepScript = user: pkgs.writeShellScript "hermes-share-prep-${user}" ''
     set -eu
-    export PATH=${lib.makeBinPath (with pkgs; [ coreutils util-linux ])}
+    export PATH=${lib.makeBinPath (with pkgs; [ coreutils ])}
     install -d -m 0700 -o root -g root ${baseDir user}/state-vault
     install -d -m 0700 -o ${user} -g users ${baseDir user}/state-vault/state
     install -d -m 0755 ${baseDir user}/state-vault/state/simplex
-    mkdir -p ${shareSourceDir user}
-    install -d -m 0700 -o root -g root ${shareSourceDir user}/state
     # host-config share source; contents provisioned later by microvm@'s
     # ExecStartPre — the dir just has to exist
     install -d -m 0755 -o root -g root ${baseDir user}/guest
@@ -268,7 +260,6 @@ let
     # home — never created or chowned here)
     install -d -m 0755 -o ${user} -g users ${exchangeDir user}
     install -d -m 0755 -o ${user} -g users ${guestWorkspace user}
-    mount --bind ${baseDir user}/state-vault/state ${shareSourceDir user}/state
   '';
 
   # ── Guest NixOS configuration (fully declarative microvm) ────────────
@@ -355,13 +346,12 @@ let
           readOnly = true;
         }
         {
-          # HERMES state from the namespace-hidden vault (source is the
-          # decoy; virtiofsd bind-mounts the real vault over it). cache
+          # HERMES state from the root-only vault. cache
           # stays "auto": the guest never uses WAL (hermesPackageNoWal),
           # and exec/MAP_PRIVATE mmaps in .venv need the page cache.
           proto = "virtiofs";
           tag = "hermes-state";
-          source = "${shareSourceDir user}/state";
+          source = "${baseDir user}/state-vault/state";
           mountPoint = guestStateDir;
         }
       ];
@@ -1002,17 +992,10 @@ in
         wants = [ "user@${toString ucfg.uid}.service" ];
       };
 
-      # State-vault hiding: PrivateMounts + the bind in ExecStartPre mean
-      # only virtiofsd sees the hermes state; slave propagation keeps the
-      # store/exchange shares receiving host mounts. Deliberately NO "+"
-      # prefix — a full-privilege Exec line skips the namespacing options
-      # and would leak the mount into the host namespace. (Upstream
-      # defines this unit with overrideStrategy=asDropin; these merge.)
+      # Re-assert share sources at every start. (Upstream defines this
+      # unit with overrideStrategy=asDropin; these merge.)
       "microvm-virtiofsd@${vmName user}" = {
-        serviceConfig = {
-          PrivateMounts = true;
-          ExecStartPre = [ "${vaultBindScript user}" ];
-        };
+        serviceConfig.ExecStartPre = [ "${sharePrepScript user}" ];
       };
 
       # spaces gateway bridge: guest socat -> 10.0.2.2:<port> -> this unit
@@ -1038,8 +1021,7 @@ in
     ];
 
     # Share sources must exist before virtiofsd starts; guest/* contents
-    # are filled by the provisioning ExecStartPre. The decoys under /run
-    # stay empty in the host namespace by design.
+    # are filled by the provisioning ExecStartPre.
     systemd.tmpfiles.rules =
       [
         "d /var/lib/hermes-microvm 0755 root root - -"
@@ -1053,8 +1035,6 @@ in
         "d ${baseDir user}/guest/secrets 0700 root root - -"
         "d ${baseDir user}/state-vault 0700 root root - -"
         "d ${baseDir user}/state-vault/state 0700 ${user} users - -"
-        "d ${shareSourceDir user} 0755 root root - -"
-        "d ${shareSourceDir user}/state 0700 root root - -"
         "d ${exchangeDir user} 0755 ${user} users - -"
         "d ${guestWorkspace user} 0755 ${user} users - -"
       ]) cfg.users);

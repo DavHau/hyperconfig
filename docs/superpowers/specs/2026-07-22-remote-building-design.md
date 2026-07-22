@@ -155,23 +155,57 @@ No QML plugin — uses noctalia's built-in **CustomButton** widget.
 
 ### 4. Clan test
 
-VM test following the `modules/clan/wireguard/tests/vm` pattern:
-`modules/clan/remote-building/tests/vm/default.nix` with
-`clan.directory = ./.` and pre-generated test vars/sops committed under
-`tests/vm/vars` + `tests/vm/sops` (generated offline via
-`clan vars generate` against the test clan).
+Uses the **current clan-core test harness** (verified against clan-core
+2026-07-21, the pinned input; local checkout `../clan/clan-core` at
+2026-07-20 is equivalent):
 
-- **Nodes:** `builder1`, `client1`, wired through the test inventory as
-  one `remote-building` instance.
+- **Layout:** only `modules/clan/remote-building/tests/vm/default.nix` is
+  committed, with `clan.directory = ./.`. **No committed `vars/` or
+  `sops/` fixtures and no `update-vars` step** — the `clanTest` module
+  (`lib/clanTest/flake-module.nix`) runs all vars generators at eval time
+  via its Nix vars-executor and points `clan.core.settings.directory` at
+  the merged result. Our generators are plain `ssh-keygen` / `nix key`
+  scripts, so they run fine inside the executor derivation. (The
+  committed-vars layout in `modules/clan/wireguard/tests/vm` is the
+  legacy pattern; recent upstream services — `p2p-ssh-iroh`,
+  `borgbackup` — commit only `default.nix`.)
+- **Containers, not VMs:** the harness defaults to
+  `clan.test.useContainers = true` (systemd-nspawn; far cheaper).
+  Requires the `uid-range` system feature (`auto-allocate-uids`,
+  `cgroups`) on the building host. Risk: assertion 4 runs nested nix
+  builds inside a node — likely needs `nix.settings.sandbox = false` on
+  the test nodes; if container nesting still fights the daemon, set
+  `clan.test.useContainers = false` for this one test (documented
+  fallback, decided by first implementation run).
 - **Wiring into checks:** a new flake-parts module
   `modules/flake-parts/clan-tests.nix` (auto-imported by
-  `all-modules.nix`) exposing the test as
-  `checks.x86_64-linux.remote-building`, built with clan-core's nixos
-  test harness (the same machinery `clan.nixosTests` uses; exact entry
-  point — `inputs.clan-core.clanLib` test lib — resolved at
-  implementation). Note: the existing wireguard `flake-module.nix` is
-  currently NOT imported anywhere; this spec does not adopt it, but the
-  new module is written so the wireguard test could be wired in later.
+  `all-modules.nix`):
+
+  ```nix
+  { inputs, ... }: {
+    imports = [ inputs.clan-core.flakeModules.testModule ];
+    perSystem = _: {
+      clan.nixosTests.remote-building = {
+        imports = [ ../clan/remote-building/tests/vm/default.nix ];
+        clan.modules.remote-building = ../clan/remote-building;
+      };
+    };
+  }
+  ```
+
+  `testModule` (exported, flagged "unstable interface" upstream) provides
+  the `perSystem` `clan.nixosTests.*` option and exposes each test as
+  `checks.<system>.remote-building` automatically. The test inventory
+  references the module as `module.name = "remote-building";
+  module.input = "self"` (mirrors upstream `borgbackup` test).
+  Note: the dormant wireguard `flake-module.nix` stays untouched, but
+  once this module exists its test could be registered the same way.
+- **Nodes:** `builder1`, `client1`, one `remote-building` instance;
+  node-level extras kept minimal (upstream pattern: harness injects
+  minify + age-secrets modules via `defaults`).
+- **Debugging:** `nix run .#checks.x86_64-linux.remote-building.driver
+  -- --interactive` when on VMs; container runs log an `nsenter` command
+  per node.
 - **Assertions (the contract, in order):**
   1. `remote-builders.service` active at boot on client1;
      `/run/remote-builders/machines` non-empty and names
