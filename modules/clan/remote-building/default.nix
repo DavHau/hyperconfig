@@ -83,8 +83,11 @@
             users.users.nixremote = {
               isNormalUser = true;
               group = "nixremote";
-              # The ssh store protocol runs `nix-store --serve` through the
-              # login shell; nologin would break it.
+              # "*" = unusable password but NOT locked: sshd with UsePAM=false
+              # rejects pubkey auth for locked ("!") accounts.
+              hashedPassword = "*";
+              # ssh-ng runs `nix-daemon --stdio` through the login shell;
+              # nologin would break it.
               useDefaultShell = true;
               openssh.authorizedKeys.keys = map lib.trim (clientVals "ssh.id.pub");
             };
@@ -145,10 +148,10 @@
                 ssh-keygen -t ed25519 -N "" \
                   -C "${machineName}-remote-building-${instanceName}" \
                   -f "$out"/ssh.id
-                nix key generate-secret \
+                nix --extra-experimental-features nix-command key generate-secret \
                   --key-name "${machineName}-remote-building-${instanceName}-1" \
                   > "$out"/signing.key
-                nix key convert-secret-to-public \
+                nix --extra-experimental-features nix-command key convert-secret-to-public \
                   < "$out"/signing.key > "$out"/signing.key.pub
               '';
             };
@@ -162,9 +165,15 @@
 
             # NixOS renders these into /etc/nix/machines; the toggle unit
             # decides whether the daemon sees them (builders = @/run/...).
+            # ssh-ng is required: with the legacy ssh protocol build-remote
+            # assumes the remote user is trusted and calls buildDerivation,
+            # which the builder daemon rejects for untrusted users on
+            # input-addressed derivations. Over ssh-ng it detects the
+            # untrusted client and falls back to copying the (signed) drv
+            # closure + buildPaths, which is exactly the trust model here.
             nix.buildMachines = lib.mapAttrsToList (name: machine: {
               hostName = if machine.settings.host != null then machine.settings.host else "${name}.d";
-              protocol = "ssh";
+              protocol = "ssh-ng";
               sshUser = "nixremote";
               sshKey = gen.files."ssh.id".path;
               inherit (machine.settings)
