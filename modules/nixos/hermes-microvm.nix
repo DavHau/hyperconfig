@@ -164,17 +164,16 @@ let
   '';
 
   # ── Guest hermes package: sqlite WAL disabled ────────────────────────
-  # On virtiofs (cache=auto) `PRAGMA journal_mode=WAL` SUCCEEDS but the
-  # -shm mmap's FUSE cache invalidation is unreliable — a corruption
+  # WAL: on virtiofs (cache=auto) `PRAGMA journal_mode=WAL` SUCCEEDS but
+  # the -shm mmap's FUSE cache invalidation is unreliable — a corruption
   # risk, not a clean failure — so upstream's WAL->DELETE fallback
-  # (hermes_state.apply_wal_with_fallback) never fires, and
-  # agent/verification_evidence.py + tools/async_delegation.py set WAL
-  # with no fallback at all. No config/env knob exists, so the wheel is
-  # patched to force journal_mode=DELETE everywhere. The upstream package
-  # is a bin-wrapper around a sealed uv2nix venv (a symlink farm over
-  # per-wheel store paths): copy the farm, embed a patched wheel,
-  # retarget the farm's links, re-point the wrapper. A build-time grep
-  # proves no WAL set-pragma survives.
+  # (hermes_state.apply_wal_with_fallback) never fires, and several files
+  # set WAL raw with no fallback at all. No config/env knob exists, so
+  # the wheel is patched to force journal_mode=DELETE everywhere. The
+  # upstream package is a bin-wrapper around a sealed uv2nix venv (a
+  # symlink farm over per-wheel store paths): copy the farm, embed a
+  # patched wheel, retarget the farm's links, re-point the wrapper. A
+  # build-time grep proves no WAL set-pragma survives.
   hermesPackageBase = inputs.hermes-agent.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
   hermesVenvNoWal = pkgs.runCommand "${hermesPackageBase.hermesVenv.name}-nowal" { } ''
@@ -196,16 +195,22 @@ let
                      'if False and current_mode and current_mode[0] == "wal":  # hyperconfig: DELETE-only on virtiofs' \
       --replace-fail 'conn.execute("PRAGMA journal_mode=WAL")' \
                      'conn.execute("PRAGMA journal_mode=DELETE"); return "delete"  # hyperconfig: DELETE-only on virtiofs'
-    substituteInPlace "$out/pkg/$sp/agent/verification_evidence.py" \
-      --replace-fail 'conn.execute("PRAGMA journal_mode=WAL")' \
-                     'conn.execute("PRAGMA journal_mode=DELETE")'
-    substituteInPlace "$out/pkg/$sp/tools/async_delegation.py" \
-      --replace-fail 'conn.execute("PRAGMA journal_mode=WAL")' \
-                     'conn.execute("PRAGMA journal_mode=DELETE")'
+    # Raw WAL set-pragmas with no fallback: force DELETE directly.
+    for f in agent/verification_evidence.py tools/async_delegation.py \
+             cron/executions.py gateway/delivery_ledger.py \
+             plugins/platforms/discord/recovery.py; do
+      substituteInPlace "$out/pkg/$sp/$f" \
+        --replace-fail 'conn.execute("PRAGMA journal_mode=WAL")' \
+                       'conn.execute("PRAGMA journal_mode=DELETE")'
+    done
+
     # Stale bytecode would shadow the patched sources.
-    rm -f "$out/pkg/$sp/__pycache__/hermes_state."*.pyc \
-          "$out/pkg/$sp/agent/__pycache__/verification_evidence."*.pyc \
-          "$out/pkg/$sp/tools/__pycache__/async_delegation."*.pyc
+    for f in hermes_state.py agent/verification_evidence.py \
+             tools/async_delegation.py cron/executions.py \
+             gateway/delivery_ledger.py plugins/platforms/discord/recovery.py; do
+      d=$(dirname "$f"); b=$(basename "$f" .py)
+      rm -f "$out/pkg/$sp/$d/__pycache__/$b."*.pyc
+    done
     if grep -RF 'execute("PRAGMA journal_mode=WAL")' "$out/pkg" --include='*.py'; then
       echo "hermes-microvm: unpatched WAL set-pragma sites remain" >&2
       exit 1
@@ -632,12 +637,16 @@ let
     remote_cmd="$env_exports cd /home/$u/hermes/workspace && export HERMES_HOME=${guestStateDir}/.hermes && exec /run/current-system/sw/bin/hermes"
     # printf %q with zero args would still emit one empty-string argument
     if [ "$#" -gt 0 ]; then remote_cmd="$remote_cmd $(printf '%q ' "$@")"; fi
+    # ControlMaster=no: keep the user's global ssh mux config out of this
+    # connection (its socket mismatch printed "disabling multiplexing"
+    # noise into the TUI).
     exec ${pkgs.openssh}/bin/ssh $tty_flag \
       -p "$ssh_port" \
       -i "$base/ssh/client_ed25519" \
       -o IdentitiesOnly=yes \
       -o UserKnownHostsFile="$base/ssh/known_hosts" \
       -o StrictHostKeyChecking=yes \
+      -o ControlMaster=no -o ControlPath=none \
       "$u@127.0.0.1" -- \
       "$remote_cmd"
   '';
