@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """Publish per-account Anthropic Fable weekly usage for the noctalia bar.
 
-Reads every logged-in Anthropic account from omp's agent.db (READ-ONLY —
-an OAuth refresh rotates the refresh token and would corrupt omp's
-copy), asks the OAuth usage endpoint for each account's weekly Fable
-utilization, and atomically writes a small state file the noctalia
-`anthropic-usage` plugin watches:
+Reads every logged-in Anthropic account from omp's agent.db databases
+(READ-ONLY — an OAuth refresh rotates the refresh token and would
+corrupt omp's copy). Both the main profile (~/.omp/agent/agent.db) and
+every named profile (~/.omp/profiles/*/agent/agent.db) are read; for
+each account the credential that expires latest and the freshest cached
+usage report win, so a profile the user actually drives day-to-day
+(e.g. `afk`) supplies live data even when the main profile's token has
+expired. The poller asks the OAuth usage endpoint for each account's
+weekly Fable utilization, and atomically writes a small state file the
+noctalia `anthropic-usage` plugin watches:
 
     { "version": 1, "updatedAt": <epoch ms>,
       "accounts": [ { "email", "percent", "resetsAt", "stale" } ] }
@@ -22,7 +27,8 @@ because the file may be bind-mounted into sandboxes). Failing all that:
 omp's cached usage report, then the last published value, marked stale.
 
 Environment:
-    OMP_AGENT_DB              agent.db path   (default ~/.omp/agent/agent.db)
+    OMP_AGENT_DB              agent.db path(s), os.pathsep-joined; overrides
+                              profile discovery (default: main + all profiles)
     ANTHROPIC_USAGE_STATE     state file path (default $XDG_STATE_HOME/anthropic-usage.json)
     ANTHROPIC_USAGE_URL       usage endpoint  (default https://api.anthropic.com/api/oauth/usage)
     ANTHROPIC_PROFILE_URL     profile endpoint(default https://api.anthropic.com/api/oauth/profile)
@@ -30,6 +36,7 @@ Environment:
     CLAUDE_CODE_CREDENTIALS   Claude Code store (default ~/.claude/.credentials.json)
 """
 
+import glob
 import json
 import os
 import sqlite3
@@ -45,10 +52,27 @@ DEFAULT_TOKEN_URL = "https://api.anthropic.com/v1/oauth/token"
 CLAUDE_CODE_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 
 
-def db_path():
-    return os.environ.get(
-        "OMP_AGENT_DB", os.path.expanduser("~/.omp/agent/agent.db")
+def db_paths():
+    """Every omp agent.db to read: the main profile plus each named
+    profile under ~/.omp/profiles/*/agent/agent.db.
+
+    Each profile keeps its own logins and usage cache. A daily-driver
+    profile (e.g. `afk`) often holds the freshest — even still-valid —
+    token for an account while the main profile's copy has expired, so
+    we read them all and let the callers merge by freshness.
+
+    OMP_AGENT_DB overrides discovery; it may name several databases
+    joined by the OS path separator (used by the tests).
+    """
+    override = os.environ.get("OMP_AGENT_DB")
+    if override:
+        return [p for p in override.split(os.pathsep) if p]
+    home = os.path.expanduser("~")
+    paths = [os.path.join(home, ".omp", "agent", "agent.db")]
+    paths += sorted(
+        glob.glob(os.path.join(home, ".omp", "profiles", "*", "agent", "agent.db"))
     )
+    return [p for p in paths if os.path.exists(p)]
 
 
 def state_path():
@@ -59,27 +83,44 @@ def state_path():
     return os.environ.get("ANTHROPIC_USAGE_STATE", default)
 
 
-def load_accounts(db):
-    """Latest credential per account email from omp's auth_credentials."""
-    rows = db.execute(
-        "SELECT data, updated_at FROM auth_credentials"
-        " WHERE provider = 'anthropic' AND credential_type = 'oauth'"
-        " ORDER BY updated_at"
-    ).fetchall()
-    by_email = {}
-    for data, updated_at in rows:
-        try:
-            cred = json.loads(data)
-        except ValueError:
-            continue
-        email = cred.get("email")
-        if not email or not cred.get("access"):
-            continue
-        by_email[email] = cred  # rows are updated_at-ascending: last wins
-    return by_email
+def load_accounts(dbs):
+    """Best credential per account email across every omp database.
+
+    Within a db, auth_credentials keeps every historical login row; the
+    newest (updated_at-ascending, last wins) is the live one. Across dbs
+    (main + profiles) the same account may be logged in more than once,
+    so we keep the credential that expires latest — the one most likely
+    to still authenticate. A profile the user actually drives (e.g.
+    `afk`) can thus supply a valid token when the main profile's has
+    expired.
+    """
+    by_email = {}  # email -> (expires_key, cred)
+    for db in dbs:
+        rows = db.execute(
+            "SELECT data FROM auth_credentials"
+            " WHERE provider = 'anthropic' AND credential_type = 'oauth'"
+            " ORDER BY updated_at"
+        ).fetchall()
+        local = {}
+        for (data,) in rows:
+            try:
+                cred = json.loads(data)
+            except ValueError:
+                continue
+            email = cred.get("email")
+            if not email or not cred.get("access"):
+                continue
+            local[email] = cred  # rows are updated_at-ascending: last wins
+        for email, cred in local.items():
+            expires = cred.get("expires")
+            key = expires if isinstance(expires, (int, float)) else -1
+            prev = by_email.get(email)
+            if prev is None or key >= prev[0]:
+                by_email[email] = (key, cred)
+    return {email: cred for email, (_key, cred) in by_email.items()}
 
 
-def load_omp_usage_cache(db):
+def load_omp_usage_cache(dbs):
     """omp's own cached usage reports, keyed by account email.
 
     omp (the coding agent) polls the same endpoint while it works and
@@ -87,23 +128,33 @@ def load_omp_usage_cache(db):
     `usage_cache:report:anthropic:...|email:<email>`. When our direct
     fetch fails (expired access token — we never refresh, see module
     docstring) that row is the freshest data available.
+
+    omp keeps several rows per account (one per endpoint scope, e.g.
+    `default` and `https://api.anthropic.com`), refreshed independently,
+    and each profile has its own cache. Their freshness differs, so
+    across all rows in all databases keep the one with the latest
+    `expires_at` per email — an arbitrary pick can surface hours-old data
+    while a fresher row sits right beside it in another scope or profile.
     """
-    rows = db.execute(
-        "SELECT key, value FROM cache"
-        " WHERE key LIKE 'usage_cache:report:anthropic:%'"
-    ).fetchall()
-    by_email = {}
-    for key, value in rows:
-        marker = "|email:"
-        if marker not in key:
-            continue
-        email = key.rsplit(marker, 1)[1]
-        try:
-            report = json.loads(value).get("value") or {}
-        except ValueError:
-            continue
-        by_email[email] = report
-    return by_email
+    by_email = {}  # email -> (expires_at, report)
+    for db in dbs:
+        rows = db.execute(
+            "SELECT key, value, expires_at FROM cache"
+            " WHERE key LIKE 'usage_cache:report:anthropic:%'"
+        ).fetchall()
+        for key, value, expires_at in rows:
+            marker = "|email:"
+            if marker not in key:
+                continue
+            email = key.rsplit(marker, 1)[1]
+            try:
+                report = json.loads(value).get("value") or {}
+            except ValueError:
+                continue
+            prev = by_email.get(email)
+            if prev is None or expires_at > prev[0]:
+                by_email[email] = (expires_at, report)
+    return {email: report for email, (_expires_at, report) in by_email.items()}
 
 
 def fable_from_omp_report(report):
@@ -239,12 +290,13 @@ def main():
         token_url=os.environ.get("ANTHROPIC_TOKEN_URL", DEFAULT_TOKEN_URL),
     )
 
-    db = sqlite3.connect(f"file:{db_path()}?mode=ro", uri=True)
+    dbs = [sqlite3.connect(f"file:{p}?mode=ro", uri=True) for p in db_paths()]
     try:
-        creds = load_accounts(db)
-        omp_cache = load_omp_usage_cache(db)
+        creds = load_accounts(dbs)
+        omp_cache = load_omp_usage_cache(dbs)
     finally:
-        db.close()
+        for db in dbs:
+            db.close()
 
     accounts = []
     for email in sorted(creds):
