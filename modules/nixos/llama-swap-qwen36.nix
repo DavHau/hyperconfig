@@ -1,9 +1,8 @@
-# Qwen3.6-35B-A3B uncensored (heretic abliteration, native MTP head
-# preserved) for llama-swap. imatrix IQ4_XS quant by mradermacher.
+# Qwen3.6-35B-A3B (unsloth dynamic quants, MTP variant) for llama-swap.
 #
 # Local brain for the hermes agent. Tuned for a 16 GB Blackwell GPU +
 # 64 GB system RAM (machine: vit). Do NOT import on machines without
-# that much memory; the model download alone is ~18 GiB.
+# that much memory; the model download alone is ~17 GiB.
 #
 #   - Weights: attention/dense layers on GPU, part of the routed MoE
 #     experts parked in system RAM (--n-cpu-moe). Only 3B of 35B params
@@ -12,52 +11,70 @@
 #   - 200K context fits in VRAM because only 10 of 40 layers are full
 #     attention (2 KV heads x 256 head dim, rest is Gated DeltaNet):
 #     KV cache is ~20 KB/token fp16 -> ~2 GiB at 200K with q8_0 KV.
-#   - MTP head preserved (unlike the HauhauCS-Aggressive export used
-#     before): multi-token-prediction speculative decode, 1.4-2.2x
+#   - MTP GGUF: multi-token-prediction speculative decode, 1.4-2.2x
 #     faster generation for ~1 GiB extra memory.
-#   - mmproj comes from the SOURCE repo (llmfan46): mradermacher's i1
-#     repos ship no vision projector, and abliteration does not touch
-#     the vision tower, so the source model's own projector is correct.
 #
 # pkgs.fetchurl (fixed-output derivation), not builtins.fetchurl like the
-# small gemma4 models: an 18 GiB eval-time fetch would stall every
+# small gemma4 models: a 17 GiB eval-time fetch would stall every
 # `nix flake check` / CI eval; this way it downloads only when vit builds.
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.llama-swap;
   llama-server = lib.getExe' cfg.llama-server-package "llama-server";
 
-  baseName = "Qwen3.6-35B-A3B-uncensored-heretic-Native-MTP-Preserved";
-  quantRepo = "https://huggingface.co/mradermacher/${baseName}-i1-GGUF/resolve/main";
-  sourceRepo = "https://huggingface.co/llmfan46/${baseName}-GGUF/resolve/main";
+  # HF's CDN resets long-lived HTTP/2 streams (curl error 92, 0x8
+  # CANCEL) on slow links; at ~1 MB/s these ~17 GiB pulls take hours and
+  # get cut repeatedly. fetchurl already resumes (-C -), but its default
+  # --retry 3 is exhausted long before the file completes and the
+  # fixed-output derivation then discards the partial download.
+  # HTTP/1.1 avoids the h2 stream resets; a big retry budget makes the
+  # resumed transfer monotone to completion. (Last --retry wins.)
+  bigFetchCurlOpts = [ "--http1.1" "--retry" "99" "--retry-delay" "2" ];
+
+  hfRepo = "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/resolve/main";
 
   iq4xs = pkgs.fetchurl {
-    url = "${quantRepo}/${baseName}.i1-IQ4_XS.gguf";
-    hash = "sha256-OwEjyNGpAdes5uaznvdJVsIiffJtqPyTM6WiqXYLnW0=";
-    # HF's CDN resets long-lived HTTP/2 streams (curl error 92, 0x8
-    # CANCEL) on slow links; at ~1 MB/s this 18 GiB pull takes hours and
-    # gets cut repeatedly. fetchurl already resumes (-C -), but its
-    # default --retry 3 is exhausted long before the file completes and
-    # the fixed-output derivation then discards the partial download.
-    # HTTP/1.1 avoids the h2 stream resets; a big retry budget makes the
-    # resumed transfer monotone to completion. (Last --retry wins.)
-    curlOptsList = [ "--http1.1" "--retry" "99" "--retry-delay" "2" ];
+    url = "${hfRepo}/Qwen3.6-35B-A3B-UD-IQ4_XS.gguf";
+    hash = "sha256-3yengENbe0XCWXU2ES6jywkfhUTD0MMxjZ9CWLMfet8=";
+    curlOptsList = bigFetchCurlOpts;
   };
 
-  # Vision projector (Qwen3.6 is natively multimodal); BF16 suffices on CUDA.
+  # Vision projector (Qwen3.6 is natively multimodal); F16 suffices on CUDA.
   mmproj = pkgs.fetchurl {
-    url = "${sourceRepo}/${baseName}-mmproj-BF16.gguf";
-    hash = "sha256-1gULuCoBh+GwZV8cXa72DJR5Jz+9dAL/JdMTffLgcc4=";
+    url = "${hfRepo}/mmproj-F16.gguf";
+    hash = "sha256-cfPLwffMDzDQnUHPqSTABggn68M78VrOfoZmHoVvAWA=";
   };
+
+  # -- Uncensored variant (heretic abliteration, native MTP head
+  # -- preserved), imatrix IQ4_XS quant by mradermacher. Kept around but
+  # -- disabled; re-enable by uncommenting here and in `models` below.
+  # --   - mmproj comes from the SOURCE repo (llmfan46): mradermacher's
+  # --     i1 repos ship no vision projector, and abliteration does not
+  # --     touch the vision tower, so the source model's own projector
+  # --     is correct.
+  # hereticBaseName = "Qwen3.6-35B-A3B-uncensored-heretic-Native-MTP-Preserved";
+  # hereticQuantRepo = "https://huggingface.co/mradermacher/${hereticBaseName}-i1-GGUF/resolve/main";
+  # hereticSourceRepo = "https://huggingface.co/llmfan46/${hereticBaseName}-GGUF/resolve/main";
+  #
+  # hereticIq4xs = pkgs.fetchurl {
+  #   url = "${hereticQuantRepo}/${hereticBaseName}.i1-IQ4_XS.gguf";
+  #   hash = "sha256-OwEjyNGpAdes5uaznvdJVsIiffJtqPyTM6WiqXYLnW0=";
+  #   curlOptsList = bigFetchCurlOpts;
+  # };
+  #
+  # hereticMmproj = pkgs.fetchurl {
+  #   url = "${hereticSourceRepo}/${hereticBaseName}-mmproj-BF16.gguf";
+  #   hash = "sha256-1gULuCoBh+GwZV8cXa72DJR5Jz+9dAL/JdMTffLgcc4=";
+  # };
 
   # nCpuMoe: MoE expert blocks (of 40 layers) streamed from system RAM.
   # Sized so GPU-resident weights + ~2 GiB KV (200K, q8_0) + compute
   # buffers stay under 16 GiB. Lower to fill VRAM once measured on the
   # real card (watch nvidia-smi at full context).
-  mkCmd = { model, nCpuMoe }: lib.concatStringsSep " " [
+  mkCmd = { model, mmprojFile ? mmproj, nCpuMoe }: lib.concatStringsSep " " [
     llama-server
     "-m ${model}"
-    "--mmproj ${mmproj}"
+    "--mmproj ${mmprojFile}"
     "--port \${PORT}"
     "--jinja"
     # 200K context. q8_0 KV halves the (already small) cache; if long
@@ -80,9 +97,12 @@ in
 {
   services.llama-swap.settings.models = {
     # Name is referenced by amy's hermes VMs (vit.d:8012) -- keep in sync
-    # with modules/nixos/hermes-agent.nix settings.model.default.
-    "qwen3.6:35b-heretic-iq4_xs" = {
+    # with modules/nixos/hermes/site.nix settings.model.default.
+    "qwen3.6:35b-iq4_xs" = {
       cmd = mkCmd { model = iq4xs; nCpuMoe = 16; };
     };
+    # "qwen3.6:35b-heretic-iq4_xs" = {
+    #   cmd = mkCmd { model = hereticIq4xs; mmprojFile = hereticMmproj; nCpuMoe = 16; };
+    # };
   };
 }

@@ -14,7 +14,7 @@
     ../../modules/nixos/noctalia-resume-fix.nix
     ../../modules/nixos/noctalia-anthropic-usage
     ../../modules/nixos/fw-fanctrl.nix
-    ../../modules/nixos/hermes-agent.nix
+    ../../modules/nixos/hermes/site.nix
     ../../modules/nixos/vibepn.nix
     ./disko.nix
   ];
