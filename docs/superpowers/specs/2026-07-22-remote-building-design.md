@@ -154,11 +154,13 @@ No QML plugin — uses noctalia's built-in **CustomButton** widget.
   `systemd.user.services.noctalia-shell.serviceConfig.ExecStartPre`
   (`lib.mkAfter`, same slot and idempotence contract as
   `noctalia-anthropic-usage/merge.sh`): if no CustomButton with our
-  command exists in `bar.widgets.right`, append
+  command exists in `bar.widgets.right`, insert
   `{ id: "CustomButton", icon: "cloud-upload",
      leftClickExec: "remote-build-toggle toggle",
      textCommand: "remote-build-toggle status",
-     parseJson: true, textIntervalMs: 3000 }`.
+     parseJson: true, textIntervalMs: 3000 }`
+  immediately BEFORE the `ControlCenter` widget (the noctalia owl stays
+  the rightmost icon), or append when no ControlCenter is present.
   User's own layout and existing widgets are never rewritten; the merge
   is idempotent across restarts. `restartTriggers` on the merge script.
 

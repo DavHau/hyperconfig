@@ -4,6 +4,10 @@
 # remote-build-toggle (any section, any screen override), do nothing —
 # the user may have moved or restyled it. Missing/corrupt settings.json
 # starts from {}.
+#
+# Placement: immediately BEFORE the ControlCenter widget (the noctalia
+# owl) when present, so the owl stays the rightmost icon; plain append
+# otherwise.
 set -euo pipefail
 
 cfgDir="${XDG_CONFIG_HOME:-$HOME/.config}/noctalia"
@@ -30,7 +34,11 @@ printf '%s' "$existing" | jq --argjson w "$widget" '
          | .textCommand // "" | select(test("remote-build-toggle"))]
       | length) > 0
   then .
-  else .bar.widgets.right = ((.bar.widgets.right // []) + [$w])
+  else .bar.widgets.right = ((.bar.widgets.right // []) as $r
+    | if any($r[]; .id? == "ControlCenter")
+      then [$r[] | if .id? == "ControlCenter" then $w, . else . end]
+      else $r + [$w]
+      end)
   end
 ' > "$tmp"
 mv "$tmp" "$target"
