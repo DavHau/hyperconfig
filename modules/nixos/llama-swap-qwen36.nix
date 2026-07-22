@@ -34,6 +34,14 @@ let
   iq4xs = pkgs.fetchurl {
     url = "${quantRepo}/${baseName}.i1-IQ4_XS.gguf";
     hash = "sha256-OwEjyNGpAdes5uaznvdJVsIiffJtqPyTM6WiqXYLnW0=";
+    # HF's CDN resets long-lived HTTP/2 streams (curl error 92, 0x8
+    # CANCEL) on slow links; at ~1 MB/s this 18 GiB pull takes hours and
+    # gets cut repeatedly. fetchurl already resumes (-C -), but its
+    # default --retry 3 is exhausted long before the file completes and
+    # the fixed-output derivation then discards the partial download.
+    # HTTP/1.1 avoids the h2 stream resets; a big retry budget makes the
+    # resumed transfer monotone to completion. (Last --retry wins.)
+    curlOptsList = [ "--http1.1" "--retry" "99" "--retry-delay" "2" ];
   };
 
   # Vision projector (Qwen3.6 is natively multimodal); BF16 suffices on CUDA.
