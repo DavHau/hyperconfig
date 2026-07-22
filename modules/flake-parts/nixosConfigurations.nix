@@ -155,9 +155,7 @@ in {
               module.name = "remote-building";
               module.input = "self";
               roles.builder.machines.bam = {};
-              # barToggle stays false until Task 3 lands the widget module;
-              # Task 4 flips it to true.
-              roles.client.machines.amy = {};
+              roles.client.machines.amy.settings.barToggle = true;
             };
 
             p2p-ssh-iroh = {
