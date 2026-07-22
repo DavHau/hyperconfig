@@ -56,24 +56,28 @@ Generic: any number of builders and clients per instance.
     `files.ssh.id.pub` (public, in-repo): `ssh-keygen -t ed25519`.
   - `files.signing.key` (secret, deployed) + `files.signing.key.pub`
     (public, in-repo): `nix key generate-secret --key-name
-    <machine>-remote-build-1` / `nix key convert-secret-to-public`.
+    <machine>-remote-building-<instance>-1` / `nix key convert-secret-to-public`.
 - **Signing:** `nix.settings.secret-key-files = [ <signing.key path> ]` —
   every locally built/added path is signed at registration time.
-- **SSH client config** for root (what nix-daemon uses): per builder
-  machine in `roles.builder.machines`, a `programs.ssh.extraConfig` block:
-  `Host <builder>.d` / `User nixremote` / `IdentityFile <ssh.id path>` /
-  `BatchMode yes`.
+- **SSH transport:** no global root `programs.ssh` `Host` block — that
+  would redirect interactive `ssh <builder>.d` for every user. Instead,
+  each builder gets an entry in `nix.buildMachines` carrying
+  `sshUser = "nixremote"` and `sshKey = <ssh.id path>`, so the
+  credentials live in the machines file itself.
+- **Protocol:** `protocol = "ssh-ng"`. Required: over the legacy ssh
+  (serve) protocol, `build-remote` assumes the remote user is trusted
+  and calls `buildDerivation`, which the builder's daemon rejects for
+  untrusted users on input-addressed derivations. ssh-ng runs
+  `nix daemon --stdio` on the builder, which accepts a signed closure
+  upload + `buildPaths` from an untrusted user — exactly this trust
+  model.
 - **Distributed builds:**
   - `nix.distributedBuilds = true`,
     `nix.settings.builders-use-substitutes = true`.
-  - Do NOT use `nix.buildMachines` (it writes a static `/etc/nix/machines`).
-    Instead render the machines file content ourselves into the store
-    (`pkgs.writeText`), one line per builder:
-    `ssh://nixremote@<builder>.d <systems> <ssh.id path> <maxJobs>
-    <speedFactor> <features> - -`
-    and set `nix.settings.builders = "@/run/remote-builders/machines"`.
-    nix-daemon re-reads the `@file` per build — toggling needs no daemon
-    restart.
+  - `nix.buildMachines` renders the static `/etc/nix/machines`;
+    `nix.settings.builders = "@/run/remote-builders/machines"` points
+    the daemon at a runtime-switchable copy. nix-daemon re-reads the
+    `@file` per build — toggling needs no daemon restart.
 - **Toggle unit `remote-builders.service`:** oneshot,
   `RemainAfterExit = true`, `wantedBy = [ "multi-user.target" ]`
   (⇒ ON at boot, per decision). ExecStart installs the rendered machines
@@ -90,8 +94,11 @@ Generic: any number of builders and clients per instance.
 #### roles.builder — perInstance nixosModule
 
 - **User:** `users.users.nixremote`: normal user, `isNormalUser = true`,
-  `shell = pkgs.bash` (nix's ssh store protocol needs a working shell),
-  no extra groups, no password.
+  default shell (ssh-ng runs `nix-daemon --stdio` through the login
+  shell, so `nologin` would break it), no extra groups,
+  `hashedPassword = "*"` — password unusable but account not locked:
+  sshd with `UsePAM = false` rejects pubkey auth for locked (`!`)
+  accounts.
 - **Authorized keys:** for each machine in `roles.client.machines`, read
   `${clan.core.settings.directory}/vars/per-machine/<client>/remote-building-<instanceName>/ssh.id.pub/value`
   into `users.users.nixremote.openssh.authorizedKeys.keys`.
@@ -221,10 +228,13 @@ Uses the **current clan-core test harness** (verified against clan-core
      client1 and the build log mentions the builder. This exercises the
      full signing chain: client-signed input paths accepted by builder's
      daemon WITHOUT `trusted-users`, and copy-back to the client.
-  5. Negative: a path with signatures stripped (`nix store copy` from a
-     store with no key / `--no-check-sigs` locally, then push attempt via
-     `nix copy --to ssh://nixremote@builder1`) is REJECTED by builder1 —
-     proves `nixremote` is genuinely untrusted.
+  5. Negative: `nixremote` must remain genuinely untrusted. Implemented
+     as a config-level assertion — builder1's
+     `nix.settings.trusted-users` must not contain `nixremote` — rather
+     than a runtime unsigned-push probe: `secret-key-files` on the
+     client signs every local registration, so an unsigned path cannot
+     be constructed client-side to push; assertion 4 already proves
+     signatures are what the builder accepts.
 
 ## Security Model
 
