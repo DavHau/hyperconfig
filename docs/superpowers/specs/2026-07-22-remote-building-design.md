@@ -1,0 +1,237 @@
+# Remote Building via Clan Service + Noctalia Toggle
+
+Date: 2026-07-22
+Status: approved design, pending implementation
+
+## Goal
+
+Offload nix builds from laptops to powerful clan machines. First instance:
+`amy` (client) builds on `bam` (builder). A noctalia bar icon on the client
+toggles remote building on/off at runtime. All authentication — ssh user
+keys and nix store signing keys — is generated, deployed, and distributed
+by clan vars; zero manual key handling.
+
+## Non-Goals
+
+- Builder reachability probing / automatic failover to local builds
+  (the bar toggle IS the manual failover).
+- Serving bam's store as a binary cache (separate, existing `nix-cache`
+  module).
+- Auto re-signing of the client store on a schedule (one-time manual step,
+  see Deploy Notes).
+
+## Architecture
+
+```
+amy (roles.client)                        bam (roles.builder)
+──────────────────                        ───────────────────
+vars: ssh keypair ───public key──────────▶ nixremote authorized_keys
+vars: signing keypair ─public key────────▶ nix.settings.trusted-public-keys
+nix.settings.secret-key-files             (nixremote is NOT a trusted-user)
+nix.distributedBuilds = true
+builders = @/run/remote-builders/machines
+        ▲
+remote-builders.service (oneshot, RemainAfterExit, enabled)
+  start → writes machines file            noctalia CustomButton
+  stop  → truncates it            ◀────── toggle script (polkit-allowed
+                                           systemctl start/stop for wheel)
+```
+
+Host key trust needs no work: the existing clan-core `sshd` instance
+(roles server+client on `tags.all`) already gives every machine a
+CA-signed host certificate that clients trust for `*.d`.
+
+## Components
+
+### 1. Clan service `modules/clan/remote-building/default.nix`
+
+`_class = "clan.service"`, `manifest.name = "hyperconfig/remote-building"`.
+Generic: any number of builders and clients per instance.
+
+#### roles.client — perInstance nixosModule
+
+- **Vars generator `remote-building-<instanceName>`** (per-machine, not
+  shared):
+  - `files.ssh.id` (secret, deployed, root-owned 0400) +
+    `files.ssh.id.pub` (public, in-repo): `ssh-keygen -t ed25519`.
+  - `files.signing.key` (secret, deployed) + `files.signing.key.pub`
+    (public, in-repo): `nix key generate-secret --key-name
+    <machine>-remote-build-1` / `nix key convert-secret-to-public`.
+- **Signing:** `nix.settings.secret-key-files = [ <signing.key path> ]` —
+  every locally built/added path is signed at registration time.
+- **SSH client config** for root (what nix-daemon uses): per builder
+  machine in `roles.builder.machines`, a `programs.ssh.extraConfig` block:
+  `Host <builder>.d` / `User nixremote` / `IdentityFile <ssh.id path>` /
+  `BatchMode yes`.
+- **Distributed builds:**
+  - `nix.distributedBuilds = true`,
+    `nix.settings.builders-use-substitutes = true`.
+  - Do NOT use `nix.buildMachines` (it writes a static `/etc/nix/machines`).
+    Instead render the machines file content ourselves into the store
+    (`pkgs.writeText`), one line per builder:
+    `ssh://nixremote@<builder>.d <systems> <ssh.id path> <maxJobs>
+    <speedFactor> <features> - -`
+    and set `nix.settings.builders = "@/run/remote-builders/machines"`.
+    nix-daemon re-reads the `@file` per build — toggling needs no daemon
+    restart.
+- **Toggle unit `remote-builders.service`:** oneshot,
+  `RemainAfterExit = true`, `wantedBy = [ "multi-user.target" ]`
+  (⇒ ON at boot, per decision). ExecStart installs the rendered machines
+  file at `/run/remote-builders/machines` (0444, dir 0755); ExecStop
+  truncates it. `systemctl is-active remote-builders` is the single
+  source of truth for toggle state.
+- **Polkit rule:** members of `wheel` may `start`/`stop`/`restart` exactly
+  `remote-builders.service` without authentication
+  (`org.freedesktop.systemd1.manage-units` scoped to that unit).
+- **Interface options (client):** `barToggle : bool` (default `false`) —
+  when true, imports the noctalia widget module (component 3). Set only
+  for amy.
+
+#### roles.builder — perInstance nixosModule
+
+- **User:** `users.users.nixremote`: normal user, `isNormalUser = true`,
+  `shell = pkgs.bash` (nix's ssh store protocol needs a working shell),
+  no extra groups, no password.
+- **Authorized keys:** for each machine in `roles.client.machines`, read
+  `${clan.core.settings.directory}/vars/per-machine/<client>/remote-building-<instanceName>/ssh.id.pub/value`
+  into `users.users.nixremote.openssh.authorizedKeys.keys`.
+- **Signature trust:** for each client, read
+  `.../signing.key.pub/value` into `nix.settings.trusted-public-keys`.
+  **`nixremote` is NOT added to `nix.settings.trusted-users`** — unsigned
+  path injection from a compromised client key is rejected; only paths
+  signed by a registered client key (or upstream caches bam already
+  trusts) are accepted.
+- **Interface options (builder):**
+  - `maxJobs : int` (default 10)
+  - `speedFactor : int` (default 2)
+  - `systems : listOf str` (default `[ "x86_64-linux" "aarch64-linux" ]`)
+  - `supportedFeatures : listOf str` (default
+    `[ "nixos-test" "big-parallel" "kvm" "benchmark" ]`)
+
+  These are builder-side settings consumed by the *client* role when
+  rendering its machines file (read via `roles.builder.machines.<name>.settings`).
+
+### 2. Inventory + registration
+
+In `modules/flake-parts/nixosConfigurations.nix`:
+
+- `modules.remote-building = ../../modules/clan/remote-building;`
+- Instance:
+
+  ```nix
+  remote-building = {
+    module.name = "remote-building";
+    module.input = "self";
+    roles.builder.machines.bam = {};
+    roles.client.machines.amy.settings.barToggle = true;
+  };
+  ```
+
+Cleanup: delete the dead commented `nix.buildMachines` block in
+`modules/nixos/laptop-dave.nix` (lines ~108–115).
+
+### 3. Noctalia bar toggle `modules/nixos/noctalia-remote-build/`
+
+No QML plugin — uses noctalia's built-in **CustomButton** widget.
+
+- **`remote-build-toggle` script** (in `environment.systemPackages`):
+  - `status`: prints CustomButton JSON on one line, e.g.
+    `{"icon":"cloud_upload","tooltip":"Remote builds: on (bam)"}` when
+    `remote-builders.service` is active,
+    `{"icon":"cloud_off","tooltip":"Remote builds: off"}` otherwise.
+  - `toggle`: `systemctl stop` if active else `start` (passwordless via
+    the polkit rule).
+- **Config seeding:** an append-only merge script run as
+  `systemd.user.services.noctalia-shell.serviceConfig.ExecStartPre`
+  (`lib.mkAfter`, same slot and idempotence contract as
+  `noctalia-anthropic-usage/merge.sh`): if no CustomButton with our
+  command exists in `bar.widgets.right`, append
+  `{ id: "CustomButton", icon: "cloud_upload",
+     leftClickExec: "remote-build-toggle toggle",
+     textCommand: "remote-build-toggle status",
+     parseJson: true, textIntervalMs: 3000 }`.
+  User's own layout and existing widgets are never rewritten; the merge
+  is idempotent across restarts. `restartTriggers` on the merge script.
+
+### 4. Clan test
+
+VM test following the `modules/clan/wireguard/tests/vm` pattern:
+`modules/clan/remote-building/tests/vm/default.nix` with
+`clan.directory = ./.` and pre-generated test vars/sops committed under
+`tests/vm/vars` + `tests/vm/sops` (generated offline via
+`clan vars generate` against the test clan).
+
+- **Nodes:** `builder1`, `client1`, wired through the test inventory as
+  one `remote-building` instance.
+- **Wiring into checks:** a new flake-parts module
+  `modules/flake-parts/clan-tests.nix` (auto-imported by
+  `all-modules.nix`) exposing the test as
+  `checks.x86_64-linux.remote-building`, built with clan-core's nixos
+  test harness (the same machinery `clan.nixosTests` uses; exact entry
+  point — `inputs.clan-core.clanLib` test lib — resolved at
+  implementation). Note: the existing wireguard `flake-module.nix` is
+  currently NOT imported anywhere; this spec does not adopt it, but the
+  new module is written so the wireguard test could be wired in later.
+- **Assertions (the contract, in order):**
+  1. `remote-builders.service` active at boot on client1;
+     `/run/remote-builders/machines` non-empty and names
+     `ssh://nixremote@builder1`.
+  2. `systemctl stop remote-builders` → machines file empty;
+     `start` → content restored (toggle round-trip).
+  3. Root on client1 can `ssh -o BatchMode=yes nixremote@builder1 true`
+     using only deployed vars (auth chain: CA host cert + generated
+     user key).
+  4. End-to-end offloaded build: client1 runs
+     `nix build --expr` on a trivial derivation with
+     `--max-jobs 0` (forces remote); assert the output path exists on
+     client1 and the build log mentions the builder. This exercises the
+     full signing chain: client-signed input paths accepted by builder's
+     daemon WITHOUT `trusted-users`, and copy-back to the client.
+  5. Negative: a path with signatures stripped (`nix store copy` from a
+     store with no key / `--no-check-sigs` locally, then push attempt via
+     `nix copy --to ssh://nixremote@builder1`) is REJECTED by builder1 —
+     proves `nixremote` is genuinely untrusted.
+
+## Security Model
+
+| Threat | Mitigation |
+| --- | --- |
+| Client key compromise → root on builder | `nixremote` is unprivileged, not in `trusted-users`; ssh key grants only store-protocol access |
+| Malicious store path injection into builder | Builder requires signatures from per-client keys in `trusted-public-keys`; revocation = remove one client's vars + redeploy |
+| MITM on first connect | clan-core sshd CA host certificates (already deployed clan-wide) |
+| Non-wheel local user flips builds | polkit rule scoped to `wheel` and to the single unit |
+
+Accepted residual: a client signing key is trusted for *any* import on
+the builder (including substitution), not only builds — narrower than
+`trusted-users`, acceptable for this clan.
+
+## Error Handling
+
+- Builder unreachable while toggled ON: nix stalls/retries on the remote;
+  user flips the bar icon OFF and rebuilds locally. No auto-probing.
+- Copy-back signature check: the client daemon imports build results from
+  the builder itself (build-hook path, no signature requirement on
+  self-initiated copies). If implementation proves otherwise, symmetric
+  fix: builder role also generates a signing key, clients trust it. The
+  e2e test assertion 4 settles this.
+- Unsigned pre-existing client paths: rejected as build inputs until the
+  one-time re-sign (Deploy Notes).
+
+## Deploy Notes (one-time, after first deploy to amy)
+
+```sh
+sudo nix store sign --all -k /run/secrets/vars/remote-building-remote-building/signing.key   # actual var path per clan vars layout
+```
+
+Signs pre-existing locally-built paths so they are accepted as build
+inputs by bam. New builds are signed automatically.
+
+## Verification Plan
+
+1. `nix build .#checks.x86_64-linux.remote-building` (the clan test).
+2. Eval both machines: `nix build .#nixosConfigurations.{amy,bam}.config.system.build.toplevel --dry-run` (amy locally; full builds via CI/deploy).
+3. After deploy: `nix store ping --store ssh://nixremote@bam.d` as root on
+   amy; trivial `nix build --rebuild` shows `building on 'ssh://…bam.d'`;
+   bar icon click flips state within one poll interval (≤3 s) and
+   `systemctl is-active remote-builders` agrees; toggled off, the same
+   build runs locally.
