@@ -1,97 +1,53 @@
 # Hermes Agent (NousResearch) in per-user MicroVMs — microvm.nix, fully
-# declarative, qemu + slirp user networking (no host bridge/NAT; coexists
-# with NetworkManager).
+# declarative, qemu + slirp user networking (no host bridge/NAT).
 #
-# One VM per configured user ("hermes-<user>"). Inside each guest the
-# UPSTREAM hermes NixOS module runs in native mode as a guest account with
-# the same name/uid as the host user. The guest gets the host's /nix/store
-# read-only, a namespace-hidden virtiofs share for HERMES state (see
-# below), an artifact workspace exposed on the host as ~/hermes/workspace,
-# and passwordless sudo inside the guest. The guest account's HOME is the
-# state dir (upstream convention): artifacts land in the workspace
-# (default session cwd), dotfiles/caches in the hidden vault.
+# One VM per user ("hermes-<user>"); the upstream hermes NixOS module runs
+# natively in each guest as an account mirroring the host user's name/uid,
+# with passwordless sudo. /home/<user>/hermes is the path-identity
+# exchange dir (same absolute path on both sides, also the guest HOME);
+# artifacts land in /home/<user>/hermes/workspace, hermes state (.hermes
+# DBs, .venv) in a hidden vault.
 #
 # Host <-> guest interfaces (per user, all on 127.0.0.1):
-#   - `hermes` CLI/TUI: host shim ssh-execs into the owner's VM with a
-#     dedicated per-user keypair (0600, owner-only) — same seam as the old
-#     docker-exec routing. State never crosses the VM boundary, so the
-#     gateway/CLI sqlite+lockfile coordination stays inside one kernel.
-#   - Web dashboard: guest `hermes dashboard` on 127.0.0.1:9118 in loopback
-#     mode (upstream's non-loopback auth gate is cookie-only — no static
-#     token contract), bridged by a guest socat to the NIC-facing 9119
-#     slirp forward, then to host 127.0.0.1:<dashboardPort>. Auth: a fixed
-#     per-user HERMES_DASHBOARD_SESSION_TOKEN generated on the host; the
-#     real boundary is the iptables owner match on the forwarded port.
-#   - Hermes Desktop: host `hermes-desktop` wrapper launches the upstream
-#     Electron app against the owner's forwarded dashboard via
-#     HERMES_DESKTOP_REMOTE_URL/_TOKEN (token file 0400 owner-only).
-#   - spaces MCP: guest socat -> slirp host alias 10.0.2.2:<spacesPort> ->
-#     host socat (running as the owner) -> the per-user gateway socket in
-#     /run/user/<uid>.
+#   - `hermes` CLI/TUI: host shim ssh-execs into the VM (per-user keypair).
+#   - Web dashboard: guest socat bridges loopback :9118 to the :9119 slirp
+#     forward -> host <dashboardPort>; auth = fixed host-generated token.
+#   - `hermes-desktop`: Electron app against the forwarded dashboard.
+#   - spaces MCP: guest socat -> 10.0.2.2:<spacesPort> -> host socat (as
+#     the owner) -> the per-user gateway socket.
+# Isolation: owner-only key/token files + iptables OUTPUT owner-match on
+# every forwarded port. Caveats (fine for one user): guests share the
+# `microvm` uid, so one guest can reach another user's spaces bridge; and
+# owner-match gates connects, not listens — a down VM's port can be
+# squatted (ssh/wrappers fail closed; a browser could still be phished).
 #
-# Isolation between users: ssh keys and dashboard tokens are owner-only
-# files, and iptables OUTPUT owner-match rules reject other local users on
-# every forwarded loopback port. Residual caveats:
-#   - all VMs' qemu processes run as the shared `microvm` user; the
-#     loopback allowlist (spaces ports + DNS, REJECT otherwise) keeps
-#     guests off arbitrary host loopback services, but one user's guest
-#     can still reach ANOTHER user's spaces bridge port;
-#   - owner-match gates CONNECTS, not LISTENS: while a VM is down, any
-#     local user can squat its free forwarded port. ssh fails closed
-#     (pinned host key); the shim/desktop wrappers refuse to talk unless
-#     the VM unit is active, but a browser can still be phished into
-#     sending the dashboard token to a squatter. Full fix would be a
-#     vsock backend behind a root-held socket;
-#   - the guest never sees the owner's real home. Its persistence surface
-#     is ~/hermes/workspace (owner-auditable) plus the hidden state vault;
-#     host dotfile-planting via a shared home is no longer possible.
-# All acceptable for now with a single configured user.
-#
-# HERMES state (/var/lib/hermes in the guest) is a virtiofs share. The
-# real data lives in a root-only vault on the host,
-#   /var/lib/hermes-microvm/<user>/state-vault/state   (vault 0700 root),
-# while the share's `source` points at an EMPTY decoy dir under
-# /run/hermes-microvm-shares/<user>/. Only the per-VM virtiofsd unit sees
-# the data: it runs with PrivateMounts plus an ExecStartPre bind mount
-# vault -> share-source inside its private mount namespace. INVARIANT:
-# the host must never open the state sqlite DBs — a host-side reader
-# would reintroduce exactly the cross-kernel sqlite coordination that
-# virtiofs cannot provide (no remote locks, unsafe WAL mmap). Inspect
-# state through the guest (`hermes`/ssh) or via
+# State vault: guest /var/lib/hermes is virtiofs from the host's
+# /var/lib/hermes-microvm/<user>/state-vault/state (0700 root), which only
+# the virtiofsd unit sees (bind mount in its private mount namespace over
+# an empty decoy source under /run/hermes-microvm-shares/<user>/).
+# INVARIANT: the host must NEVER open the state sqlite DBs (virtiofs: no
+# cross-kernel locks, unsafe WAL mmap) — inspect via the guest, or:
 #   nsenter -m -t "$(systemctl show -p MainPID --value microvm-virtiofsd@hermes-<user>)"
-# sqlite safety on virtiofs: WAL needs a MAP_SHARED -shm mapping whose
-# FUSE cache invalidation is unreliable, so the guest runs a patched
-# hermes package (hermesPackageNoWal below) that forces
-# journal_mode=DELETE for every DB family. fcntl/flock locking is
-# guest-local and safe: all lockers of a given DB live in one guest
-# kernel.
+# The guest runs hermesPackageNoWal (journal_mode=DELETE everywhere).
 #
-# pip: guests get a venv at /var/lib/hermes/.venv with the preinstalled
-# scientific stack importable AND `pip install` working — see
-# ./hermes-guest-python.nix (shared module, pinned by the
-# `hermes-guest-python` flake check).
-#
-# Hardware acceleration: the host desktop owns the iGPU, so no
-# passthrough — instead `gpu.enable` gives every guest Vulkan via QEMU
-# Venus (virtio-gpu-gl-pci + egl-headless on the host render node; the
-# iGPU is time-shared with the host compositor). Computation is
-# otherwise CPU-side: openblas-backed numpy/scipy, CPU torch with
-# AVX-512, numba JIT.
+# pip venv: see ./hermes-guest-python.nix (pinned by a flake check).
+# GPU: `gpu.enable` = Vulkan via QEMU Venus on the shared host iGPU.
 { config, lib, pkgs, inputs, ... }:
 let
   cfg = config.services.hermes-microvm;
 
   vmName = user: "hermes-${user}";
   baseDir = user: "/var/lib/hermes-microvm/${user}";
-  # Share `source`s for the state vault: empty decoy dirs in the host
-  # namespace; the real vault is bind-mounted over them only inside the
-  # virtiofsd unit's private mount namespace (see the drop-in below).
+  # State-vault share sources: empty decoy dirs in the host namespace; the
+  # real vault is bind-mounted over them only inside the virtiofsd unit.
   shareSourceDir = user: "/run/hermes-microvm-shares/${user}";
 
   # Fixed guest paths
   guestStateDir = "/var/lib/hermes";
   guestHostDir = "/run/hermes-host"; # ro virtiofs: ssh keys + secrets
-  guestWorkspace = "${guestStateDir}/workspace";
+  # Exchange dir: same absolute path in the guest, and the guest HOME.
+  exchangeDir = user: "/home/${user}/hermes";
+  guestWorkspace = user: "${exchangeDir user}/workspace";
   # NIC-facing port the slirp forward targets (guest socat listens here)
   dashboardGuestPort = 9119;
   # loopback bind of `hermes dashboard` behind the socat bridge
@@ -118,15 +74,13 @@ let
   ];
 
   # Root ExecStartPre of microvm@hermes-<user>: per-user keys, dashboard
-  # credentials, guest secret env files, VM state dir lockdown, and a
-  # bounded wait for the owner's spaces gateway socket.
+  # token, guest secret env files, VM state dir lockdown, spaces wait.
   provisionScript = user: ucfg: pkgs.writeShellScript "hermes-microvm-provision-${user}" ''
     set -eu
     export PATH=${lib.makeBinPath (with pkgs; [ coreutils gawk openssh openssl ])}
     base=${baseDir user}
-    # dirs come from the tmpfiles rules (virtiofsd needs them before this
-    # script ever runs); everything below is secret material that cannot
-    # live in the world-readable nix store, so it is generated here.
+    # dirs come from the tmpfiles rules; only secret material that cannot
+    # live in the world-readable nix store is generated here.
 
     # ssh client key: the owner's credential for `hermes` CLI routing
     if [ ! -f "$base/ssh/client_ed25519" ]; then
@@ -146,9 +100,8 @@ let
       "$base/guest/ssh/ssh_host_ed25519_key.pub" > "$base/ssh/known_hosts"
     chmod 0644 "$base/ssh/known_hosts"
 
-    # dashboard session token: fixed HERMES_DASHBOARD_SESSION_TOKEN for the
-    # loopback-mode dashboard; owner-readable (0400) copy so the
-    # hermes-desktop wrapper can pass it as HERMES_DESKTOP_REMOTE_TOKEN.
+    # dashboard session token; the 0400 owner-readable copy doubles as
+    # HERMES_DESKTOP_REMOTE_TOKEN for the hermes-desktop wrapper.
     if [ ! -f "$base/desktop-token" ]; then
       (umask 277; openssl rand -hex 32 | tr -d '\n' > "$base/desktop-token")
     fi
@@ -169,8 +122,7 @@ let
     mv "$base/guest/secrets/hermes.env.tmp" "$base/guest/secrets/hermes.env"
 
     # VM runtime dir (virtiofsd sockets, current-system symlink) — no
-    # world access. The hermes state itself lives in the state-vault,
-    # hidden from the host; see the virtiofsd drop-in.
+    # world access.
     if [ -d /var/lib/microvms/${vmName user} ]; then
       chmod 0750 /var/lib/microvms/${vmName user}
     fi
@@ -190,15 +142,13 @@ let
   '';
 
   # Mirror the host's /etc/localtime (deref'd TZif bytes, atomic replace)
-  # into every user's shared guest dir. A pure mount can't do this: the
-  # host timezone is a symlink in /etc (virtiofs shares directories only,
-  # and sharing /etc would leak secrets). Runs at provisioning and on every
-  # /etc/localtime swap (timedatectl, automatic-timezoned, rebuild).
+  # into every guest share dir. A mount can't: the host tz is a symlink
+  # into /etc, and sharing /etc would leak secrets. Runs at provisioning
+  # and on every /etc/localtime swap.
   tzSyncScript = pkgs.writeShellScript "hermes-microvm-tz-sync" ''
     set -eu
-    # Own the umask: the provisioning script calls this after `umask 077`,
-    # which once produced an untraversable 0700 tz dir (guest fell back to
-    # UTC). chmod repairs dirs created by that bug.
+    # Own the umask: callers may run under umask 077, which once produced
+    # an untraversable tz dir (guest fell back to UTC); chmod repairs.
     umask 022
     export PATH=${lib.makeBinPath [ pkgs.coreutils ]}
     src=/etc/localtime
@@ -214,27 +164,17 @@ let
   '';
 
   # ── Guest hermes package: sqlite WAL disabled ────────────────────────
-  # /var/lib/hermes is a virtiofs share now. Guest-local fcntl/flock (the
-  # gateway/CLI seam, .dispatch.lock) are fine on rust virtiofsd, but
-  # sqlite WAL mode needs a MAP_SHARED mmap of the -shm index whose FUSE
-  # page-cache invalidation is not reliable — a corruption risk, not a
-  # clean failure: on virtiofs (cache=auto) `PRAGMA journal_mode=WAL`
-  # SUCCEEDS, so upstream's WAL->DELETE fallback
-  # (hermes_state.apply_wal_with_fallback, which only matches "locking
-  # protocol"/"not authorized" errors) never fires, and
-  # agent/verification_evidence.py sets WAL with no fallback at all.
-  # There is no config/env knob for the journal mode, so the wheel is
-  # patched to force rollback-journal (DELETE) deterministically:
-  #   - apply_wal_with_fallback() returns "delete" always; that covers
-  #     state.db, kanban*.db, projects.db, response_store.db and the
-  #     holographic memory store (they all call the helper);
-  #   - agent/verification_evidence.py and tools/async_delegation.py
-  #     (raw WAL pragmas, no fallback) set journal_mode=DELETE directly.
-  # The upstream package is a bin-wrapper around a sealed uv2nix venv,
-  # itself a symlink farm over per-wheel store paths — so: copy the farm,
-  # embed a patched copy of the hermes wheel, retarget the farm's links,
-  # and re-point the wrapper. A build-time grep proves no WAL set-pragma
-  # survives anywhere in the wheel.
+  # On virtiofs (cache=auto) `PRAGMA journal_mode=WAL` SUCCEEDS but the
+  # -shm mmap's FUSE cache invalidation is unreliable — a corruption
+  # risk, not a clean failure — so upstream's WAL->DELETE fallback
+  # (hermes_state.apply_wal_with_fallback) never fires, and
+  # agent/verification_evidence.py + tools/async_delegation.py set WAL
+  # with no fallback at all. No config/env knob exists, so the wheel is
+  # patched to force journal_mode=DELETE everywhere. The upstream package
+  # is a bin-wrapper around a sealed uv2nix venv (a symlink farm over
+  # per-wheel store paths): copy the farm, embed a patched wheel,
+  # retarget the farm's links, re-point the wrapper. A build-time grep
+  # proves no WAL set-pragma survives.
   hermesPackageBase = inputs.hermes-agent.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
   hermesVenvNoWal = pkgs.runCommand "${hermesPackageBase.hermesVenv.name}-nowal" { } ''
@@ -299,11 +239,10 @@ let
     done
   '';
 
-  # Bind the state vault over the empty share-source dir INSIDE the
-  # virtiofsd unit's private mount namespace (PrivateMounts on the
-  # drop-in below; all Exec* lines of a unit share one namespace). Every
-  # unit start gets a fresh namespace, hence the idempotent re-assertion
-  # of the tmpfiles layout before mounting.
+  # ExecStartPre of the per-VM virtiofsd unit: bind the state vault over
+  # the decoy inside the unit's private mount namespace, and re-assert
+  # EVERY share source so a state wipe can't wedge the Type=notify unit
+  # (tmpfiles only runs at boot/rebuild; this runs at every start).
   vaultBindScript = user: pkgs.writeShellScript "hermes-vault-bind-${user}" ''
     set -eu
     export PATH=${lib.makeBinPath (with pkgs; [ coreutils util-linux ])}
@@ -312,6 +251,13 @@ let
     install -d -m 0755 ${baseDir user}/state-vault/state/simplex
     mkdir -p ${shareSourceDir user}
     install -d -m 0700 -o root -g root ${shareSourceDir user}/state
+    # host-config share source; contents provisioned later by microvm@'s
+    # ExecStartPre — the dir just has to exist
+    install -d -m 0755 -o root -g root ${baseDir user}/guest
+    # exchange dir share source (/home/<user> itself is the owner's real
+    # home — never created or chowned here)
+    install -d -m 0755 -o ${user} -g users ${exchangeDir user}
+    install -d -m 0755 -o ${user} -g users ${guestWorkspace user}
     mount --bind ${baseDir user}/state-vault/state ${shareSourceDir user}/state
   '';
 
@@ -323,11 +269,9 @@ let
       ./simplex-chat.nix
     ];
 
-    # SimpleX daemon lives INSIDE the guest (no host loopback exposure).
-    # Its SQLite state must persist -> bind /var/lib/simplex-chat onto the
-    # vault share. Known amber risk: simplex runs its own SQLite (likely
-    # WAL) on virtiofs; guest-only access keeps the host out, the residual
-    # FUSE-mmap hazard is accepted — worst case is re-pairing contacts.
+    # SimpleX daemon lives INSIDE the guest; its SQLite state persists on
+    # the vault share. Accepted amber risk: simplex likely runs WAL on
+    # virtiofs — worst case is re-pairing contacts.
     services.simplex-chat-daemon = lib.mkIf cfg.simplex.enable {
       enable = true;
       allowedUsers = cfg.simplex.allowedUsers;
@@ -352,8 +296,8 @@ let
       hypervisor = "qemu";
       vcpu = cfg.vcpu;
       mem = cfg.mem;
-      # slirp user networking: outbound internet with zero host network
-      # setup; inbound only through the explicit forwards below.
+      # slirp: outbound internet with zero host network setup; inbound
+      # only through the explicit forwards below.
       interfaces = [
         {
           type = "user";
@@ -385,15 +329,13 @@ let
           mountPoint = "/nix/.ro-store";
         }
         {
-          # Artifact exchange: one flat dir shared by ALL hermes sessions,
-          # never GC'd by hermes — cleanup is the owner's manual call.
-          # Mounted over the state share (nested). Do not open live SQLite
-          # DBs the agent creates here while the VM runs (cross-kernel
-          # locking is not coordinated over virtiofs).
+          # Path-identity exchange: host ~/hermes IS guest ~/hermes (also
+          # the guest HOME), owner-auditable, never GC'd by hermes. Do not
+          # open live SQLite DBs in here from the host while the VM runs.
           proto = "virtiofs";
-          tag = "hermes-workspace";
-          source = "/home/${user}/hermes/workspace";
-          mountPoint = guestWorkspace;
+          tag = "hermes-exchange";
+          source = exchangeDir user;
+          mountPoint = exchangeDir user;
         }
         {
           proto = "virtiofs";
@@ -403,14 +345,10 @@ let
           readOnly = true;
         }
         {
-          # HERMES state: virtiofs from the namespace-hidden vault (the
-          # source is an empty decoy dir in the host namespace — the
-          # virtiofsd unit bind-mounts the real vault over it; see the
-          # drop-in). cache stays "auto" (the default): the guest never
-          # uses sqlite WAL (hermesPackageNoWal), and exec/MAP_PRIVATE
-          # mmaps in .venv and node caches need the page cache. Persists
-          # across guest rebuilds; sqlite + lockfile coordination stays
-          # guest-local.
+          # HERMES state from the namespace-hidden vault (source is the
+          # decoy; virtiofsd bind-mounts the real vault over it). cache
+          # stays "auto": the guest never uses WAL (hermesPackageNoWal),
+          # and exec/MAP_PRIVATE mmaps in .venv need the page cache.
           proto = "virtiofs";
           tag = "hermes-state";
           source = "${shareSourceDir user}/state";
@@ -420,29 +358,22 @@ let
       # Writable store overlay so `nix` works inside the guest.
       writableStoreOverlay = "/nix/.rw-store";
 
-      # Venus (Vulkan-in-guest): qemu renders on the host iGPU's render
-      # node via egl-headless; the guest sees a virtio-gpu-gl PCI device
-      # with venus+blob. hostmem is a PCI BAR address window for mapped
-      # blobs, not a RAM reservation. Appended after the runner's
-      # `-nographic` (which only pre-sets display "none"; the later
-      # -display wins and the serial console redirection is kept).
+      # Venus: qemu renders on the host render node via egl-headless;
+      # hostmem is a PCI BAR window for mapped blobs, not a RAM
+      # reservation. Appended after the runner's `-nographic` — the later
+      # -display wins and the serial console redirection is kept.
       qemu.extraArgs = lib.optionals cfg.gpu.enable [
         "-display" "egl-headless,rendernode=/dev/dri/renderD128"
         "-device" "virtio-gpu-gl-pci,hostmem=${cfg.gpu.hostmem},blob=true,venus=true"
       ];
-      # microvm.optimize (default on) swaps in a qemu built with
-      # nixosTestRunner=true, which strips SDL -> OpenGL -> virgl ->
-      # venus. Disable it when gpu is on; everything else it would have
-      # set is pinned explicitly below.
+      # microvm.optimize swaps in a qemu built without SDL/OpenGL/virgl/
+      # venus — disable it when gpu is on; its defaults are pinned below.
       optimize.enable = !cfg.gpu.enable;
     };
 
-    # Guest-visible microvm.optimize defaults, pinned explicitly so that
-    # switching optimize.enable off (gpu) regresses nothing (mirrors
-    # microvm.nix nixos-modules/microvm/optimization.nix at the pinned
-    # rev; one deliberate divergence: upstream keeps system.switch
-    # enabled when sshd + a store share make switching viable — these
-    # guests are fully declarative, so it stays off).
+    # microvm.optimize defaults pinned explicitly so gpu.enable regresses
+    # nothing. One divergence from upstream: system.switch stays off —
+    # these guests are fully declarative.
     documentation.enable = lib.mkDefault false;
     boot.initrd.systemd.enable = lib.mkDefault true;
     boot.initrd.systemd.tpm2.enable = lib.mkDefault false;
@@ -453,11 +384,9 @@ let
     systemd.tpm2.enable = lib.mkDefault false;
     system.switch.enable = lib.mkDefault false;
 
-    # Venus guest side: virtio-gpu DRM device + the mesa Vulkan ICD
-    # (hardware.graphics pulls in mesa, which ships the virtio "venus"
-    # driver). microvm.nix blacklists drm whenever its own graphics
-    # option is off — take the blacklist over minus drm (rest reproduced
-    # from nixos-modules/microvm/system.nix at the pinned rev).
+    # Venus guest side: virtio-gpu DRM device + mesa Vulkan ICD.
+    # microvm.nix blacklists drm whenever its graphics option is off —
+    # reproduce its blacklist minus drm.
     boot.blacklistedKernelModules = lib.mkIf cfg.gpu.enable (lib.mkForce [ "rfkill" "intel_pstate" ]);
     boot.kernelModules = lib.optionals cfg.gpu.enable [ "virtio_gpu" ];
     hardware.graphics.enable = cfg.gpu.enable;
@@ -495,31 +424,26 @@ let
       ];
     };
 
-    # Timezone tracks the host: /etc/localtime points into the live host
-    # share; the host path unit re-mirrors it on change. New processes see
-    # the new zone immediately; already-running daemons keep their cached
-    # TZ (normal glibc behavior, same as on the host).
+    # Timezone tracks the host via the mirrored file; already-running
+    # daemons keep their cached TZ (normal glibc behavior).
     time.timeZone = null;
     systemd.tmpfiles.rules = [
       "L+ /etc/localtime - - - - ${guestHostDir}/tz/localtime"
     ];
 
-    # Same name/uid as on the host so shared-dir ownership maps 1:1. HOME
-    # is the state dir — matching the upstream gateway service (it sets
-    # HOME=stateDir), so services, ssh logins and sudo shells agree on one
-    # home. Dotfiles/caches land in the (hidden) vault; user-facing output
-    # lands in the workspace (default cwd, host-visible at
-    # ~/hermes/workspace via MESSAGING_CWD/WorkingDirectory upstream).
+    # Same name/uid as the host so share ownership maps 1:1. HOME is the
+    # exchange dir; hermes state stays on the vault — HERMES_HOME is set
+    # explicitly at every entry point, nothing falls back to ~/.hermes.
     users.users.${user} = {
       isNormalUser = true;
       uid = ucfg.uid;
       group = "users";
-      home = guestStateDir;
+      home = exchangeDir user;
       createHome = false;
       # render/video: Vulkan on the virtio-gpu render node (Venus).
       extraGroups = [ "wheel" ] ++ lib.optionals cfg.gpu.enable [ "render" "video" ];
     };
-    # Self-modification parity with the old container (sudo NOPASSWD).
+    # Self-modification parity: sudo NOPASSWD.
     security.sudo.wheelNeedsPassword = false;
 
     services.hermes-agent = {
@@ -530,6 +454,8 @@ let
       group = "users";
       createUser = false;
       stateDir = guestStateDir;
+      # Sessions start (and files land) in the path-identity workspace.
+      workingDirectory = guestWorkspace user;
       addToSystemPackages = true;
       settings = cfg.settings;
       environment = cfg.environment // ucfg.environment
@@ -555,7 +481,7 @@ let
     systemd.services.hermes-agent = {
       after = [ "hermes-python-venv.service" ];
       wants = [ "hermes-python-venv.service" ];
-      unitConfig.RequiresMountsFor = [ guestStateDir guestWorkspace ];
+      unitConfig.RequiresMountsFor = [ guestStateDir (exchangeDir user) ];
       # venv first so python/pip resolve to the writable interpreter.
       # NOTE: systemd `path` string entries get /bin appended — pass the
       # venv ROOT, not its bin dir (".venv/bin" rendered as ".venv/bin/bin"
@@ -565,13 +491,11 @@ let
       # nix-built interpreter, so their NEEDED libs resolve via
       # LD_LIBRARY_PATH — nix-ld doesn't apply to dlopen.
       environment.LD_LIBRARY_PATH = config.services.hermes-python.wheelLibraryPath;
-      # Defensive: strip interpreter-hijacking keys from the writable .env.
-      # load_hermes_dotenv() imports that file into the gateway's process
-      # env, which the terminal tool passes into every subprocess — a
-      # persisted PYTHONPATH shadows the venv's site-packages with the
-      # gateway's own sealed cp312 venv (wrong-ABI imports). Upstream's
-      # env writer denylists exactly these keys; a sudo-wielding agent can
-      # still hand-edit them in, so drop them before every start.
+      # Strip interpreter-hijacking keys from the writable .env: it is
+      # imported into the gateway's process env and inherited by every
+      # subprocess; a persisted PYTHONPATH shadows the venv with the
+      # gateway's sealed cp312 venv (wrong-ABI imports). A sudo-wielding
+      # agent can re-add them, so drop before every start.
       preStart = ''
         env_file=${guestStateDir}/.hermes/.env
         if [ -f "$env_file" ]; then
@@ -580,24 +504,27 @@ let
             "$env_file"
         fi
       '';
-      # The upstream unit only allows stateDir+workspace; guestWorkspace is
-      # under stateDir, so no extra ReadWritePaths are needed.
+      # Upstream hardcodes HOME=stateDir in the unit env; force the
+      # exchange dir so ~ is the same path in guest and host.
+      environment.HOME = lib.mkForce (exchangeDir user);
+      # Upstream's ProtectSystem=strict allows only stateDir+workspace;
+      # HOME sits one level above the workspace, so writes like ~/.cache
+      # need the exchange dir writable too.
+      serviceConfig.ReadWritePaths = [ (exchangeDir user) ];
     };
 
-    # Web dashboard (SPA + JSON-RPC/WS backend). Separate process from the
-    # gateway by upstream design; shares state via HERMES_HOME. Loopback
-    # bind: non-loopback binds engage the upstream cookie-only auth gate,
-    # which the desktop's static remote token cannot pass — so the
-    # dashboard runs in loopback mode with the host-fixed session token,
-    # and the socat bridge below fronts the slirp forward.
+    # Web dashboard (SPA + JSON-RPC/WS backend); separate process by
+    # upstream design, shares state via HERMES_HOME. Loopback bind:
+    # non-loopback engages the cookie-only auth gate the desktop's static
+    # remote token cannot pass.
     systemd.services.hermes-dashboard = {
       description = "Hermes Agent web dashboard";
       wantedBy = [ "multi-user.target" ];
       after = [ "network-online.target" "hermes-python-venv.service" ];
       wants = [ "network-online.target" ];
-      unitConfig.RequiresMountsFor = [ guestStateDir guestWorkspace guestHostDir ];
+      unitConfig.RequiresMountsFor = [ guestStateDir (exchangeDir user) guestHostDir ];
       environment = {
-        HOME = guestStateDir;
+        HOME = exchangeDir user;
         HERMES_HOME = "${guestStateDir}/.hermes";
         HERMES_MANAGED = "true";
       };
@@ -621,17 +548,17 @@ let
           "--port"
           (toString dashboardGuestBackendPort)
         ];
-        WorkingDirectory = guestWorkspace;
+        WorkingDirectory = guestWorkspace user;
         Restart = "always";
         RestartSec = 5;
         UMask = "0007";
       };
     };
 
-    # slirp hostfwd can only target the guest NIC, so bridge NIC:9119 to
-    # the loopback dashboard. Every forwarded client thus looks "loopback"
-    # to upstream; the real boundary is the host's iptables owner match on
-    # the forwarded port (owner uid + root only).
+    # slirp hostfwd can only target the guest NIC — bridge NIC:9119 to
+    # the loopback dashboard. Every forwarded client thus looks
+    # "loopback" to upstream; the real boundary is the host's iptables
+    # owner match.
     systemd.services.hermes-dashboard-proxy = {
       description = "Hermes dashboard guest-side proxy for the slirp forward";
       wantedBy = [ "multi-user.target" ];
@@ -654,9 +581,9 @@ let
   };
 
   # ── Host-side wiring per user ─────────────────────────────────────────
-  # Host-side per-user pieces. NOTE: assembled under static top-level
-  # option keys below — a config-dependent mkMerge list at the config root
-  # makes option-key resolution depend on cfg.users (infinite recursion).
+  # Assembled under static top-level option keys — a config-dependent
+  # mkMerge list at the config root makes option-key resolution depend on
+  # cfg.users (infinite recursion).
   forEachUser = f: lib.mkMerge (lib.mapAttrsToList f cfg.users);
 
   # Case arms mapping the invoking user to their VM's ports.
@@ -667,12 +594,10 @@ let
       ;;
   '') cfg.users);
 
-  # Host CLI shim: routes every `hermes` invocation into the caller's VM
-  # (microvm equivalent of the old .container-mode docker-exec seam).
+  # Host CLI shim: routes every `hermes` invocation into the caller's VM.
   hermesShim = pkgs.writeShellScriptBin "hermes" ''
-    # The desktop app is a host-side GUI (guests are headless): route the
-    # upstream `hermes desktop` subcommand to the hermes-desktop wrapper
-    # instead of ssh-execing it into the VM.
+    # `hermes desktop` is a host-side GUI (guests are headless): route it
+    # to the hermes-desktop wrapper instead of ssh-execing into the VM.
     if [ "''${1:-}" = "desktop" ]; then
       shift
       exec ${hermesDesktop}/bin/hermes-desktop "$@"
@@ -685,8 +610,7 @@ let
       exit 1
       ;;
     esac
-    # Fail fast while the VM is down (ssh would fail closed on the pinned
-    # host key anyway, but with a less helpful error).
+    # Fail fast while the VM is down (clearer than ssh's pinned-key error).
     ${pkgs.systemd}/bin/systemctl is-active --quiet "microvm@hermes-$u.service" || {
       echo "hermes: microvm@hermes-$u is not running (systemctl status microvm@hermes-$u)" >&2
       exit 1
@@ -694,12 +618,10 @@ let
     base="/var/lib/hermes-microvm/$u"
     tty_flag=""
     if [ -t 0 ] && [ -t 1 ]; then tty_flag="-t"; fi
-    # ssh only carries TERM; the old docker-exec routing also passed
-    # COLORTERM/LANG/LC_ALL (TUI colors + UTF-8 glyphs). Embed them into
-    # the remote command, shell-quoted. Deliberately NOT WAYLAND_DISPLAY:
-    # the host clipboard is never bridged into the VM; without the variable
-    # hermes's clipboard path stays disabled and paste degrades to
-    # "No image found in clipboard".
+    # ssh only carries TERM; embed COLORTERM/LANG/LC_ALL shell-quoted in
+    # the remote command (TUI colors + UTF-8 glyphs). Deliberately NOT
+    # WAYLAND_DISPLAY: the host clipboard is never bridged into the VM —
+    # hermes's clipboard path stays disabled, paste degrades gracefully.
     env_exports=""
     for v in COLORTERM LANG LC_ALL; do
       eval "val=\''${$v:-}"
@@ -707,7 +629,7 @@ let
         env_exports="$env_exports export $v=$(printf '%q' "$val") &&"
       fi
     done
-    remote_cmd="$env_exports cd ${guestWorkspace} && export HERMES_HOME=${guestStateDir}/.hermes && exec /run/current-system/sw/bin/hermes"
+    remote_cmd="$env_exports cd /home/$u/hermes/workspace && export HERMES_HOME=${guestStateDir}/.hermes && exec /run/current-system/sw/bin/hermes"
     # printf %q with zero args would still emit one empty-string argument
     if [ "$#" -gt 0 ]; then remote_cmd="$remote_cmd $(printf '%q ' "$@")"; fi
     exec ${pkgs.openssh}/bin/ssh $tty_flag \
@@ -734,9 +656,8 @@ let
     base="/var/lib/hermes-microvm/$u"
     echo "VM:            microvm@hermes-$u.service"
     echo "CLI/TUI:       hermes (routed via ssh, port $ssh_port)"
-    # Loopback mode serves the SPA unauthenticated and injects the session
-    # token itself; a ?token= URL would only leak the secret into shell
-    # history. Point at the file instead.
+    # Loopback mode serves the SPA unauthenticated; a ?token= URL would
+    # only leak the secret into shell history — point at the file instead.
     echo "Dashboard:     http://127.0.0.1:$dashboard_port/"
     echo "  token file:  $base/desktop-token (for API/WS clients)"
     echo "Desktop:       hermes-desktop (upstream Electron app -> this VM's backend)"
@@ -745,10 +666,9 @@ let
   # Upstream Electron desktop app (nixpkgs electron + npm-built renderer).
   desktopPackage = inputs.hermes-agent.packages.${pkgs.stdenv.hostPlatform.system}.desktop;
 
-  # Host desktop launcher: the upstream app in remote-backend mode against
-  # the owner's forwarded dashboard instead of spawning a local python
-  # backend. Token file is 0400 owner-only and the port is uid-gated by
-  # iptables, so the exported token stays owner-confined.
+  # Host launcher: the upstream app in remote-backend mode against the
+  # owner's forwarded dashboard. Token file 0400 + uid-gated port keep
+  # the exported token owner-confined.
   hermesDesktop = pkgs.writeShellScriptBin "hermes-desktop" ''
     u="$(${pkgs.coreutils}/bin/id -un)"
     case "$u" in
@@ -774,14 +694,11 @@ let
     export HERMES_DESKTOP_REMOTE_TOKEN="$token"
     exec ${desktopPackage}/bin/hermes-desktop "$@"
   '';
-  # Launcher visibility: neither the upstream desktop package nor the
-  # shims above ship .desktop files, so app launchers (fuzzel drun) never
-  # list Hermes. Two entries, both against the host wrappers (absolute
-  # store paths — launchers don't inherit a useful PATH):
-  #   - Hermes Desktop: the Electron app via the token-injecting wrapper.
-  #   - Hermes TUI: Terminal=true; fuzzel's default `terminal=$TERMINAL -e`
-  #     resolves via desktop.nix's TERMINAL=alacritty. Wrapped so a fast
-  #     failure (VM down) doesn't just flash and vanish with the window.
+  # Neither the upstream desktop package nor the shims ship .desktop
+  # files — provide launcher entries against the host wrappers (absolute
+  # store paths; launchers don't inherit a useful PATH). The TUI entry is
+  # Terminal=true and wraps the shim so a fast failure (VM down) doesn't
+  # just flash and vanish with the window.
   hermesIcon = "${desktopPackage}/share/hermes-desktop/dist/hermes.png";
 
   hermesTuiLauncher = pkgs.writeShellScriptBin "hermes-tui" ''
@@ -829,11 +746,9 @@ let
       ${ownerOnlyRules ucfg.spacesPort ucfg.uid}
     ''}
   '') cfg.users) + ''
-    # Guest -> host loopback allowlist: everything a guest sends to slirp's
-    # 10.0.2.2 egresses here as uid microvm. The per-user spaces-bridge
-    # RETURNs above are the only sanctioned services; DNS stays open for
-    # slirp's resolver forwarding; the rest of the host's loopback is
-    # rejected (it used to be a wildcard).
+    # Guest -> host loopback allowlist (uid microvm = anything a guest
+    # sends to slirp's 10.0.2.2): the spaces-bridge RETURNs above plus DNS
+    # for slirp's resolver forwarding; everything else rejected.
     iptables -w -A hermes-microvm -p tcp --dport 53 -m owner --uid-owner microvm -j RETURN
     iptables -w -A hermes-microvm -p udp --dport 53 -m owner --uid-owner microvm -j RETURN
     iptables -w -A hermes-microvm -m owner --uid-owner microvm -j REJECT
@@ -1031,12 +946,10 @@ in
       iptables -w -X hermes-microvm 2>/dev/null || true
     '';
 
-    # Venus host side: qemu (user `microvm`) opens the iGPU render node
-    # and /dev/udmabuf (guest blob mappings). /dev/udmabuf is root-only
-    # by default — hand it to the render group. Neither microvm@ nor
-    # microvm-virtiofsd@ sets a DevicePolicy upstream, so no DeviceAllow
-    # lines are needed. (The group grants live in the users.users merge
-    # at the bottom of this file.)
+    # Venus host side: qemu (user `microvm`) opens the render node and
+    # /dev/udmabuf (root-only by default — hand it to the render group).
+    # No DeviceAllow needed: neither microvm unit sets a DevicePolicy.
+    # Group grants live in the users.users merge below.
     services.udev.extraRules = lib.mkIf cfg.gpu.enable ''
       KERNEL=="udmabuf", GROUP="render", MODE="0660"
     '';
@@ -1044,14 +957,12 @@ in
     microvm.vms = lib.mapAttrs' (user: ucfg:
       lib.nameValuePair (vmName user) {
         config = guestConfig user ucfg;
-        # autostart + restart-on-rebuild are the defaults for fully-
-        # declarative VMs; listed here for greppability.
+        # default for fully-declarative VMs; listed for greppability
         autostart = true;
       }
     ) cfg.users;
 
-    # Re-mirror the timezone whenever the host's /etc/localtime symlink is
-    # swapped (timedatectl, automatic-timezoned, rebuild activation).
+    # Re-mirror the timezone whenever /etc/localtime is swapped.
     systemd.paths.hermes-microvm-timezone = {
       wantedBy = [ "multi-user.target" ];
       pathConfig.PathChanged = "/etc/localtime";
@@ -1077,16 +988,12 @@ in
         wants = [ "user@${toString ucfg.uid}.service" ];
       };
 
-      # State-vault hiding: virtiofsd (and ONLY virtiofsd) sees the
-      # hermes state. PrivateMounts gives the unit a private mount
-      # namespace with slave propagation (the /nix/store and /home shares
-      # served by this same unit keep receiving host mounts); the
-      # ExecStartPre bind-mounts the vault over the empty share-source
-      # dir inside that namespace. Deliberately NO "+" prefix: a
-      # full-privilege Exec line skips the namespacing options and would
-      # leak the mount into the host namespace. (Upstream defines this
-      # per-VM unit with overrideStrategy=asDropin; these settings merge
-      # into the same drop-in.)
+      # State-vault hiding: PrivateMounts + the bind in ExecStartPre mean
+      # only virtiofsd sees the hermes state; slave propagation keeps the
+      # store/exchange shares receiving host mounts. Deliberately NO "+"
+      # prefix — a full-privilege Exec line skips the namespacing options
+      # and would leak the mount into the host namespace. (Upstream
+      # defines this unit with overrideStrategy=asDropin; these merge.)
       "microvm-virtiofsd@${vmName user}" = {
         serviceConfig = {
           PrivateMounts = true;
@@ -1117,9 +1024,7 @@ in
     ];
 
     # Share sources must exist before virtiofsd starts; guest/* contents
-    # are filled by the provisioning ExecStartPre. The state vault is a
-    # 0700 root door with the user-owned data dir inside (guest uid ==
-    # host uid, virtiofsd maps 1:1); the share-source decoys under /run
+    # are filled by the provisioning ExecStartPre. The decoys under /run
     # stay empty in the host namespace by design.
     systemd.tmpfiles.rules =
       [
@@ -1136,8 +1041,8 @@ in
         "d ${baseDir user}/state-vault/state 0700 ${user} users - -"
         "d ${shareSourceDir user} 0755 root root - -"
         "d ${shareSourceDir user}/state 0700 root root - -"
-        "d /home/${user}/hermes 0755 ${user} users - -"
-        "d /home/${user}/hermes/workspace 0755 ${user} users - -"
+        "d ${exchangeDir user} 0755 ${user} users - -"
+        "d ${guestWorkspace user} 0755 ${user} users - -"
       ]) cfg.users);
 
     # The per-user gateway socket must exist at boot, before any
@@ -1145,10 +1050,8 @@ in
     users.users = lib.mkMerge [
       (forEachUser (user: ucfg: {
         ${user} = {
-          # Pin the host uid to the configured one: firewall owner-match,
-          # guest account, home-share ownership and port/MAC derivation all
-          # assume they agree. A drifted auto-allocated uid would authorize
-          # the wrong account silently.
+          # Pin the host uid: firewall owner-match, guest account, share
+          # ownership and port/MAC derivation all assume they agree.
           uid = ucfg.uid;
         } // lib.optionalAttrs ucfg.spacesGateway.enable {
           linger = true;
