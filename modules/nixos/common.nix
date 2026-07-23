@@ -8,6 +8,17 @@
     ./all-hardware.nix
   ];
   users.mutableUsers = false;
+  # spaces' base module imports nixpkgs' profiles/perlless.nix, which flips
+  # services.userborn + system.etc.overlay to mkDefault true. That combo
+  # rebuilds the user DB from scratch (the overlay masks the existing
+  # /etc/passwd) and userborn's allocator lets a uid-less user (dave, clan
+  # users role) steal a uid a later user declares statically (grmpf uid 1000)
+  # -- the 2026-07-23 amy lockout. Pin both off until userborn's allocator
+  # reserves static ids (https://github.com/nikstur/userborn) and the
+  # etc-overlay migration is done deliberately (reboot cutover, uids pinned).
+  # Plain definitions override perlless' mkDefault; no mkForce needed.
+  services.userborn.enable = false;
+  system.etc.overlay.enable = false;
 
   programs.fish.enable = true;
 

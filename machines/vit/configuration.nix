@@ -73,6 +73,14 @@
   systemd.targets.hibernate.enable = false;
   systemd.targets.hybrid-sleep.enable = false;
 
+  # The spaces desktop profile now defaults hermes-microvm on
+  # (auto-provisioning a VM per normal user), but vit's job is SERVING the
+  # model to amy's agent VMs, not running its own: RAM/VRAM are budgeted
+  # for qwen3.6 (see llama-swap-qwen36.nix), and dave has no declared uid
+  # (the module asserts one). Opt out; to enable later, declare
+  # users.users.dave.uid = 1000 and drop this line.
+  services.hermes-microvm.enable = false;
+
   # Belt-and-braces on top of the disabled sleep targets above: logind's
   # default HandleLidSwitch=suspend still fires a (failing) suspend attempt
   # on every lid close. Ignore the lid switch entirely — closed lid never

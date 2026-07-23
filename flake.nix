@@ -137,9 +137,10 @@
     nixos-example.inputs.llm-agents.follows = "llm-agents";
     nixos-example.inputs.sbox.follows = "sbox";
     nixos-example.inputs.wrappers.follows = "wrappers";
-    # hermes-agent moved into the spaces flake (nixosModules.hermes);
-    # nixos-example keeps its own hermes-agent pin (it declares the input
-    # itself — no follows needed here anymore).
+    # hermes-agent moved into the spaces flake (nixosModules.hermes); no
+    # root-level hermes-agent input anymore. nixos-example's hermes.nix
+    # still references inputs.hermes-agent via OUR specialArgs (path
+    # imports) — specialArgs aliases spaces' pin (nixosConfigurations.nix).
     messaging-daemon.url = "github:vbuterin/messaging-daemon";
     messaging-daemon.flake = false;
 
