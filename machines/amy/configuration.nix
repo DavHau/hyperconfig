@@ -53,6 +53,13 @@
     services.spaces.niri.modKey = "Alt";
   };
 
+  # dave (clan users role) has no declared uid and on-disk got 1001 (grmpf
+  # took 1000 first). Pin it so any tool that rebuilds the user DB from the
+  # declarative config (userborn, fresh install) can never hand dave 1000
+  # and collide with grmpf's static uid (hermes requires grmpf = 1000).
+  # amy-specific: on other machines dave may legitimately be 1000.
+  users.users.dave.uid = 1001;
+
   # required by zfs
   networking.hostId = "5eb1bf28";
 

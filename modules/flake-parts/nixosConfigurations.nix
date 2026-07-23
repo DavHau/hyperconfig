@@ -28,7 +28,13 @@ in {
         };
 
         specialArgs = {
-          inherit inputs pkgsCross self;
+          # nixos-example's hermes.nix (imported by v-machine via path, so
+          # it resolves `inputs` from OUR specialArgs) needs
+          # inputs.hermes-agent; the root flake dropped that input when
+          # hermes moved into the spaces flake — alias spaces' pin instead
+          # of re-locking our own.
+          inputs = inputs // { hermes-agent = inputs.spaces.inputs.hermes-agent; };
+          inherit pkgsCross self;
         };
 
         meta.name = "DavClan";
