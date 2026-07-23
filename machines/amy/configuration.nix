@@ -16,6 +16,7 @@
     ../../modules/nixos/fw-fanctrl.nix
     ../../modules/nixos/hermes/site.nix
     ../../modules/nixos/vibepn.nix
+    ../../modules/nixos/fabro
     ./disko.nix
   ];
 
