@@ -2088,10 +2088,10 @@
     },
     "sbox": {
       "locked": {
-        "lastModified": 1784385570,
-        "narHash": "sha256-rP4FxE3Rr+3RNL221EHj7uoU4HLScCy+MDTj8l+Ib7A=",
-        "rev": "a5e2103829f069ef2fc1b09f1e38284c60208efc",
-        "revCount": 87,
+        "lastModified": 1784886808,
+        "narHash": "sha256-9Dw9vdm+2d1np6WHPDAx7tx84czpaavHvU1Tu7QS1Ak=",
+        "rev": "60a703df014cb40d82b7808d2c47a9d1a7db6acf",
+        "revCount": 101,
         "type": "git",
         "url": "file:///home/grmpf/synced/projects/sbox"
       },
@@ -2159,8 +2159,8 @@
         "voxtype": "voxtype"
       },
       "locked": {
-        "lastModified": 1784815765,
-        "narHash": "sha256-yFt+dh8PK7nqfiyuqSgbiDPE2FtoznipTRhUq1jC0VY=",
+        "lastModified": 1784885834,
+        "narHash": "sha256-7dNOfPgg5SQZIosRUBn4pvc5VIYuusy7Nk+yjpfrcag=",
         "path": "/home/grmpf/synced/projects/spaces",
         "type": "path"
       },
