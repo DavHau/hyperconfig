@@ -33,36 +33,50 @@
   # PS5) if stability holds and battery matters.
   #
   # nmi_watchdog: hard-lockup detector (2026-07-20 freeze mitigation below).
+  #
+  # intel_idle.max_cstate=1: 2026-07-24 freeze root cause, second iteration.
+  # After the VMD-off + BIOS 311 fix the NVMe lost-interrupt timeouts are
+  # gone (0 in three boots), yet the daily hard freeze persisted with a NEW
+  # signature: journal stops mid-stream with zero kernel output, pstore
+  # empty (so hung_task_panic never fired — not an I/O wedge), and the 30s
+  # iTCO watchdog never reset the box (TCO timer stops ticking in deep
+  # package idle on S0ix-era platforms). All three deaths (Jul 22 17:02,
+  # Jul 23 12:30, Jul 23 21:30) happened while llama-swap was IDLE (1.3h,
+  # 3.7h, 3min after the last request) — never under load. This matches the
+  # community-documented Arrow Lake-H idle hard-hang: Ultra 9 285H + Arc
+  # 140T machines (ThinkPad T14p 2025, GU605CW itself on the ROG forum)
+  # freeze at idle/display-off, power button is the only recovery, and
+  # capping C-states is the verified workaround; reportedly fixed on
+  # kernel >= 6.19.8. Cap to C1: blocks the deep package states (PC8/PC10)
+  # the SoC dies in. Costs a few W at idle — acceptable for an always-on
+  # inference box on AC. Revisit (drop the cap) after moving to kernel 6.19+.
   boot.kernelParams = [
     "pcie_aspm=off"
     "nmi_watchdog=1"
     "nvme_core.default_ps_max_latency_us=0"
+    "intel_idle.max_cstate=1"
   ];
 
-  # 2026-07-20/21: repeated hard freezes after 1-2h uptime, zero kernel trace
-  # (journal just stops mid-stream). Root cause identified 2026-07-21: NVMe
-  # controller hang, not nvidia. Evidence: chronic lost-interrupt timeouts on
-  # every boot (see kernelParams above), SMART clean (no media errors), and
-  # the freeze signature — journald can't flush (disk dead) while PID1 keeps
-  # petting the hardware watchdog from memory, which is exactly why the 30s
-  # iTCO watchdog below never rebooted the frozen machine. The NVMe sits
-  # behind Intel VMD (PCI domain 10000); VMD-swallowed interrupts are a known
-  # failure on 2025 Zephyrus G16 (GU605) — community-verified fix is
-  # disabling "Intel VMD Controller" in BIOS (Advanced menu). No Windows on
-  # this disk, so the toggle is safe; disko mounts by partlabel, unaffected
-  # by the PCI-topology change. ALSO: update BIOS 310 -> 311 (fixes speaker
-  # amps + Modern Standby freeze fixes reported on ROG forum).
+  # 2026-07-20/21: repeated hard freezes, first diagnosed as NVMe controller
+  # hang behind Intel VMD (chronic lost-interrupt timeouts). Fixed 2026-07-23
+  # via BIOS: VMD disabled (NVMe now plain 0000:02:00.0) + BIOS 310 -> 311.
+  # That fix held (no nvme timeouts since) but freezes continued — see the
+  # 2026-07-24 Arrow Lake idle C-state diagnosis above.
   #
   # vit serves qwen3.6 to the hermes VMs (vit.d:8012), so a hang takes the
   # agents' brain offline until someone walks to the machine. Self-recover
   # where possible: hardware watchdog reboots a wedged kernel, hung tasks
-  # (D-state > 120s, e.g. everything blocked on a dead NVMe) escalate to a
-  # panic, and kernel.panic reboots 10s after any panic so hung_task_panic
-  # actually cycles the box instead of sitting at a dead console.
+  # (D-state > 120s) escalate to a panic, hard/soft lockups panic too
+  # (2026-07-24: they defaulted to backtrace-and-continue, which on a dead
+  # console is indistinguishable from a hang), and kernel.panic reboots 10s
+  # after any panic so the box cycles instead of sitting at a dead console.
+  # Panics land in efi-pstore (/sys/fs/pstore) for post-mortem.
   systemd.watchdog.runtimeTime = "30s";
   boot.kernel.sysctl = {
     "kernel.hung_task_timeout_secs" = 120;
     "kernel.hung_task_panic" = 1;
+    "kernel.hardlockup_panic" = 1;
+    "kernel.softlockup_panic" = 1;
     "kernel.panic" = 10;
   };
   # Inference-server duty: sleeping breaks vit.d for every consumer, and
