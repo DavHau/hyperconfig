@@ -1,7 +1,7 @@
 # Minimal local fabro + omp ACP setup — Design
 
 Date: 2026-07-24
-Status: approved (brainstorm session)
+Status: piloted (2026-07-24 — both acceptance criteria met)
 Scope: hyperconfig (infra) + VibePN (pilot repo)
 
 ## Goal
@@ -165,3 +165,41 @@ lands on the personal Anthropic account.
 2. One real VibePN backlog item goes spec → plan → implementation →
    green `cargo nextest` + `clippy` → files moved to `done/` — with no
    human input after the spec and zero Anthropic API spend.
+
+## Pilot notes (2026-07-24)
+
+Both acceptance criteria met: smoke run and full spec-to-done run on
+`config-range` (CLI `--ipv4-range` display fix) succeeded unattended,
+177-line implementation, TDD, pedantic-clippy clean, all billing zero
+(fabro `model: null` everywhere; omp credential verified as
+`sk-ant-oat01-*` OAuth, no `ANTHROPIC_API_KEY` anywhere).
+
+Deviations from the plan discovered during execution:
+
+- The install wizard cannot skip GitHub (interactive and
+  `--non-interactive` both require it). Manual setup instead:
+  `~/.fabro/settings.toml` (`[server.listen]` tcp 127.0.0.1:3000,
+  `[server.auth] methods=["dev-token"]`, docker/daytona providers
+  disabled, `[run.environment] id="local"`) plus
+  `~/.fabro/storage/server.env` with `SESSION_SECRET` (64 hex) and
+  `FABRO_DEV_TOKEN` (`fabro_dev_` + 64 hex — format enforced). CLI auth:
+  `fabro auth login --server http://127.0.0.1:3000 --dev-token <tok>`.
+- No `--sandbox` flag in 0.254.0; `local` is a reserved synthetic
+  environment selected via `[run.environment]` or `--environment local`.
+- Workflow discovery requires a `workflow.toml` beside the `.fabro` graph.
+- `[environments.<slug>]` in settings.toml is auto-migrated out on server
+  start; define environments elsewhere or use the reserved `local`.
+- `fabro repo init` scaffolds `[run.pull_request] enabled = true`;
+  must be set to `false` for GitHub-less repos.
+- **Commit-loss anomaly:** work committed by ACP agents mid-stage did not
+  survive to the final branch (plan artifacts vanished between plan and
+  implement; the implement agent's code commit was absorbed, leaving the
+  implementation uncommitted in the working tree while Verify passed
+  against it). Mitigations: finalize script now commits the full tree
+  (`git add -A`), and the implement prompt's "commit as you go" cannot be
+  relied on. Root cause (fabro checkpointing vs. agent git use in local
+  sandbox) unresolved — worth an upstream issue.
+- The verify→Fix loop was never exercised (verify passed first try);
+  its routing on a failed command outcome remains untested.
+- VibePN dev shell has no cargo-nextest; verify gate uses
+  `nix develop --command` with `cargo test` + `cargo clippy`.
