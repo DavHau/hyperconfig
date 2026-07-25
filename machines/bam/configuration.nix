@@ -6,10 +6,11 @@
     ../../modules/nixos/nix-caches.nix
     # ../../modules/nixos/dns.nix
     ./disko-xfs.nix
-    ./buildbot
     ./nextcloud.nix
     ./vikunja.nix
-    ./ollama.nix
+    ./inference-host.nix
+    ./inference-net.nix
+    ./inference-vm.nix
     ../../modules/nixos/vibepn.nix
   ];
 
@@ -20,16 +21,8 @@
   # hostId would make re-importing the pool need -f when vault is re-set up.
   networking.hostId = "b411ca35";
 
-  nix.settings.max-jobs = 16;
+  nix.settings.max-jobs = 1;
   nix.settings.sandbox = "relaxed";
-  networking.firewall.interfaces.dave.allowedTCPPorts = [
-    9933
-    9944
-    9955
-    9966
-  ];
-  virtualisation.docker.enable = true;
-  virtualisation.docker.rootless.enable = true;
 
   users.users.root.openssh.authorizedKeys.keys = [
     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOirp5rceowRPLnkCT2/vlTPgxtRWPeKdMIPnJ7ixJfi ds@nintendo-ds"
