@@ -88,6 +88,9 @@
     stylix.inputs.nixpkgs.follows = "nixpkgs";
     stylix.inputs.flake-parts.follows = "flake-parts";
 
+    nixvirt.url = "github:AshleyYakeley/NixVirt";
+    nixvirt.inputs.nixpkgs.follows = "nixpkgs";
+
     easytier.url = "github:EasyTier/EasyTier";
     easytier.flake = false;
 

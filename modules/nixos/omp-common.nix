@@ -13,8 +13,22 @@
     "    discovery:"
     "      type: lm-studio"
   ];
+  # LLM inference VM on bam (RTX PRO 6000 passthrough, vLLM serving
+  # MiniMax-M2.7-REAP; see machines/bam/inference-handoff.md).
+  # openai-models-list discovery polls /v1/models at runtime; vLLM reports
+  # max_model_len, which omp uses as the context window — stays in sync
+  # with whatever the guest serves. Unreachable off-LAN, harmless.
+  bamVmProvider = lib.concatStringsSep "\n" [
+    "  bam-vm:"
+    "    baseUrl: http://192.168.8.107:30000/v1"
+    "    api: openai-completions"
+    "    auth: none # vLLM runs without API key"
+    "    discovery:"
+    "      type: openai-models-list"
+  ];
   modelProviderBlocks =
-    lib.optional llama-swap-enabled llamaSwapProvider;
+    lib.optional llama-swap-enabled llamaSwapProvider
+    ++ [ bamVmProvider ];
 in rec {
   models-needed = modelProviderBlocks != [ ];
   modelsFile = pkgs.writeText "models.yml"
