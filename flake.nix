@@ -110,7 +110,9 @@
     # re-lock/rebuild (vit: create it or symlink). llm-agents/superpowers stay
     # pinned by afk's own lock — its patches are validated against those exact
     # revs; only nixpkgs is deduplicated.
-    afk.url = "path:/home/grmpf/projects/afk";
+    # Real path: ~/projects is a symlink to ~/synced/projects and current
+    # nix refuses symlinked path-input parents on re-lock.
+    afk.url = "path:/home/grmpf/synced/projects/afk";
     afk.inputs.nixpkgs.follows = "nixpkgs";
 
     mics-skills.url = "github:Mic92/mics-skills";
