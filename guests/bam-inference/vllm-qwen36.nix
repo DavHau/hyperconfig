@@ -44,7 +44,9 @@
     cmd = [
       "/models/Qwen3.6-27B-FP8"
       "--served-model-name" "Qwen3.6-27B-FP8" "default"
-      "--host" "0.0.0.0"
+      # "::" = dual-stack: inbound is v6-only since the routed-net
+      # isolation (v4 is NAT-out only); 0.0.0.0 would be unreachable
+      "--host" "::"
       "--port" "30000"
       # full native context; hybrid GDN = only 16 full-attn layers pay
       # per-token KV, bf16 KV for 262K is cheap on 96G with 31G weights

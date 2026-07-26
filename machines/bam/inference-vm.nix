@@ -64,7 +64,7 @@
           <source><address domain="0x0000" bus="0x0a" slot="0x00" function="0x0"/></source>
         </hostdev>
         <interface type="bridge">
-          <source bridge="br0"/>
+          <source bridge="br-inf"/>
           <model type="virtio"/>
           <mac address="52:54:00:6b:a3:01"/>
           <driver name="vhost" queues="2"/>

@@ -125,8 +125,9 @@ be bound to vfio-pci by address (`0000:0a:00.0`), never by ID.
 - Host nftables: VM → WAN masqueraded/allowed; VM → RFC1918 and VM → host
   services dropped (only DNS/DHCP on virbr-inf allowed). No inbound
   forwarding from LAN.
-- Guest joins overlay (yggdrasil / vibepn) itself; users reach :30000 and
-  ssh over overlay only. VM admins cannot undo host-side isolation.
+- Guest stays reachable via a LAN-independent path (public IPv6 routed
+  through the host, or an overlay); users reach :30000 and ssh over
+  that path only. VM admins cannot undo host-side isolation.
 - Switch = redefine interface in NixVirt domain + VM reboot; guest is DHCP
   in both phases.
 
