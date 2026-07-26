@@ -155,6 +155,111 @@ GPU). Build notes: needs `NIX_ENFORCE_NO_NATIVE = false` (its iqk
 kernels don't compile without `-march=native`) and a static build
 (no upstream install rules; shared libs leave /build/ RPATHs).
 
+## Model swap #3 (2026-07-26): Qwen3.6-27B dense via llama.cpp
+
+`guests/bam-inference/llama-qwen36.nix`. Qwen3.6-27B (dense, hybrid
+Gated DeltaNet, multimodal, 262K native ctx) as unsloth UD-Q8_K_XL
+(35.3G, near-lossless) + BF16 mmproj, plus **MTP speculative decoding**:
+ggml-org's standalone `mtp-Qwen3.6-27B-Q8_0.gguf` head (3.2G) via
+`--spec-type draft-mtp -md ... -ngld 999` (cross-publisher trunk/head
+pairing works; llama.cpp b10063 has the Qwen3.5/3.6 hybrid MTP path).
+Serves alias `Qwen3.6-27B-Q8` on :30000, full 256K ctx, 50.5G VRAM
+(~45G free). MiniMax IQ3_XXS unit stays installed; swap back:
+`systemctl start llama-minimax`.
+
+Benchmarks (2026-07-26, MTP on, thinking mode):
+
+- Short gen: **107 t/s** (code probe: 97 t/s, draft acceptance 65%
+  — 611 drafted / 395 accepted; prose drafts accept worse: ~83 t/s).
+- Long ctx: 41.7K-token prompt prefills at **3025 t/s** (TTFT 13.8s),
+  then gen **99 t/s @41K** — near-zero decay vs short (DeltaNet linear
+  attention; only sparse full-attn layers pay per-token KV).
+- Concurrency (per-stream / aggregate): 1u 82.6; 2u ~81 / **161.8**;
+  4u ~66 / **262.8**.
+- vs MiniMax-M2.7 IQ3_XXS: slower short-gen (107 vs 140) but *faster*
+  at long ctx (99 vs 65 @31-41K), comparable 4-user aggregate (263 vs
+  304), 2.7× native ctx headroom (262K vs 144K), and dense-27B
+  quality per token is a different tradeoff vs 230B-A10B MoE at 3-bit.
+
+No `--cache-ram` on this unit yet (recurrent DeltaNet state vs host-RAM
+prompt-cache interaction untested).
+
+## Model swap #4 (2026-07-26): Qwen3.6-27B-FP8 via vLLM — ACTIVE
+
+`guests/bam-inference/vllm-qwen36.nix` (container `vllm-qwen36`,
+image `vllm-openai:v0.26.0-cu129-ubuntu2404` — cu129 tag mandatory on
+the 12.9 driver). Official `Qwen/Qwen3.6-27B-FP8` (29G) at
+`/var/lib/models/Qwen3.6-27B-FP8`, serving `Qwen3.6-27B-FP8` +
+`default` on :30000. Chosen for multi-user throughput per research
+(`agent://QwenServeResearch`); config deviates from the official
+recipe deliberately: **bf16 KV (NOT fp8)** and **MTP n=2 (not 3)** —
+fp8 KV + MTP + GDN + concurrency is the open crash bug vllm#40756
+(sm_120 repro; fix PR #48475 unmerged). 86.5G VRAM, **KV pool
+807,249 tokens** (bf16!), 262K max per request, 8 seqs.
+
+Benchmarks (warm; cold first request ~34-55 t/s while graphs capture).
+vLLM columns: auto-selected FA2 first, then with
+`--attention-backend FLASHINFER` (the shipped config):
+
+| | llama.cpp Q8+MTP | vLLM FP8+MTP2 FA2 | vLLM +FlashInfer |
+|---|---|---|---|
+| short gen 1u | 107 t/s | 101.5 | 98.8 |
+| gen @41K ctx | 99 | 53.2 | 90.7 |
+| gen @76K ctx | — | 39 | 83.3 |
+| prefill 41-76K | 3025 t/s | 2783 | **5331-6595** |
+| repeat prompt | ~1-2s (cache-ram) | **TTFT 0.3s** (prefix cache) | same |
+| 2u agg | 161.8 | 189.6 | 139-190 (noisy) |
+| 4u agg | 262.8 | 374.3 | **333.7** |
+| 8u agg | — (4 slots) | 704.5 | **695.1** |
+
+**FA2 depth-decay debug (2026-07-26):** auto-selection picked
+FlashAttention v2 — no sm_120-tuned decode path. Decode cost grew
+~14x steeper with context than KV-bandwidth math allows (100→53→39
+t/s at 0/41K/76K); MTP acceptance was healthy (74.9%: pos0 83%,
+pos1 67%) and prefix caching was ruled out (fresh vs cached decode
+identical), isolating the attention kernel. FlashInfer restores a
+near-flat depth curve AND ~2.2x prefill. Gotcha: the
+`VLLM_ATTENTION_BACKEND` env var is silently ignored in 0.26 —
+only the `--attention-backend` CLI flag works (env absent from
+envs.py; selection in platforms/cuda.py get_attn_backend_cls). The
+`cuda.py:482 Using FLASH_ATTN` line still appearing at startup is a
+SUBCOMPONENT selector (MTP draft head / ViT); the main model logs
+`cuda.py:422 Using AttentionBackendEnum.FLASHINFER backend.`
+
+Read: vLLM wins everything multi-user (~2.6x llama.cpp @4u+, per-
+stream stays ~83-90 t/s at 8 users), 2x prefill, prefix caching;
+llama.cpp keeps a small single-stream edge (107/99 vs 99/91) —
+parked as rollback (`systemctl start llama-qwen36`).
+
+**Tuning round (2026-07-26, research: `agent://VllmTuneResearch`):**
+applied in one restart: (1) drafter attention forced to FlashInfer
+via `"attention_backend":"FLASHINFER"` INSIDE --speculative-config —
+the MTP head deliberately ignores the CLI flag and was still on FA2;
+(2) `--kv-cache-memory 60GiB` replaces --gpu-memory-utilization →
+KV pool 808K → 891,289 tokens; (3) --max-num-seqs 16; (4) compile/
+JIT caches persisted at /var/lib/vllm-cache; (5) --stream-interval 4
++ --api-server-count 2. Result: **16u ~1,140 t/s aggregate**
+(per-stream 68-75), 8u unchanged 693, TTFT @41.7K 13.7s → 6.7s,
+92.4G VRAM, 0 preemptions. Declined: dynamic MTP schedule (crossover
+guess, upstream MTP support caveat — revisit if 9-16u acceptance
+decays), --language-model-only (keeps vision), fp8 KV (#40756 still
+open; builder-clamp workaround trades crash for silent state
+corruption). Next-image pickups queued upstream: #44700 GDN split
+batches, KV-offload MTP fixes (#46972/#49071/#49671) → then A/B
+--kv-offloading-size 32 and the NVFP4 checkpoint.
+
+Gotchas:
+- vLLM 0.26 returns thinking as `message.reasoning` (llama.cpp uses
+  `reasoning_content`) — check omp parses it.
+- `--generation-config vllm` = greedy defaults server-side (MTP
+  acceptance); clients set their own sampling per request.
+- 1M ctx variant possible (YaRN factor 4 + NVFP4 weights + fp8 KV)
+  but fp8 KV re-enters the #40756 crash zone: needs MTP off or the
+  clamp patch. Not built.
+- After every engine swap: `env -u PI_CODING_AGENT_DIR
+  OMP_PROFILE=afk omp models refresh` (omp persists discovery cache;
+  harness restarts do NOT re-probe).
+
 ## Deviations from plan/spec (all deliberate, in order of importance)
 
 1. **Engine: vLLM v0.26.0 instead of SGLang.** The checkpoint is
