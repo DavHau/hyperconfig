@@ -211,7 +211,7 @@ Run: `nix-instantiate --parse machines/bam/inference-host.nix` — expected: pri
 }
 ```
 
-CAUTION: bam's LAN address currently lives on `enp8s0` via clan/networkd defaults. Check `modules/` and clan inventory for an existing network unit matching `enp8s0` (grep `enp8s0` and `DHCP` across repo + `networkctl status enp8s0` on bam); the slave unit above must take precedence (lower-numbered unit wins on Match). Deploying this WILL briefly drop LAN connectivity — bam stays reachable over ygg/vibepn/hyprspace overlays if the bridge misbehaves.
+CAUTION: bam's LAN address currently lives on `enp8s0` via clan/networkd defaults. Check `modules/` and clan inventory for an existing network unit matching `enp8s0` (grep `enp8s0` and `DHCP` across repo + `networkctl status enp8s0` on bam); the slave unit above must take precedence (lower-numbered unit wins on Match). Deploying this WILL briefly drop LAN connectivity — bam stays reachable over its vibepn/hyprspace overlays if the bridge misbehaves.
 
 - [ ] **Step 2: Verify parse**
 
@@ -743,20 +743,11 @@ Check first: whether this repo/clan already manages nftables tables (grep `nftab
 
 Replace `<source bridge="br0"/>` with `<source bridge="virbr-inf"/>`.
 
-- [ ] **Step 3: Guest joins overlay** — add the overlay of choice to `guests/bam-inference/configuration.nix` (yggdrasil is self-contained):
-
-```nix
-  services.yggdrasil = {
-    enable = true;
-    persistentKeys = true;
-    settings.Peers = [
-      # copy 2-3 public peers from bam's working ygg config or
-      # https://publicpeers.neilalexander.dev
-    ];
-  };
-  networking.firewall.interfaces.tun0.allowedTCPPorts = [22 30000];
-```
-Apply to guest FIRST (while still on br0), record the guest's ygg address, confirm `ssh root@<ygg-addr>` works from your workstation.
+- [ ] **Step 3: Guest management path** — ensure the guest stays
+  reachable independent of the LAN before the flip (as built 2026-07-26:
+  its public IPv6 routed through the host; alternatively any overlay of
+  choice). Confirm `ssh root@<vm-public-addr>` works from your
+  workstation while the guest is still on br0.
 
 - [ ] **Step 4: Flip + verify isolation**
 
@@ -764,11 +755,11 @@ Apply to guest FIRST (while still on br0), record the guest's ygg address, confi
 clan machines update bam
 ssh root@bam.d 'virsh destroy inference; virsh start inference'
 ```
-Then verify from the guest (over ygg ssh):
+Then verify from the guest (over the LAN-independent path):
 - `curl -4 -s https://icanhazip.com` → works (WAN OK)
 - `ping -c1 192.168.8.189` → fails (LAN blocked)
 - `curl -m3 http://192.168.8.1` → fails
-- port 30000 reachable via ygg address from workstation, NOT via any LAN address.
+- port 30000 reachable via the public address from workstation, NOT via any LAN address.
 
 ### Task 10: Final verification + handoff
 
@@ -783,8 +774,8 @@ Then verify from the guest (over ygg ssh):
 ssh root@bam.d reboot
 # wait, then:
 ssh root@bam.d 'virsh list; systemctl --failed; free -h'
-ssh root@<ygg-addr> 'systemctl is-active podman-sglang gpu-powercap; nvidia-smi --query-gpu=power.limit --format=csv'
-curl -s http://[<ygg-addr>]:30000/v1/models
+ssh root@<vm-public-addr> 'systemctl is-active podman-sglang gpu-powercap; nvidia-smi --query-gpu=power.limit --format=csv'
+curl -s http://[<vm-public-addr>]:30000/v1/models
 ```
 Expected: VM autostarted, SGLang serving, host has zero failed units, host services (nextcloud/vikunja/jackett) respond.
 

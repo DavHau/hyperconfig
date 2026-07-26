@@ -8,6 +8,7 @@
     ./vllm-minimax-gguf.nix
     ./llama-qwen36.nix
     ./vllm-qwen36.nix
+    ./network.nix
   ];
 
   networking.hostName = "inference";
@@ -16,19 +17,8 @@
   # fallback copy (EFI/BOOT/BOOTX64.EFI) is what OVMF boots.
   boot.loader.efi.canTouchEfiVariables = false;
   boot.kernelParams = ["console=ttyS0,115200"];
-  networking.useDHCP = true;
   services.openssh.enable = true;
 
-  # Overlay: join the clan's yggdrasil mesh by peering with bam's ygg
-  # listener on the LAN (VM is bridged onto the LAN via br0).
-  services.yggdrasil = {
-    enable = true;
-    persistentKeys = true;
-    settings.Peers = [
-      "tls://192.168.8.150:6446"
-    ];
-  };
-  networking.firewall.interfaces.tun0.allowedTCPPorts = [22 30000];
 
   # NVIDIA: Blackwell requires the open kernel modules, >=570.
   # nvidiaPackages.latest = 610.43.03 at lock time (2026-07-25).

@@ -15,19 +15,20 @@ Spec: `docs/superpowers/specs/2026-07-25-bam-inference-vm-design.md`
   with 256GiB 64-bit MMIO aperture (`opt/ovmf/X-PciMmio64Mb=262144`).
 - **Guest OS:** standalone flake `guests/bam-inference` (NOT part of the
   clan inventory). NixOS 26.11pre (nixos-unstable e2587ca), root xfs on the
-  passed-through NVMe (disko, mounts by partlabel). Reachable at its LAN
-  DHCP address (currently `192.168.8.107`) — the VM is **bridged onto the
-  LAN via br0**; bam's own LAN address moved to br0 (was on enp8s0, now
-  `192.168.8.150` — DHCP lease changed with the bridge MAC).
+  passed-through NVMe (disko, mounts by partlabel). Reachable ONLY at
+  its public IPv6 `2405:9800:b901:94e3::feed:da7a` (routed via bam's
+  br-inf since 2026-07-26; formerly bridged on br0 as 192.168.8.107).
+  bam's own LAN address stays `192.168.8.150` on br0.
 
 ## Serving endpoint
 
-OpenAI-compatible API: `http://<vm-lan-ip>:30000/v1`. Active model id:
-`MiniMax-M2.7-IQ3_XXS` (see "Model swap #2" below; previous ids
-`Qwen3-Coder-Next-FP8`/`default` return when podman-vllm is reactivated).
-omp discovers the catalog at runtime (`discovery: openai-models-list`) —
-nothing to edit client-side on model changes; run `omp models refresh`
-to bust its cache.
+OpenAI-compatible API: `http://[2405:9800:b901:94e3::feed:da7a]:30000/v1`
+— the VM's public IPv6 is its ONLY address since the routed-isolation
+change (2026-07-26, see below); the old LAN address 192.168.8.107 is
+gone. Active model ids: `Qwen3.6-27B-FP8` + `default` (vLLM, swap #4).
+omp discovers the catalog at runtime (`discovery: openai-models-list`,
+provider source: modules/nixos/omp-common.nix) — run
+`omp models refresh` after every engine swap or address change.
 
 **Final launch command** (podman container `vllm`, image
 `docker.io/vllm/vllm-openai:v0.26.0`, entrypoint `vllm serve`):
@@ -280,10 +281,21 @@ Gotchas:
    for reference.
    The "Marlin weight-only" startup warning is expected, not a bug: the
    checkpoint has FP16 activations by construction.
-2. **Phase-2 network lockdown dropped** (user decision): VM stays bridged
-   on br0 with a LAN address until its config moves out of this clan.
-   `machines/bam/inference-net.nix` contains only the bridge; the NAT
-   segment + nftables isolation from the plan were reverted before deploy.
+2. **Phase-2 network lockdown: dropped 2026-07-25, REVISED 2026-07-26 —
+   now ROUTED + isolated.** The VM moved off br0 onto a port-less
+   internal bridge `br-inf` (bam routes; `machines/bam/inference-net.nix`).
+   No prefix delegation: bam answers LAN NDP for the single public
+   address `2405:9800:b901:94e3::feed:da7a` (networkd IPv6ProxyNDP, no
+   daemon) and routes the /128 to the VM (static config in
+   `guests/bam-inference/network.nix`; guest gw = 10.42.0.1/fe80::1).
+   Policy (iptables chain `inf-fwd` on bam): VM->LAN dropped both
+   families (hairpin-proof — LAN dsts die on bam), VM->internet free
+   (v4 masqueraded), inbound to the VM = tcp 22/30000 + ICMPv6 to the
+   public v6 only; no inbound v4. LAN clients reach the VM exclusively
+   via the public address through bam. VM->bam itself (10.42.0.1,
+   192.168.8.150) is INPUT, not FORWARD — ssh-jump fallback. vLLM
+   binds `--host ::` (dual-stack) — 0.0.0.0 would be unreachable
+   from outside. Deploys now target `root@[2405:...::feed:da7a]`.
 3. **Context length 139264 (was 98304, spec said 131072).** Measured VRAM
    (torch-visible 95.01 GiB): weights 74.98 + activations 1.30 + non-torch
    0.23 leaves 17.71 GiB physical KV ceiling — but that ceiling is only
@@ -331,15 +343,11 @@ Gotchas:
 
 ## Known issues / notes
 
-- **Yggdrasil from the guest is half-working:** the guest peers with bam
-  (`tls://192.168.8.150:6446`, session establishes, byte counters move both
-  ways) but end-to-end TCP/ICMP over ygg addresses times out
-  (guest addr `200:9fde:424e:c7ef:7e8f:3293:1fb9:b580`). Not blocking while
-  the VM is LAN-bridged; debug before any future lockdown that depends on it.
 - **Guest sshd PerSourcePenalties (OpenSSH ≥9.8):** repeated failed auth
   (e.g. ssh-agent key spam) gets a source IP temporarily banned — looks like
-  "valid key rejected". Use `IdentitiesOnly yes` (workstation has a
-  `Host 192.168.8.107 inference-vm` block) or restart sshd in the guest.
+  "valid key rejected". Use `IdentitiesOnly yes` (workstation had a
+  `Host 192.168.8.107 inference-vm` block — update it to the v6
+  address) or restart sshd in the guest.
 - The domain XML's stale SATA/SCSI controllers from the bootstrap ISO era
   disappear whenever NixVirt reapplies the canonical XML.
 - Host `/proc/meminfo HugePages_Total` only counts the default page size —
@@ -356,12 +364,12 @@ Gotchas:
 # host
 virsh list; virsh console inference        # serial console (root pw set)
 systemctl status nixvirt libvirtd
-# guest
-ssh root@192.168.8.107                     # keys: ds@nintendo-ds, root@nintendo-ds, grmpf
-journalctl -u podman-vllm -f
-curl -s localhost:30000/v1/models
+# guest (public v6 only; from bam also: ssh root@10.42.0.2)
+ssh root@2405:9800:b901:94e3::feed:da7a   # keys: ds@nintendo-ds, root@nintendo-ds, grmpf
+journalctl -u podman-vllm-qwen36 -f
+curl -s "http://[2405:9800:b901:94e3::feed:da7a]:30000/v1/models"
 # deploy
 nixos-rebuild switch --flake .#bam --target-host root@bam.d          # host
 nixos-rebuild switch --flake ./guests/bam-inference#inference \
-  --target-host root@192.168.8.107                                   # guest
+  --target-host "root@[2405:9800:b901:94e3::feed:da7a]"              # guest
 ```

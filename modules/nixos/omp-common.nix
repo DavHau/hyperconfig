@@ -14,13 +14,15 @@
     "      type: lm-studio"
   ];
   # LLM inference VM on bam (RTX PRO 6000 passthrough, vLLM serving
-  # MiniMax-M2.7-REAP; see machines/bam/inference-handoff.md).
+  # Qwen3.6-27B-FP8; see machines/bam/inference-handoff.md).
   # openai-models-list discovery polls /v1/models at runtime; vLLM reports
   # max_model_len, which omp uses as the context window — stays in sync
-  # with whatever the guest serves. Unreachable off-LAN, harmless.
+  # with whatever the guest serves. VM is routed/isolated since
+  # 2026-07-26: ONLY reachable via its public IPv6 (bam proxies NDP +
+  # routes; LAN address is gone). Unreachable off-site, harmless.
   bamVmProvider = lib.concatStringsSep "\n" [
     "  bam-vm:"
-    "    baseUrl: http://192.168.8.107:30000/v1"
+    "    baseUrl: http://[2405:9800:b901:94e3::feed:da7a]:30000/v1"
     "    api: openai-completions"
     "    auth: none # vLLM runs without API key"
     "    discovery:"
