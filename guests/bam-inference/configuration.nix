@@ -3,6 +3,9 @@
     ./common.nix
     ./common-tools.nix
     ./vllm.nix
+    ./llama-minimax.nix
+    ./ik-llama-minimax.nix
+    ./vllm-minimax-gguf.nix
   ];
 
   networking.hostName = "inference";

@@ -22,11 +22,12 @@ Spec: `docs/superpowers/specs/2026-07-25-bam-inference-vm-design.md`
 
 ## Serving endpoint
 
-OpenAI-compatible API: `http://<vm-lan-ip>:30000/v1`. Model ids:
-`Qwen3-Coder-Next-FP8` (primary) and `default` (alias, kept so existing
-client selections survive model swaps). omp discovers the catalog at
-runtime (`discovery: openai-models-list`) — nothing to edit client-side
-on model changes; run `omp models refresh` to bust its cache.
+OpenAI-compatible API: `http://<vm-lan-ip>:30000/v1`. Active model id:
+`MiniMax-M2.7-IQ3_XXS` (see "Model swap #2" below; previous ids
+`Qwen3-Coder-Next-FP8`/`default` return when podman-vllm is reactivated).
+omp discovers the catalog at runtime (`discovery: openai-models-list`) —
+nothing to edit client-side on model changes; run `omp models refresh`
+to bust its cache.
 
 **Final launch command** (podman container `vllm`, image
 `docker.io/vllm/vllm-openai:v0.26.0`, entrypoint `vllm serve`):
@@ -41,8 +42,11 @@ vllm serve /models/Qwen3-Coder-Next-FP8 \
   --max-num-seqs 4
 ```
 
-Supervision: `podman-vllm.service`, `Restart=always`, ordered after
-`gpu-powercap.service` (which needs `nvidia-persistenced`).
+Supervision (currently **stopped**, kept for one-flip rollback):
+`podman-vllm.service`, `Restart=always`, ordered after
+`gpu-powercap.service` (which needs `nvidia-persistenced`). The active
+unit is `llama-minimax.service` (Conflicts= podman-vllm, holds the
+autostart) — see "Model swap #2" below.
 
 ## Versions
 
@@ -85,6 +89,71 @@ code (mid-string quote mismatches). Replaced with Qwen3-Coder-Next-FP8
 Qwen model exist (RedHatAI/GadflyII) but run slower than FP8 on SM120
 until vLLM ships native FP4 kernels — revisit then. The deviations list
 below is the historical record of the original MiniMax bring-up.
+
+## Model swap #2 (2026-07-26): MiniMax-M2.7 UD-IQ4_XS via llama.cpp
+
+Experiment: the **full** MiniMax-M2.7 (230B-A10B, not the REAP prune that
+failed above) at unsloth Dynamic 2.0 4-bit (`UD-IQ4_XS`, 101GiB GGUF).
+Model > 96GiB VRAM, so llama.cpp with expert offload: `--n-cpu-moe 20`
+keeps the expert tensors of 20 layers (~31GiB) in guest RAM; attention,
+shared weights and 128K q8_0 KV stay on GPU (89.8GiB used). Config:
+`guests/bam-inference/llama-minimax.nix` (native nixpkgs `llama-cpp`
+b10063, CUDA 12.9, sm_120 only).
+
+Measured (2026-07-26): **gen 40 t/s** short ctx / **31 t/s @ 31K ctx**;
+**prefill 1888 t/s** (31.5K tok in 16.7s) after `-ub 2048 --no-mmap`
+(default ubatch gave 495 t/s — the CPU-resident expert set streams over
+PCIe once per ubatch, and mmap'd CPU tensors page-fault single-core).
+Bounded thinking (~2K chars, unlike the REAP runaway), clean tool_calls
+via `--jinja` + GGUF-embedded template, correct 31.5K-ctx recall.
+Model load: 24s. Serves one alias only — the `default` id is gone until
+vllm returns.
+
+Rollback to Qwen: remove the `autoStart = lib.mkForce false` in
+llama-minimax.nix (or drop the import) and redeploy; ad hoc:
+`systemctl start podman-vllm` (conflict stops llama-minimax).
+
+**Quant swap to UD-IQ3_XXS (2026-07-26, current):** the IQ4_XS offload
+setup was too slow in practice (esp. multi-user). Swapped to unsloth
+**UD-IQ3_XXS** (74.6GiB) — fully GPU-resident, no --n-cpu-moe, 128K
+q8_0 KV, 94.6GiB VRAM used. Measured: **short gen 140 t/s** (3.5x),
+**65 t/s @ 31K ctx**, **prefill 2596 t/s** (31.5K in 12.2s);
+concurrency now GPU-bound and scales: 2 users 115 t/s each, 4 users
+76 t/s each (~304 aggregate). Quality gate: 3/3 codegen node --check,
+clean tool_calls, correct 31.5K recall; thinking longer than IQ4
+(~4.7K vs ~2K chars on the same prompt) — expected 3-bit behavior.
+Quant ladder context: UD-IQ3_XXS ≈ 93% of full precision vs ≈97% for
+IQ4_XS (DeepSeek-V3.1 UD Aider ladder). IQ4_XS weights kept on disk;
+flip back = model path + alias + `--n-cpu-moe 20` in llama-minimax.nix.
+Client id changes to `MiniMax-M2.7-IQ3_XXS`.
+
+**vLLM GGUF route — tried and rejected (2026-07-26):**
+`guests/bam-inference/vllm-minimax-gguf.nix` (parked; `systemctl start
+podman-vllm-minimax` to re-test). The stack works functionally —
+vllm-openai:v0.25.1-x86_64-cu129 + vllm-gguf-plugin 0.0.4 wheel +
+startup shim for the `hf_config` plugin-API skew, minimax_m2
+tool/reasoning parsers, prefetched tokenizer at
+/var/lib/models/MiniMax-M2.7-hf-meta, 96K ctx fp8 KV (128K needs
+15.5GiB KV, only 12.8 free) — but decodes at **9.4 t/s** vs
+llama.cpp's 140. Root-caused in-container: the wheel's CUDA extension
+fails to import (torch ABI, `undefined symbol: torch_exception*`) and
+the plugin silently Triton-JITs every GGUF op; independently, the
+wheel ships no sm_120 SASS and no PTX (cuobjdump), so its CUDA
+kernels can't run on Blackwell regardless. Upstream calls vLLM GGUF
+"highly experimental and under-optimized" (vllm#35987 matches).
+Revive only when upstream ships sm_120 wheels (or source-build with
+TORCH_CUDA_ARCH_LIST=12.0 against the exact container torch).
+
+**ik_llama.cpp A/B (2026-07-26):** packaged in
+`guests/bam-inference/ik-llama-cpp.nix` (+ parked unit
+`ik-llama-minimax`, manual `systemctl start` for A/B; Conflicts=
+swaps engines). Result: prefill parity (1873 vs 1888 t/s), gen @31K
+ctx 28.4 vs 31.2 t/s — mainline llama.cpp keeps the autostart. ik's
+`-rtr` repack is a prefill killer here (488 t/s: CUDA has no kernels
+for `_R4` repacked quants, so CPU experts can't batch-offload to the
+GPU). Build notes: needs `NIX_ENFORCE_NO_NATIVE = false` (its iqk
+kernels don't compile without `-march=native`) and a static build
+(no upstream install rules; shared libs leave /build/ RPATHs).
 
 ## Deviations from plan/spec (all deliberate, in order of importance)
 
