@@ -26,9 +26,11 @@ OpenAI-compatible API: `http://[2405:9800:b901:94e3::feed:da7a]:30000/v1`
 — the VM's public IPv6 is its ONLY address since the routed-isolation
 change (2026-07-26, see below); the old LAN address 192.168.8.107 is
 gone. Active model ids: `Qwen3.6-27B-FP8` + `default` (vLLM, swap #4).
-omp discovers the catalog at runtime (`discovery: openai-models-list`,
-provider source: modules/nixos/omp-common.nix) — run
-`omp models refresh` after every engine swap or address change.
+(A second co-hosted engine on :30001 ran briefly — swap #5, parked;
+re-enable kit in guests/bam-inference/dual-engine/.) omp discovers
+the catalog at runtime (`discovery: openai-models-list`, provider
+source: modules/nixos/omp-common.nix) — run `omp models refresh`
+after every engine swap or address change.
 
 **Final launch command** (podman container `vllm`, image
 `docker.io/vllm/vllm-openai:v0.26.0`, entrypoint `vllm serve`):
@@ -187,7 +189,7 @@ prompt-cache interaction untested).
 
 ## Model swap #4 (2026-07-26): Qwen3.6-27B-FP8 via vLLM — ACTIVE
 
-`guests/bam-inference/vllm-qwen36.nix` (container `vllm-qwen36`,
+`guests/bam-inference/vllm-qwen36-27b.nix` (container `vllm-qwen36-27b`,
 image `vllm-openai:v0.26.0-cu129-ubuntu2404` — cu129 tag mandatory on
 the 12.9 driver). Official `Qwen/Qwen3.6-27B-FP8` (29G) at
 `/var/lib/models/Qwen3.6-27B-FP8`, serving `Qwen3.6-27B-FP8` +
@@ -245,9 +247,32 @@ JIT caches persisted at /var/lib/vllm-cache; (5) --stream-interval 4
 guess, upstream MTP support caveat — revisit if 9-16u acceptance
 decays), --language-model-only (keeps vision), fp8 KV (#40756 still
 open; builder-clamp workaround trades crash for silent state
-corruption). Next-image pickups queued upstream: #44700 GDN split
-batches, KV-offload MTP fixes (#46972/#49071/#49671) → then A/B
---kv-offloading-size 32 and the NVFP4 checkpoint.
+corruption). **CPU KV offload research 2026-07-27
+(machines/bam/kv-offload-research-2026-07-27.md) — corrected
+picture:** #46972 (MTP
+chunk-boundary store) IS already in v0.26.0; #49071 is
+Simple-connector-only and #49671 tiering-only — neither blocks the
+default OffloadingConnector path. The REAL v0.26.0 blockers: #49118
+queued-abort EngineCore kill (enabling change #48596 is in-tag, fix
+#49146 main-only — one client disconnect kills the engine, fatal for
+agent traffic) and OPEN #49127 (native offload + prefix caching on
+Qwen3.6 silently restores a wrong prefix under cache pressure;
+reproduces on main 2026-07-23, NO fix anywhere). Adopt only on a tag
+with #49146+#49671+#49052+#49226 (v0.26.1/v0.27) AND after a local
+A->B->A determinism probe for #49127. When adopting: 27B
+--kv-offloading-size 36 / 35B 12 (pinned RAM, 48 of ~60GiB),
+offload_prompt_only:false (default true skips decode blocks =
+halves agent hit rates), keep expandable_segments but add
+--enable-cumem-allocator (hard startup reject otherwise), never
+extra-config block_size with MTP (#48919), never
+VLLM_USE_SIMPLE_KV_OFFLOAD (#47282) or lmcache backend (#45407).
+fp8 KV: STILL blocked — #48475 open/needs-rebase, clamp = silent
+cross-request corruption (brasrox 2026-07-19 on #40756); bf16 KV is
+the only stable Blackwell+MTP config. Also watch: #49476/#49115
+(FlashInfer sm_120 MoE workspace unaccounted in profiling — keep the
+35B VRAM cushion), #47602 (MTP acceptance decays with ctx depth).
+Full validation checklist in kv-offload-research-2026-07-27.md. Other next-image
+pickups: #44700 GDN split batches, NVFP4 27B A/B.
 
 Gotchas:
 - vLLM 0.26 returns thinking as `message.reasoning` (llama.cpp uses
@@ -260,6 +285,99 @@ Gotchas:
 - After every engine swap: `env -u PI_CODING_AGENT_DIR
   OMP_PROFILE=afk omp models refresh` (omp persists discovery cache;
   harness restarts do NOT re-probe).
+
+## Model swap #5 (2026-07-27): + Qwen3.6-35B-A3B NVFP4 — CO-HOSTED, then PARKED
+
+**PARKED same day (user call):** the VRAM carve starved multi-session
+KV (27B 475K tokens + 35B 157K @131K/req vs 891K @262K solo — see
+the OOM post-mortem below for why the cushion cannot shrink). The
+27B is back to its solo config (60GiB pool, 891,289 tokens, no
+utilization flag). The whole dual-engine setup is preserved,
+unimported, in `guests/bam-inference/dual-engine/` — README there
+has the exact re-enable steps (27B flag changes, firewall 30001,
+omp provider). 35B weights remain on disk. Section kept for the
+benchmarks and hard-won co-tenancy lessons:
+
+`guests/bam-inference/dual-engine/vllm-qwen36-35b.nix` (container
+`vllm-qwen36-35b`, same v0.26.0-cu129 image), port 30001, serving
+`unsloth/Qwen3.6-35B-A3B-NVFP4-Fast` (23.7G weights at
+`/var/lib/models/Qwen3.6-35B-A3B-NVFP4-Fast`). NOT a swap — runs NEXT
+TO the 27B on the same GPU; the 27B keeps `default`.
+
+**Why co-hosting is cheap:** the A3B is MoE (256 experts, 8+1 active,
+3B active params) with only 10 full-attention layers (2 KV heads x
+256 dim) — measured ~12.2KiB/token KV vs the 27B's ~70.6KiB/t.
+
+**KV split (final, after the 04:26 OOM — see post-mortem below):**
+27B 32GiB pool = **474,943 tokens**, 262K/request; 35B 2GiB pool =
+**157,640 tokens**, capped **131K/request** (pool must hold >= one
+max-len request). ~632K tokens of live context total. The 35B runs
+**fp8 KV** — NOT set by us: the unsloth NVFP4 checkpoint embeds an
+fp8 KV scheme and vLLM applies it silently (that's why its KV is
+~12.2KiB/t; bf16 would be ~24.4). Deliberately accepted despite the
+#40756 fp8-KV+MTP+GDN risk: blast radius = the secondary engine
+restarting. The 27B stays bf16 KV. Resize = one --kv-cache-memory
+number + matching --gpu-memory-utilization claim per unit, redeploy.
+
+**VRAM ledger (97,887 MiB card, measured warm):** 27B ~65.5GiB
+resident (33.5 non-KV + 32GiB KV) + 35B ~27.2GiB (22.1 weights +
+runtime + 2GiB KV) = ~93.9GiB used, **~3.9GiB free — this cushion is
+load-bearing, do NOT shrink it** (see post-mortem).
+
+**OOM post-mortem (2026-07-27 04:26):** with the cushion trimmed to
+~2.6GiB (then eaten to ~1GiB by 27B warm growth), the first real
+multimodal request on the 35B (54.8K-token prompt, 3 images) died:
+`FusedMoeRunner::getWorkspaceInfo` OOM allocating a 534MiB FlashInfer
+CUTLASS fused-MoE workspace. This workspace + ViT activations
+allocate at REQUEST time and are invisible to vLLM's boot profiling
+— exactly vllm#49476/#49115 (sm_120 MoE workspace unaccounted).
+Worse, the engine then CRASH-LOOPED on restart: the warm 27B left
+30.1GiB free, just under the 35B's then-0.32 claim (30.4GiB). Both
+lessons applied: 35B pool 4->2GiB + claim 0.30 (re-enters cleanly
+next to the warm 27B), request cap 131K. Rule of thumb: keep >=3.5GiB
+card-wide free, and every engine's claim must fit under the free VRAM
+left by its WARM co-tenant, not the cold one.
+
+**The co-tenancy trap (hit three times, fixed):** vLLM validates
+free-VRAM >= `--gpu-memory-utilization` x total at init even when
+`--kv-cache-memory` pins the pool absolutely. The 0.90 default can
+never pass next to a resident co-tenant => `Restart=always` crash
+loop. BOTH units therefore carry BOTH flags: 27B = util 0.68 +
+32GiB KV; 35B = util 0.30 + 2GiB KV. The util claim is NOT a usage
+cap — it gates only the init free-check and the profile-time KV
+bound. Resize = edit one number, redeploy; only that engine restarts.
+
+**Perf levers (all on, mirroring the 27B):** MTP n=2 with FlashInfer
+drafter inside --speculative-config, --attention-backend FLASHINFER,
+chunked prefill, prefix caching, async scheduling, greedy
+--generation-config vllm, stream-interval 4, api-server-count 2.
+MoE path auto-selected FlashInfer trtllm::fused_moe kernels — the
+unsloth card warns the Marlin fallback is 2x slower; check the boot
+log for `fused_moe` autotuning after every image bump.
+
+**Benchmarks (2026-07-27, guest-local, 27B idle-resident):**
+
+- short single-stream: **284.6 t/s** (27B: ~100)
+- @41,699 ctx: prefill **25,347 t/s** (TTFT 1.6s), decode **272.7 t/s**
+  (27B: 6,215 t/s / 6.7s / 89.1)
+- concurrency (300-tok bursts): 4u **795** agg, 8u **1,434** agg,
+  16u **2,219** agg (per-stream still 132-150 t/s at 16u)
+- MTP acceptance 67.9% (6,851/10,090); answer correctness sanity pass
+- 2u run measured an anomalous 240 agg (per-stream halved) — one-off
+  scheduler/graph warmup artifact; 4u+ shows no trace of it. Re-check
+  if it reproduces.
+- 27B co-tenancy cost: **none once warm** (short 95.8 vs ~100 solo =
+  noise; deep-ctx 92.1 vs 90.7 solo). Early "88.4" readings are
+  warm-up bias — first ~5min after an engine restart run slow (JIT +
+  graph re-warm). Both engines restarting simultaneously is safe:
+  Restart=always absorbs the init-check race. Bench scripts:
+  /root/qv36bench.py (27B), /root/qv36b35bench.py (35B).
+
+**NVFP4 quality (unsloth card):** MMLU-Pro 85.58 / GPQA 87.75 /
+AIME25 91.67 vs BF16 85.75/86.36/92.50 — within noise. The planned
+27B-NVFP4 A/B (swap #4 next steps) may be moot: for raw speed the
+35B-A3B already delivers 3x, with better benchmark scores than the
+27B dense on most coding suites.
 
 ## Deviations from plan/spec (all deliberate, in order of importance)
 
@@ -366,7 +484,7 @@ virsh list; virsh console inference        # serial console (root pw set)
 systemctl status nixvirt libvirtd
 # guest (public v6 only; from bam also: ssh root@10.42.0.2)
 ssh root@2405:9800:b901:94e3::feed:da7a   # keys: ds@nintendo-ds, root@nintendo-ds, grmpf
-journalctl -u podman-vllm-qwen36 -f
+journalctl -u podman-vllm-qwen36-27b -f
 curl -s "http://[2405:9800:b901:94e3::feed:da7a]:30000/v1/models"
 # deploy
 nixos-rebuild switch --flake .#bam --target-host root@bam.d          # host

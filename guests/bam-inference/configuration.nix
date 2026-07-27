@@ -7,7 +7,7 @@
     ./ik-llama-minimax.nix
     ./vllm-minimax-gguf.nix
     ./llama-qwen36.nix
-    ./vllm-qwen36.nix
+    ./vllm-qwen36-27b.nix
     ./network.nix
   ];
 

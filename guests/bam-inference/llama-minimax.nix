@@ -32,7 +32,7 @@ in {
   virtualisation.oci-containers.containers.vllm.autoStart = lib.mkForce false;
 
   systemd.services.llama-minimax = {
-    # PARKED since swap #4 (2026-07-26): vllm-qwen36 owns the GPU
+    # PARKED since swap #4 (2026-07-26): vllm-qwen36-27b owns the GPU
     # autostart. Manual A/B: `systemctl start llama-minimax`.
     # (Leaving multi-user.target here made every nixos-rebuild switch
     # start this unit, Conflicts=-killing the active vLLM engine.)
