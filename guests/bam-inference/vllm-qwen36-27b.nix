@@ -22,7 +22,7 @@
   lib,
   ...
 }: {
-  virtualisation.oci-containers.containers.vllm-qwen36 = {
+  virtualisation.oci-containers.containers.vllm-qwen36-27b = {
     # cu129 variant REQUIRED: guest driver is CUDA 12.9; the plain
     # v0.26.0 tag is built for cu13 / r580+ drivers.
     image = "docker.io/vllm/vllm-openai:v0.26.0-cu129-ubuntu2404";
@@ -58,7 +58,11 @@
       "--max-num-seqs" "16"
       # 60GiB KV pool (~890K tokens), replaces --gpu-memory-utilization
       # 0.90 (gave 54.4G): vLLM's own boot accounting says 63.2G is
-      # usable; 60G leaves ~3.2G for runtime Triton JIT. If OOM: 58G.
+      # usable; 60G leaves ~3.2G for runtime Triton JIT, ViT
+      # activations and the FlashInfer workspace (all allocate at
+      # request time, invisible to boot profiling). If OOM: 58G.
+      # Co-hosting the 35B again? See dual-engine/README.md — this
+      # flag AND a --gpu-memory-utilization claim must change.
       "--kv-cache-memory" "64424509440"
       "--enable-chunked-prefill"
       # GDN prefix caching is "align"-mode experimental: only the
@@ -99,7 +103,7 @@
     # mamba cache dtypes        never fp8 — wrong outputs (same sweep)
   };
 
-  systemd.services.podman-vllm-qwen36 = {
+  systemd.services.podman-vllm-qwen36-27b = {
     after = ["gpu-powercap.service"];
     requires = ["gpu-powercap.service"];
     conflicts = [
