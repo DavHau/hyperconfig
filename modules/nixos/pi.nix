@@ -24,6 +24,7 @@
     preHook = ''
       config_dir="''${PI_CODING_AGENT_DIR:-$HOME/.omp/agent}"
       mkdir -p "$config_dir"
+      ${common.inferenceApiKeyExport}
       ln -sf ${configFile} "$config_dir/config.yml"
       ln -sf ${common.agentsFile} "$config_dir/AGENTS.md"
       # Always-apply rules: injected into the system prompt of the main loop

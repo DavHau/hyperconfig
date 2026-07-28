@@ -31,10 +31,11 @@
     "  bam-vm:"
     "    baseUrl: https://inference.p0.contact/v1"
     "    api: openai-completions"
-    # Bearer token enforced by vLLM itself on /v1/* (project-zero
-    # modules/inference-api-key.nix, a clan var prompted per machine).
-    # The value here is the ENV VAR NAME omp reads, never the token.
-    "    apiKey: BAM_VM_API_KEY"
+    # Bearer token, enforced by vLLM itself on /v1/* (project-zero
+    # modules/inference-api-key.nix). The value here is the ENV VAR NAME omp
+    # reads, never the token; inferenceApiKeyExport below fills it in from
+    # the clan var (./inference-api-key.nix).
+    "    apiKey: INFERENCE_API_KEY"
     "    discovery:"
     "      type: openai-models-list"
   ];
@@ -42,6 +43,15 @@
     lib.optional llama-swap-enabled llamaSwapProvider
     ++ [ bamVmProvider ];
 in rec {
+  # Wrapper preHook line: hand the endpoint token to omp without it ever
+  # touching a config file or the Nix store. Guarded on readability so a
+  # machine that has not run `clan vars generate` still starts — it just gets
+  # 401s from that one provider instead of failing to launch.
+  inferenceApiKeyExport = ''
+    if [ -r ${config.clan.core.vars.generators.inference-api-key.files.token.path} ]; then
+      export INFERENCE_API_KEY="$(cat ${config.clan.core.vars.generators.inference-api-key.files.token.path})"
+    fi
+  '';
   models-needed = modelProviderBlocks != [ ];
   modelsFile = pkgs.writeText "models.yml"
     (lib.concatStringsSep "\n" ([ "providers:" ] ++ modelProviderBlocks) + "\n");
