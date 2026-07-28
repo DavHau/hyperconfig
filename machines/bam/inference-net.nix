@@ -11,9 +11,9 @@
 #   VM -> LAN (192.168.8.0/24 or on-link /64): DROP — incl. the
 #     router-hairpin trick (packets die on bam before any router).
 #   VM -> internet: allowed (v4 masqueraded, v6 native).
-#   inbound -> VM: tcp 22 + 30000 and ICMPv6 to feed:da7a only; v4
-#     established-only. LAN clients therefore CAN reach the VM, but
-#     only via the public address routed through bam.
+#   inbound -> VM: everything to feed:da7a (the guest's own firewall is
+#     the port authority); v4 established-only. LAN clients therefore CAN
+#     reach the VM, but only via the public address routed through bam.
 #   VM -> bam itself (10.42.0.1 / .150): INPUT path, not FORWARD —
 #     ssh-jump for management if the public path is ever down.
 {
@@ -86,10 +86,11 @@
     iptables  -w -A inf-fwd -i br-inf -d 192.168.8.0/24 -j DROP
     ip6tables -w -A inf-fwd -i br-inf -d 2405:9800:b901:94e3::/64 -j DROP
 
-    # inbound to the VM: ssh + inference API + ICMPv6 only
-    ip6tables -w -A inf-fwd -o br-inf -d 2405:9800:b901:94e3::feed:da7a \
-      -p tcp -m multiport --dports 22,30000 -j RETURN
-    ip6tables -w -A inf-fwd -o br-inf -p ipv6-icmp -j RETURN
+    # inbound to the VM: everything to its public address. The guest runs
+    # its own nftables firewall (nginx 80/443 + ssh) — bam does not
+    # duplicate that port list, so guest-side changes need no host rebuild.
+    ip6tables -w -A inf-fwd -o br-inf -d 2405:9800:b901:94e3::feed:da7a -j RETURN
+    # any other dst routed at br-inf is not ours
     ip6tables -w -A inf-fwd -o br-inf -j DROP
     # v4 inbound: nothing (NAT has no DNAT rules; established handled above)
   '';
