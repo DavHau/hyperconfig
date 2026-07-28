@@ -27,6 +27,27 @@
     "    auth: none # vLLM runs without API key"
     "    discovery:"
     "      type: openai-models-list"
+    # /v1/models has no field for reasoning capability, so discovery
+    # caches `reasoning: false` and the harness shows no thinking dial.
+    # Assert it here. thinkingFormat qwen-chat-template routes the dial
+    # through `chat_template_kwargs.enable_thinking` — the ONLY thinking
+    # control this checkpoint's chat template honors; reasoning_effort
+    # and thinking_budget render identically to no kwargs at all
+    # (verified against the live /tokenize endpoint), so the dial is
+    # binary: off, or on at whatever level.
+    # No maxTokens override on purpose: discovery reports the engine's
+    # own 262,140, and a turn is deliberately left free to run that far.
+    "    modelOverrides:"
+    "      Qwen3.6-27B-FP8:"
+    "        reasoning: true"
+    "        compat:"
+    "          thinkingFormat: qwen-chat-template"
+    # `default` is vLLM's second --served-model-name for the same
+    # engine, so it needs the identical treatment.
+    "      default:"
+    "        reasoning: true"
+    "        compat:"
+    "          thinkingFormat: qwen-chat-template"
   ];
   modelProviderBlocks =
     lib.optional llama-swap-enabled llamaSwapProvider
