@@ -13,41 +13,30 @@
     "    discovery:"
     "      type: lm-studio"
   ];
-  # LLM inference VM on bam (RTX PRO 6000 passthrough, vLLM serving
-  # Qwen3.6-27B-FP8; see machines/bam/inference-handoff.md).
-  # openai-models-list discovery polls /v1/models at runtime; vLLM reports
-  # max_model_len, which omp uses as the context window — stays in sync
-  # with whatever the guest serves. VM is routed/isolated since
-  # 2026-07-26: ONLY reachable via its public IPv6 (bam proxies NDP +
-  # routes; LAN address is gone). Unreachable off-site, harmless.
+  # LLM inference VM on bam (RTX PRO 6000 passthrough, vLLM; see
+  # machines/bam/inference-handoff.md). Reached through the guest's nginx
+  # (TLS + ACME, project-zero modules/nginx-proxy.nix), so this works
+  # off-site too — the raw engine port is no longer exposed.
+  #
+  # Pure discovery, no model names anywhere: openai-models-list polls
+  # /v1/models at runtime and takes the context window from the engine's
+  # own max_model_len, so a checkpoint swap needs nothing here.
+  #
+  # Consequence, measured 2026-07-28: /v1/models has no capability field, so
+  # discovery caches `reasoning: false` and there is no thinking dial for
+  # these models (Shift+Tab skips them). Restoring it costs a per-model-id
+  # override here — which is exactly what we refuse to carry — or
+  # capability metadata from the server side. Left off deliberately.
   bamVmProvider = lib.concatStringsSep "\n" [
     "  bam-vm:"
-    "    baseUrl: http://[2405:9800:b901:94e3::feed:da7a]:30000/v1"
+    "    baseUrl: https://inference.p0.contact/v1"
     "    api: openai-completions"
-    "    auth: none # vLLM runs without API key"
+    # Bearer token enforced by vLLM itself on /v1/* (project-zero
+    # modules/inference-api-key.nix, a clan var prompted per machine).
+    # The value here is the ENV VAR NAME omp reads, never the token.
+    "    apiKey: BAM_VM_API_KEY"
     "    discovery:"
     "      type: openai-models-list"
-    # /v1/models has no field for reasoning capability, so discovery
-    # caches `reasoning: false` and the harness shows no thinking dial.
-    # Assert it here. thinkingFormat qwen-chat-template routes the dial
-    # through `chat_template_kwargs.enable_thinking` — the ONLY thinking
-    # control this checkpoint's chat template honors; reasoning_effort
-    # and thinking_budget render identically to no kwargs at all
-    # (verified against the live /tokenize endpoint), so the dial is
-    # binary: off, or on at whatever level.
-    # No maxTokens override on purpose: discovery reports the engine's
-    # own 262,140, and a turn is deliberately left free to run that far.
-    "    modelOverrides:"
-    "      Qwen3.6-27B-FP8:"
-    "        reasoning: true"
-    "        compat:"
-    "          thinkingFormat: qwen-chat-template"
-    # `default` is vLLM's second --served-model-name for the same
-    # engine, so it needs the identical treatment.
-    "      default:"
-    "        reasoning: true"
-    "        compat:"
-    "          thinkingFormat: qwen-chat-template"
   ];
   modelProviderBlocks =
     lib.optional llama-swap-enabled llamaSwapProvider
