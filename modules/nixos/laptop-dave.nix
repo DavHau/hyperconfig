@@ -30,6 +30,9 @@ in
     ./pi.nix
     ./pi-superpowers.nix
     ./afk.nix
+    # Bearer token for the fleet inference endpoint, exported into all three
+    # harness wrappers above.
+    ./inference-api-key.nix
     ./cpu-powersave-cap.nix
     ./amd-pstate-resume-fix.nix
     ./omr.nix

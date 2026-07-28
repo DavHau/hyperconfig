@@ -37,6 +37,7 @@
     preHook = ''
       config_dir="$HOME/.omp/profiles/sp/agent"
       mkdir -p "$config_dir"
+      ${common.inferenceApiKeyExport}
       ln -sf ${configFile} "$config_dir/config.yml"
       ln -sf ${common.agentsFile} "$config_dir/AGENTS.md"
       # Always-apply rules (main loop + every subagent). Only the jj +
