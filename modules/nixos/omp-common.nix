@@ -14,12 +14,15 @@
     "      type: lm-studio"
   ];
   # Inference VM on bam (vLLM behind the guest's nginx, so off-site works).
-  # Pure runtime discovery, no model names here; the token is enforced by
-  # nginx on /v1/*. Setup docs: project-zero machines/inference/omp-quickstart.md.
+  # Model ids come from discovery; the token is enforced by nginx on /v1/*.
+  # Setup docs: project-zero machines/inference/omp-quickstart.md.
   #
-  # /v1/models carries no capability field, so discovery caches
-  # `reasoning: false` and these models get no thinking dial (Shift+Tab skips
-  # them). Fixing that needs a per-model-id override, which we refuse to carry.
+  # modelOverrides is the one place ids appear, and only to get a thinking
+  # toggle: /v1/models advertises no capability, so discovery stamps
+  # `reasoning: false` and omp then sends no thinking param at all, leaving the
+  # Qwen template's `enable_thinking: true` default on with no way off.
+  # qwen-chat-template is the dialect vLLM honours (chat_template_kwargs);
+  # top-level `enable_thinking` is silently ignored.
   p0Provider = lib.concatStringsSep "\n" [
     "  p0:"
     "    baseUrl: https://inference.p0.contact/v1"
@@ -28,6 +31,11 @@
     "    apiKey: INFERENCE_API_KEY"
     "    discovery:"
     "      type: openai-models-list"
+    "    modelOverrides:"
+    "      Qwen3.6-27B-FP8:"
+    "        reasoning: true"
+    "        compat:"
+    "          thinkingFormat: qwen-chat-template"
   ];
   modelProviderBlocks =
     lib.optional llama-swap-enabled llamaSwapProvider
