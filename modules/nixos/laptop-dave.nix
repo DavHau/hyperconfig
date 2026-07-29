@@ -27,11 +27,10 @@ in
     ./niri-terminal-cwd.nix
     ./niri-float-rules.nix
     ./greetd.nix
-    ./pi.nix
-    ./pi-superpowers.nix
+    ./pi-agent.nix
     ./afk.nix
-    # Bearer token for the fleet inference endpoint, exported into all three
-    # harness wrappers above.
+    # Bearer token for the fleet inference endpoint, exported into the afk
+    # wrapper above.
     ./inference-api-key.nix
     ./cpu-powersave-cap.nix
     ./amd-pstate-resume-fix.nix

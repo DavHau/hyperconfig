@@ -25,12 +25,12 @@
       "$HOME/.pi/agent/auth.json" = {};
       "$HOME/.pi/agent/settings.json" = {};
       "$HOME/.omp/agent" = {};
-      # omp-sp (pi-superpowers.nix) runs under OMP_PROFILE=sp; its state —
-      # including agent.db with the OAuth logins — lives here, not in
-      # .omp/agent. Without this bind every sbox launch starts logged out.
-      "$HOME/.omp/profiles/sp/agent" = {};
+      # Named-profile harnesses keep their own state — including agent.db with
+      # the OAuth logins — under .omp/profiles/<name>/agent, NOT .omp/agent.
+      # Without these binds every sbox launch starts logged out.
       "$HOME/.omp/profiles/oml/agent" = {};
-      # afk (afk.nix) runs under OMP_PROFILE=afk; same reasoning as sp/oml.
+      # afk (afk.nix) runs under OMP_PROFILE=afk; it is the only omp harness
+      # on dave's machines since the pi.nix / pi-superpowers.nix wrappers went.
       "$HOME/.omp/profiles/afk/agent" = {};
       "$HOME/.local/share/zoxide" = {};
       "$HOME/.local/share/pueue" = {};
@@ -47,7 +47,7 @@
       # sandbox rather than joining (and exposing) the host's tmux server.
       "$HOME/.config/cctl" = {};
     } // lib.optionalAttrs (config.services.spaces-integrations.enable or false) {
-      # spaces integration gateway socket: lets the omp/omp-sp harnesses'
+      # spaces integration gateway socket: lets the omp/afk harnesses'
       # `spaces` MCP server (spaces-mcp-connect) reach the per-user gateway
       # --user service from inside the sandbox. Gated on the integrations
       # feature so headless hosts without it don't bind a nonexistent socket.
