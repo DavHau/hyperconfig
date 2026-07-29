@@ -109,8 +109,10 @@
     # its derivations hash-match what numtide's CI pushed to cache.numtide.com
     # and substitute instead of building. Use this for machines that must
     # update fast and take the packages as-is (joy); `llm-agents` above stays
-    # nixpkgs-follows for the machines whose omp is patched/wrapped locally
-    # (that build from source anyway, and shares one nixpkgs closure).
+    # nixpkgs-follows so it shares one nixpkgs closure with the rest of the
+    # fleet. Nothing here patches omp any more — the omp harness is afk, which
+    # carries its own patch set against its own pinned llm-agents (see below);
+    # this input now only supplies `pi` (pi-agent.nix) and claude-code.
     llm-agents-cached.url = "github:numtide/llm-agents.nix";
 
     # afk: locally checked-out omp harness wrapper (jj patches + Superpowers).
@@ -126,12 +128,6 @@
     mics-skills.url = "github:Mic92/mics-skills";
     mics-skills.inputs.nixpkgs.follows = "nixpkgs";
     mics-skills.inputs.flake-parts.follows = "flake-parts";
-
-    mattpocock-skills.url = "git+https://github.com/mattpocock/skills.git?ref=main&shallow=1";
-    mattpocock-skills.flake = false;
-
-    superpowers.url = "git+https://github.com/obra/superpowers.git?ref=main&shallow=1";
-    superpowers.flake = false;
 
     wrappers.url = "github:lassulus/wrappers";
     wrappers.inputs.nixpkgs.follows = "nixpkgs";

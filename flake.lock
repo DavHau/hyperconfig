@@ -10,8 +10,8 @@
         "wrappers": "wrappers"
       },
       "locked": {
-        "lastModified": 1785039275,
-        "narHash": "sha256-i6ged0M/F2KJBMDbL3mRdOZLl0FrJlYcsxam8xj4LP8=",
+        "lastModified": 1785307038,
+        "narHash": "sha256-Tmgoe+fiwUUlPMA/GlSxDpMo2VHqxolyBgu4EMt/7BQ=",
         "path": "/home/grmpf/synced/projects/afk",
         "type": "path"
       },
@@ -84,31 +84,6 @@
         "owner": "tinted-theming",
         "repo": "base16-vim",
         "rev": "577fe8125d74ff456cf942c733a85d769afe58b7",
-        "type": "github"
-      }
-    },
-    "blueprint": {
-      "inputs": {
-        "nixpkgs": [
-          "llm-agents",
-          "nixpkgs"
-        ],
-        "systems": [
-          "llm-agents",
-          "systems"
-        ]
-      },
-      "locked": {
-        "lastModified": 1776249299,
-        "narHash": "sha256-Dt9t1TGRmJFc0xVYhttNBD6QsAgHOHCArqGa0AyjrJY=",
-        "owner": "numtide",
-        "repo": "blueprint",
-        "rev": "56131e8628f173d24a27f6d27c0215eff57e40dd",
-        "type": "github"
-      },
-      "original": {
-        "owner": "numtide",
-        "repo": "blueprint",
         "type": "github"
       }
     },
@@ -194,11 +169,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1782772816,
-        "narHash": "sha256-s9BuFv0mRuZx9C1MF8qPHRdcAK14ONi0A5m6E2wqOoM=",
+        "lastModified": 1784665499,
+        "narHash": "sha256-9BMxlTxCCDAeoNLtb1a/st7udtTIJep+wpUzquA29VU=",
         "owner": "nix-community",
         "repo": "bun2nix",
-        "rev": "5a39d717029e94163ac223aee8d5c9946cafed1c",
+        "rev": "0f2a1f0b6f42cebe3b149bf62d38754c5e0e9729",
         "type": "github"
       },
       "original": {
@@ -1182,7 +1157,6 @@
     },
     "llm-agents_2": {
       "inputs": {
-        "blueprint": "blueprint",
         "bun2nix": "bun2nix_2",
         "flake-parts": [
           "flake-parts"
@@ -1196,35 +1170,17 @@
         "treefmt-nix": "treefmt-nix_7"
       },
       "locked": {
-        "lastModified": 1783567605,
-        "narHash": "sha256-LyF84yqWppXAAEOAkL325Lt+DrVmkbbeXGzDgX9zMzI=",
+        "lastModified": 1785296168,
+        "narHash": "sha256-us2LMEII2b+B6ZRfsryZr3fsYOEL077ZYdtJYLFgbRo=",
         "owner": "numtide",
         "repo": "llm-agents.nix",
-        "rev": "a4c847460f0e773d02d0655ce28dc6b532dd65d6",
+        "rev": "fcd7079ff30bc4774cc2db48bcc568a42098e9b0",
         "type": "github"
       },
       "original": {
         "owner": "numtide",
         "repo": "llm-agents.nix",
         "type": "github"
-      }
-    },
-    "mattpocock-skills": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1783938435,
-        "narHash": "sha256-YpAg/v1jMjt9+yRxwf8VpHUH+eOuQ+PzJqo9Jp9wb9I=",
-        "ref": "main",
-        "rev": "04fee67571bc52ac58a0e59fc4924a13f61b50a6",
-        "shallow": true,
-        "type": "git",
-        "url": "https://github.com/mattpocock/skills.git"
-      },
-      "original": {
-        "ref": "main",
-        "shallow": true,
-        "type": "git",
-        "url": "https://github.com/mattpocock/skills.git"
       }
     },
     "messaging-daemon": {
@@ -2169,7 +2125,6 @@
         "hyprspace": "hyprspace",
         "llm-agents": "llm-agents_2",
         "llm-agents-cached": "llm-agents-cached",
-        "mattpocock-skills": "mattpocock-skills",
         "messaging-daemon": "messaging-daemon",
         "mics-skills": "mics-skills",
         "ncps": "ncps",
@@ -2194,7 +2149,6 @@
         "spaces": "spaces",
         "srvos": "srvos",
         "stylix": "stylix",
-        "superpowers": "superpowers_2",
         "systems": "systems_12",
         "vibepn": "vibepn",
         "wrappers": "wrappers_2"
@@ -2357,24 +2311,6 @@
       }
     },
     "superpowers": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1783029415,
-        "narHash": "sha256-kHdQ9e44doBk2yYW88tMSCqVG8ycYcvJSZlrIziXhpA=",
-        "ref": "main",
-        "rev": "d884ae04edebef577e82ff7c4e143debd0bbec99",
-        "shallow": true,
-        "type": "git",
-        "url": "https://github.com/obra/superpowers.git"
-      },
-      "original": {
-        "ref": "main",
-        "shallow": true,
-        "type": "git",
-        "url": "https://github.com/obra/superpowers.git"
-      }
-    },
-    "superpowers_2": {
       "flake": false,
       "locked": {
         "lastModified": 1783029415,
@@ -2829,11 +2765,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1780220602,
-        "narHash": "sha256-eynAfOmbmxJnkp7YewvCEbShNnnYJ9gLLqkzsYtBPeM=",
+        "lastModified": 1784369104,
+        "narHash": "sha256-47cxbcZODibHv3rELFQ9vZly0vUNkND/atn/U7HLeb0=",
         "owner": "numtide",
         "repo": "treefmt-nix",
-        "rev": "db947814a175b7ca6ded66e21383d938df01c227",
+        "rev": "df3c0640565d04a0261253cdd89fce78ec50168a",
         "type": "github"
       },
       "original": {
