@@ -13,43 +13,33 @@
     "    discovery:"
     "      type: lm-studio"
   ];
-  # LLM inference VM on bam (RTX PRO 6000 passthrough, vLLM; see
-  # machines/bam/inference-handoff.md). Reached through the guest's nginx
-  # (TLS + ACME, project-zero modules/nginx-proxy.nix), so this works
-  # off-site too — the raw engine port is no longer exposed.
+  # Inference VM on bam (vLLM behind the guest's nginx, so off-site works).
+  # Pure runtime discovery, no model names here; the token is enforced by
+  # nginx on /v1/*. Setup docs: project-zero machines/inference/omp-quickstart.md.
   #
-  # Pure discovery, no model names anywhere: openai-models-list polls
-  # /v1/models at runtime and takes the context window from the engine's
-  # own max_model_len, so a checkpoint swap needs nothing here.
-  #
-  # Consequence, measured 2026-07-28: /v1/models has no capability field, so
-  # discovery caches `reasoning: false` and there is no thinking dial for
-  # these models (Shift+Tab skips them). Restoring it costs a per-model-id
-  # override here — which is exactly what we refuse to carry — or
-  # capability metadata from the server side. Left off deliberately.
-  bamVmProvider = lib.concatStringsSep "\n" [
-    "  bam-vm:"
+  # /v1/models carries no capability field, so discovery caches
+  # `reasoning: false` and these models get no thinking dial (Shift+Tab skips
+  # them). Fixing that needs a per-model-id override, which we refuse to carry.
+  p0Provider = lib.concatStringsSep "\n" [
+    "  p0:"
     "    baseUrl: https://inference.p0.contact/v1"
     "    api: openai-completions"
-    # Bearer token, enforced by vLLM itself on /v1/* (project-zero
-    # modules/inference-api-key.nix). The value here is the ENV VAR NAME omp
-    # reads, never the token; inferenceApiKeyExport below fills it in from
-    # the clan var (./inference-api-key.nix).
+    # env var NAME omp reads, never the token (inferenceApiKeyExport fills it)
     "    apiKey: INFERENCE_API_KEY"
     "    discovery:"
     "      type: openai-models-list"
   ];
   modelProviderBlocks =
     lib.optional llama-swap-enabled llamaSwapProvider
-    ++ [ bamVmProvider ];
+    ++ [ p0Provider ];
 in rec {
-  # Wrapper preHook line: hand the endpoint token to omp without it ever
-  # touching a config file or the Nix store. Guarded on readability so a
-  # machine that has not run `clan vars generate` still starts — it just gets
-  # 401s from that one provider instead of failing to launch.
+  # Token into the env, never into a config file or the Nix store. Guarded on
+  # readability so a machine without `clan vars generate` still launches (that
+  # provider just 401s).
   inferenceApiKeyExport = ''
     if [ -r ${config.clan.core.vars.generators.inference-api-key.files.token.path} ]; then
-      export INFERENCE_API_KEY="$(cat ${config.clan.core.vars.generators.inference-api-key.files.token.path})"
+      INFERENCE_API_KEY="$(cat ${config.clan.core.vars.generators.inference-api-key.files.token.path})"
+      export INFERENCE_API_KEY
     fi
   '';
   models-needed = modelProviderBlocks != [ ];
