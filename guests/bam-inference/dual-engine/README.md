@@ -22,7 +22,7 @@ aggregate @16u, MTP acceptance 67.9%. Weights remain on the guest at
    invisible to boot profiling.
 4. Host: add 30001 to the inbound multiport rule in
    machines/bam/inference-net.nix.
-5. omp: re-add the bam-vm-35b provider in modules/nixos/omp-common.nix
+5. omp: re-add the 35b provider in modules/nixos/omp-common.nix
    and the live ~/.omp/profiles/afk/agent/models.yml, then
    `env -u PI_CODING_AGENT_DIR OMP_PROFILE=afk omp models refresh`.
 6. Note: the 35B checkpoint embeds fp8 KV (vllm#40756 risk with
