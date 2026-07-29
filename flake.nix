@@ -105,6 +105,14 @@
     llm-agents.inputs.flake-parts.follows = "flake-parts";
     llm-agents.inputs.systems.follows = "systems";
 
+    # Same flake, but with NOTHING deduplicated: it keeps its own nixpkgs, so
+    # its derivations hash-match what numtide's CI pushed to cache.numtide.com
+    # and substitute instead of building. Use this for machines that must
+    # update fast and take the packages as-is (joy); `llm-agents` above stays
+    # nixpkgs-follows for the machines whose omp is patched/wrapped locally
+    # (that build from source anyway, and shares one nixpkgs closure).
+    llm-agents-cached.url = "github:numtide/llm-agents.nix";
+
     # afk: locally checked-out omp harness wrapper (jj patches + Superpowers).
     # Absolute path input: machines need this checkout at the same path to
     # re-lock/rebuild (vit: create it or symlink). llm-agents/superpowers stay

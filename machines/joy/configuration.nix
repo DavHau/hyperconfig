@@ -4,7 +4,9 @@
     ../../modules/nixos/common.nix
     ../../modules/nixos/common-tools.nix
     ../../modules/nixos/sbox.nix
+    ../../modules/nixos/omp-joy.nix
     ./output-formats.nix
+    ../../modules/nixos/nix-caches.nix
   ];
 
   nixpkgs.hostPlatform = "x86_64-linux";
