@@ -6,6 +6,7 @@
   imports = [
     # ./nix-caches.nix
     ./all-hardware.nix
+    ./timedated-ntp.nix
   ];
   users.mutableUsers = false;
   # spaces' base module imports nixpkgs' profiles/perlless.nix, which flips
