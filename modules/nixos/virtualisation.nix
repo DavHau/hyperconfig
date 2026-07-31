@@ -18,7 +18,4 @@
   # virtualisation.virtualbox.host.enable = true;
   # users.extraGroups.vboxusers.members = [ "grmpf" ];
   # virtualisation.virtualbox.host.enableExtensionPack = true;
-
-  # libvirtd
-  virtualisation.libvirtd.enable = true;
 }
