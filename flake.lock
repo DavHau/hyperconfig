@@ -10,8 +10,8 @@
         "wrappers": "wrappers"
       },
       "locked": {
-        "lastModified": 1785508332,
-        "narHash": "sha256-mRGRcHDnHRaUFtywO+fIqxos75dSUiHKfkoMpsI47s4=",
+        "lastModified": 1785512028,
+        "narHash": "sha256-mQqGfbGHYbcTi1UXI4Fg/xd2evYvFAFyAhzuQlfaF/g=",
         "path": "/home/grmpf/synced/projects/afk",
         "type": "path"
       },
@@ -1119,10 +1119,10 @@
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1784986205,
-        "narHash": "sha256-2JnCiA4JxySAyH++JduEQ56TJgN5l/7T0NMiA1HxUm0=",
+        "lastModified": 1785481674,
+        "narHash": "sha256-ujzuafv52VH5LJkMINYcpjWG7xpMVHTZwwdiisJhZGY=",
         "ref": "refs/heads/main",
-        "rev": "be7d518035073dcac5a2812e24b1960c9fbc7a8e",
+        "rev": "a6dcbf72f6d61519cc12858176f0fdd189853b28",
         "shallow": true,
         "type": "git",
         "url": "https://github.com/numtide/llm-agents.nix"
@@ -2596,11 +2596,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1784369104,
-        "narHash": "sha256-47cxbcZODibHv3rELFQ9vZly0vUNkND/atn/U7HLeb0=",
+        "lastModified": 1785360170,
+        "narHash": "sha256-XE1lKgQ3eIO3E7zWryqcRsax+mYXod/5RHBn4YaR9YE=",
         "owner": "numtide",
         "repo": "treefmt-nix",
-        "rev": "df3c0640565d04a0261253cdd89fce78ec50168a",
+        "rev": "d1187f8bc71fb8aab02395869ec3f5c1920f75c0",
         "type": "github"
       },
       "original": {
