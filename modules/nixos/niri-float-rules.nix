@@ -7,12 +7,12 @@
 # included files, so a nixos-rebuild live-reloads the rules without a relogin.
 {
   environment.etc."niri/config-laptop.kdl".text = ''
-    // ssh-tpm-agent confirm dialog (yad, see ./ssh-tpm-agent.nix): a proper
+    // ssh-tpm-agent confirm dialog (see ./ssh-tpm-confirm-dialog.py): a proper
     // floating popup instead of a tiled half-screen window. Match both ways:
-    // the app-id covers yad regardless of dialog title, the title covers a
-    // future non-yad dialog keeping the same name.
+    // the app-id covers the GTK dialog regardless of title, the title covers
+    // any future dialog keeping the same name.
     window-rule {
-        match app-id="^yad$"
+        match app-id="^ssh-tpm-confirm-dialog$"
         match title="^ssh-tpm-agent$"
         open-floating true
     }
