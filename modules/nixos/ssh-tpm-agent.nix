@@ -8,6 +8,10 @@ let
   # ssh-tpm-agent-package.nix (shared with the ssh-tpm-confirm-cache VM test).
   sshTpmAgent = import ./ssh-tpm-agent-package.nix { inherit pkgs; };
 
+  # The confirm dialog itself (GTK, see ssh-tpm-confirm-dialog.py). Shared with
+  # the `ssh-tpm-confirm-dialog-preview` screenshot harness.
+  confirmDialog = import ./ssh-tpm-confirm-dialog.nix { inherit pkgs; };
+
   # SSH_ASKPASS handler for graphical prompts. The agent runs as a TTY-less user
   # service, so GUI prompts go through here; it resolves the wayland/X display at
   # prompt time because the socket-activated agent may start before the
@@ -17,8 +21,8 @@ let
   #   choice  -> grant dialog. The agent passes the peer's ancestry in
   #              SSH_TPM_CHOICES (one "pid<TAB>name<TAB>cwd" line per process,
   #              requester first; cwd may be empty for sandboxed peers). The
-  #              user picks WHICH process to trust (a radiolist row; the
-  #              requester is preselected) and for how long (a button).
+  #              user picks WHICH process to trust (a list row; the requester
+  #              is preselected) and for how long (a button).
   #              Prints "temporary <pid>" | "session <pid>" | "deny".
   #   (unset) -> TPM PIN passphrase entry via seahorse.
   # Headless requests never reach this script: the agent prompts for the PIN on
@@ -29,31 +33,10 @@ let
       | ${pkgs.gnused}/bin/sed 's/^/export /')"
 
     if [ "$SSH_ASKPASS_PROMPT" = choice ]; then
-      ttl="''${SSH_TPM_CONFIRM_TTL:-15m}"
-      rows=()
-      checked=TRUE
-      while IFS=$'\t' read -r pid name cwd; do
-        [ -n "$pid" ] || continue
-        rows+=("$checked" "$pid" "$name" "$cwd")
-        checked=FALSE
-      done <<<"$SSH_TPM_CHOICES"
-
-      # yad prints the selected row's PID column for buttons with an EVEN exit
-      # code and nothing for odd ones (Deny, Esc/close = 252).
-      pid="$(${pkgs.yad}/bin/yad --list --radiolist --center --no-markup \
-        --title "ssh-tpm-agent" --text "$1" \
-        --column "Trust:RD" --column "PID:NUM" --column "Process" --column "Directory" \
-        --print-column 2 --separator "" \
-        --button "Deny:1" --button "Trust $ttl:0" --button "Trust forever:2" \
-        "''${rows[@]}")"
-      rc=$?
-      if [ -n "$pid" ] && [ "$rc" -eq 0 ]; then
-        echo "temporary $pid"
-      elif [ -n "$pid" ] && [ "$rc" -eq 2 ]; then
-        echo "session $pid"
-      else
-        echo deny
-      fi
+      # The dialog prints the agent's grant protocol on stdout and always
+      # exits 0; a crashed dialog (no output) is treated as a denial.
+      answer="$(${confirmDialog}/bin/ssh-tpm-confirm-dialog "$1")"
+      echo "''${answer:-deny}"
       exit 0
     fi
 

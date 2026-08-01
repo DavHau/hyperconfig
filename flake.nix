@@ -188,6 +188,10 @@
         import ./modules/nixos/ssh-tpm-agent-package.nix {
           pkgs = nixpkgs.legacyPackages.x86_64-linux;
         };
+      flake.packages.x86_64-linux.ssh-tpm-confirm-dialog =
+        import ./modules/nixos/ssh-tpm-confirm-dialog.nix {
+          pkgs = nixpkgs.legacyPackages.x86_64-linux;
+        };
       flake.packages.x86_64-linux.fabro =
         import ./modules/nixos/fabro/package.nix {
           pkgs = nixpkgs.legacyPackages.x86_64-linux;
@@ -207,6 +211,11 @@
         )) // {
         ssh-tpm-confirm-cache =
           import ./modules/nixos/ssh-tpm-agent-confirm-test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          };
+        # Sandboxed GTK dialog test; its $out also holds the screenshots.
+        ssh-tpm-confirm-dialog =
+          import ./modules/nixos/ssh-tpm-confirm-dialog-test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
         niri-terminal-cwd =
