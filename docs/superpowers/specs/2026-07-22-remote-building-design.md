@@ -79,8 +79,8 @@ Generic: any number of builders and clients per instance.
     the daemon at a runtime-switchable copy. nix-daemon re-reads the
     `@file` per build — toggling needs no daemon restart.
 - **Toggle unit `remote-builders.service`:** oneshot,
-  `RemainAfterExit = true`, `wantedBy = [ "multi-user.target" ]`
-  (⇒ ON at boot, per decision). ExecStart installs the rendered machines
+  `RemainAfterExit = true`, no `wantedBy` (⇒ OFF at boot: remote building
+  is opt-in per boot). ExecStart installs the rendered machines
   file at `/run/remote-builders/machines` (0444, dir 0755); ExecStop
   truncates it. `systemctl is-active remote-builders` is the single
   source of truth for toggle state.
