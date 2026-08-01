@@ -1,6 +1,6 @@
 # Contract of the remote-building service, e2e:
-#   1. toggle ON at boot: machines file lists the builder
-#   2. stop/start round-trip empties/restores it
+#   1. toggle OFF at boot: machines file empty, unit inactive
+#   2. start/stop round-trip fills/empties it
 #   3. root@client authenticates as nixremote@builder with the deployed var key
 #   4. a dependent build offloads: client-BUILT (signed) input is accepted
 #      by the builder WITHOUT trusted-users, output is copied back
@@ -56,12 +56,14 @@
     builder1.wait_for_unit("sshd.socket")
     client1.wait_for_unit("multi-user.target")
 
-    # 1. ON at boot
-    client1.wait_for_unit("remote-builders.service")
-    machines_file = client1.succeed("cat /run/remote-builders/machines")
-    assert "ssh-ng://nixremote@builder1" in machines_file, machines_file
+    # 1. OFF at boot: the unit is not wanted by multi-user.target, so the
+    # machines file stays the empty one tmpfiles created (builds stay local).
+    client1.fail("systemctl is-active --quiet remote-builders.service")
+    assert client1.succeed("cat /run/remote-builders/machines").strip() == ""
 
     # 2. toggle round-trip
+    client1.succeed("systemctl start remote-builders.service")
+    assert "ssh-ng://nixremote@builder1" in client1.succeed("cat /run/remote-builders/machines")
     client1.succeed("systemctl stop remote-builders.service")
     assert client1.succeed("cat /run/remote-builders/machines").strip() == ""
     client1.succeed("systemctl start remote-builders.service")

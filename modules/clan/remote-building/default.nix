@@ -192,9 +192,11 @@
             ];
             nix.settings.builders = "@/run/remote-builders/machines";
 
+            # Deliberately not wantedBy multi-user.target: remote building is
+            # opt-in per boot. The tmpfiles-created empty machines file keeps
+            # the daemon building locally until the bar toggle starts this.
             systemd.services.remote-builders = {
               description = "Expose remote nix builders to the daemon (stop = build locally)";
-              wantedBy = [ "multi-user.target" ];
               serviceConfig = {
                 Type = "oneshot";
                 RemainAfterExit = true;
