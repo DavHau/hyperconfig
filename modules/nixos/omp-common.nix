@@ -22,13 +22,41 @@
   # Model ids come from discovery; the token is enforced by nginx on /v1/*.
   # Setup docs: project-zero machines/inference/omp-quickstart.md.
   #
-  # modelOverrides is the one place ids appear, and only to get a thinking
-  # toggle: /v1/models advertises no capability, so discovery stamps
-  # `reasoning: false` and omp then sends no thinking param at all, leaving the
-  # Qwen template's `enable_thinking: true` default on with no way off.
-  # qwen-chat-template is the dialect vLLM honours (chat_template_kwargs);
-  # top-level `enable_thinking` is silently ignored.
-  p0Provider = lib.concatStringsSep "\n" [
+  # modelOverrides is the one place ids appear, and it does two jobs.
+  #
+  # 1. A thinking toggle: /v1/models advertises no capability, so discovery
+  #    stamps `reasoning: false` and omp then sends no thinking param at all,
+  #    leaving the Qwen template's `enable_thinking: true` default on with no
+  #    way off. qwen-chat-template is the dialect vLLM honours
+  #    (chat_template_kwargs); top-level `enable_thinking` is silently ignored.
+  #
+  # 2. Reserving the output budget inside the context window. vLLM rejects any
+  #    request where prompt + max_tokens > --max-model-len (262144 there) with a
+  #    hard 400, and omp treats contextWindow and maxTokens as independent: with
+  #    the discovered 262144/64000 pair every request above 198144 prompt tokens
+  #    400s, so a long session dies outright instead of compacting. Declaring
+  #    220K + 32K keeps the sum at 258048 (4096 margin) and puts the ceiling
+  #    back under omp's own compaction trigger; 32K out is ~30x the largest
+  #    single turn measured on this model.
+  #
+  # NOT here, deliberately: any thinking-history workaround. The Qwen3.6
+  # template used to emit an EMPTY `<think></think>` for every historical
+  # assistant turn a client didn't send `reasoning_content` for, which ended
+  # agent sessions mid-task. That is fixed once, server-side, in the template
+  # the engine serves (project-zero decisions/0020) — no client opts in.
+  #
+  # Both ids carry the block: `default` is the alias the fleet autopilot runs
+  # on. A checkpoint swap to a non-Qwen model must revisit BOTH entries, and a
+  # --max-model-len change must revisit the 220K/32K split.
+  p0ModelOverride = id: [
+    "      ${id}:"
+    "        reasoning: true"
+    "        contextWindow: 225280"
+    "        maxTokens: 32768"
+    "        compat:"
+    "          thinkingFormat: qwen-chat-template"
+  ];
+  p0Provider = lib.concatStringsSep "\n" ([
     "  p0:"
     "    baseUrl: https://inference.p0.contact/v1"
     "    api: openai-completions"
@@ -37,11 +65,9 @@
     "    discovery:"
     "      type: openai-models-list"
     "    modelOverrides:"
-    "      Qwen3.6-27B-FP8:"
-    "        reasoning: true"
-    "        compat:"
-    "          thinkingFormat: qwen-chat-template"
-  ];
+  ]
+  ++ p0ModelOverride "Qwen3.6-27B-FP8"
+  ++ p0ModelOverride "default");
   modelProviderBlocks =
     lib.optional llama-swap-enabled llamaSwapProvider
     ++ [ p0Provider ];
