@@ -22,37 +22,39 @@
   # Model ids come from discovery; the token is enforced by nginx on /v1/*.
   # Setup docs: project-zero machines/inference/omp-quickstart.md.
   #
-  # modelOverrides is the one place ids appear, and it does two jobs.
+  # modelOverrides now carries exactly one key, because the endpoint publishes
+  # the rest itself.
   #
-  # 1. A thinking toggle: /v1/models advertises no capability, so discovery
-  #    stamps `reasoning: false` and omp then sends no thinking param at all,
-  #    leaving the Qwen template's `enable_thinking: true` default on with no
-  #    way off. qwen-chat-template is the dialect vLLM honours
-  #    (chat_template_kwargs); top-level `enable_thinking` is silently ignored.
+  # `litellm` discovery makes omp read `/model_group/info` off the inference
+  # host — a static document the engine generates next to its own
+  # --max-model-len (project-zero modules/inference-model-groups.nix). That
+  # supplies the context window, the output cap and reasoning support, so the
+  # numbers live once, server-side, instead of in every client. Serving that one
+  # extra path changes nothing about `/v1/*`; discovery.type only picks how omp
+  # LEARNS about models, never how it talks to them (api stays
+  # openai-completions). On a 404 omp falls back to `/v1/models` and loses the
+  # output reservation — the tell is a 400 partway into a long session.
   #
-  # 2. Reserving the output budget inside the context window. vLLM rejects any
-  #    request where prompt + max_tokens > --max-model-len (262144 there) with a
-  #    hard 400, and omp treats contextWindow and maxTokens as independent: with
-  #    the discovered 262144/64000 pair every request above 198144 prompt tokens
-  #    400s, so a long session dies outright instead of compacting. Declaring
-  #    220K + 32K keeps the sum at 258048 (4096 margin) and puts the ceiling
-  #    back under omp's own compaction trigger; 32K out is ~30x the largest
-  #    single turn measured on this model.
+  # Why the reservation exists at all: vLLM enforces one budget, prompt +
+  # max_tokens <= --max-model-len, and rejects violations with a hard 400. omp
+  # treats contextWindow and maxTokens as independent, so the undeclared pair
+  # (262144 discovered from max_model_len, 64000 sent on the wire) 400s every
+  # request above 198144 prompt tokens.
+  #
+  # thinkingFormat stays a client override because no protocol advertises a
+  # thinking dialect: omp infers it from host + model id, and an unrecognised
+  # host serving a Qwen id resolves to Alibaba's top-level `enable_thinking`,
+  # which vLLM accepts and silently drops. qwen-chat-template is the spelling it
+  # honours (chat_template_kwargs).
   #
   # NOT here, deliberately: any thinking-history workaround. The Qwen3.6
   # template used to emit an EMPTY `<think></think>` for every historical
   # assistant turn a client didn't send `reasoning_content` for, which ended
   # agent sessions mid-task. That is fixed once, server-side, in the template
-  # the engine serves (project-zero decisions/0020) — no client opts in.
-  #
-  # Both ids carry the block: `default` is the alias the fleet autopilot runs
-  # on. A checkpoint swap to a non-Qwen model must revisit BOTH entries, and a
-  # --max-model-len change must revisit the 220K/32K split.
+  # the engine serves (project-zero machines/inference/chat-template.md) — no
+  # client opts in.
   p0ModelOverride = id: [
     "      ${id}:"
-    "        reasoning: true"
-    "        contextWindow: 225280"
-    "        maxTokens: 32768"
     "        compat:"
     "          thinkingFormat: qwen-chat-template"
   ];
@@ -63,7 +65,7 @@
     # env var NAME omp reads, never the token (inferenceApiKeyExport fills it)
     "    apiKey: INFERENCE_API_KEY"
     "    discovery:"
-    "      type: openai-models-list"
+    "      type: litellm"
     "    modelOverrides:"
   ]
   ++ p0ModelOverride "Qwen3.6-27B-FP8");
