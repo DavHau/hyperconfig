@@ -66,8 +66,7 @@
     "      type: openai-models-list"
     "    modelOverrides:"
   ]
-  ++ p0ModelOverride "Qwen3.6-27B-FP8"
-  ++ p0ModelOverride "default");
+  ++ p0ModelOverride "Qwen3.6-27B-FP8");
   modelProviderBlocks =
     lib.optional llama-swap-enabled llamaSwapProvider
     ++ [ p0Provider ];
