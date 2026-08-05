@@ -134,7 +134,6 @@
     wrappers.inputs.nixpkgs.follows = "nixpkgs";
 
     spaces.url = "github:generational-infrastructure/distro";
-    spaces.inputs.llm-agents.follows = "llm-agents";
 
     cctl.url = "github:allouis/cctl";
     cctl.inputs.nixpkgs.follows = "nixpkgs";

@@ -1832,11 +1832,11 @@
     },
     "nixpkgs_7": {
       "locked": {
-        "lastModified": 1785692966,
-        "narHash": "sha256-vUfIeBEfpbAfZ5zjgIkYk7eHBeVfCYVjLbWnMkseYnk=",
+        "lastModified": 1785828668,
+        "narHash": "sha256-8fsyqeO+mJqvIzeO4xIpgJe/f7MTbbVTEC6RT6WSXNs=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "643809054d65fdd466a63e3155b8c498cb483c04",
+        "rev": "e72e4f299401a3689d4b3d5fc6496b11db7064eb",
         "type": "github"
       },
       "original": {
@@ -2224,8 +2224,8 @@
         "voxtype": "voxtype"
       },
       "locked": {
-        "lastModified": 1785920337,
-        "narHash": "sha256-rw4/IQjYPu3FYVep5WW8KJWVMieDybWDNmksG8X7Nno=",
+        "lastModified": 1785927791,
+        "narHash": "sha256-YxH5Xzu1d310b7wMnMimKUjXDv29xCsqJUFtj3V/8qM=",
         "path": "/home/grmpf/synced/projects/spaces",
         "type": "path"
       },
