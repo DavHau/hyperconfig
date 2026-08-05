@@ -14,9 +14,9 @@
 #   - MTP GGUF: multi-token-prediction speculative decode, 1.4-2.2x
 #     faster generation for ~1 GiB extra memory.
 #
-# pkgs.fetchurl (fixed-output derivation), not builtins.fetchurl like the
-# small gemma4 models: a 17 GiB eval-time fetch would stall every
-# `nix flake check` / CI eval; this way it downloads only when vit builds.
+# pkgs.fetchurl (fixed-output derivation), not builtins.fetchurl: a 17 GiB
+# eval-time fetch would stall every `nix flake check` / CI eval; this way it
+# downloads only when vit builds.
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.llama-swap;
