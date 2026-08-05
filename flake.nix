@@ -10,7 +10,8 @@
       url = "github:edolstra/flake-compat";
       flake = false;
     };
-    nixpkgs.url = "git+https://github.com/nixos/nixpkgs?ref=nixpkgs-unstable&shallow=1";
+    nixpkgs.follows = "spaces/nixpkgs";
+    # nixpkgs.url = "git+https://github.com/nixos/nixpkgs?ref=nixpkgs-unstable&shallow=1";
     # nixpkgs.url = "git+https://github.com/DavHau/nixpkgs?&ref=dave&shallow=1";
     # nixpkgs-riscv.url = "git+https://github.com/davhau/nixpkgs?&ref=riscv&shallow=1";
     # nixpkgs-riscv.url = "git+https://github.com/DavHau/nixpkgs?&ref=dave&shallow=1";
@@ -133,7 +134,6 @@
     wrappers.inputs.nixpkgs.follows = "nixpkgs";
 
     spaces.url = "github:generational-infrastructure/distro";
-    spaces.inputs.nixpkgs.follows = "nixpkgs";
     spaces.inputs.llm-agents.follows = "llm-agents";
 
     cctl.url = "github:allouis/cctl";

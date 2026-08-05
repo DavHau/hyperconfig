@@ -1832,19 +1832,18 @@
     },
     "nixpkgs_7": {
       "locked": {
-        "lastModified": 1783915482,
-        "narHash": "sha256-FmieJB8/OUvNxbkboi7+IGfIuSXY3nF/hZQm8kD0r50=",
-        "ref": "nixpkgs-unstable",
-        "rev": "6cdc7fc76e8bf7fde9fa43a849fcaaa70e230dee",
-        "shallow": true,
-        "type": "git",
-        "url": "https://github.com/nixos/nixpkgs"
+        "lastModified": 1785692966,
+        "narHash": "sha256-vUfIeBEfpbAfZ5zjgIkYk7eHBeVfCYVjLbWnMkseYnk=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "643809054d65fdd466a63e3155b8c498cb483c04",
+        "type": "github"
       },
       "original": {
-        "ref": "nixpkgs-unstable",
-        "shallow": true,
-        "type": "git",
-        "url": "https://github.com/nixos/nixpkgs"
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
       }
     },
     "nixvim": {
@@ -2138,7 +2137,10 @@
         "nixos-generators": "nixos-generators",
         "nixos-hardware": "nixos-hardware",
         "nixos-images": "nixos-images",
-        "nixpkgs": "nixpkgs_7",
+        "nixpkgs": [
+          "spaces",
+          "nixpkgs"
+        ],
         "nixpkgs-riscv": [
           "nixpkgs"
         ],
@@ -2215,20 +2217,15 @@
       "inputs": {
         "hermes-agent": "hermes-agent_2",
         "home-manager": "home-manager_2",
-        "llm-agents": [
-          "llm-agents"
-        ],
         "microvm": "microvm",
-        "nixpkgs": [
-          "nixpkgs"
-        ],
+        "nixpkgs": "nixpkgs_7",
         "systems": "systems_10",
         "treefmt-nix": "treefmt-nix_10",
         "voxtype": "voxtype"
       },
       "locked": {
-        "lastModified": 1784885834,
-        "narHash": "sha256-7dNOfPgg5SQZIosRUBn4pvc5VIYuusy7Nk+yjpfrcag=",
+        "lastModified": 1785920337,
+        "narHash": "sha256-rw4/IQjYPu3FYVep5WW8KJWVMieDybWDNmksG8X7Nno=",
         "path": "/home/grmpf/synced/projects/spaces",
         "type": "path"
       },
