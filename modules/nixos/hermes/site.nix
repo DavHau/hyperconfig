@@ -99,9 +99,6 @@
         # what the ssh-launched `hermes` CLI reads too.
         INFERENCE_API_KEY = config.clan.core.vars.generators.inference-api-key.files.token.path;
       };
-      # amy does not run services.spaces-integrations (the option's new
-      # default source) — keep the bridge on explicitly, as before.
-      spacesGateway.enable = true;
     };
   };
 }
