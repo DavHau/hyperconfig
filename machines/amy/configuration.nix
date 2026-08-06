@@ -26,6 +26,15 @@
     ../../modules/home-manager/houses.nix
   ];
 
+  # 32" 4K desk monitor: open new niri columns at a third of the screen
+  # (laptop panel keeps the global 1/2 default). Merged into the
+  # displays.kdl snapshot by save-niri-displays; see niri-output-extras.nix.
+  niri.outputExtras."Samsung Electric Company LS32D80xU HNBY600016" = ''
+    layout {
+        default-column-width { proportion 0.33333; }
+    }
+  '';
+
   networking.extraHosts = "10.0.0.1 127.0.0.0";
 
   virtualisation.vmVariant = {
