@@ -2224,15 +2224,14 @@
         "voxtype": "voxtype"
       },
       "locked": {
-        "lastModified": 1785998195,
+        "lastModified": 1785998221,
         "narHash": "sha256-67xarmT5QEMy2E/ij1bFgMlemlJigSTPN6MfbkebBbA=",
         "path": "/home/grmpf/synced/projects/spaces",
         "type": "path"
       },
       "original": {
-        "owner": "generational-infrastructure",
-        "repo": "distro",
-        "type": "github"
+        "type": "git",
+        "url": "https://git.geninf.io/spaces/spaces-os"
       }
     },
     "spectrum": {

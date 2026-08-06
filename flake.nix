@@ -133,7 +133,7 @@
     wrappers.url = "github:lassulus/wrappers";
     wrappers.inputs.nixpkgs.follows = "nixpkgs";
 
-    spaces.url = "github:generational-infrastructure/distro";
+    spaces.url = "git+https://git.geninf.io/spaces/spaces-os";
 
     cctl.url = "github:allouis/cctl";
     cctl.inputs.nixpkgs.follows = "nixpkgs";
