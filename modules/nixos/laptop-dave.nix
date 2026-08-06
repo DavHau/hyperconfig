@@ -27,6 +27,7 @@ in
     ./niri-monitor-binds.nix
     ./niri-terminal-cwd.nix
     ./niri-float-rules.nix
+    ./niri-output-extras.nix
     ./greetd.nix
     ./pi-agent.nix
     ./afk.nix
