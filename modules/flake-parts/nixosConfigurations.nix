@@ -33,7 +33,21 @@ in {
           # inputs.hermes-agent; the root flake dropped that input when
           # hermes moved into the spaces flake — alias spaces' pin instead
           # of re-locking our own.
-          inputs = inputs // { hermes-agent = inputs.spaces.inputs.hermes-agent; };
+          #
+          # Our spaces input is a local checkout whose module set has
+          # diverged from the release nixos-example pins (local has
+          # `hermes`, release has `pi-chat`). nixos-example's v-laptop.nix
+          # (also path-imported) needs inputs.spaces.nixosModules.pi-chat,
+          # so union the release's nixosModules underneath ours — local
+          # modules win on collision.
+          inputs = inputs // {
+            hermes-agent = inputs.spaces.inputs.hermes-agent;
+            spaces = inputs.spaces // {
+              nixosModules =
+                inputs.nixos-example.inputs.spaces.nixosModules
+                // inputs.spaces.nixosModules;
+            };
+          };
           inherit pkgsCross self;
         };
 
