@@ -84,8 +84,11 @@ let
     "--cache-type-v q8_0"
     "-ngl 99"
     "--n-cpu-moe ${toString nCpuMoe}"
-    # MTP speculative decode; unsloth found 2 best on most hardware,
-    # but it is hardware-dependent -- try 1..6.
+    # MTP speculative decode (model's built-in MTP head as
+    # self-speculative draft). --spec-type draft-mtp is REQUIRED to
+    # activate the MTP tensors; draft-n-max 2 is unsloth's sweet spot
+    # on most hardware (hardware-dependent -- try 1..6).
+    "--spec-type draft-mtp"
     "--spec-draft-n-max 2"
     # Recommended thinking-mode sampling for general/agentic tasks.
     "--temp 1.0"
