@@ -3,6 +3,8 @@
   lib,
   ...
 }: {
+  imports = [./prune-gcroots.nix];
+
   environment.systemPackages = lib.attrValues {
     inherit (pkgs)
       bat
