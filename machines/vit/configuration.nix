@@ -129,6 +129,21 @@
     };
   };
 
+  # sbox (the agent sandbox on amy) binds ~/.ssh/id_ed25519_github1 over
+  # ~/.ssh/id_ed25519 (modules/nixos/sbox.nix), so this is the sandbox's
+  # default identity. Root here, and only here: vit is the inference box the
+  # agent operates (llama-swap, model fetches, freeze post-mortems); the
+  # clan-wide `admin` allowedKeys entry stays limited to dave's TPM key.
+  #
+  # NOTE: sshd here reads ONLY /etc/ssh/authorized_keys.d/%u — spaces'
+  # modules/nixos/default.nix mkForces services.openssh.authorizedKeysFiles
+  # to that single path (authorizedKeysInHomedir itself is still true, but
+  # its "%h/.ssh/authorized_keys" entry is overridden away). A key
+  # hand-appended to /root/.ssh/authorized_keys is silently ignored.
+  users.users.root.openssh.authorizedKeys.keys = [
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM7ptVA/R16UvtWJD3VfJUWdEL2nzonoFRz2Na6lg+UU agent@amy"
+  ];
+
   # VM settings
   virtualisation.vmVariant = {
     users.users.dave.hashedPasswordFile = lib.mkForce null;
