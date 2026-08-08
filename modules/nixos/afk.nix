@@ -29,13 +29,17 @@ in
       package = inputs.afk.packages.${pkgs.stdenv.hostPlatform.system}.afk;
       preHook = ''
         config_dir="$HOME/.omp/profiles/afk/agent"
-        mkdir -p "$config_dir/rules" "$config_dir/extensions"
+        mkdir -p "$config_dir/rules" "$config_dir/extensions" "$config_dir/skills"
         ${common.inferenceApiKeyExport}
         ln -sf ${common.agentsFile} "$config_dir/AGENTS.md"
         # Host-specific always-apply rule (repo layout); the nix/direnv/jj
         # rules live in afk. Rules reach the main loop AND every subagent
         # (omp forwards rules to subagents, unlike AGENTS.md).
         ln -sf ${./default-rules.md} "$config_dir/rules/default-rules.md"
+        # Personal skills (see modules/nixos/skills/): symlinked per-skill so
+        # user-created skills next to them survive.
+        ln -sfn ${./skills/external-scripts} "$config_dir/skills/external-scripts"
+        ln -sfn ${./skills/project-init} "$config_dir/skills/project-init"
         # jobs-hub extension: background-bash-jobs widget + Ctrl+J / /bashjobs
         # overlay; Enter prints a job's log into the chat transcript (native
         # scrollback). /jobs is taken by the builtin printout; source + tests
