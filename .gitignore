@@ -3,3 +3,5 @@ result*
 *qcow2
 
 .venv-*
+*.iso
+*.tar.gz
