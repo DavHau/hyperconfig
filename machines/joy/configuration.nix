@@ -21,6 +21,9 @@
   networking.networkmanager.enable = true;
   services.resolved.enable = true;
 
+  # AirDrop-alike file transfer; opens tcp+udp 53317 for discovery/receiving
+  programs.localsend.enable = true;
+
   environment.systemPackages = with pkgs; [
     firefox
     gimp
