@@ -71,7 +71,14 @@ in
   clan.core.vars.generators.zfs-key = {
     files.passphrase = {
       secret = true;
+      # Never installed on the machine whose disk it protects.
       deploy = false;
+      # ... but `clan machines install` must hand it to disko before it can
+      # create the encrypted dataset. This phase uploads it to the *installer*
+      # as /run/partitioning-secrets/zfs-key/passphrase (nixos-anywhere
+      # --disk-encryption-keys) and nowhere else. Only the partitioning phase
+      # consults neededFor, so deploy = false still holds for the target.
+      neededFor = "partitioning";
     };
     runtimeInputs = [
       pkgs.coreutils
