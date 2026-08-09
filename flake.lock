@@ -365,7 +365,9 @@
         "nixpkgs": [
           "nixpkgs"
         ],
-        "sops-nix": "sops-nix",
+        "sops-nix": [
+          "sops-nix"
+        ],
         "systems": "systems_3",
         "treefmt-nix": "treefmt-nix_4"
       },
@@ -394,7 +396,9 @@
         "nixpkgs": [
           "nixpkgs"
         ],
-        "sops-nix": "sops-nix_2",
+        "sops-nix": [
+          "sops-nix"
+        ],
         "systems": "systems_4",
         "treefmt-nix": "treefmt-nix_5"
       },
@@ -2433,6 +2437,7 @@
         "nixvirt": "nixvirt",
         "retiolum": "retiolum",
         "sbox": "sbox",
+        "sops-nix": "sops-nix",
         "spaces": "spaces_2",
         "srvos": "srvos",
         "stylix": "stylix",
@@ -2459,41 +2464,20 @@
     "sops-nix": {
       "inputs": {
         "nixpkgs": [
-          "clan-core",
           "nixpkgs"
         ]
       },
       "locked": {
-        "lastModified": 1783174389,
-        "narHash": "sha256-aCWC8ngycU7OdJrU2+Je3qf+1a2ykuBvpPhZT/9tXMc=",
-        "owner": "Mic92",
+        "lastModified": 1786253040,
+        "narHash": "sha256-XcD1v8HdBSr29WDV3bQDS+VaajR0vCANTU5Yf/OapEU=",
+        "owner": "DavHau",
         "repo": "sops-nix",
-        "rev": "f1406619a3884cd5c47992a70b8b35c9c0fcb4c9",
+        "rev": "f1bf134f01027bd24ef7e1693b44020ed46e060a",
         "type": "github"
       },
       "original": {
-        "owner": "Mic92",
-        "repo": "sops-nix",
-        "type": "github"
-      }
-    },
-    "sops-nix_2": {
-      "inputs": {
-        "nixpkgs": [
-          "clan-core-monitoring",
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1770145881,
-        "narHash": "sha256-ktjWTq+D5MTXQcL9N6cDZXUf9kX8JBLLBLT0ZyOTSYY=",
-        "owner": "Mic92",
-        "repo": "sops-nix",
-        "rev": "17eea6f3816ba6568b8c81db8a4e6ca438b30b7c",
-        "type": "github"
-      },
-      "original": {
-        "owner": "Mic92",
+        "owner": "DavHau",
+        "ref": "fix/partial-secret-install",
         "repo": "sops-nix",
         "type": "github"
       }

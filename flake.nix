@@ -43,6 +43,16 @@
     clan-core-monitoring.inputs.flake-parts.follows = "flake-parts";
     clan-core-monitoring.inputs.nixpkgs.follows = "nixpkgs";
 
+    # Fork carrying https://github.com/Mic92/sops-nix/pull/973: one secret with
+    # an owner that does not resolve to an existing user used to abort the whole
+    # activation, leaving the machine with zero secrets (vit, 2026-08-08). Drop
+    # this input once the PR lands. sops-nix is a transitive input of clan-core
+    # only, hence the follows below.
+    sops-nix.url = "github:DavHau/sops-nix/fix/partial-secret-install";
+    sops-nix.inputs.nixpkgs.follows = "nixpkgs";
+    clan-core.inputs.sops-nix.follows = "sops-nix";
+    clan-core-monitoring.inputs.sops-nix.follows = "sops-nix";
+
     disko.url = "github:nix-community/disko";
     disko.inputs.nixpkgs.follows = "nixpkgs";
 
