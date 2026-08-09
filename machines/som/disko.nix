@@ -50,9 +50,12 @@
             # files.passphrase.neededFor = "partitioning".
             keylocation = "file://${config.clan.core.vars.generators.zfs-key.files.passphrase.path}";
           };
-          # No key file on the installed system — it is fed over ssh at boot,
-          # or typed at the console.
-          postCreateHook = "zfs change-key -o keylocation=prompt zroot/root";
+          # The key material stays exactly as created - only the pointer moves,
+          # since the installer's /run path is gone on the booted system. Must
+          # be `zfs set`, not `zfs change-key`: change-key rekeys the dataset
+          # and blocks asking for a new passphrase. At boot the key arrives via
+          # `zfs load-key -L file:///dev/stdin` (ssh) or the console prompt.
+          postCreateHook = "zfs set keylocation=prompt zroot/root";
         };
         "root/nix" = {
           type = "zfs_fs";
