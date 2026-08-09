@@ -69,6 +69,7 @@ in {
           machines = {
             installer.tags = [ "wifi-home" ];
             cm-pi.tags = [ "wifi-home" ];
+            som.deploy.targetHost = "root@beast.local"; # renames to som.local on switch
             # joy.deploy.targetHost = "joy.dave";
           };
 
