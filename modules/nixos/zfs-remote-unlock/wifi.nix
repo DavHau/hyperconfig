@@ -35,7 +35,14 @@ in
     description = "wpa_supplicant (initrd, for remote unlock)";
     wantedBy = [ "initrd.target" ];
     after = [ "initrd-nixos-copy-secrets.service" ];
-    before = [ "sshd.service" ];
+    # DefaultDependencies = false means systemd adds no implicit ordering against
+    # shutdown.target, so switch-root would leave this supplicant running: a
+    # stale process, its binary gone with the initrd, still holding wlan0 via
+    # nl80211 - and NetworkManager then finds the device owned by a supplicant it
+    # does not control, i.e. no wifi on the booted system. nixpkgs' own initrd
+    # sshd wires these two explicitly for the same reason.
+    before = [ "sshd.service" "shutdown.target" ];
+    conflicts = [ "shutdown.target" ];
     unitConfig.DefaultDependencies = false;
     serviceConfig = {
       Type = "simple";
