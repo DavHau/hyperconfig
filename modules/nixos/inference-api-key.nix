@@ -12,7 +12,7 @@
 #
 #   clan vars generate <machine> --generator inference-api-key
 #   clan vars get <machine> inference-api-key/token
-{ ... }:
+{ config, ... }:
 {
   clan.core.vars.generators.inference-api-key = {
     share = true;
@@ -24,9 +24,10 @@
       persist = true;
     };
     # Readable by the desktop user: the omp wrappers run unprivileged and read
-    # this at launch. 0400 owner-only, never group- or world-readable.
+    # this at launch. An owner the machine doesn't declare makes
+    # sops-install-secrets abort every secret on the host (sops-nix#972).
     files.token = {
-      owner = "grmpf";
+      owner = if config.users.users ? grmpf then "grmpf" else "dave";
       mode = "0400";
     };
   };

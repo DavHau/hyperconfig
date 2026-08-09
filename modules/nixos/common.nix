@@ -9,6 +9,11 @@
     ./timedated-ntp.nix
   ];
   users.mutableUsers = false;
+
+  # Only decides the id for a dave that doesn't exist yet: update-users-groups.pl
+  # refuses to renumber a live account. amy pins 1001 (grmpf owns 1000 there).
+  users.users.dave.uid = lib.mkDefault 1000;
+
   # spaces' base module imports nixpkgs' profiles/perlless.nix, which flips
   # services.userborn + system.etc.overlay to mkDefault true. That combo
   # rebuilds the user DB from scratch (the overlay masks the existing
