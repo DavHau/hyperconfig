@@ -20,6 +20,7 @@ in
     ./nix.nix
     # ./hyprspace
     ./nrb
+    ./clan-unlock
     ./nix-caches.nix
     # niri compositor + noctalia shell come from distro.nixosModules.spaces
     # (above); host-local additions layer on the /etc/niri/config-laptop.kdl

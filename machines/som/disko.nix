@@ -1,58 +1,62 @@
-# Layout of the running system — som is switched, never installed from here.
-# Boot is systemd-boot in the 1G ESP; the 1M EF02 partition is unused.
 { ... }:
 {
   disko.devices = {
-    disk = {
-      x = {
-        type = "disk";
-        device = "/dev/disk/by-id/nvme-WD_BLACK_SN7100_2TB_2512ET401381";
-        content = {
-          type = "gpt";
-          partitions = {
-            "boot" = {
-              size = "1M";
-              type = "EF02";
-              priority = 1;
+    disk.main = {
+      type = "disk";
+      device = "/dev/disk/by-id/nvme-WD_BLACK_SN7100_2TB_2512ET401381";
+      content = {
+        type = "gpt";
+        partitions = {
+          ESP = {
+            size = "1G";
+            type = "EF00";
+            content = {
+              type = "filesystem";
+              format = "vfat";
+              mountpoint = "/boot";
+              mountOptions = [ "umask=0077" ];
             };
-            ESP = {
-              size = "1G";
-              type = "EF00";
-              content = {
-                type = "filesystem";
-                format = "vfat";
-                mountpoint = "/boot";
-              };
-            };
-            zfs = {
-              size = "100%";
-              content = {
-                type = "zfs";
-                pool = "zroot";
-              };
+          };
+          zfs = {
+            size = "100%";
+            content = {
+              type = "zfs";
+              pool = "zroot";
             };
           };
         };
       };
     };
-    zpool = {
-      zroot = {
-        type = "zpool";
-        rootFsOptions = {
-          compression = "lz4";
+
+    zpool.zroot = {
+      type = "zpool";
+      options.ashift = "12";
+      rootFsOptions = {
+        mountpoint = "none";
+        compression = "zstd-1";
+        acltype = "posixacl";
+        xattr = "sa";
+        "com.sun:auto-snapshot" = "true";
+      };
+      datasets = {
+        "root" = {
+          type = "zfs_fs";
+          mountpoint = "/";
+          options = {
+            encryption = "aes-256-gcm";
+            keyformat = "passphrase";
+            # Install-time only: `clan machines install` writes the clan var here.
+            keylocation = "file:///tmp/zfs.key";
+          };
+          # No key file on the installed system — it is fed over ssh at boot,
+          # or typed at the console.
+          postCreateHook = "zfs change-key -o keylocation=prompt zroot/root";
         };
-        datasets = {
-          "root" = {
-            type = "zfs_fs";
-            options = {
-              mountpoint = "none";
-            };
-          };
-          "root/nixos" = {
-            type = "zfs_fs";
-            options.mountpoint = "/";
-            mountpoint = "/";
-          };
+        "root/nix" = {
+          type = "zfs_fs";
+          mountpoint = "/nix";
+          options.mountpoint = "/nix";
+          options."com.sun:auto-snapshot" = "false";
         };
       };
     };
