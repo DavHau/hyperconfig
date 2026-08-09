@@ -9,6 +9,7 @@
     ../../modules/nixos/dave.nix
     ../../modules/nixos/user-dave.nix
     ../../modules/nixos/amdgpu.nix
+    ../../modules/nixos/zfs-remote-unlock
     ./disko.nix
   ];
 
