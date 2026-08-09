@@ -1,4 +1,4 @@
-{ ... }:
+{ config, ... }:
 {
   disko.devices = {
     disk.main = {
@@ -45,8 +45,10 @@
           options = {
             encryption = "aes-256-gcm";
             keyformat = "passphrase";
-            # Install-time only: `clan machines install` writes the clan var here.
-            keylocation = "file:///tmp/zfs.key";
+            # Install-time only, and only on the installer: clan uploads this
+            # var to /run/partitioning-secrets before disko runs, because
+            # files.passphrase.neededFor = "partitioning".
+            keylocation = "file://${config.clan.core.vars.generators.zfs-key.files.passphrase.path}";
           };
           # No key file on the installed system — it is fed over ssh at boot,
           # or typed at the console.
