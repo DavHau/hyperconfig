@@ -2,8 +2,8 @@
   Unified ssh client key for the nix daemon.
 
   One ed25519 keypair, generated once via clan vars (share = true) and
-  deployed to every machine importing this module (all laptops via
-  laptop-dave.nix — currently amy and vit).
+  deployed to every machine importing this module (via dave.nix — currently
+  amy, vit and som).
 
   The private key is symlinked to /root/.ssh/id_ed25519 at activation, so it
   becomes root's default ssh identity — the nix daemon runs as root and, for

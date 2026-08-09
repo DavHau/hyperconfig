@@ -6,7 +6,8 @@
     # inputs.nixos-hardware.nixosModules.framework-13-7040-amd
     # inputs.nixos-hardware.nixosModules.lenovo-yoga-7-14ARH7-amdgpu
     # inputs.nixos-hardware.nixosModules.tuxedo-pulse-14-gen3
-    ../../modules/nixos/laptop-dave.nix
+    ../../modules/nixos/dave.nix
+    ../../modules/nixos/laptop.nix
     ../../modules/nixos/user-grmpf.nix
     ../../modules/nixos/amdgpu.nix
     ../../modules/nixos/llama-swap.nix

@@ -42,7 +42,7 @@
   };
 
   # Fleet inference endpoint token. The generator itself lives in
-  # ../inference-api-key.nix (imported via laptop-dave.nix) and is shared with
+  # ../inference-api-key.nix (imported via dave.nix) and is shared with
   # the afk/omp harness — only the VM restart hook is amy's business.
   clan.core.vars.generators.inference-api-key.files.token.restartUnits = [
     "microvm@hermes-grmpf.service"

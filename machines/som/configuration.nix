@@ -6,11 +6,14 @@
     inputs.nixos-hardware.nixosModules.common-cpu-amd-pstate
     inputs.nixos-hardware.nixosModules.common-gpu-amd
     inputs.nixos-hardware.nixosModules.common-pc-ssd
-    ../../modules/nixos/laptop-dave.nix
+    ../../modules/nixos/dave.nix
     ../../modules/nixos/user-dave.nix
     ../../modules/nixos/amdgpu.nix
     ./disko.nix
   ];
+
+  # r8169 is the only wired NIC; the initrd needs it to be reachable for unlock.
+  boot.initrd.availableKernelModules = [ "r8169" ];
 
   system.stateVersion = "25.11";
 }
