@@ -104,6 +104,8 @@
   programs.vim.defaultEditor = true;
   programs.steam.enable = true;
   programs.wireshark.enable = true;
+  # AirDrop-alike file transfer; opens tcp+udp 53317 for discovery/receiving
+  programs.localsend.enable = true;
   hardware.ledger.enable = true;
   services.fwupd.enable = true;
   # services.smokeping.enable = true;
