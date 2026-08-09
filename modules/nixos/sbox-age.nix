@@ -2,7 +2,7 @@
   Shared age identity for sandboxes.
 
   One age keypair, generated once via clan vars (share = true) and deployed
-  to every machine importing this module (all laptops via laptop-dave.nix).
+  to every machine importing this module (via dave.nix).
   The identity file is group-readable by "users" so the desktop user can
   read it, and sbox mounts it read-only into the sandbox at
   ~/.config/age/identities.

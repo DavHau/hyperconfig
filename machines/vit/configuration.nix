@@ -2,7 +2,8 @@
 {
   imports = [
     inputs.nixos-hardware.nixosModules.asus-zephyrus-gu605cw
-    ../../modules/nixos/laptop-dave.nix
+    ../../modules/nixos/dave.nix
+    ../../modules/nixos/laptop.nix
     ../../modules/nixos/user-dave.nix
     ./disko.nix
     ../../modules/nixos/nvidia.nix

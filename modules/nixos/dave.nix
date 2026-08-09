@@ -35,7 +35,6 @@ in
     # Bearer token for the fleet inference endpoint, exported into the afk
     # wrapper above.
     ./inference-api-key.nix
-    ./cpu-powersave-cap.nix
     ./amd-pstate-resume-fix.nix
     ./omr.nix
     ./proton-vpn.nix
@@ -50,7 +49,6 @@ in
     # ./tplink-archer-t2u-nano.nix
     ./printing.nix
     ./nix-registry.nix
-    ./low-battery-power-off.nix
     ./nix-lazy.nix
     ./nix-eval-cache.nix
     ./git.nix
