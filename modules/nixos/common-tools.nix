@@ -12,6 +12,7 @@
       git
       htop
       python3
+      rsync
       screen
       tmux
       vim
