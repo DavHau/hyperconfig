@@ -136,6 +136,16 @@
     afk.url = "path:/home/grmpf/synced/projects/afk";
     afk.inputs.nixpkgs.follows = "nixpkgs";
 
+    # ntop: nix-native htop (live builds, transfers, store, remotes) from the
+    # local checkout. git+file: rather than path: — the worktree carries a
+    # ~520M cargo target/ that a path: input would copy into the store on
+    # every eval, while git+file honours .gitignore and still picks up
+    # uncommitted work. Price: while that checkout is dirty nix refuses to
+    # write a lock entry for it (and thus to rewrite flake.lock at all), so
+    # commit there before re-locking here.
+    ntop.url = "git+file:///home/grmpf/synced/projects/ntop";
+    ntop.inputs.nixpkgs.follows = "nixpkgs";
+
     mics-skills.url = "github:Mic92/mics-skills";
     mics-skills.inputs.nixpkgs.follows = "nixpkgs";
     mics-skills.inputs.flake-parts.follows = "flake-parts";

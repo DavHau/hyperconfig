@@ -38,6 +38,7 @@ in
     ./inference-api-key.nix
     ./amd-pstate-resume-fix.nix
     ./omr.nix
+    ./ntop.nix
     ./proton-vpn.nix
     ./vpn.nix
     ./home-manager.nix
