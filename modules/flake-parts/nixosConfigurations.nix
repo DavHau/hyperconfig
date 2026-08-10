@@ -79,6 +79,9 @@ in {
               roles.default.tags = {
                 all = {  };
               };
+              # Fleet-wide `agent` account (sbox ssh identity); reaches all
+              # machines through this all-tags instance.
+              roles.default.extraModules = [ ../../modules/nixos/agent-user.nix ];
               roles.default.settings = {
                 allowedKeys = {
                   dave = "ecdsa-sha2-nistp384 AAAAE2VjZHNhLXNoYTItbmlzdHAzODQAAAAIbmlzdHAzODQAAABhBMAWEy2KMRae6D0kreSie2gA7s3g8x3QVNtdotxY4MDVO2dim6kc1OlGovByt06XGa/H1kMwIlc+RhfuJ/eRioGhrJ13SrDeJegC0T1iyIIZY67WMNSj5vZ0bJOmIQvm1A== grmpf@amy";
