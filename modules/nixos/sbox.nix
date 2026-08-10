@@ -41,6 +41,10 @@
       "$HOME/.config/Code" = {};
       "$HOME/synced/projects" = {};
       "$HOME/projects" = {};
+      # Bulk data: grmpf's zroot/root/nobackup/bigfiles dataset. Literal
+      # path, not $HOME: the dataset is grmpf's (see machines/*/disko.nix) and
+      # binds are --bind-try, so on hosts/users without it this is a no-op.
+      "/home/grmpf/bigfiles" = {};
       # cctl: DB + notify.sock (rw) for the in-sandbox agent hooks. The host
       # tmux socket dir is intentionally NOT bound: sbox gives /tmp its own
       # tmpfs, so a tmux server started inside a sandbox stays private to that
