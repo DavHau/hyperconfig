@@ -10,10 +10,12 @@
         "wrappers": "wrappers"
       },
       "locked": {
-        "lastModified": 1785562838,
-        "narHash": "sha256-bzf4B7QFucEQaR51iM9bMpHQfOzrUi7pAV5nHZBNt2E=",
-        "path": "/home/grmpf/synced/projects/afk",
-        "type": "path"
+        "lastModified": 1786335091,
+        "narHash": "sha256-NTmVAFwfreSSgE1W3cpGlKG/KtfDSciUmJHKiWqEeBs=",
+        "rev": "e4c5327d3512a3c4d69fded3d92fb9a41ed0b2e7",
+        "revCount": 28,
+        "type": "git",
+        "url": "file:///home/grmpf/synced/projects/afk"
       },
       "original": {
         "path": "/home/grmpf/synced/projects/afk",
@@ -2448,12 +2450,12 @@
     },
     "sbox": {
       "locked": {
-        "lastModified": 1785995839,
-        "narHash": "sha256-qSFF2jHuPerg9f4c9AiTDWUiHkiywu0GVbC85QaRD9g=",
-        "owner": "DavHau",
-        "repo": "sbox",
-        "rev": "17ac0e089b4abdbd97fd336453bb3d300470e59e",
-        "type": "github"
+        "lastModified": 1786329919,
+        "narHash": "sha256-jJXEjGEHgXxsNsmV44c9GQWk0tXLpidXRYqYI/VhplE=",
+        "rev": "5279270ae87689684d262bede8035e15c930f4b9",
+        "revCount": 108,
+        "type": "git",
+        "url": "file:///home/grmpf/synced/projects/sbox"
       },
       "original": {
         "owner": "DavHau",
