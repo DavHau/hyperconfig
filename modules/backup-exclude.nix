@@ -22,6 +22,7 @@
   "/home/*/**/DawnCache"  # electron
   "/home/*/**/GPUCache"  # electron
   "/home/*/temp"
+  "/home/*/bigfiles"
   "/home/*/VirtualBox VMs"
   "/home/*/.local/share/clan/"
 

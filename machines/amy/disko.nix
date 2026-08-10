@@ -57,6 +57,27 @@
             options."com.sun:auto-snapshot" = "false";
             mountpoint = "/nix";
           };
+          "root/nobackup" = {
+            type = "zfs_fs";
+            options = {
+              mountpoint = "none";
+              compression = "zstd-6";
+              "com.sun:auto-snapshot" = "false";
+            };
+          };
+          "root/nobackup/bigfiles" = {
+            type = "zfs_fs";
+            options = {
+              mountpoint = "/home/grmpf/bigfiles";
+              recordsize = "1M";
+            };
+            mountpoint = "/home/grmpf/bigfiles";
+          };
+          "root/nobackup/temp" = {
+            type = "zfs_fs";
+            options.mountpoint = "/home/grmpf/temp";
+            mountpoint = "/home/grmpf/temp";
+          };
         };
       };
     };
