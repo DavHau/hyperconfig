@@ -2226,6 +2226,25 @@
         "type": "github"
       }
     },
+    "ntop": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786336912,
+        "narHash": "sha256-S1xckQrCWZqkf1poSg/muECWiPs+wiODNwcQnkl3Ajg=",
+        "rev": "80537cbc0bad52b1d701fa96bdd97b8ab68e5146",
+        "revCount": 33,
+        "type": "git",
+        "url": "file:///home/grmpf/synced/projects/ntop"
+      },
+      "original": {
+        "type": "git",
+        "url": "file:///home/grmpf/synced/projects/ntop"
+      }
+    },
     "nur": {
       "inputs": {
         "flake-parts": [
@@ -2437,6 +2456,7 @@
         ],
         "nixvim": "nixvim",
         "nixvirt": "nixvirt",
+        "ntop": "ntop",
         "retiolum": "retiolum",
         "sbox": "sbox",
         "sops-nix": "sops-nix",
