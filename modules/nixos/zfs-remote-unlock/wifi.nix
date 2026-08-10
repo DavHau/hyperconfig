@@ -16,7 +16,12 @@ let
   };
 in
 {
-  boot.initrd.availableKernelModules = [ "iwlwifi" ];
+  # iwlmvm is the op-mode iwlwifi request_module()s for the AX210 -- listing
+  # only iwlwifi builds an initrd where the driver binds the PCI device, then
+  # fails to find its op-mode: no wlan0 in the initrd, and stage 2 inherits a
+  # half-attached device that its own supplicant cannot drive. mac80211,
+  # cfg80211, rfkill and the rest come along as modules.dep dependencies.
+  boot.initrd.availableKernelModules = [ "iwlwifi" "iwlmvm" ];
 
   # The driver asks for the highest API it supports and walks down; these are
   # the newest three AX210 images plus its platform blob. If association fails,
@@ -48,10 +53,32 @@ in
       Type = "simple";
       RuntimeDirectory = "wpa_supplicant";
       ExecStart = "${pkgs.wpa_supplicant}/bin/wpa_supplicant -c ${initrdConf} -i ${iface}";
+      # Stopping the supplicant does not hand the adapter back. The initrd
+      # supplicant configures the device through nl80211 and then vanishes
+      # with the initramfs; stage 2's NetworkManager-owned supplicant finds
+      # ${iface} in that leftover state and cannot drive it -- the symptom is
+      # a desktop that boots with dead wifi until you kill wpa_supplicant and
+      # reload the driver by hand. Do exactly that here instead: drop the
+      # driver while the initrd is still up, so stage 2 probes a virgin
+      # device (boot.kernelModules below reloads it deterministically rather
+      # than relying on udev coldplug). /bin/modprobe is the initrd's own
+      # kmod (systemd initrdBin), so this needs no extra storePaths and no
+      # shell; iwlmvm is iwlwifi's op-mode module and holds a reference, so
+      # it has to go first. The leading '-' ignores failures: a wedged
+      # unload must never block switch-root.
+      ExecStopPost = [
+        "-/bin/modprobe -r iwlmvm"
+        "-/bin/modprobe -r iwlwifi"
+      ];
+      TimeoutStopSec = 10;
       Restart = "on-failure";
       RestartSec = 2;
     };
   };
+
+  # Counterpart to the ExecStopPost unload above: never leave the adapter
+  # unbound if udev's coldplug misses the re-probe.
+  boot.kernelModules = [ "iwlwifi" ];
 
   system.activationScripts.initrdWifiConf = {
     deps = [ "setupSecrets" ];
