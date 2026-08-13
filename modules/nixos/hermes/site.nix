@@ -86,6 +86,25 @@
       # as per-request extra_body.
       extra_body.chat_template_kwargs.enable_thinking = true;
     };
+    # Second control channel beside telegram. The guest runs its own
+    # simplex-chat daemon; the profile address lands in
+    # ~/hermes/simplex-address.txt (same path on the host). Connect to it
+    # from the phone and the adapter accepts the request.
+    #
+    # Authorization uses the upstream pairing flow, NOT an allowlist:
+    # message the agent from the phone, it replies with a one-time code,
+    # and `hermes pairing approve simplex <CODE>` (run via the hermes shim,
+    # which lands in the guest over vsock-ssh) approves that contactId
+    # durably in the vault-backed pairing store.
+    #
+    # No SIMPLEX_ALLOWED_USERS on purpose. A display-name entry is an
+    # authorization bypass: names are attacker-chosen profile metadata, and
+    # whoever claims a listed name while no live contact holds it gets full
+    # control (upstream #44729/#44730, CWE-290; the pending fix #44741
+    # removes name matching entirely). A contactId entry is safe but
+    # transient - ids are renumbered on every re-pair. Pairing binds the
+    # actual contact that received the code, so neither problem exists.
+    simplex.enable = true;
     gpu.enable = true;
     users.grmpf = {
       secretEnv = {
