@@ -1,4 +1,4 @@
-# Parked: dual-engine co-hosting (Qwen3.6-27B-FP8 + 35B-A3B NVFP4)
+# Parked: dual-engine co-hosting (Qwen3.8-27B-FP8 + 35B-A3B NVFP4)
 
 Ran co-hosted 2026-07-27, parked the same day: the VRAM carve left too
 little KV for many concurrent sessions (27B 475K tokens + 35B 157K
