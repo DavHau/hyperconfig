@@ -25,7 +25,7 @@ Spec: `docs/superpowers/specs/2026-07-25-bam-inference-vm-design.md`
 OpenAI-compatible API: `http://[2405:9800:b901:94e3::feed:da7a]:30000/v1`
 — the VM's public IPv6 is its ONLY address since the routed-isolation
 change (2026-07-26, see below); the old LAN address 192.168.8.107 is
-gone. Active model ids: `Qwen3.6-27B-FP8` + `default` (vLLM, swap #4).
+gone. Active model ids: `Qwen3.8-27B-FP8` + `default` (vLLM, swap #4).
 (A second co-hosted engine on :30001 ran briefly — swap #5, parked;
 re-enable kit in guests/bam-inference/dual-engine/.) omp discovers
 the catalog at runtime (`discovery: openai-models-list`, provider
@@ -187,12 +187,12 @@ Benchmarks (2026-07-26, MTP on, thinking mode):
 No `--cache-ram` on this unit yet (recurrent DeltaNet state vs host-RAM
 prompt-cache interaction untested).
 
-## Model swap #4 (2026-07-26): Qwen3.6-27B-FP8 via vLLM — ACTIVE
+## Model swap #4 (2026-07-26): Qwen3.8-27B-FP8 via vLLM — ACTIVE
 
 `guests/bam-inference/vllm-qwen36-27b.nix` (container `vllm-qwen36-27b`,
 image `vllm-openai:v0.26.0-cu129-ubuntu2404` — cu129 tag mandatory on
-the 12.9 driver). Official `Qwen/Qwen3.6-27B-FP8` (29G) at
-`/var/lib/models/Qwen3.6-27B-FP8`, serving `Qwen3.6-27B-FP8` +
+the 12.9 driver). Official `Qwen/Qwen3.8-27B-FP8` (29G) at
+`/var/lib/models/Qwen3.8-27B-FP8`, serving `Qwen3.8-27B-FP8` +
 `default` on :30000. Chosen for multi-user throughput per research
 (`agent://QwenServeResearch`); config deviates from the official
 recipe deliberately: **bf16 KV (NOT fp8)** and **MTP n=2 (not 3)** —

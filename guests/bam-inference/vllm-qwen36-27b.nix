@@ -42,8 +42,8 @@
     ];
     # image entrypoint is `vllm serve`; first arg = model path
     cmd = [
-      "/models/Qwen3.6-27B-FP8"
-      "--served-model-name" "Qwen3.6-27B-FP8" "default"
+      "/models/Qwen3.8-27B-FP8"
+      "--served-model-name" "Qwen3.8-27B-FP8" "default"
       # "::" = dual-stack: inbound is v6-only since the routed-net
       # isolation (v4 is NAT-out only); 0.0.0.0 would be unreachable
       "--host" "::"
