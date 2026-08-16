@@ -11,6 +11,7 @@
     ../../modules/nixos/amdgpu.nix
     ../../modules/nixos/zfs-remote-unlock
     ./disko.nix
+    ../../modules/nixos/storagebox.nix
   ];
 
   # r8169 is the only wired NIC; the initrd needs it to be reachable for unlock.

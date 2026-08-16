@@ -10,6 +10,7 @@
     ../../modules/nixos/llama-swap.nix
     ../../modules/nixos/llama-swap-qwen36.nix
     ../../modules/nixos/llama-swap-yggdrasil.nix
+    ../../modules/nixos/storagebox.nix
   ];
 
   # Enable all hardware support
