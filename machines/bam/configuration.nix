@@ -6,6 +6,7 @@
     ../../modules/nixos/nix-caches.nix
     # ../../modules/nixos/dns.nix
     ./disko-xfs.nix
+    ./zfs.nix
     ./nextcloud.nix
     ./vikunja.nix
     ./inference-host.nix
@@ -17,8 +18,8 @@
   nixpkgs.hostPlatform = "x86_64-linux";
   boot.binfmt.emulatedSystems = ["aarch64-linux"];
 
-  # Kept from the removed vault pool config (machines/bam/zfs.nix): a changed
-  # hostId would make re-importing the pool need -f when vault is re-set up.
+  # Must not change: the vault pool's labels carry this hostId, and a mismatch
+  # makes every import need -f (see ./zfs.nix).
   networking.hostId = "b411ca35";
 
   nix.settings.max-jobs = 1;
