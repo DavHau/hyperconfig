@@ -20,6 +20,7 @@
     ../../modules/nixos/hermes/site.nix
     ../../modules/nixos/spaces-kiwix.nix
     ../../modules/nixos/vibepn.nix
+    ../../modules/nixos/storagebox.nix
     ../../modules/nixos/fabro
     ./disko.nix
   ];

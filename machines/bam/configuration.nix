@@ -13,6 +13,9 @@
     ./inference-net.nix
     ./inference-vm.nix
     ../../modules/nixos/vibepn.nix
+    # storagebox-sync imports storagebox.nix (the mount, the shared password
+    # var and the host-key pin), so it is the only line needed here.
+    ../../modules/nixos/storagebox-sync.nix
   ];
 
   nixpkgs.hostPlatform = "x86_64-linux";
