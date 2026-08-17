@@ -11,6 +11,7 @@
     ../../modules/nixos/llama-swap-qwen36.nix
     ../../modules/nixos/llama-swap-yggdrasil.nix
     ../../modules/nixos/storagebox.nix
+    ../../modules/nixos/vault-nfs-client.nix
   ];
 
   # Enable all hardware support

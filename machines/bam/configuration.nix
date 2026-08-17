@@ -16,6 +16,7 @@
     # storagebox-sync imports storagebox.nix (the mount, the shared password
     # var and the host-key pin), so it is the only line needed here.
     ../../modules/nixos/storagebox-sync.nix
+    ../../modules/nixos/vault-nfs-server.nix
   ];
 
   nixpkgs.hostPlatform = "x86_64-linux";

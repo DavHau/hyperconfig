@@ -12,6 +12,7 @@
     ../../modules/nixos/zfs-remote-unlock
     ./disko.nix
     ../../modules/nixos/storagebox.nix
+    ../../modules/nixos/vault-nfs-client.nix
   ];
 
   # r8169 is the only wired NIC; the initrd needs it to be reachable for unlock.
