@@ -22,6 +22,7 @@
     ../../modules/nixos/vibepn.nix
     ../../modules/nixos/storagebox.nix
     ../../modules/nixos/fabro
+    ../../modules/nixos/vault-nfs-client.nix
     ./disko.nix
   ];
 

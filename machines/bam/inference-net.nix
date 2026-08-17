@@ -16,6 +16,7 @@
 #     reach the VM, but only via the public address routed through bam.
 #   VM -> bam itself (10.42.0.1 / .150): INPUT path, not FORWARD —
 #     ssh-jump for management if the public path is ever down.
+{ lib, ... }:
 {
   systemd.network = {
     # bam's own LAN uplink stays a bridge (historical; carries DHCP).
@@ -55,9 +56,12 @@
     };
   };
 
+  # mkDefault: the clan wireguard module (wg-vault controller role) also sets
+  # ipv6 forwarding = 1; identical value, but the sysctl option type rejects
+  # duplicate hard definitions.
   boot.kernel.sysctl = {
-    "net.ipv4.conf.all.forwarding" = 1;
-    "net.ipv6.conf.all.forwarding" = 1;
+    "net.ipv4.conf.all.forwarding" = lib.mkDefault 1;
+    "net.ipv6.conf.all.forwarding" = lib.mkDefault 1;
   };
 
   # v4: masquerade the internal segment out the LAN uplink.

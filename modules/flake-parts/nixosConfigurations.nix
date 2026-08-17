@@ -255,6 +255,25 @@ in {
                 "tossa-pi" "vit" "v-machine" "installer"
               ] (_: { });
             };
+            # Fast local star for the vault NFS traffic: bam is the controller
+            # with its LAN address as endpoint, so peers exchange traffic with
+            # bam directly over the LAN (no hairpin through a remote hub, unlike
+            # wg-edi). Kernel WireGuard - saturates 2.5GbE where the userspace
+            # meshes (yggdrasil ~365 Mbit/s measured) cap out. The wg key list
+            # doubles as the NFS mount ACL (see modules/nixos/vault-nfs-server.nix).
+            wg-vault = {
+              module.name = "wireguard";
+              module.input = "self";
+              roles.controller.machines.bam.settings = {
+                # bam's static LAN alias (not the DHCP lease, which has
+                # changed before; not provider IPv6, which rotates). Defined
+                # in modules/nixos/vault-nfs-server.nix.
+                endpoint = "192.168.8.250";
+                # 51820/51821/51822 are taken by wg-casa/wg-edi/vibepn.
+                port = 51823;
+              };
+              roles.peer.machines = lib.genAttrs [ "amy" "vit" "som" ] (_: { });
+            };
             # easytier
             # dave = {
             #   module.name = "easytier";
