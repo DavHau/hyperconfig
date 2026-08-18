@@ -12,6 +12,7 @@
     ../../modules/nixos/llama-swap-yggdrasil.nix
     ../../modules/nixos/storagebox.nix
     ../../modules/nixos/vault-nfs-client.nix
+    ../../modules/nixos/users/stefan-vault.nix
   ];
 
   # Enable all hardware support
