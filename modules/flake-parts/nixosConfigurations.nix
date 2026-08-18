@@ -69,7 +69,7 @@ in {
           machines = {
             installer.tags = [ "wifi-home" ];
             cm-pi.tags = [ "wifi-home" ];
-            som.deploy.targetHost = "root@som.local";
+            som.deploy.targetHost = "root@som.d";
             som.tags = [ "wifi-home" ]; # also gives the initrd its PSK
             # joy.deploy.targetHost = "joy.dave";
           };
