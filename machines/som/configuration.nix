@@ -13,6 +13,7 @@
     ./disko.nix
     ../../modules/nixos/storagebox.nix
     ../../modules/nixos/vault-nfs-client.nix
+    ../../modules/nixos/users/stefan-vault.nix
   ];
 
   # r8169 is the only wired NIC; the initrd needs it to be reachable for unlock.
