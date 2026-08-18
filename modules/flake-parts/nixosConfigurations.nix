@@ -103,6 +103,9 @@ in {
               roles.controller.settings.allowedIps = [
                 "7c29125877"
               ];
+              roles.controller.settings.allowedIds = [
+                "8f7d1a2b3c" # stefan's laptop (external)
+              ];
             };
             # VibePN mesh: instance name = network name; the service module
             # mints the shared invite phrase (generator vibepn-vibe) and
