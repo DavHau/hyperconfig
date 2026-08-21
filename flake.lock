@@ -10,12 +10,10 @@
         "wrappers": "wrappers"
       },
       "locked": {
-        "lastModified": 1786498185,
-        "narHash": "sha256-7ClQpJljZTFond1IOyyxkaPglSftVxvLsTCOBn+JulU=",
-        "rev": "c2328d3b6dc2bc02f84e59197b3c3485dedd0738",
-        "revCount": 34,
-        "type": "git",
-        "url": "file:///home/grmpf/synced/projects/afk"
+        "lastModified": 1787283937,
+        "narHash": "sha256-tg6oeCPPOfvfbbUGY2C6bUF4xaxK9HC8wAmAXbkTLFE=",
+        "path": "/home/grmpf/synced/projects/afk",
+        "type": "path"
       },
       "original": {
         "path": "/home/grmpf/synced/projects/afk",
