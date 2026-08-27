@@ -182,7 +182,7 @@ in {
             remote-building = {
               module.name = "remote-building";
               module.input = "self";
-              roles.builder.machines.bam = {};
+              roles.builder.machines.som = {};
               roles.client.machines.amy.settings.barToggle = true;
             };
 
