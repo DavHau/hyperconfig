@@ -11,4 +11,14 @@
 { pkgs }:
 pkgs.ssh-tpm-agent.overrideAttrs (old: {
   patches = (old.patches or [ ]) ++ [ ./ssh-tpm-agent-confirm.patch ];
+
+  # nixpkgs' preCheck rewrites ENOKEY -> ENOENT in the internal/keyring tests
+  # (NixOS/nixpkgs#394097), i.e. it asserts the errno some builders return
+  # instead of the one request_key(2) actually returns. On our kernels the
+  # syscall returns ENOKEY, so the rewritten assertions fail and checkPhase
+  # breaks the build. Keep only the part that is genuinely broken upstream
+  # (cmd/scripts_test.go, a testscript suite that needs a real TPM).
+  preCheck = ''
+    rm -f cmd/scripts_test.go
+  '';
 })
