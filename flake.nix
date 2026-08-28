@@ -28,7 +28,10 @@
     nil.url = "github:oxalica/nil";
     nil.inputs.nixpkgs.follows = "nixpkgs";
 
-    nix.url = "https://flakehub.com/f/NixOS/nix/2.*.*.tar.gz";
+    # Local nix build with parallel chunked substituter downloads
+    # (parallel-downloads bookmark; see modules/nixos/nix-parallel-downloads.nix).
+    # nix.url = "https://flakehub.com/f/NixOS/nix/2.*.*.tar.gz";
+    nix.url = "git+file:///home/grmpf/projects/nix?ref=parallel-downloads&shallow=1";
     nix-lazy.url = "github:nixos/nix/lazy-trees-v2";
     nix-eval-cache.url = "github:roberth/nix/eval-cache-next";
     retiolum.url = "github:mic92/retiolum";
