@@ -2318,10 +2318,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1786336912,
-        "narHash": "sha256-S1xckQrCWZqkf1poSg/muECWiPs+wiODNwcQnkl3Ajg=",
-        "rev": "80537cbc0bad52b1d701fa96bdd97b8ab68e5146",
-        "revCount": 33,
+        "lastModified": 1787893347,
+        "narHash": "sha256-YBbCZ0Xec6PThPGR54W2VgDA+GB5WN03ayxS5lrXDTg=",
+        "rev": "1600a8f3afb223b1ab150e4886ce4b35539bd863",
+        "revCount": 36,
         "type": "git",
         "url": "file:///home/grmpf/synced/projects/ntop"
       },
