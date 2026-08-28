@@ -18,6 +18,7 @@ in
     ./nix-development.nix
     ./dns.nix
     ./nix.nix
+    ./nix-parallel-downloads.nix
     # ./hyprspace
     ./nrb
     ./clan-unlock
