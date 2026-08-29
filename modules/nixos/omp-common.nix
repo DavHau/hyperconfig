@@ -69,6 +69,48 @@
     "    modelOverrides:"
   ]
   ++ p0ModelOverride "Qwen3.8-27B-FP8");
+  # TeamClaude: pooled Claude subscription gateway on pubproxy01 (project-zero
+  # modules/nixos/teamclaude-gateway.nix, docs/teamclaude-gateway.md).
+  #
+  # DISABLED 2026-08-29 (user request): the gateway itself has no capacity —
+  # a request with a valid key passes nginx, stalls ~120s inside teamclaude and
+  # then answers `429 rate_limit_error "Rate limited; retry in 60s"`
+  # (reproduced with plain curl, so it is server-side). Re-enable by
+  # uncommenting the block below, the `teamclaudeApiKeyExport` in this file, the
+  # `${"$"}{common.teamclaudeApiKeyExport}` line in ./afk.nix's preHook and the
+  # ./teamclaude-api-key.nix import in ./dave.nix. Until then the builtin
+  # anthropic provider keeps talking to api.anthropic.com with the OAuth logins.
+  #
+  # KEEP when re-enabling — this cost one dead-on-first-turn debugging session:
+  #
+  # The `headers.x-api-key` line is load-bearing, not a belt-and-braces
+  # duplicate of `apiKey`: for a non-OAuth credential on a NON-official base
+  # URL, omp sends `Authorization: Bearer <key>` and suppresses its own
+  # X-Api-Key (packages/ai/src/providers/anthropic.ts, buildAnthropicHeaders
+  # else-branch + shouldSuppressClientApiKey). The gateway's nginx authenticates
+  # solely on `map $http_x_api_key` and answers a bearer-only request with an
+  # HTML `401 Authorization Required`, which surfaces in the harness as a dead
+  # session on the first turn. A caller-supplied x-api-key header is preserved
+  # verbatim, so pinning it here is the only way to satisfy the gateway.
+  #
+  # `apiKey` stays because it registers the config-sourced credential that beats
+  # the stored Anthropic OAuth logins (AuthStorage #configOverrides): without it
+  # omp would forward a personal subscription token to the gateway and suppress
+  # nothing.
+  #
+  # Both values are env var NAMES (teamclaudeApiKeyExport fills the var, key
+  # from ./teamclaude-api-key.nix). Beware: omp resolves such a value as
+  # env-var-name-or-LITERAL (config/model-config-values.ts resolveConfigValue),
+  # so a machine where the var file is missing sends the string
+  # "TEAMCLAUDE_API_KEY" as the key and 401s exactly like a wrong key.
+  #
+  # teamclaudeProvider = lib.concatStringsSep "\n" [
+  #   "  anthropic:"
+  #   "    baseUrl: https://teamclaude.p0.contact"
+  #   "    apiKey: TEAMCLAUDE_API_KEY"
+  #   "    headers:"
+  #   "      x-api-key: TEAMCLAUDE_API_KEY"
+  # ];
   modelProviderBlocks =
     lib.optional llama-swap-enabled llamaSwapProvider
     ++ [ p0Provider ];
@@ -82,6 +124,15 @@ in rec {
       export INFERENCE_API_KEY
     fi
   '';
+  # Disabled with the provider block above; the interpolation would reference
+  # config.clan.core.vars.generators.teamclaude-api-key, which does not exist
+  # while ./teamclaude-api-key.nix is not imported in ./dave.nix.
+  # teamclaudeApiKeyExport = ''
+  #   if [ -r /run/secrets/vars/teamclaude-api-key/key ]; then
+  #     TEAMCLAUDE_API_KEY="$(cat /run/secrets/vars/teamclaude-api-key/key)"
+  #     export TEAMCLAUDE_API_KEY
+  #   fi
+  # '';
   models-needed = modelProviderBlocks != [ ];
   modelsFile = pkgs.writeText "models.yml"
     (lib.concatStringsSep "\n" ([ "providers:" ] ++ modelProviderBlocks) + "\n");
