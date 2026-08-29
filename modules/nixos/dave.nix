@@ -37,6 +37,9 @@ in
     # Bearer token for the fleet inference endpoint, exported into the afk
     # wrapper above.
     ./inference-api-key.nix
+    # TeamClaude gateway key (anthropic provider override in models.yml):
+    # disabled with the provider block, see ./omp-common.nix.
+    # ./teamclaude-api-key.nix
     ./amd-pstate-resume-fix.nix
     ./omr.nix
     ./ntop.nix

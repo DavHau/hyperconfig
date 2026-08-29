@@ -31,6 +31,7 @@ in
         config_dir="$HOME/.omp/profiles/afk/agent"
         mkdir -p "$config_dir/rules" "$config_dir/extensions" "$config_dir/skills"
         ${common.inferenceApiKeyExport}
+        # TeamClaude gateway key export: disabled, see ./omp-common.nix.
         ln -sf ${common.agentsFile} "$config_dir/AGENTS.md"
         # Host-specific always-apply rule (repo layout); the nix/direnv/jj
         # rules live in afk. Rules reach the main loop AND every subagent
