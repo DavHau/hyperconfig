@@ -2314,10 +2314,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1787893347,
-        "narHash": "sha256-YBbCZ0Xec6PThPGR54W2VgDA+GB5WN03ayxS5lrXDTg=",
-        "rev": "1600a8f3afb223b1ab150e4886ce4b35539bd863",
-        "revCount": 36,
+        "lastModified": 1787901903,
+        "narHash": "sha256-HVNCWPVxurdMXfJ4uU39Rg1yZsRBGBDYE5ughpxg0Fo=",
+        "rev": "dda3a5963853d0e7fd0a34180ef0093c25687c08",
+        "revCount": 37,
         "type": "git",
         "url": "file:///home/grmpf/synced/projects/ntop"
       },
@@ -2551,10 +2551,10 @@
     },
     "sbox": {
       "locked": {
-        "lastModified": 1786969210,
-        "narHash": "sha256-VXxRSjU/q0yjY7lv1IillA8TGYDwVNwSib9LMijgWZw=",
-        "rev": "371f90a37f4e825d3b2525a1fa25d7a665efa756",
-        "revCount": 109,
+        "lastModified": 1787280827,
+        "narHash": "sha256-r49/Uoh/LsXMGPJoboICo6EeWAjMUUaYVThn1uT3DXc=",
+        "rev": "c405da3e6e6f0eb7c0d470ecf1cb5ae1f5342355",
+        "revCount": 110,
         "type": "git",
         "url": "file:///home/grmpf/synced/projects/sbox"
       },
