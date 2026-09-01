@@ -1,5 +1,5 @@
 substitutions:
-  name: aircon_mitsubishi
-  friendly_name: AC
+  name: aircon_mitsubishi_4
+  friendly_name: AC 4
 
 <<: !include mitsubishi_common.yaml
