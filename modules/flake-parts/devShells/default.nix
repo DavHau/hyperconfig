@@ -11,13 +11,34 @@
           export _NIX_TRACING_CACHE_LOGGING=1
         '';
       };
+      # nixpkgs' esphome cannot build esp32/esp-idf configs: pioarduino's
+      # tool-esp_install runs idf_tools.py with a python that lacks the
+      # platformio module (NixOS/nixpkgs#227230). Instead, run a pip-installed
+      # esphome inside an FHS env so platformio manages its own toolchain.
+      esphome-fhs = pkgs.buildFHSEnv {
+        name = "esphome";
+        targetPkgs = p: [
+          p.python3
+          p.git
+          p.zlib
+          p.libusb1
+          p.udev
+        ];
+        profile = ''
+          export ESPHOME_PIN=${pkgs.esphome.version}
+        '';
+        runScript = pkgs.writeShellApplication {
+          name = "esphome-fhs";
+          text = builtins.readFile ./esphome-fhs.sh;
+        };
+      };
     in
     {
       devShells.default = pkgs.mkShell {
         packages = [
           inputs'.clan-core.packages.clan-cli
           clan-fast
-          # pkgs.esphome
+          esphome-fhs
         ];
       };
 

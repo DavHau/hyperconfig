@@ -1,0 +1,5 @@
+substitutions:
+  name: aircon_mitsubishi_1
+  friendly_name: AC 1
+
+<<: !include mitsubishi_common.yaml
