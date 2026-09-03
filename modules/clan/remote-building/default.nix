@@ -51,11 +51,38 @@
             default = [ "nixos-test" "big-parallel" "kvm" "benchmark" ];
             description = "Features advertised to clients.";
           };
+          externalClients = lib.mkOption {
+            type = lib.types.attrsOf (
+              lib.types.submodule {
+                options = {
+                  sshKeys = lib.mkOption {
+                    type = lib.types.listOf lib.types.str;
+                    description = "OpenSSH public keys allowed to log in as nixremote.";
+                  };
+                  signingKeys = lib.mkOption {
+                    type = lib.types.listOf lib.types.str;
+                    default = [ ];
+                    description = ''
+                      Nix store signing public keys ("name:base64") added to
+                      trusted-public-keys. Empty: the client can only build
+                      derivations whose inputs are substitutable, since the
+                      builder rejects unsigned uploads (no trusted-users).
+                    '';
+                  };
+                };
+              }
+            );
+            default = { };
+            description = ''
+              Non-clan machines allowed to build here. Clan clients are wired
+              automatically from their vars; use this for outside people.
+            '';
+          };
         };
       };
 
     perInstance =
-      { instanceName, roles, ... }:
+      { instanceName, roles, settings, ... }:
       {
         nixosModule =
           { config, lib, ... }:
@@ -75,6 +102,7 @@
                   }
                 ) (lib.attrNames (roles.client.machines or { }))
               );
+            externals = lib.attrValues settings.externalClients;
           in
           {
             services.openssh.enable = true;
@@ -89,13 +117,15 @@
               # ssh-ng runs `nix-daemon --stdio` through the login shell;
               # nologin would break it.
               useDefaultShell = true;
-              openssh.authorizedKeys.keys = map lib.trim (clientVals "ssh.id.pub");
+              openssh.authorizedKeys.keys =
+                map lib.trim (clientVals "ssh.id.pub") ++ lib.concatMap (c: c.sshKeys) externals;
             };
 
             # Accept client-signed store paths. NOT trusted-users: this is
             # the whole point — an untrusted user may only import paths
             # carrying a signature the daemon already trusts.
-            nix.settings.trusted-public-keys = map lib.trim (clientVals "signing.key.pub");
+            nix.settings.trusted-public-keys =
+              map lib.trim (clientVals "signing.key.pub") ++ lib.concatMap (c: c.signingKeys) externals;
           };
       };
   };
