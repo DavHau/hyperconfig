@@ -10,16 +10,16 @@
         "wrappers": "wrappers"
       },
       "locked": {
-        "lastModified": 1788191572,
-        "narHash": "sha256-QGXbiRB5pnlBwm8st0uexg/9YVghodJN3hqnroqSuWs=",
+        "lastModified": 1788408068,
+        "narHash": "sha256-36qTemJzTMrhce7Q9xPD4SM9Z7VkZ1u0MRLrqM5sbXs=",
         "ref": "master",
-        "rev": "3c1b9dc163e5ccd3135510462b162c2d6ec3de86",
-        "revCount": 36,
+        "rev": "03e0bf20c94a73ba3c67f9ce1c99d5e999d986c6",
+        "revCount": 37,
         "type": "git",
         "url": "file:///home/grmpf/synced/projects/afk"
       },
       "original": {
-        "rev": "3c1b9dc163e5ccd3135510462b162c2d6ec3de86",
+        "rev": "03e0bf20c94a73ba3c67f9ce1c99d5e999d986c6",
         "type": "git",
         "url": "file:///home/grmpf/synced/projects/afk"
       }
@@ -186,15 +186,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1784665499,
-        "narHash": "sha256-9BMxlTxCCDAeoNLtb1a/st7udtTIJep+wpUzquA29VU=",
-        "owner": "nix-community",
+        "lastModified": 1788011267,
+        "narHash": "sha256-mEq2kU+ljompTToZ44Afvm7d/rHJ5iMBl0tjZuyShJs=",
+        "owner": "Mic92",
         "repo": "bun2nix",
-        "rev": "0f2a1f0b6f42cebe3b149bf62d38754c5e0e9729",
+        "rev": "5765b0614591f75ee8ba5596e81ae85c167d1071",
         "type": "github"
       },
       "original": {
-        "owner": "nix-community",
+        "owner": "Mic92",
+        "ref": "fix-structured-attrs-hook",
         "repo": "bun2nix",
         "type": "github"
       }
@@ -660,11 +661,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1787559586,
-        "narHash": "sha256-onL0VLf9vPllmT0H/OlURIU5r5t5WIEl7t4tVNKT0Nw=",
+        "lastModified": 1788306937,
+        "narHash": "sha256-lbrI1UYVpFgKSsyrU9oeF7FHfnu8nLD9ja0ou9f2rxk=",
         "owner": "hercules-ci",
         "repo": "flake-parts",
-        "rev": "9d0d87172c374f89da73c1cfe6d81ae62feac1f1",
+        "rev": "f16b25b8c3d2809b87925d0b76652d7821a75c68",
         "type": "github"
       },
       "original": {
@@ -1371,10 +1372,10 @@
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1788173616,
-        "narHash": "sha256-x/B/7TqgY44sZtp61hyVh6qUf4u8k/jRqN6zowV/BtU=",
+        "lastModified": 1788392098,
+        "narHash": "sha256-7Ouya75MfV8m8WPokr2X45Zj/fWX7JGMvEzQNnwgR2k=",
         "ref": "refs/heads/main",
-        "rev": "f55ce77d0c5a84f80b86a81e7b8231f10e17aa99",
+        "rev": "ceb3bcb057ab9066541fb1334934d75270164e2b",
         "shallow": true,
         "type": "git",
         "url": "https://github.com/numtide/llm-agents.nix"
