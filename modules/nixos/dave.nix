@@ -33,6 +33,8 @@ in
     ./niri-output-extras.nix
     ./greetd.nix
     ./pi-agent.nix
+    # herdr wrapped with the community herdr-jj plugin (jj workspaces).
+    ./herdr-jj.nix
     ./afk.nix
     # Bearer token for the fleet inference endpoint, exported into the afk
     # wrapper above.
