@@ -7,10 +7,12 @@
 #   5. nixremote is not a trusted user on the builder (config assertion;
 #      an unsigned-push probe is impossible from the client because
 #      secret-key-files signs every local registration)
+#   6. externalClients: a non-clan machine with a fixed test keypair
+#      (external1/) authenticates and its signed input is accepted
 #
 # Host keys: prod trusts them via the clan-core sshd CA; that service is
 # out of scope here, so the test seeds known_hosts with ssh-keyscan.
-{ ... }:
+{ lib, ... }:
 {
   name = "remote-building";
 
@@ -20,6 +22,7 @@
     inventory = {
       machines.builder1 = { };
       machines.client1 = { };
+      machines.external1 = { };
 
       instances = {
         remote-building = {
@@ -27,6 +30,10 @@
           module.input = "self";
           # Test network resolves bare hostnames, not <name>.d
           roles.builder.machines.builder1.settings.host = "builder1";
+          roles.builder.machines.builder1.settings.externalClients.external1 = {
+            sshKeys = [ (lib.fileContents ./external1/ssh.id_ed25519.pub) ];
+            signingKeys = [ (lib.fileContents ./external1/signing.key.pub) ];
+          };
           roles.client.machines.client1 = { };
         };
       };
@@ -43,6 +50,20 @@
       nix.settings.sandbox = false;
       nix.settings.experimental-features = [ "nix-command" ];
     };
+    # Non-clan machine: no remote-building role, keys from fixed files.
+    external1 = {
+      nix.settings.sandbox = false;
+      nix.settings.experimental-features = [ "nix-command" ];
+      nix.settings.secret-key-files = [ "/etc/nix/signing.key" ];
+      environment.etc."nix/signing.key" = {
+        source = ./external1/signing.key;
+        mode = "0600";
+      };
+      environment.etc."ssh/external1.key" = {
+        source = ./external1/ssh.id_ed25519;
+        mode = "0600";
+      };
+    };
   };
 
   testScript = ''
@@ -55,6 +76,7 @@
     builder1.wait_for_unit("multi-user.target")
     builder1.wait_for_unit("sshd.socket")
     client1.wait_for_unit("multi-user.target")
+    external1.wait_for_unit("multi-user.target")
 
     # 1. OFF at boot: the unit is not wanted by multi-user.target, so the
     # machines file stays the empty one tmpfiles created (builds stay local).
@@ -108,5 +130,17 @@
 
     # 5. untrusted: no trusted-users grant anywhere for nixremote
     builder1.fail("grep -R nixremote /etc/nix/nix.conf | grep trusted-users")
+
+    # 6. external client: not in the clan, keys from settings.externalClients
+    external1.succeed("mkdir -p /root/.ssh && ssh-keyscan builder1 >> /root/.ssh/known_hosts")
+    external1.succeed("ssh -o BatchMode=yes -i /etc/ssh/external1.key nixremote@builder1 true")
+    external1.succeed(f"nix build --builders ''' --expr '{dep_expr}' --out-link /tmp/dep")
+    ext_dep = external1.succeed("readlink -f /tmp/dep").strip()
+    assert "external1-test-1:" in external1.succeed(f"nix path-info --sigs {ext_dep}")
+    builders = "ssh-ng://nixremote@builder1 x86_64-linux /etc/ssh/external1.key"
+    external1.succeed(f"nix build -L --max-jobs 0 --builders '{builders}' --expr '{top_expr}' --out-link /tmp/result 2>&1")
+    ext_top = external1.succeed("readlink -f /tmp/result").strip()
+    builder1.succeed(f"test -e {ext_top}")
+    assert external1.succeed(f"cat {ext_top}").strip().endswith("top")
   '';
 }
