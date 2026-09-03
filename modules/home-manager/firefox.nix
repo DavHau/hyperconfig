@@ -15,6 +15,32 @@ let
     #   # vue-js-devtools
     # ];
 
+    # Brave as the default engine. `force` overwrites the profile's
+    # search.json.mozlz4 on activation — without it home-manager refuses
+    # to touch an existing search database and the default stays whatever
+    # the profile last saved.
+    search = {
+      force = true;
+      default = "Brave";
+      engines = {
+        "Brave" = {
+          urls = [
+            {
+              template = "https://search.brave.com/search";
+              params = [
+                {
+                  name = "q";
+                  value = "{searchTerms}";
+                }
+              ];
+            }
+          ];
+          definedAliases = [ "@brave" ];
+          icon = "https://search.brave.com/favicon.ico";
+        };
+      };
+    };
+
     userChrome = ''
       #TabsToolbar { visibility: collapse !important; }
       #titlebar { visibility: collapse !important; }
@@ -47,7 +73,13 @@ let
       "browser.search.suggest.enabled" = false;
 
       "browser.sessionstore.resume_from_crash" = false;
-      # "browser.startup.homepage" = "${./blank.html}";
+      # New windows open the Firefox Home page (focused search box) and new
+      # tabs open about:newtab (focused address bar) — never a saved homepage
+      # like gmail. 1 = show homepage; about:home overrides whatever homepage
+      # the profile has stored.
+      "browser.startup.page" = 1;
+      "browser.startup.homepage" = "about:home";
+      "browser.newtabpage.enabled" = true;
       "browser.toolbars.bookmarks.visibility" = "never";
       "distribution.searchplugins.defaultLocale" = "en-US";
       "extensions.pocket.enabled" = false;
