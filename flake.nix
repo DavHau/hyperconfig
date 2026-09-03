@@ -130,13 +130,15 @@
     llm-agents-cached.url = "github:numtide/llm-agents.nix";
 
     # afk: locally checked-out omp harness wrapper (jj patches + Superpowers).
-    # Absolute path input: machines need this checkout at the same path to
-    # re-lock/rebuild (vit: create it or symlink). llm-agents/superpowers stay
-    # pinned by afk's own lock — its patches are validated against those exact
-    # revs; only nixpkgs is deduplicated.
-    # Real path: ~/projects is a symlink to ~/synced/projects and current
-    # nix refuses symlinked path-input parents on re-lock.
-    afk.url = "path:/home/grmpf/synced/projects/afk";
+    # Pinned to an exact rev because the checkout is under active rework (an
+    # in-flight omp 18.1.4 bump); this is the last stable commit
+    # (2026-08-31, omp 18.0.11 + all 16 patches rebased). Bump the rev once
+    # that lands. llm-agents/superpowers stay pinned by afk's own lock — its
+    # patches are validated against those exact revs; only nixpkgs is
+    # deduplicated. Machines need this checkout at the same path to
+    # re-lock/rebuild (vit: create it or symlink); real path because
+    # ~/projects is a symlink to ~/synced/projects.
+    afk.url = "git+file:///home/grmpf/synced/projects/afk?rev=3c1b9dc163e5ccd3135510462b162c2d6ec3de86";
     afk.inputs.nixpkgs.follows = "nixpkgs";
 
     # ntop: nix-native htop (live builds, transfers, store, remotes) from the
