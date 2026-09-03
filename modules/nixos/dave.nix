@@ -56,7 +56,6 @@ in
     ./printing.nix
     ./nix-registry.nix
     ./nix-lazy.nix
-    ./nix-eval-cache.nix
     ./git.nix
     ./jujutsu.nix
     ./alacritty.nix
