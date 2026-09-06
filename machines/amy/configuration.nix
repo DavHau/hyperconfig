@@ -41,6 +41,9 @@
 
   networking.extraHosts = "10.0.0.1 127.0.0.0";
 
+  networking.firewall.allowedTCPPorts = [ 8085 ];
+  networking.firewall.allowedUDPPorts = [ 8085 ];
+
   virtualisation.vmVariant = {
     imports = [ ../../modules/nixos/user-dave.nix ];
     users.users.grmpf.hashedPasswordFile = lib.mkForce null;
