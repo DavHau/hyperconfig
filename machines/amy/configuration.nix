@@ -18,11 +18,14 @@
     ../../modules/nixos/noctalia-anthropic-usage
     ../../modules/nixos/fw-fanctrl.nix
     ../../modules/nixos/hermes/site.nix
+    ../../modules/nixos/hermes-claude-auth.nix
     ../../modules/nixos/spaces-kiwix.nix
     ../../modules/nixos/vibepn.nix
     ../../modules/nixos/storagebox.nix
     ../../modules/nixos/fabro
     ../../modules/nixos/vault-nfs-client.nix
+    ../../modules/nixos/router-ais.nix
+    ../../modules/nixos/router-cm-beryl.nix
     ./disko.nix
   ];
 
@@ -78,6 +81,12 @@
   # and collide with grmpf's static uid (hermes requires grmpf = 1000).
   # amy-specific: on other machines dave may legitimately be 1000.
   users.users.dave.uid = 1001;
+  # Consequence for the vault NFS export (sec=sys): uid 1000 from amy is
+  # `dave` on bam, so grmpf - not amy's dave - is the principal that reads
+  # /vault. Give grmpf the `vault` reader group (vault-nfs-client.nix only
+  # adds dave); the client sends its own gid list, so membership must be
+  # local.
+  users.users.grmpf.extraGroups = [ "vault" ];
 
   # required by zfs
   networking.hostId = "5eb1bf28";

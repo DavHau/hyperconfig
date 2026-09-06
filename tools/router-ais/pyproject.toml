@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "router-ais"
+version = "0.1.0"
+description = "Manage the AIS ZTE F6107A router: login and IPv6 inbound-allow rules"
+requires-python = ">=3.11"
+dependencies = ["requests", "pillow", "pytesseract", "cryptography"]
+
+[project.scripts]
+router-ais = "router_ais.cli:main"
+
+[tool.setuptools]
+packages = ["router_ais"]

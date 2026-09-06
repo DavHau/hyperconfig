@@ -6,6 +6,10 @@
 # Default `hard` semantics are kept deliberately - `soft` trades hangs for
 # silent write corruption.
 {
+  imports = [ ./vault-ids.nix ];
+
+  users.users.dave.extraGroups = [ "vault" ];
+
   fileSystems."/vault" = {
     device = "bam.wg-vault:/vault";
     fsType = "nfs";
