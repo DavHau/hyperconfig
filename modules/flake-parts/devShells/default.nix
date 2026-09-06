@@ -39,6 +39,8 @@
           inputs'.clan-core.packages.clan-cli
           clan-fast
           esphome-fhs
+          self'.packages.router-ais
+          self'.packages.router-cm-beryl
         ];
       };
 

@@ -8,7 +8,8 @@
 # gets onto that interface only by holding one of the three private keys in
 # the instance's peer list - the WireGuard key list IS the mount ACL. sec=sys
 # on top of that is fine: all members are single-admin machines with
-# declarative UIDs.
+# declarative UIDs. Per-user authorization is file modes on the datasets,
+# with the principals pinned in ./vault-ids.nix.
 #
 # NFSv4-only keeps the surface to a single TCP port (2049); v3, UDP and the
 # rpcbind/mountd port zoo stay off the wire.
@@ -18,6 +19,10 @@ let
   wgVaultSubnet = "${config.clan.core.vars.generators."wireguard-network-wg-vault".files.prefix.value}::/56";
 in
 {
+  imports = [ ./vault-ids.nix ];
+
+  users.users.dave.extraGroups = [ "vault" ];
+
   services.nfs.server = {
     enable = true;
     # /vault itself is a plain dir on the XFS root; crossmnt makes the zfs
