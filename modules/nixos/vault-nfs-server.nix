@@ -9,7 +9,9 @@
 # the instance's peer list - the WireGuard key list IS the mount ACL. sec=sys
 # on top of that is fine: all members are single-admin machines with
 # declarative UIDs. Per-user authorization is file modes on the datasets,
-# with the principals pinned in ./vault-ids.nix.
+# with the principals pinned in ./vault-ids.nix. no_root_squash: root on any
+# peer is root on the pool - the peers are all admin-owned, and squashing
+# only got in the way of admin work on the momentum tree.
 #
 # NFSv4-only keeps the surface to a single TCP port (2049); v3, UDP and the
 # rpcbind/mountd port zoo stay off the wire.
@@ -27,7 +29,7 @@ in
     enable = true;
     # /vault itself is a plain dir on the XFS root; crossmnt makes the zfs
     # dataset mounts beneath it (parquet, photos, media, misc) traversable.
-    exports = "/vault ${wgVaultSubnet}(rw,crossmnt,no_subtree_check)";
+    exports = "/vault ${wgVaultSubnet}(rw,crossmnt,no_subtree_check,no_root_squash)";
   };
 
   # v4.2 only: no v3, no UDP.
