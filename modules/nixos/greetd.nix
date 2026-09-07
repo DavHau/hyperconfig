@@ -1,5 +1,10 @@
 { pkgs, lib, ... }:
 {
+  # spaces' desktop profile now defaults to COSMIC + cosmic-greeter
+  # (spaces.nix, mkDefault); that module also claims greetd's default
+  # session. This host stays on tuigreet -> niri.
+  services.displayManager.cosmic-greeter.enable = false;
+
   services.greetd = {
     enable = true;
     settings = {
