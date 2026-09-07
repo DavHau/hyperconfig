@@ -10,11 +10,11 @@
 #
 # What works and what does not (measured 2026-09-06):
 #   - a symlink into /vault dangles in the guest: bind mount needed.
-#   - root is squashed on the NFS client and virtiofsd resolves guest reads
-#     with those squashed credentials as well: the guest reads only what is
-#     o+r/o+x, even files momentum owns. The tree is therefore 2755/644
-#     (momentum's umask 022 default); the wg-vault ACL is the perimeter and
-#     group vault is not needed for this dataset.
+#   - virtiofsd resolves guest reads with the host's NFS credentials. With
+#     no_root_squash (vault-nfs-server.nix) guest root is real root on this
+#     dir, and the bind mount below is the only vault path the guest sees.
+#     The tree is 2775/664 so group vault (dave/grmpf) can write alongside
+#     momentum.
 #   - nofail keeps boot independent of bam; the automount materializes on
 #     first access as elsewhere.
 #   - read-only: the microVM must never modify the datasets; they are written

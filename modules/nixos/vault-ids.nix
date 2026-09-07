@@ -3,22 +3,31 @@
 # uid/gid on a client IS the identity nfsd checks against bam's file modes;
 # anything not pinned identically on both sides is meaningless as an ACL.
 #
-# Authorization on the pool is plain Unix modes, set once by hand on bam
-# (not tmpfiles: the datasets are nofail mounts and a rule that ran against
-# an unmounted /vault would chmod the XFS root's placeholder dirs):
+# Authorization on the pool is Unix modes plus one POSIX ACL, set once by
+# hand on bam (not tmpfiles: the datasets are nofail mounts and a rule that
+# ran against an unmounted /vault would chmod the XFS root's placeholder
+# dirs). The datasets are acltype=posix; a default ACL `g:vault:rwx` on every
+# directory makes files written by any writer group-writable regardless of
+# that writer's umask:
+#
+#   setfacl -R -m g:vault:rwX -m d:g:vault:rwx <dir>
 #
 #   /vault, /vault/parquet            root:root  0755   traversal for everyone
 #   /vault/parquet/depth, photos,
-#     media, misc                      root:vault 0750   readers only
-#   /vault/parquet/momentum            momentum:vault 2755, files 644: momentum
-#                                      writes; readable by any uid inside the
-#                                      wg-vault perimeter (its hermes microVM
-#                                      reads arrive as squashed root, see
-#                                      momentum-state.nix)
+#     media, misc                      root:vault 2770   group writes, setgid so
+#                                      new subdirs stay group vault; nothing
+#                                      for others (momentum stays out)
+#   /vault/parquet/momentum            momentum:vault 2775, files 664: momentum
+#                                      and group vault write; readable by any
+#                                      uid inside the wg-vault perimeter (its
+#                                      hermes microVM, see momentum-state.nix)
 #
-# `vault` = read access to the datasets (dave, stefan; grmpf on amy, where
-# uid 1000 is grmpf). `momentum` = a single-purpose account whose only
-# writable data is its own directory.
+# `vault` = read+write on the datasets. Members: dave (uid 1000 on bam/som/
+# vit, 1001 on amy), grmpf (amy, uid 1000 - on the wire the same principal
+# as dave elsewhere), stefan. The client sends its own gid list, so
+# membership is granted per host. root on any client is root on the pool
+# (no_root_squash, vault-nfs-server.nix). `momentum` = a single-purpose
+# account whose only writable data is its own directory.
 #
 # 1100/1101 sit above the auto-allocated range in use (agent landed on 1002
 # and already collides with stefan's pin on vit).
