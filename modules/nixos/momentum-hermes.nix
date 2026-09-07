@@ -77,4 +77,21 @@ in
     };
     environment.TELEGRAM_REQUIRE_MENTION = "true";
   };
+
+  # One shared session for the whole room. By default hermes keys a group
+  # session per sender (agent:main:telegram:group:<chat>:<uid>, gateway/
+  # session.py build_session_key), so members talk to separate agents and a
+  # /model override only ever binds to the issuer's lane. Both flags must
+  # agree - the adapter reads its own copy and the gateway drops routed
+  # events whose key disagrees (gateway/platforms/base.py handle_message).
+  #
+  # Set on momentum's GUEST only: services.hermes-microvm.settings is
+  # host-global (every VM on som), so this goes through the microvm's own
+  # config instead. Deep-merged into the guest config.yaml on each boot.
+  microvm.vms."hermes-momentum".config = {
+    services.hermes-agent.settings = {
+      group_sessions_per_user = false;
+      gateway.platforms.telegram.extra.group_sessions_per_user = false;
+    };
+  };
 }

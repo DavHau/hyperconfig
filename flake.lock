@@ -532,6 +532,27 @@
         "type": "github"
       }
     },
+    "disko_2": {
+      "inputs": {
+        "nixpkgs": [
+          "spaces",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1781152676,
+        "narHash": "sha256-RxWs5ND31KzTG7wvMM+PMfUjyNpmIEr999lqNARaM5o=",
+        "owner": "nix-community",
+        "repo": "disko",
+        "rev": "ff8702b4de27f72b4c78573dfb89ec74e36abdf1",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "disko",
+        "type": "github"
+      }
+    },
     "easytier": {
       "flake": false,
       "locked": {
@@ -2620,6 +2641,7 @@
     },
     "spaces_2": {
       "inputs": {
+        "disko": "disko_2",
         "hermes-agent": "hermes-agent_2",
         "home-manager": "home-manager_4",
         "llm-agents": "llm-agents_4",
@@ -2630,13 +2652,12 @@
         "voxtype": "voxtype_2"
       },
       "locked": {
-        "lastModified": 1787554482,
-        "narHash": "sha256-nT4A6tzUGEFf1b2KoEUzZyplBMo9Q34uANr2r9buL1U=",
-        "ref": "refs/heads/main",
-        "rev": "28d1d6a2845ea6d73363303257127c714b821c9f",
-        "revCount": 719,
+        "lastModified": 1788775142,
+        "narHash": "sha256-Eh444r9fUxq5Z3wWvC8DU3l+6irRZ9i90Xlm5RX2JlM=",
+        "rev": "1d32d22c5080b42e1a65343fee2de18ccb56a1f6",
+        "revCount": 828,
         "type": "git",
-        "url": "https://git.geninf.io/spaces/spaces-os"
+        "url": "file:///home/grmpf/synced/projects/spaces"
       },
       "original": {
         "type": "git",
