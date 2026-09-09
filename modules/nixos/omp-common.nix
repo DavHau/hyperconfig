@@ -62,8 +62,9 @@
     "  p0:"
     "    baseUrl: https://inference.p0.contact/v1"
     "    api: openai-completions"
-    # env var NAME omp reads, never the token (inferenceApiKeyExport fills it)
-    "    apiKey: P0_API_KEY"
+    # Resolved by running the command (model-registry.ts resolveCommandConfig);
+    # the token never sits in a config file or the store. inference-api-key.nix.
+    "    apiKey: \"!p0-api-key\""
     "    discovery:"
     "      type: litellm"
     "    modelOverrides:"
@@ -115,21 +116,6 @@
     lib.optional llama-swap-enabled llamaSwapProvider
     ++ [ p0Provider ];
 in rec {
-  # Token into the env, never into a config file or the Nix store. The
-  # per-user copy (hyper.inferenceApiKey.users, inference-api-key.nix) wins
-  # over the owner's var file. Guarded on readability so a machine without
-  # `clan vars generate` still launches (that provider just 401s).
-  inferenceApiKeyExport = ''
-    for _tok in ${config.hyper.inferenceApiKey.userTokenPath "$(id -un)"} \
-                ${config.clan.core.vars.generators.inference-api-key.files.token.path}; do
-      if [ -r "$_tok" ]; then
-        P0_API_KEY="$(cat "$_tok")"
-        export P0_API_KEY
-        break
-      fi
-    done
-    unset _tok
-  '';
   # Disabled with the provider block above; the interpolation would reference
   # config.clan.core.vars.generators.teamclaude-api-key, which does not exist
   # while ./teamclaude-api-key.nix is not imported in ./dave.nix.
