@@ -1,14 +1,16 @@
 { pkgs, inputs, lib, config, ... }:
-# afk: the omp-based harness from the local ../afk flake checkout, the only omp
-# harness on dave's machines. Default package is the non-sandboxed variant
-# (private Nix store); afk-nosand is opt-in per host.
+# afk: the omp-based harness (profile + patchset) from the local ../afk flake
+# checkout. Default package is the non-sandboxed variant (private Nix store);
+# afk-nosand is opt-in per host. The bare `omp` and `pi` from spaces'
+# agentHarnesses stay beside it as unrelated harnesses; ./omp-p0.nix gives
+# bare omp the same models.yml, and every harness shares the p0 key through
+# `p0-api-key` (inference-api-key.nix) and the skills in ~/.agents/skills.
 #
 # afk owns its own profile bootstrap (distribution config.yml via
 # $OMP_DISTRO_CONFIG, the jj/isolation rules, the superpowers/direnv
 # extensions), so this wrapper only adds what afk does NOT ship:
 #
-# - the inference endpoint token (P0_API_KEY, see ./inference-api-key.nix)
-#   plus the models.yml referencing it (providers live in omp-common.nix),
+# - the models.yml with the p0 provider (omp-common.nix),
 # - the spaces MCP server (mcp.json): stdio bridge to the per-user
 #   spaces-integration-gateway socket,
 # - the host-specific always-apply rule (repo layout) and the top-level
@@ -30,8 +32,6 @@ in
       preHook = ''
         config_dir="$HOME/.omp/profiles/afk/agent"
         mkdir -p "$config_dir/rules" "$config_dir/extensions" "$config_dir/skills"
-        ${common.inferenceApiKeyExport}
-        # TeamClaude gateway key export: disabled, see ./omp-common.nix.
         ln -sf ${common.agentsFile} "$config_dir/AGENTS.md"
         # Host-specific always-apply rule (repo layout); the nix/direnv/jj
         # rules live in afk. Rules reach the main loop AND every subagent

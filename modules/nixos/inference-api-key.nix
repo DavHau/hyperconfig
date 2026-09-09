@@ -14,11 +14,15 @@
 #   clan vars get <machine> inference-api-key/token
 #
 # The var file belongs to the desktop user. Any other account that runs
-# the omp wrapper gets its own copy: `hyper.inferenceApiKey.users` runs a
-# root oneshot per user that installs the token 0400 under
+# a harness gets its own copy: `hyper.inferenceApiKey.users` runs a root
+# oneshot per user that installs the token 0400 under
 # /run/inference-api-key/<user>/token (re-run on rotation via
-# restartUnits). The wrapper's export (omp-common.nix) tries that path
-# before the var file.
+# restartUnits).
+#
+# `p0-api-key` prints the token for the calling user (its copy first,
+# then the var file). models.yml names it as `apiKey: "!p0-api-key"`, so
+# every harness (afk, bare omp, pi) resolves the key by running it and no
+# wrapper has to export anything. Exit 1 when neither file is readable.
 { config, lib, pkgs, ... }:
 let
   cfg = config.hyper.inferenceApiKey;
@@ -41,6 +45,20 @@ in
   };
 
   config = {
+    environment.systemPackages = [
+      (pkgs.writeShellApplication {
+        runtimeInputs = [ pkgs.coreutils ];
+        name = "p0-api-key";
+        text = ''
+          for f in ${cfg.userTokenPath "$(id -un)"} ${token.path}; do
+            [ -r "$f" ] && exec cat "$f"
+          done
+          echo "p0-api-key: no readable inference-api-key token for $(id -un)" >&2
+          exit 1
+        '';
+      })
+    ];
+
     systemd.services = lib.listToAttrs (
       map (
         user:

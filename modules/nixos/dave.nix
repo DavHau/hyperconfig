@@ -39,8 +39,10 @@ in
     # herdr wrapped with the community herdr-jj plugin (jj workspaces).
     ./herdr-jj.nix
     ./afk.nix
-    # Bearer token for the fleet inference endpoint, exported into the afk
-    # wrapper above.
+    # Same p0 models.yml for spaces' bare omp.
+    ./omp-p0.nix
+    # Bearer token for the fleet inference endpoint; `p0-api-key` hands it
+    # to every harness's models.yml.
     ./inference-api-key.nix
     # TeamClaude gateway key (anthropic provider override in models.yml):
     # disabled with the provider block, see ./omp-common.nix.
