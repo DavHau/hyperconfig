@@ -11,5 +11,8 @@ in
     "qwen3.5:35b" = {
       cmd = "${llama-server} -hf unsloth/Qwen3.5-35B-A3B-GGUF:Q4_K_M --port \${PORT}";
     };
+    "minicpm5:2b" = {
+      cmd = "${llama-server} -hf openbmb/MiniCPM5-2B-GGUF:Q4_K_M --port \${PORT}";
+    };
   };
 }
