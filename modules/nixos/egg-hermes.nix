@@ -14,11 +14,13 @@
 {
   imports = [ ./hermes-common.nix ];
 
-  # Plain account; native mode derives its backend ports from the runtime
-  # uid, so no static uid is needed. The spaces desktop profile
-  # auto-provisions every normal user, which merges with the entry below.
+  # The spaces desktop profile auto-provisions every normal user, which
+  # merges with the entry below. uid pinned to what som allocated: native
+  # mode binds the dashboard backend at 20000 + uid, and
+  # ./egg-dashboard.nix needs that port as a constant.
   users.users.egg = {
     isNormalUser = true;
+    uid = 1004;
     openssh.authorizedKeys.keys = [
       # github.com/allouis.keys (fetched 2026-09-09)
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBcx+vaa7+HgTcP0tpFpgs4SpzoViy8/fERFL6YWBfb0 allouis"
@@ -35,7 +37,7 @@
     };
   };
 
-  # oh-my-pi: the afk-wrapped `omp` (./afk.nix, on PATH for every user via
+  # oh-my-pi: the `afk` wrapper (./afk.nix, on PATH for every user via
   # dave.nix) exports P0_API_KEY and ships a models.yml with the p0
   # provider (./omp-common.nix). The var file itself is owner-only (dave);
   # a per-user copy at /run/inference-api-key/egg/token gives egg's

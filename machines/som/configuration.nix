@@ -18,6 +18,7 @@
     ../../modules/nixos/momentum-state.nix
     ../../modules/nixos/momentum-hermes.nix
     ../../modules/nixos/egg-hermes.nix
+    ../../modules/nixos/egg-dashboard.nix
     ../../modules/nixos/hermes-claude-auth.nix
     ../../modules/nixos/public-ipv6-token.nix
   ];
