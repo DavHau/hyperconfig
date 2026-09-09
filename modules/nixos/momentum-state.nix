@@ -1,12 +1,12 @@
-# momentum's vault directory inside its hermes microVM (som only).
+# momentum's vault directory for its hermes agent (som only).
 #
 # momentum's datasets live on bam at /vault/parquet/momentum (vault-ids.nix).
-# The guest has no wg-vault, so the host bind-mounts that directory into the
-# hermes exchange dir as /home/momentum/hermes/state: host path == guest path,
-# and everything momentum keeps in the exchange dir (repos, workspace) can
-# point at it with a relative symlink. virtiofsd serves submounts of the
-# exchange dir and mount propagation is live, so the guest sees it without a
-# restart.
+# The host bind-mounts that directory read-only into the hermes exchange dir
+# as /home/momentum/hermes/state, so everything momentum keeps in the
+# exchange dir (repos, workspace) can point at it with a relative symlink.
+# The agent now runs natively (momentum-hermes.nix) and could also read
+# /vault directly; the mount keeps the path the agent's existing state
+# references. The VM-era notes below still describe the mount's rationale.
 #
 # What works and what does not (measured 2026-09-06):
 #   - a symlink into /vault dangles in the guest: bind mount needed.

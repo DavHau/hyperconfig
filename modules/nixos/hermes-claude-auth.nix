@@ -86,8 +86,10 @@ in
   config = lib.mkIf cfg.enable {
     services.hermes-microvm.extraPackages = [ pkgs.claude-code ];
     # VM name = hlib.vmName in the spaces hermes module ("hermes-<user>").
+    # VM users only: a native user (native.nix) runs host units, and a
+    # microvm.vms entry for it would declare a guest nobody builds.
     microvm.vms = lib.mapAttrs' (
       user: _: lib.nameValuePair "hermes-${user}" { config = guestModule; }
-    ) cfg.enabledUsers;
+    ) cfg.vmUsers;
   };
 }

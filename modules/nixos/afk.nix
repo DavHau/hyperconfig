@@ -7,7 +7,7 @@
 # $OMP_DISTRO_CONFIG, the jj/isolation rules, the superpowers/direnv
 # extensions), so this wrapper only adds what afk does NOT ship:
 #
-# - the inference endpoint token (INFERENCE_API_KEY, see ./inference-api-key.nix)
+# - the inference endpoint token (P0_API_KEY, see ./inference-api-key.nix)
 #   plus the models.yml referencing it (providers live in omp-common.nix),
 # - the spaces MCP server (mcp.json): stdio bridge to the per-user
 #   spaces-integration-gateway socket,
