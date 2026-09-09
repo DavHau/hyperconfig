@@ -68,7 +68,7 @@
     "      type: litellm"
     "    modelOverrides:"
   ]
-  ++ p0ModelOverride "Qwen3.8-27B-FP8");
+  ++ p0ModelOverride "qwen");
   # TeamClaude: pooled Claude subscription gateway on pubproxy01 (project-zero
   # modules/nixos/teamclaude-gateway.nix, docs/teamclaude-gateway.md).
   #
