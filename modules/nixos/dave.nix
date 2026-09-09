@@ -12,6 +12,7 @@ in
     ./common-tools.nix
     ./sbox.nix
     ./sbox-age.nix
+    ./sbox-mullvad.nix
     ./nix-ssh-client.nix
     ./ssh-tpm-agent.nix
     ./etc-hosts.nix
