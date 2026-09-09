@@ -141,7 +141,7 @@ in
         # Env var NAME, never the token: resolved by the agent from the
         # credential-seeded .env (hermes_cli/runtime_provider.py).
         key_env = "P0_API_KEY";
-        default_model = "Qwen3.8-27B-FP8";
+        default_model = "qwen";
         # Qwen only reasons when the chat template is told to; hermes spelling
         # of omp's compat.thinkingFormat: qwen-chat-template (omp-common.nix).
         extra_body.chat_template_kwargs.enable_thinking = true;
@@ -151,7 +151,7 @@ in
       initialModel = lib.mkOverride 900 {
         provider = "p0";
         base_url = "https://inference.p0.contact/v1";
-        default = "Qwen3.8-27B-FP8";
+        default = "qwen";
       };
 
       users = lib.mapAttrs (name: u: {
