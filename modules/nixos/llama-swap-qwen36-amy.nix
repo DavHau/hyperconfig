@@ -3,8 +3,10 @@
 # ~80 GiB unified RAM. Counterpart of llama-swap-qwen36.nix (vit, dGPU).
 #
 #   - Same GGUFs as vit's module (identical url+hash => identical store
-#     path, downloaded once per store): unsloth UD-IQ4_XS Dynamic 2.0
-#     quant from the MTP repo (~17 GiB) + F16 vision projector.
+#     path, downloaded once per store): unsloth Dynamic 2.0 quants from
+#     the MTP repo -- UD-IQ4_XS (~17 GiB, default) and UD-IQ2_XXS
+#     (~11 GiB, lighter/faster; RAM headroom for VMs) + F16 vision
+#     projector.
 #   - iGPU has no dedicated VRAM: weights live in GTT (system RAM), so
 #     there is no VRAM budget to split against and no --n-cpu-moe; full
 #     offload (-ngl 99) lets Vulkan run attention/FFN while the memory
@@ -36,6 +38,12 @@ let
     curlOptsList = bigFetchCurlOpts;
   };
 
+  iq2xxs = pkgs.fetchurl {
+    url = "${hfRepo}/Qwen3.6-35B-A3B-UD-IQ2_XXS.gguf";
+    hash = "sha256-Yn4rBfgwiESOJ4Yew5LVbvwrF4eDyuWt+krS2YhEEgM=";
+    curlOptsList = bigFetchCurlOpts;
+  };
+
   # Vision projector (Qwen3.6 is natively multimodal).
   mmproj = pkgs.fetchurl {
     url = "${hfRepo}/mmproj-F16.gguf";
@@ -47,34 +55,35 @@ let
     cudaSupport = false;
     rocmSupport = false;
   };
+
+  mkCmd = model: lib.concatStringsSep " " [
+    (lib.getExe' llama-cpp-vulkan "llama-server")
+    "-m ${model}"
+    "--mmproj ${mmproj}"
+    "--port \${PORT}"
+    "--jinja"
+    # 200K context; q8_0 KV halves the (already small) cache. If
+    # long context degrades, switch to bf16 KV cache instead.
+    "-c 204800"
+    "--cache-type-k q8_0"
+    "--cache-type-v q8_0"
+    "-ngl 99"
+    # MTP speculative decode (model's built-in MTP head as
+    # self-speculative draft). --spec-type draft-mtp is REQUIRED to
+    # activate the MTP tensors; draft-n-max 2 is unsloth's sweet
+    # spot on most hardware (hardware-dependent -- try 1..6).
+    "--spec-type draft-mtp"
+    "--spec-draft-n-max 2"
+    # Recommended thinking-mode sampling for general/agentic tasks.
+    "--temp 1.0"
+    "--top-p 0.95"
+    "--top-k 20"
+    "--min-p 0.0"
+  ];
 in
 {
   services.llama-swap.settings.models = {
-    "qwen3.6:35b-iq4_xs" = {
-      cmd = lib.concatStringsSep " " [
-        (lib.getExe' llama-cpp-vulkan "llama-server")
-        "-m ${iq4xs}"
-        "--mmproj ${mmproj}"
-        "--port \${PORT}"
-        "--jinja"
-        # 200K context; q8_0 KV halves the (already small) cache. If
-        # long context degrades, switch to bf16 KV cache instead.
-        "-c 204800"
-        "--cache-type-k q8_0"
-        "--cache-type-v q8_0"
-        "-ngl 99"
-        # MTP speculative decode (model's built-in MTP head as
-        # self-speculative draft). --spec-type draft-mtp is REQUIRED to
-        # activate the MTP tensors; draft-n-max 2 is unsloth's sweet
-        # spot on most hardware (hardware-dependent -- try 1..6).
-        "--spec-type draft-mtp"
-        "--spec-draft-n-max 2"
-        # Recommended thinking-mode sampling for general/agentic tasks.
-        "--temp 1.0"
-        "--top-p 0.95"
-        "--top-k 20"
-        "--min-p 0.0"
-      ];
-    };
+    "qwen3.6:35b-iq4_xs".cmd = mkCmd iq4xs;
+    "qwen3.6:35b-iq2_xxs".cmd = mkCmd iq2xxs;
   };
 }
