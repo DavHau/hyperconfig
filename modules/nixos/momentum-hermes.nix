@@ -1,10 +1,15 @@
-# momentum's hermes microVM on som: OpenRouter brain + a Telegram bot that
+# momentum's hermes agent on som: OpenRouter brain + a Telegram bot that
 # lives in ONE group chat where several allow-listed people prompt it.
 #
-# The VM itself is auto-provisioned (spaces desktop profile, one VM per
-# normal user); this only wires its secrets and telegram gating. Defining
-# secretEnv replaces the module's openrouter default, so OPENROUTER_API_KEY
-# is re-listed (same shared var pi-chat uses, from pi-chat-openrouter.nix).
+# Runs NATIVE (services.hermes-microvm.users.<n>.native, spaces
+# modules/nixos/hermes/native.nix): host units hermes-agent-momentum /
+# hermes-dashboard-momentum as the momentum account, no microVM. The state
+# vault (/var/lib/hermes-microvm/momentum/state-vault) is the same path in
+# both modes, so the sessions of the earlier VM carry over. One vault has
+# one runner: after the switch that retired the VM, stop the still-loaded
+# instance once (systemctl stop microvm@hermes-momentum) so the native
+# units start. This file wires the telegram gating on top of the common
+# secret plumbing (./hermes-common.nix: openrouter, p0, restart hooks).
 #
 # Telegram authorization model (hermes gateway/authz_mixin.py):
 #   TELEGRAM_ALLOWED_USERS   per-SENDER allowlist, applies in DMs and groups.
@@ -25,55 +30,30 @@
 # join) the bot to the group. Chat id: add @userinfobot to the group briefly.
 #
 #   clan vars generate som --generator telegram   # token, allowed_users, chat_id, mention_patterns
-{ config, ... }:
-let
-  telegram = config.clan.core.vars.generators.telegram;
-  vm = "microvm@hermes-momentum.service";
-in
 {
-  clan.core.vars.generators.openrouter.files.apikey.restartUnits = [ vm ];
+  imports = [ ./hermes-common.nix ];
 
-  # Per-machine generator (share defaults to false): som's bot, not amy's.
-  clan.core.vars.generators.telegram = {
-    prompts.token = {
-      type = "hidden";
-      persist = true;
-      description = "Telegram bot token from @BotFather";
-    };
-    prompts.allowed_users = {
-      type = "hidden";
-      persist = true;
-      description = "Comma-separated numeric Telegram user ids allowed to prompt the bot";
-    };
-    prompts.chat_id = {
-      type = "hidden";
-      persist = true;
-      description = "Telegram group chat id the bot answers in (negative -100... supergroup id)";
-    };
-    prompts.mention_patterns = {
-      type = "hidden";
-      persist = true;
-      description = "Regex of wake words (alternation, e.g. name1|name 1|nick), matched case-insensitively";
-    };
-    files.token.restartUnits = [ vm ];
-    files.allowed_users.restartUnits = [ vm ];
-    files.chat_id.restartUnits = [ vm ];
-    files.mention_patterns.restartUnits = [ vm ];
-  };
-
-  services.hermes-microvm.users.momentum = {
+  hyper.hermes.users.momentum = {
+    native = true;
     # Everything telegram-side is a secret (the chat id would let anyone
     # target the room; the wake words name the bot), so all ride in as
     # credentials. The patterns file holds ONE regex (alternation), not a
     # JSON list: the adapter treats a non-JSON value as a single pattern.
-    secretEnv = {
-      OPENROUTER_API_KEY = config.clan.core.vars.generators.openrouter.files.apikey.path;
-      TELEGRAM_BOT_TOKEN = telegram.files.token.path;
-      TELEGRAM_ALLOWED_USERS = telegram.files.allowed_users.path;
-      TELEGRAM_ALLOWED_CHATS = telegram.files.chat_id.path;
-      # Proactive/cron output goes to the room as well.
-      TELEGRAM_HOME_CHANNEL = telegram.files.chat_id.path;
-      TELEGRAM_MENTION_PATTERNS = telegram.files.mention_patterns.path;
+    telegram = {
+      enable = true;
+      # Pre-common var name; vars/per-machine/som/telegram/ holds the values.
+      generator = "telegram";
+      # On top of the common token + allowed_users:
+      prompts = {
+        chat_id = "Telegram group chat id the bot answers in (negative -100... supergroup id)";
+        mention_patterns = "Regex of wake words (alternation, e.g. name1|name 1|nick), matched case-insensitively";
+      };
+      env = {
+        TELEGRAM_ALLOWED_CHATS = "chat_id";
+        # Proactive/cron output goes to the room as well.
+        TELEGRAM_HOME_CHANNEL = "chat_id";
+        TELEGRAM_MENTION_PATTERNS = "mention_patterns";
+      };
     };
     environment.TELEGRAM_REQUIRE_MENTION = "true";
   };
@@ -85,13 +65,12 @@ in
   # agree - the adapter reads its own copy and the gateway drops routed
   # events whose key disagrees (gateway/platforms/base.py handle_message).
   #
-  # Set on momentum's GUEST only: services.hermes-microvm.settings is
-  # host-global (every VM on som), so this goes through the microvm's own
-  # config instead. Deep-merged into the guest config.yaml on each boot.
-  microvm.vms."hermes-momentum".config = {
-    services.hermes-agent.settings = {
-      group_sessions_per_user = false;
-      gateway.platforms.telegram.extra.group_sessions_per_user = false;
-    };
+  # services.hermes-microvm.settings is host-global (every agent on som,
+  # merged into each config.yaml on every start). The other agents here are
+  # DM bots or have no telegram group, so the shared-session flags change
+  # nothing for them.
+  services.hermes-microvm.settings = {
+    group_sessions_per_user = false;
+    gateway.platforms.telegram.extra.group_sessions_per_user = false;
   };
 }
