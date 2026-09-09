@@ -30,5 +30,11 @@
   # matching AIS router allow rule is `router-ais ipv6-rules list` -> "som".
   networking.publicIPv6Token = "::c0de:ba5e";
 
+  # The spaces desktop profile defaults llama-swap on, which registers a
+  # local provider in every harness's models.yml (omp-common.nix) and in the
+  # hermes settings, and omp picks it as the first-run default. som's iGPU
+  # is not a brain; p0 is (hermes-common.nix). Off, as on vit.
+  services.llama-swap.enable = false;
+
   system.stateVersion = "25.11";
 }
