@@ -10,16 +10,16 @@
         "wrappers": "wrappers"
       },
       "locked": {
-        "lastModified": 1788408068,
-        "narHash": "sha256-36qTemJzTMrhce7Q9xPD4SM9Z7VkZ1u0MRLrqM5sbXs=",
+        "lastModified": 1789012222,
+        "narHash": "sha256-+kJadzCEp23n20EKB7dflhkmahrSQVgxgN7PjsUjm6g=",
         "ref": "master",
-        "rev": "03e0bf20c94a73ba3c67f9ce1c99d5e999d986c6",
-        "revCount": 37,
+        "rev": "b419098e9ae41f3463ad68b472399561e896de4a",
+        "revCount": 38,
         "type": "git",
         "url": "file:///home/grmpf/synced/projects/afk"
       },
       "original": {
-        "rev": "03e0bf20c94a73ba3c67f9ce1c99d5e999d986c6",
+        "rev": "b419098e9ae41f3463ad68b472399561e896de4a",
         "type": "git",
         "url": "file:///home/grmpf/synced/projects/afk"
       }
@@ -682,11 +682,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1788306937,
-        "narHash": "sha256-lbrI1UYVpFgKSsyrU9oeF7FHfnu8nLD9ja0ou9f2rxk=",
+        "lastModified": 1788450739,
+        "narHash": "sha256-glZLQlzIn1fXH6PazR2iUmTo7kzzyYSshrWhLS9TqCU=",
         "owner": "hercules-ci",
         "repo": "flake-parts",
-        "rev": "f16b25b8c3d2809b87925d0b76652d7821a75c68",
+        "rev": "31729ca8cbdb4fa927b34e5f4353e6a83f39e993",
         "type": "github"
       },
       "original": {
@@ -1393,10 +1393,10 @@
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1788392098,
-        "narHash": "sha256-7Ouya75MfV8m8WPokr2X45Zj/fWX7JGMvEzQNnwgR2k=",
+        "lastModified": 1788839367,
+        "narHash": "sha256-O5gDvHWgLwkrGPPpqWS5o7wVQxQBWZOYR6t7kt6sX1U=",
         "ref": "refs/heads/main",
-        "rev": "ceb3bcb057ab9066541fb1334934d75270164e2b",
+        "rev": "3e98bf69b4daad2bee9cc9da412ad258b56e1a98",
         "shallow": true,
         "type": "git",
         "url": "https://github.com/numtide/llm-agents.nix"
@@ -2094,6 +2094,22 @@
         "type": "github"
       }
     },
+    "nixpkgs-llama-cpp": {
+      "locked": {
+        "lastModified": 1788982683,
+        "narHash": "sha256-PJCTsE4I20CrJJPcye9/z6brRFysG5+aygr/dZK097k=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "5052d7ccbcfb7e4ae1586cb2ecf95a2e3707dce9",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixpkgs-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
     "nixpkgs-regression": {
       "locked": {
         "lastModified": 1643052045,
@@ -2559,6 +2575,7 @@
           "spaces",
           "nixpkgs"
         ],
+        "nixpkgs-llama-cpp": "nixpkgs-llama-cpp",
         "nixpkgs-riscv": [
           "nixpkgs"
         ],
