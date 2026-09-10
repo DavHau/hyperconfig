@@ -69,8 +69,16 @@ let
 
   # nCpuMoe: MoE expert blocks (of 40 layers) streamed from system RAM.
   # Sized so GPU-resident weights + ~2 GiB KV (200K, q8_0) + compute
-  # buffers stay under 16 GiB. Lower to fill VRAM once measured on the
-  # real card (watch nvidia-smi at full context).
+  # buffers stay under 16 GiB. Measured on vit (RTX 5080 Mobile,
+  # 16303 MiB, driver 595.91, llama-cpp b10408, 2026-09-10; 200-token
+  # greedy sample, so the tok/s are indicative only):
+  #   16: OOM at load (mmproj's 858 MiB CUDA buffer is the last alloc)
+  #   18: 15828 MiB used, 44.8 tok/s  -- 475 MiB headroom, too tight
+  #   20: 15366 MiB used, 40.4 tok/s  -- ~0.9 GiB headroom  <- chosen
+  #   22: 14654 MiB used
+  #   24: 13954 MiB used
+  # Image requests allocate CLIP compute buffers on top of the load-time
+  # figure; if vision requests OOM, go to 22.
   mkCmd = { model, mmprojFile ? mmproj, nCpuMoe }: lib.concatStringsSep " " [
     llama-server
     "-m ${model}"
@@ -102,7 +110,7 @@ in
     # Name is referenced by amy's hermes VMs (vit.d:8012) -- keep in sync
     # with modules/nixos/hermes/site.nix settings.model.default.
     "qwen3.6:35b-iq4_xs" = {
-      cmd = mkCmd { model = iq4xs; nCpuMoe = 16; };
+      cmd = mkCmd { model = iq4xs; nCpuMoe = 20; };
     };
     # "qwen3.6:35b-heretic-iq4_xs" = {
     #   cmd = mkCmd { model = hereticIq4xs; mmprojFile = hereticMmproj; nCpuMoe = 16; };

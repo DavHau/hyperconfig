@@ -9,6 +9,7 @@
     ../../modules/nixos/nvidia.nix
     ../../modules/nixos/llama-swap.nix
     ../../modules/nixos/llama-swap-qwen36.nix
+    ../../modules/nixos/llama-swap-qwen38-flash-vit.nix
     ../../modules/nixos/llama-swap-yggdrasil.nix
     ../../modules/nixos/storagebox.nix
     ../../modules/nixos/vault-nfs-client.nix
