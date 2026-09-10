@@ -16,6 +16,11 @@
     # nixpkgs-riscv.url = "git+https://github.com/davhau/nixpkgs?&ref=riscv&shallow=1";
     # nixpkgs-riscv.url = "git+https://github.com/DavHau/nixpkgs?&ref=dave&shallow=1";
     nixpkgs-riscv.follows = "nixpkgs";
+    # Newer nixpkgs ONLY for llama-cpp: the fleet nixpkgs (via spaces) lags
+    # the llama.cpp release train, and inference modules that need a recent
+    # arch/spec-decode fix pull their engine from here instead of forcing a
+    # fleet-wide bump. Consumers: llama-swap-nanbeige42-amy.nix.
+    nixpkgs-llama-cpp.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
     home-manager.url = "github:nix-community/home-manager";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
@@ -129,7 +134,7 @@
     # this input now only supplies `pi` (pi-agent.nix) and claude-code.
     llm-agents-cached.url = "github:numtide/llm-agents.nix";
 
-    afk.url = "git+file:///home/grmpf/synced/projects/afk?rev=03e0bf20c94a73ba3c67f9ce1c99d5e999d986c6";
+    afk.url = "git+file:///home/grmpf/synced/projects/afk?rev=b419098e9ae41f3463ad68b472399561e896de4a";
     afk.inputs.nixpkgs.follows = "nixpkgs";
 
     # ntop: nix-native htop (live builds, transfers, store, remotes) from the
