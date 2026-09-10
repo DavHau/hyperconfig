@@ -1,0 +1,1135 @@
+From 90fde1f7f7d5b69a3953c0d19b1aa35917caef7d Mon Sep 17 00:00:00 2001
+From: Josh Leverette <coder543@gmail.com>
+Date: Mon, 31 Aug 2026 20:30:06 -0500
+Subject: [PATCH 1/2] qwen4exp: direct reads for the lazy PLE table
+ (--lazy-mode on-direct)
+
+Each cold PLE row demand-faults a 4 KiB page for ~90 bytes of data,
+capping cold diverse-text prefill at 218-360 tok/s vs ~785 warm on
+GB10. All n-gram row indices of a ubatch are known host-side before
+the graph runs, so under the new LLAMA_LAZY_MODE_DIRECT
+(--lazy-mode on-direct) they are staged into an input tensor with
+sorted, deduplicated, parallel pread()s and dequantized exactly like
+ggml_get_rows; downstream kernels unchanged, table stays on disk.
+
+Cold diverse prefill on qwen3.8-flash-next: 542-741 tok/s (2.0-3.1x,
+within ~6% of warm); warm, decode and greedy outputs bit-identical.
+---
+ common/arg.cpp                    |   2 +
+ include/llama.h                   |   1 +
+ src/llama-mmap.cpp                |  12 +-
+ src/llama-mmap.h                  |   2 +
+ src/llama-model-loader.cpp        |   2 +-
+ src/models/models.h               |   8 +-
+ src/models/qwen4exp.cpp           | 231 ++++++++++++++++++++++++++++--
+ tools/llama-bench/llama-bench.cpp |   6 +-
+ 8 files changed, 247 insertions(+), 17 deletions(-)
+
+diff --git a/common/arg.cpp b/common/arg.cpp
+index 2669cacd6..d68ffc344 100644
+--- a/common/arg.cpp
++++ b/common/arg.cpp
+@@ -2737,10 +2737,12 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
+         {"-lzm", "--lazy-mode"}, "MODE",
+         "on-demand reading of certain tensors, for example per-layer embeddings (default: auto)\n"
+         "- on: read the rows of such tensors from disk on demand instead of keeping them resident (requires mmap)\n"
++        "- on-direct: like on, but the arch reads the rows with explicit pread()s instead of demand paging the mmap (currently only the qwen4exp PLE table)\n"
+         "- auto: on, but only for tensors larger than 4 GiB\n"
+         "- off: always keep them resident",
+         [](common_params & params, const std::string & value) {
+             /**/ if (value == "on")   { params.lazy_mode = LLAMA_LAZY_MODE_ON;   }
++            else if (value == "on-direct") { params.lazy_mode = LLAMA_LAZY_MODE_DIRECT; }
+             else if (value == "auto") { params.lazy_mode = LLAMA_LAZY_MODE_AUTO; }
+             else if (value == "off")  { params.lazy_mode = LLAMA_LAZY_MODE_OFF;  }
+             else { throw std::invalid_argument("invalid value"); }
+diff --git a/include/llama.h b/include/llama.h
+index ef7a012c4..8e61d104a 100644
+--- a/include/llama.h
++++ b/include/llama.h
+@@ -218,6 +218,7 @@ extern "C" {
+         LLAMA_LAZY_MODE_OFF  = 0, // always read the whole tensor up front
+         LLAMA_LAZY_MODE_AUTO = 1, // lazy only for marked tensors larger than 4 GiB (requires mmap)
+         LLAMA_LAZY_MODE_ON   = 2, // read the rows of tensors marked by the arch on demand (requires mmap)
++        LLAMA_LAZY_MODE_DIRECT = 3, // like ON, but the arch reads the rows with explicit pread()s instead of demand paging the mmap
+     };
+ 
+     enum llama_context_type {
+diff --git a/src/llama-mmap.cpp b/src/llama-mmap.cpp
+index 4d183cbc9..a29abe7f3 100644
+--- a/src/llama-mmap.cpp
++++ b/src/llama-mmap.cpp
+@@ -83,7 +83,7 @@ struct llama_file::impl {
+         return ret;
+     }
+ 
+-    impl(const char * fname, const char * mode, [[maybe_unused]] const bool use_direct_io = false) {
++    impl(const char * fname, const char * mode, [[maybe_unused]] const bool use_direct_io = false) : fname(fname) {
+         fp = ggml_fopen(fname, mode);
+         if (fp == NULL) {
+             throw std::runtime_error(format("failed to open %s: %s", fname, strerror(errno)));
+@@ -93,8 +93,7 @@ struct llama_file::impl {
+         size = tell();
+         seek(0, SEEK_SET);
+     }
+-
+-    impl(FILE * file) : owns_fp(false) {
++    impl(FILE * file) : fname("(file*)"), owns_fp(false) {
+         fp = file;
+         fp_win32 = (HANDLE) _get_osfhandle(_fileno(fp));
+         seek(0, SEEK_END);
+@@ -381,9 +380,10 @@ struct llama_file::impl {
+         }
+     }
+     int fd = -1;
+-    std::string fname;
+ #endif
+ 
++    std::string fname;
++
+     size_t read_alignment() const {
+         return alignment;
+     }
+@@ -408,6 +408,10 @@ size_t llama_file::size() const { return pimpl->size; }
+ size_t llama_file::read_alignment() const { return pimpl->read_alignment(); }
+ bool llama_file::has_direct_io() const { return pimpl->has_direct_io(); }
+ 
++const std::string & llama_file::name() const {
++    return pimpl->fname;
++}
++
+ int llama_file::file_id() const {
+ #ifdef _WIN32
+     return _fileno(pimpl->fp);
+diff --git a/src/llama-mmap.h b/src/llama-mmap.h
+index cc28c8a73..fb2f53729 100644
+--- a/src/llama-mmap.h
++++ b/src/llama-mmap.h
+@@ -22,6 +22,8 @@ struct llama_file {
+     size_t tell() const;
+     size_t size() const;
+ 
++    const std::string & name() const; // path this file was opened from
++
+     int file_id() const; // fileno overload
+ 
+     void seek(size_t offset, int whence) const;
+diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
+index 7663797ba..37eab64f1 100644
+--- a/src/llama-model-loader.cpp
++++ b/src/llama-model-loader.cpp
+@@ -1085,7 +1085,7 @@ bool llama_model_loader::lazy_read::add(const std::string & name, const ggml_ten
+ 
+     // do not lazy-read small tensors, it has significant overhead and is not worth it
+     constexpr size_t auto_min_size = 4ull * 1024 * 1024 * 1024;
+-    if (mode != LLAMA_LAZY_MODE_ON && ggml_nbytes(t) <= auto_min_size) {
++    if (mode == LLAMA_LAZY_MODE_AUTO && ggml_nbytes(t) <= auto_min_size) {
+         return false;
+     }
+ 
+diff --git a/src/models/models.h b/src/models/models.h
+index 9b87a40d5..2ed87ee61 100644
+--- a/src/models/models.h
++++ b/src/models/models.h
+@@ -2276,10 +2276,16 @@ struct llama_model_qwen35 : public llama_model_base {
+ 
+ 
+ struct llama_model_qwen4exp : public llama_model_base {
+-    llama_model_qwen4exp(const struct llama_model_params & params) : llama_model_base(params) {}
++    llama_model_qwen4exp(const struct llama_model_params & params);
++    ~llama_model_qwen4exp() override;
+ 
+     class llm_graph_input_qsa;
+ 
++    // --lazy-mode on-direct: pread() the lazy PLE table rows
++    // host-side instead of faulting them in through the mmap; see qwen4exp.cpp
++    struct ple_direct_reader;
++    std::unique_ptr<ple_direct_reader> ple_reader;
++
+     void load_arch_hparams(llama_model_loader & ml) override;
+     void load_arch_tensors(llama_model_loader & ml) override;
+ 
+diff --git a/src/models/qwen4exp.cpp b/src/models/qwen4exp.cpp
+index 8f0e47b1f..75e163ef4 100644
+--- a/src/models/qwen4exp.cpp
++++ b/src/models/qwen4exp.cpp
+@@ -4,7 +4,155 @@
+ #include "llama-memory-recurrent.h"
+ 
+ #include <algorithm>
++#include <cerrno>
+ #include <cinttypes>
++#include <cstring>
++#include <exception>
++#include <stdexcept>
++#include <thread>
++#include <utility>
++#include <vector>
++
++
++#ifndef _WIN32
++#include <fcntl.h>
++#include <unistd.h>
++#endif
++
++llama_model_qwen4exp::llama_model_qwen4exp(const struct llama_model_params & params) : llama_model_base(params) {}
++llama_model_qwen4exp::~llama_model_qwen4exp() = default;
++
++#ifndef _WIN32
++// Direct-read path for the lazy PLE table (--lazy-mode on-direct).
++// The n-gram row indices of a whole ubatch are known host-side before the graph
++// runs, so the rows can be read with explicit pread()s of exactly what the gather
++// needs instead of demand-faulting file pages in through the mmap. Rows are sorted
++// (dedup + ascending file offsets) and read by a small set of worker threads, so
++// the block layer sees a sorted, parallel batch instead of one serialized page
++// fault per ~90-byte row. The table stays on disk; the kernel page cache provides
++// reuse across ubatches.
++struct llama_model_qwen4exp::ple_direct_reader {
++    ple_direct_reader(int fd, size_t base, size_t row_size, int64_t n_rows, int n_threads,
++                      enum ggml_type type, int64_t head_dim)
++        : fd(fd), base(base), row_size(row_size), n_rows(n_rows), n_threads(n_threads),
++          head_dim(head_dim), to_float(type == GGML_TYPE_F32 ? nullptr : ggml_get_type_traits(type)->to_float) {
++        // F32 rows have no dequantizer; they are staged as-is, like ggml_get_rows
++        GGML_ASSERT((type == GGML_TYPE_F32 || to_float != nullptr) && head_dim > 0);
++    }
++    ~ple_direct_reader() {
++        if (fd >= 0) {
++            ::close(fd);
++        }
++    }
++
++    const int      fd;
++    const size_t   base;       // file offset of row 0
++    const size_t   row_size;   // bytes per quantized row
++    const int64_t  n_rows;
++    const int      n_threads;  // in-flight read workers
++    const int64_t  head_dim;   // F32 elements per staged row
++    ggml_to_float_t to_float;  // same dequantizer the ggml_get_rows CPU kernel uses
++
++    // fill dst with the n gathered rows, dequantized to F32:
++    // dst[slot * head_dim, ...) = to_float(table[rows[slot]])
++    // throws on IO errors; never lets an exception escape a worker thread
++    void gather(const int32_t * rows, int64_t n, float * dst) const {
++        std::vector<std::pair<int32_t, int32_t>> pairs; // (row, dst slot)
++        pairs.reserve(n);
++        for (int64_t i = 0; i < n; ++i) {
++            GGML_ASSERT(rows[i] >= 0 && (int64_t) rows[i] < n_rows);
++            pairs.emplace_back(rows[i], (int32_t) i);
++        }
++
++        std::sort(pairs.begin(), pairs.end()); // equal rows adjacent, file order
++
++        // decodes gather a handful of rows; threads are not worth it there
++        const int n_workers = (int) std::min<int64_t>(n_threads, std::max<int64_t>(1, n / 32));
++
++        // worker w reads rows pairs[n*w/n_workers, n*(w+1)/n_workers)
++        auto run_chunk = [&](int w, std::exception_ptr & err) {
++            try {
++                run_range(pairs, n * w / n_workers, n * (w + 1) / n_workers, dst);
++            } catch (...) {
++                err = std::current_exception();
++            }
++        };
++
++        // an exception leaving a joinable std::thread, or destroying one,
++        // terminates the process; keep worker creation failure-safe
++        std::vector<std::exception_ptr> errs(n_workers);
++        std::vector<std::thread> workers;
++        try {
++            for (int w = 1; w < n_workers; ++w) {
++                workers.emplace_back([&run_chunk, &errs, w]() {
++                    run_chunk(w, errs[w]);
++                });
++            }
++        } catch (...) {
++            for (auto & t : workers) {
++                t.join();
++            }
++            throw;
++        }
++
++        run_chunk(0, errs[0]); // this thread takes the first chunk
++        for (auto & t : workers) {
++            t.join();
++        }
++
++        for (const auto & err : errs) {
++            if (err) {
++                std::rethrow_exception(err);
++            }
++        }
++    }
++
++private:
++    void run_range(const std::vector<std::pair<int32_t, int32_t>> & pairs,
++                   int64_t begin, int64_t end, float * dst) const {
++        std::vector<uint8_t> bounce(row_size);
++        for (int64_t i = begin; i < end; ) {
++            int64_t j = i;
++            while (j + 1 < end && pairs[j + 1].first == pairs[i].first) {
++                ++j; // dedup: one read serves the whole run
++            }
++            const size_t off = base + (size_t) pairs[i].first * row_size;
++            for (size_t done = 0; done < row_size; ) {
++                const ssize_t n_read = ::pread(fd, bounce.data() + done, row_size - done, off + done);
++                if (n_read < 0 && errno == EINTR) {
++                    continue; // interrupted by a signal without SA_RESTART
++                }
++                if (n_read <= 0) {
++                    throw std::runtime_error(format("PLE direct read of %zu bytes at file offset %zu failed: %s",
++                            row_size, off, n_read == 0 ? "unexpected EOF" : strerror(errno)));
++                }
++                done += n_read;
++            }
++            float * first = dst + (size_t) pairs[i].second * head_dim;
++            if (to_float) {
++                to_float(bounce.data(), first, head_dim);
++            } else {
++                memcpy(first, bounce.data(), (size_t) head_dim * sizeof(float));
++            }
++            for (int64_t k = i + 1; k <= j; ++k) {
++                memcpy(dst + (size_t) pairs[k].second * head_dim, first, (size_t) head_dim * sizeof(float));
++            }
++            i = j + 1;
++        }
++    }
++};
++
++// matching interface so the call sites compile; never constructed on this
++// platform, see load_arch_tensors
++#else
++struct llama_model_qwen4exp::ple_direct_reader {
++    const int64_t head_dim = 0;
++
++    void gather(const int32_t *, int64_t, float *) const {
++        GGML_ABORT("PLE direct reads are not supported on this platform");
++    }
++};
++#endif
+ 
+ // bad metadata must be catchable: GGML_ASSERT aborts the whole process
+ static void qwen4exp_require_nonzero(const llama_model_loader & ml, llm_kv kid, uint32_t value) {
+@@ -186,6 +334,43 @@ void llama_model_qwen4exp::load_arch_tensors(llama_model_loader & ml) {
+ 
+         per_layer_tok_embd = create_tensor(tn(LLM_TENSOR_PER_LAYER_TOKEN_EMBD, "weight"),
+                                            { hparams.ple_head_dim, ple_rows }, TENSOR_READ_LAZY);
++        // --lazy-mode on-direct: read the gathered rows with explicit pread()s
++        // instead of faulting them in through the mmap
++        if (ml.lazy.mode == LLAMA_LAZY_MODE_DIRECT) {
++#ifndef _WIN32
++            const auto & ple_w = ml.require_weight(ple_name.c_str());
++            // an independent buffered descriptor: dup() would share the loader's
++            // open file description, whose readahead advice and O_DIRECT flag
++            // (init_mappings applies POSIX_FADV_SEQUENTIAL, --load-mode dio)
++            // would fight the small scattered row reads
++            const int fd = ::open(ml.files[ple_w.idx]->name().c_str(), O_RDONLY | O_CLOEXEC);
++            if (fd < 0) {
++                // e.g. a FILE*-backed model has no reopenable path; the tensor is
++                // still lazy, so keep serving it through the mmap reads
++                LLAMA_LOG_WARN("%s: could not open %s for direct reads (%s), using lazy mmap reads\n",
++                        __func__, ml.files[ple_w.idx]->name().c_str(), strerror(errno));
++            } else {
++#ifdef __linux__
++                // rows are tiny and scattered, so sequential readahead would be
++                // pure waste; Darwin has no posix_fadvise
++                ::posix_fadvise(fd, 0, 0, POSIX_FADV_RANDOM);
++#endif
++
++                // in-flight reads are IO queue depth, not compute; 2x cores worked
++                // well on NVMe and stays sane on smaller machines
++                const int n_threads = 2 * (int) std::max(1u, std::thread::hardware_concurrency());
++
++                ple_reader = std::make_unique<ple_direct_reader>(fd, ple_w.offs,
++                        ggml_row_size(per_layer_tok_embd->type, per_layer_tok_embd->ne[0]), ple_rows, n_threads,
++                        per_layer_tok_embd->type, hparams.ple_head_dim);
++
++                LLAMA_LOG_INFO("%s: PLE direct read enabled: %" PRId64 " rows of %zu bytes at file offset %zu, %d threads\n",
++                        __func__, ple_rows, ple_reader->row_size, ple_w.offs, n_threads);
++            }
++#else
++            LLAMA_LOG_WARN("%s: --lazy-mode on-direct is not supported on this platform, using lazy mmap reads\n", __func__);
++#endif
++        }
+     }
+ 
+     for (int il = 0; il < n_layer; ++il) {
+@@ -1031,10 +1216,12 @@ public:
+ 
+     bool can_reuse(const llm_graph_params & params) override {
+         mctx = static_cast<const llama_memory_hybrid_idx_context *>(params.mctx)->get_attn();
+-        return rows->ne[0] == (int64_t) pmodel.hparams.ple_n_heads * params.ubatch.n_tokens;
++        const int64_t n = (int64_t) pmodel.hparams.ple_n_heads * params.ubatch.n_tokens;
++        return pmodel.ple_reader ? data->ne[1] == n : rows->ne[0] == n;
+     }
+ 
+     ggml_tensor * rows = nullptr;   // I32 [ple_n_heads * n_tokens]
++    ggml_tensor * data = nullptr;   // direct mode: staged rows [ple_head_dim, ple_n_heads * n_tokens]
+ 
+     const llama_model_qwen4exp & pmodel;
+ 
+@@ -1043,6 +1230,7 @@ public:
+ 
+     // scratch, reused across set_input() calls
+     std::vector<llama_token> prev;
++    std::vector<uint8_t> staging; // direct mode: host side of `data`
+ };
+ 
+ void llm_graph_input_ple::set_input(const llama_ubatch * ubatch) {
+@@ -1105,7 +1293,13 @@ void llm_graph_input_ple::set_input(const llama_ubatch * ubatch) {
+         }
+     }
+ 
+-    ggml_backend_tensor_set(rows, idx.data(), 0, idx.size()*ggml_element_size(rows));
++    if (pmodel.ple_reader) {
++        staging.resize(idx.size() * pmodel.ple_reader->head_dim * sizeof(float));
++        pmodel.ple_reader->gather(idx.data(), (int64_t) idx.size(), (float *) staging.data());
++        ggml_backend_tensor_set(data, staging.data(), 0, staging.size());
++    } else {
++        ggml_backend_tensor_set(rows, idx.data(), 0, idx.size()*ggml_element_size(rows));
++    }
+ }
+ 
+ // Read a conv history out of its own recurrent row and write the new tail back.
+@@ -1172,14 +1366,31 @@ ggml_tensor * llama_model_qwen4exp::graph::build_inp_ple(
+     auto ple_inp = std::make_unique<llm_graph_input_ple>(
+             static_cast<const llama_model_qwen4exp &>(model), mctx_hyb->get_attn());
+ 
+-    ple_inp->rows = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, n_heads * n_tokens);
+-    ggml_set_input(ple_inp->rows);
+-    ggml_tensor * rows = ple_inp->rows;
+-    res->add_input(std::move(ple_inp));
+-
+-    // gather then flatten the heads: get_rows lays the head dimension out slowest, as the reference does
+-    ggml_tensor * emb = ggml_get_rows(ctx0, model.per_layer_tok_embd, rows);
+-    emb = ggml_reshape_2d(ctx0, emb, hparams.ple_head_dim * n_heads, n_tokens);
++    ggml_tensor * emb = nullptr;
++
++    if (static_cast<const llama_model_qwen4exp &>(model).ple_reader) {
++        // direct-read mode: set_input() pre-gathers the rows host-side, so the
++        // staged tensor replaces ggml_get_rows and the table pages stay untouched
++        // F32 matches the ggml_get_rows output type, so the downstream mul_mats
++        // take the same kernels as the baseline path
++        ple_inp->data = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32,
++                                           hparams.ple_head_dim, n_heads * n_tokens);
++        ggml_set_input(ple_inp->data);
++        ggml_tensor * data = ple_inp->data;
++        res->add_input(std::move(ple_inp));
++
++        // flatten the heads the same way ggml_get_rows would: slowest dimension
++        emb = ggml_reshape_2d(ctx0, data, hparams.ple_head_dim * n_heads, n_tokens);
++    } else {
++        ple_inp->rows = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, n_heads * n_tokens);
++        ggml_set_input(ple_inp->rows);
++        ggml_tensor * rows = ple_inp->rows;
++        res->add_input(std::move(ple_inp));
++
++        // gather then flatten the heads: get_rows lays the head dimension out slowest, as the reference does
++        emb = ggml_get_rows(ctx0, model.per_layer_tok_embd, rows);
++        emb = ggml_reshape_2d(ctx0, emb, hparams.ple_head_dim * n_heads, n_tokens);
++    }
+     cb(emb, "ple_embd", -1);
+ 
+     return emb;
+diff --git a/tools/llama-bench/llama-bench.cpp b/tools/llama-bench/llama-bench.cpp
+index 1fff21f70..bf308a7e1 100644
+--- a/tools/llama-bench/llama-bench.cpp
++++ b/tools/llama-bench/llama-bench.cpp
+@@ -279,6 +279,8 @@ static const char * lazy_mode_str(llama_lazy_mode mode) {
+             return "auto";
+         case LLAMA_LAZY_MODE_ON:
+             return "on";
++        case LLAMA_LAZY_MODE_DIRECT:
++            return "on-direct";
+         default:
+             GGML_ABORT("invalid lazy mode");
+     }
+@@ -475,7 +477,7 @@ static void print_usage(int /* argc */, char ** argv) {
+     printf("  -fa, --flash-attn <on|off|auto>                   (default: %s)\n", join(transform_to_str(cmd_params_defaults.flash_attn, llama_flash_attn_type_name), ",").c_str());
+     printf("  -dev, --device <dev0/dev1/...>                    (default: auto)\n");
+     printf("  -lm, --load-mode <auto|none|mmap|mlock|mmap+mlock|dio> (default: %s)\n", join(transform_to_str(cmd_params_defaults.load_mode, llama_load_mode_name), ",").c_str());
+-    printf("  -lzm, --lazy-mode <on|auto|off>                   (default: %s)\n", join(transform_to_str(cmd_params_defaults.lazy_mode, lazy_mode_str), ",").c_str());
++    printf("  -lzm, --lazy-mode <on|on-direct|auto|off>                   (default: %s)\n", join(transform_to_str(cmd_params_defaults.lazy_mode, lazy_mode_str), ",").c_str());
+     printf("  -mmp, --mmap <0|1>                                (DEPRECATED IN FAVOUR OF --load-mode)\n");
+     printf("  -dio, --direct-io <0|1>                           (DEPRECATED IN FAVOUR OF --load-mode)\n");
+     printf("  -embd, --embeddings <0|1>                         (default: %s)\n", join(cmd_params_defaults.embeddings, ",").c_str());
+@@ -814,6 +816,8 @@ static cmd_params parse_cmd_params(int argc, char ** argv) {
+                     llama_lazy_mode mode;
+                     if (m == "on") {
+                         mode = LLAMA_LAZY_MODE_ON;
++                    } else if (m == "on-direct") {
++                        mode = LLAMA_LAZY_MODE_DIRECT;
+                     } else if (m == "auto") {
+                         mode = LLAMA_LAZY_MODE_AUTO;
+                     } else if (m == "off") {
+-- 
+2.55.0
+
+
+From c6a9e5c9ae6d6a551217f75c9a04b2e8b1aa62dd Mon Sep 17 00:00:00 2001
+From: Josh Leverette <coder543@gmail.com>
+Date: Wed, 2 Sep 2026 18:38:58 -0500
+Subject: [PATCH 2/2] lazy: share the direct-read machinery, support gemma4 PLE
+ tables
+
+Move the row reader into arch-agnostic src/llama-lazy-reader.h, owned
+by llama_model_base keyed by tensor name; arches opt in with one
+load_lazy_reader call. qwen4exp now uses the shared reader, and
+gemma4 stages its per-layer rows the same way. Gemma's ~5 KiB
+contiguous rows show no prefill win either way, which is why the
+reader stays opt-in per tensor rather than unconditional.
+
+Also fix the missing <string> include in llama-mmap.h (MSVC needs it
+for the name() declaration) and make the help text generic so it does
+not stale when arches opt in.
+---
+ common/arg.cpp          |   2 +-
+ src/llama-lazy-reader.h | 147 +++++++++++++++++++++++++++++++
+ src/llama-mmap.h        |   1 +
+ src/llama-model.cpp     |  67 ++++++++++++++
+ src/llama-model.h       |   9 ++
+ src/models/gemma4.cpp   |  65 +++++++++++---
+ src/models/models.h     |  11 ++-
+ src/models/qwen4exp.cpp | 187 +---------------------------------------
+ 8 files changed, 289 insertions(+), 200 deletions(-)
+ create mode 100644 src/llama-lazy-reader.h
+
+diff --git a/common/arg.cpp b/common/arg.cpp
+index d68ffc344..aa16a1a9f 100644
+--- a/common/arg.cpp
++++ b/common/arg.cpp
+@@ -2737,7 +2737,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
+         {"-lzm", "--lazy-mode"}, "MODE",
+         "on-demand reading of certain tensors, for example per-layer embeddings (default: auto)\n"
+         "- on: read the rows of such tensors from disk on demand instead of keeping them resident (requires mmap)\n"
+-        "- on-direct: like on, but the arch reads the rows with explicit pread()s instead of demand paging the mmap (currently only the qwen4exp PLE table)\n"
++        "- on-direct: like on, but the arch reads the rows with explicit pread()s instead of demand paging the mmap (currently only PLE tables)\n"
+         "- auto: on, but only for tensors larger than 4 GiB\n"
+         "- off: always keep them resident",
+         [](common_params & params, const std::string & value) {
+diff --git a/src/llama-lazy-reader.h b/src/llama-lazy-reader.h
+new file mode 100644
+index 000000000..4b97487c8
+--- /dev/null
++++ b/src/llama-lazy-reader.h
+@@ -0,0 +1,147 @@
++#pragma once
++
++// Serves rows of a lazy tensor with explicit pread()s instead of demand paging.
++// This works because the row indices of a whole ubatch are known host-side
++// before the graph runs. Hands out F32 rows, like ggml_get_rows does.
++
++#include "ggml.h"
++#include "llama-impl.h"
++
++#include <algorithm>
++#include <cerrno>
++#include <cstdio>
++#include <cstring>
++#include <stdexcept>
++#include <thread>
++#include <utility>
++#include <vector>
++
++#ifndef _WIN32
++#include <fcntl.h>
++#include <unistd.h>
++#endif
++
++struct llama_lazy_reader {
++#ifdef _WIN32
++    // pread()/open() are unavailable on Windows; --lazy-mode on-direct falls
++    // back to the lazy mmap reads there (see llama_model_base::load_lazy_reader)
++    const int64_t head_dim = 0;
++
++    void gather(const int32_t *, int64_t, float *) const {
++        GGML_ABORT("lazy direct reads are not supported on this platform");
++    }
++#else
++    llama_lazy_reader(int fd, size_t base, size_t row_size, int64_t n_rows, int n_threads,
++                      enum ggml_type type, int64_t head_dim)
++        : fd(fd), base(base), row_size(row_size), n_rows(n_rows), n_threads(n_threads),
++          head_dim(head_dim), to_float(type == GGML_TYPE_F32 ? nullptr : ggml_get_type_traits(type)->to_float) {
++        // F32 rows have no dequantizer; they are staged as-is, like ggml_get_rows
++        GGML_ASSERT((type == GGML_TYPE_F32 || to_float != nullptr) && head_dim > 0);
++    }
++
++    llama_lazy_reader(const llama_lazy_reader &) = delete;
++    llama_lazy_reader & operator=(const llama_lazy_reader &) = delete;
++
++    ~llama_lazy_reader() {
++        if (fd >= 0) {
++            ::close(fd);
++        }
++    }
++
++    const int      fd;
++    const size_t   base;       // file offset of row 0
++    const size_t   row_size;   // bytes per quantized row
++    const int64_t  n_rows;
++    const int      n_threads;  // in-flight read workers
++    const int64_t  head_dim;   // F32 elements per staged row
++    ggml_to_float_t to_float;  // same dequantizer the ggml_get_rows CPU kernel uses
++
++    // fill dst with the n gathered rows, dequantized to F32:
++    // dst[slot * head_dim, ...) = to_float(table[rows[slot]])
++    // thread-safe; never lets an exception escape a worker thread
++    void gather(const int32_t * rows, int64_t n, float * dst) const {
++        std::vector<std::pair<int32_t, int32_t>> pairs; // (row, dst slot)
++        pairs.reserve(n);
++        for (int64_t i = 0; i < n; ++i) {
++            GGML_ASSERT(rows[i] >= 0 && (int64_t) rows[i] < n_rows);
++            pairs.emplace_back(rows[i], (int32_t) i);
++        }
++
++        std::sort(pairs.begin(), pairs.end()); // equal rows adjacent, file order
++
++        // small gathers are not worth a thread per row
++        const int n_workers = (int) std::min<int64_t>(n_threads, std::max<int64_t>(1, n / 32));
++
++        // worker w reads rows pairs[n*w/n_workers, n*(w+1)/n_workers)
++        auto run_chunk = [&](int w, std::exception_ptr & err) {
++            try {
++                run_range(pairs, n * w / n_workers, n * (w + 1) / n_workers, dst);
++            } catch (...) {
++                err = std::current_exception();
++            }
++        };
++
++        // an exception leaving a joinable std::thread, or destroying one,
++        // terminates the process; keep worker creation failure-safe
++        std::vector<std::exception_ptr> errs(n_workers);
++        std::vector<std::thread> workers;
++        try {
++            for (int w = 1; w < n_workers; ++w) {
++                workers.emplace_back([&run_chunk, &errs, w]() {
++                    run_chunk(w, errs[w]);
++                });
++            }
++        } catch (...) {
++            for (auto & t : workers) {
++                t.join();
++            }
++            throw;
++        }
++
++        run_chunk(0, errs[0]); // this thread takes the first chunk
++        for (auto & t : workers) {
++            t.join();
++        }
++
++        for (const auto & err : errs) {
++            if (err) {
++                std::rethrow_exception(err);
++            }
++        }
++    }
++
++private:
++    void run_range(const std::vector<std::pair<int32_t, int32_t>> & pairs,
++                   int64_t begin, int64_t end, float * dst) const {
++        std::vector<uint8_t> bounce(row_size);
++        for (int64_t i = begin; i < end; ) {
++            int64_t j = i;
++            while (j + 1 < end && pairs[j + 1].first == pairs[i].first) {
++                ++j; // dedup: one read serves the whole run
++            }
++            const size_t off = base + (size_t) pairs[i].first * row_size;
++            for (size_t done = 0; done < row_size; ) {
++                const ssize_t n_read = ::pread(fd, bounce.data() + done, row_size - done, off + done);
++                if (n_read < 0 && errno == EINTR) {
++                    continue; // interrupted by a signal without SA_RESTART
++                }
++                if (n_read <= 0) {
++                    throw std::runtime_error(format("lazy direct read of %zu bytes at file offset %zu failed: %s",
++                            row_size, off, n_read == 0 ? "unexpected EOF" : strerror(errno)));
++                }
++                done += n_read;
++            }
++            float * first = dst + (size_t) pairs[i].second * head_dim;
++            if (to_float) {
++                to_float(bounce.data(), first, head_dim);
++            } else {
++                memcpy(first, bounce.data(), (size_t) head_dim * sizeof(float));
++            }
++            for (int64_t k = i + 1; k <= j; ++k) {
++                memcpy(dst + (size_t) pairs[k].second * head_dim, first, (size_t) head_dim * sizeof(float));
++            }
++            i = j + 1;
++        }
++    }
++#endif
++};
+diff --git a/src/llama-mmap.h b/src/llama-mmap.h
+index fb2f53729..795c083da 100644
+--- a/src/llama-mmap.h
++++ b/src/llama-mmap.h
+@@ -2,6 +2,7 @@
+ 
+ #include <cstdint>
+ #include <memory>
++#include <string>
+ #include <utility>
+ #include <vector>
+ #include <cstdio>
+diff --git a/src/llama-model.cpp b/src/llama-model.cpp
+index bfce09de0..1cd4366c3 100644
+--- a/src/llama-model.cpp
++++ b/src/llama-model.cpp
+@@ -28,7 +28,15 @@
+ #include <algorithm>
+ #include <cassert>
+ #include <cfloat>
++#include <cinttypes>
+ #include <cstdint>
++#include <thread>
++
++#ifndef _WIN32
++#include <fcntl.h>
++#include <unistd.h>
++#endif
++
+ #include <cstring>
+ #include <cmath>
+ #include <functional>
+@@ -1823,6 +1831,65 @@ bool llama_model_base::load_tensors(llama_model_loader & ml) {
+     return true;
+ }
+ 
++#ifndef _WIN32
++const llama_lazy_reader * llama_model_base::load_lazy_reader(llama_model_loader & ml, const char * tensor_name, const ggml_tensor * t) {
++    if (ml.lazy.mode != LLAMA_LAZY_MODE_DIRECT) {
++        return nullptr;
++    }
++
++    if (!t) {
++        return nullptr;
++    }
++
++    if (const auto it = lazy_readers.find(tensor_name); it != lazy_readers.end()) {
++        return it->second.get();
++    }
++
++    const auto * w = ml.get_weight(tensor_name);
++    if (!w) {
++        // e.g. synthesised from metadata, no file rows to read
++        return nullptr;
++    }
++
++    // an independently opened buffered descriptor: dup() would share the
++    // loader's open file description, whose readahead advice and O_DIRECT
++    // flag would fight the small scattered row reads
++    const int fd = ::open(ml.files[w->idx]->name().c_str(), O_RDONLY | O_CLOEXEC);
++    if (fd < 0) {
++        // e.g. a FILE*-backed model has no reopenable path; the tensor is
++        // still lazy, so keep serving it through the mmap reads
++        LLAMA_LOG_WARN("%s: could not open %s for direct reads (%s), using lazy mmap reads\n",
++                __func__, ml.files[w->idx]->name().c_str(), strerror(errno));
++        return nullptr;
++    }
++
++#ifdef __linux__
++    // rows are tiny and scattered, so sequential readahead would be pure waste
++    ::posix_fadvise(fd, 0, 0, POSIX_FADV_RANDOM);
++#endif
++
++    // in-flight reads are IO queue depth, not compute; 2x cores worked well
++    // on NVMe and stays sane on smaller machines
++    const int n_threads = 2 * (int) std::max(1u, std::thread::hardware_concurrency());
++
++    auto reader = std::make_unique<llama_lazy_reader>(fd, w->offs,
++            ggml_row_size(t->type, t->ne[0]), t->ne[1], n_threads, t->type, t->ne[0]);
++
++    LLAMA_LOG_INFO("%s: direct reads enabled for %s: %" PRId64 " rows of %zu bytes at file offset %zu, %d threads\n",
++            __func__, tensor_name, reader->n_rows, reader->row_size, w->offs, n_threads);
++
++    lazy_readers[tensor_name] = std::move(reader);
++    return lazy_readers.at(tensor_name).get();
++}
++#else
++const llama_lazy_reader * llama_model_base::load_lazy_reader(llama_model_loader & ml, const char *, const ggml_tensor *) {
++    if (ml.lazy.mode == LLAMA_LAZY_MODE_DIRECT) {
++        LLAMA_LOG_WARN("%s: --lazy-mode on-direct is not supported on this platform, using lazy mmap reads\n", __func__);
++    }
++    return nullptr;
++}
++#endif
++
+ ggml_tensor * llama_model_base::create_tensor(llama_model_loader & ml, const LLM_TN_IMPL & tn, const std::initializer_list<int64_t> & ne, int flags) {
+     const buft_list_t * buft_list_layer = tn.bid == -1 ? nullptr : pimpl->dev_layer.at(tn.bid).buft_list;
+     return ml.create_tensor(
+diff --git a/src/llama-model.h b/src/llama-model.h
+index ee6bb5ac3..f856c863e 100644
+--- a/src/llama-model.h
++++ b/src/llama-model.h
+@@ -5,6 +5,7 @@
+ #include "llama-graph.h"
+ #include "llama-hparams.h"
+ #include "llama-memory.h"
++#include "llama-lazy-reader.h"
+ #include "llama-vocab.h"
+ 
+ #include <map>
+@@ -816,6 +817,14 @@ struct llama_model_base : public llama_model {
+     void load_arch_hparams(llama_model_loader & ml) override = 0;
+     void load_arch_tensors(llama_model_loader & ml) override = 0;
+     std::unique_ptr<llm_graph_context> build_arch_graph(const llm_graph_params & params) const override = 0;
++
++    // --lazy-mode on-direct: read the rows of a lazy tensor with explicit
++    // pread()s instead of demand-faulting them in through the mmap. Call once
++    // per lazy tensor after creating it; returns null if the platform cannot
++    // serve direct reads (the tensor then stays on the lazy mmap path).
++    const llama_lazy_reader * load_lazy_reader(llama_model_loader & ml, const char * tensor_name, const ggml_tensor * t);
++
++    std::map<std::string, std::unique_ptr<llama_lazy_reader>> lazy_readers;
+ };
+ 
+ const char * llm_type_name(llm_type type);
+diff --git a/src/models/gemma4.cpp b/src/models/gemma4.cpp
+index aa518c6df..1f32711fe 100644
+--- a/src/models/gemma4.cpp
++++ b/src/models/gemma4.cpp
+@@ -28,7 +28,7 @@ void llama_model_gemma4::load_arch_hparams(llama_model_loader & ml) {
+     }
+ }
+ 
+-void llama_model_gemma4::load_arch_tensors(llama_model_loader &) {
++void llama_model_gemma4::load_arch_tensors(llama_model_loader & ml) {
+     LLAMA_LOAD_LOCALS;
+ 
+     const uint32_t n_embd_per_layer = hparams.n_embd_per_layer;
+@@ -53,6 +53,8 @@ void llama_model_gemma4::load_arch_tensors(llama_model_loader &) {
+         per_layer_tok_embd   = create_tensor(tn(LLM_TENSOR_PER_LAYER_TOKEN_EMBD, "weight"),    {n_embd_per_layer * n_layer, n_vocab}, TENSOR_READ_LAZY);
+         per_layer_model_proj = create_tensor(tn(LLM_TENSOR_PER_LAYER_MODEL_PROJ, "weight", 0), {n_embd, n_embd_per_layer * n_layer}, 0);
+         per_layer_proj_norm  = create_tensor(tn(LLM_TENSOR_PER_LAYER_PROJ_NORM,  "weight", 0), {n_embd_per_layer}, 0);
++
++        ple_reader = load_lazy_reader(ml, tn(LLM_TENSOR_PER_LAYER_TOKEN_EMBD, "weight").str().c_str(), per_layer_tok_embd);
+     }
+ 
+     output_norm = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM, "weight"), {n_embd}, 0);
+@@ -408,24 +410,65 @@ llama_model_gemma4::graph::graph(const llama_model & model, const llm_graph_para
+     ggml_build_forward_expand(gf, cur);
+ }
+ 
++// --lazy-mode on-direct: stage the per-layer rows host-side instead of
++// letting ggml_get_rows demand-fault them in through the mmap. Row indices
++// are the token ids of the ubatch, known before the graph runs.
++class llm_graph_input_gemma4_ple : public llm_graph_input_i {
++public:
++    explicit llm_graph_input_gemma4_ple(const llama_lazy_reader * reader) : reader(reader) {}
++
++    void set_input(const llama_ubatch * ubatch) override {
++        if (!ubatch->token) {
++            return; // multimodal batches use the static row-0 path, no gather
++        }
++
++        staging.resize(ubatch->n_tokens * reader->head_dim * sizeof(float));
++        reader->gather(ubatch->token, ubatch->n_tokens, (float *) staging.data());
++        ggml_backend_tensor_set(data, staging.data(), 0, staging.size());
++    }
++
++    bool can_reuse(const llm_graph_params & params) override {
++        return (!params.ubatch.token) || (data && data->ne[1] == (int64_t) params.ubatch.n_tokens);
++    }
++
++    ggml_tensor * data = nullptr; // F32 [row_elems, n_tokens]
++
++private:
++    const llama_lazy_reader * reader;
++
++    // scratch, reused across set_input() calls
++    std::vector<uint8_t> staging;
++};
++
+ // equivalent to get_per_layer_inputs() in python code
+ // output shape: [n_embd_per_layer, n_layer, n_tokens]
+ ggml_tensor * llama_model_gemma4::graph::build_inp_per_layer() {
+-    auto inp = std::make_unique<llm_graph_input_embd>(n_embd);
+-
+     ggml_tensor * inp_per_layer;
+     float tok_embd_scale = sqrtf((float) n_embd_per_layer);
+     if (ubatch.token) {
+-        inp->tokens = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, ubatch.n_tokens);
+-        ggml_set_input(inp->tokens);
+-        res->t_inp_tokens = inp->tokens;
++        if (static_cast<const llama_model_gemma4 &>(model).ple_reader) {
++            // --lazy-mode on-direct: the reader stages the per-layer rows
++            // host-side, so the table pages are never touched by the graph
++            auto inp = std::make_unique<llm_graph_input_gemma4_ple>(static_cast<const llama_model_gemma4 &>(model).ple_reader);
++            inp->data = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, model.per_layer_tok_embd->ne[0], ubatch.n_tokens);
++            ggml_set_input(inp->data);
++            ggml_tensor * data = inp->data;
++            res->add_input(std::move(inp));
++
++            inp_per_layer = ggml_reshape_3d(ctx0, data, n_embd_per_layer, n_layer, n_tokens);
++        } else {
++            auto inp = std::make_unique<llm_graph_input_embd>(n_embd);
++            inp->tokens = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, ubatch.n_tokens);
++            ggml_set_input(inp->tokens);
++            res->t_inp_tokens = inp->tokens;
+ 
+-        inp_per_layer = ggml_get_rows  (ctx0, model.per_layer_tok_embd, inp->tokens);
+-        inp_per_layer = ggml_reshape_3d(ctx0, inp_per_layer, n_embd_per_layer, n_layer, n_tokens);
+-        inp_per_layer = ggml_scale     (ctx0, inp_per_layer, tok_embd_scale);
+-        cb(inp_per_layer, "inp_per_layer_selected", -1);
++            inp_per_layer = ggml_get_rows(ctx0, model.per_layer_tok_embd, inp->tokens);
++            inp_per_layer = ggml_reshape_3d(ctx0, inp_per_layer, n_embd_per_layer, n_layer, n_tokens);
+ 
+-        res->add_input(std::move(inp));
++            res->add_input(std::move(inp));
++        }
++        inp_per_layer = ggml_scale(ctx0, inp_per_layer, tok_embd_scale);
++        cb(inp_per_layer, "inp_per_layer_selected", -1);
+     } else {
+         // Multimodal embedding path: use padding token (ID=0) embedding
+         // TODO: verify if this is the correct behavior in transformers implementation
+diff --git a/src/models/models.h b/src/models/models.h
+index 2ed87ee61..f58fa5ce9 100644
+--- a/src/models/models.h
++++ b/src/models/models.h
+@@ -856,6 +856,11 @@ struct llama_model_gemma3n : public llama_model_base {
+ 
+ struct llama_model_gemma4 : public llama_model_base {
+     llama_model_gemma4(const struct llama_model_params & params) : llama_model_base(params) {}
++
++    // --lazy-mode on-direct: pread() the lazy per-layer table rows
++    // host-side instead of faulting them in through the mmap; see gemma4.cpp
++    const llama_lazy_reader * ple_reader = nullptr;
++
+     void load_arch_hparams(llama_model_loader & ml) override;
+     void load_arch_tensors(llama_model_loader & ml) override;
+ 
+@@ -2276,15 +2281,13 @@ struct llama_model_qwen35 : public llama_model_base {
+ 
+ 
+ struct llama_model_qwen4exp : public llama_model_base {
+-    llama_model_qwen4exp(const struct llama_model_params & params);
+-    ~llama_model_qwen4exp() override;
++    llama_model_qwen4exp(const struct llama_model_params & params) : llama_model_base(params) {}
+ 
+     class llm_graph_input_qsa;
+ 
+     // --lazy-mode on-direct: pread() the lazy PLE table rows
+     // host-side instead of faulting them in through the mmap; see qwen4exp.cpp
+-    struct ple_direct_reader;
+-    std::unique_ptr<ple_direct_reader> ple_reader;
++    const llama_lazy_reader * ple_reader = nullptr;
+ 
+     void load_arch_hparams(llama_model_loader & ml) override;
+     void load_arch_tensors(llama_model_loader & ml) override;
+diff --git a/src/models/qwen4exp.cpp b/src/models/qwen4exp.cpp
+index 75e163ef4..03c1e486b 100644
+--- a/src/models/qwen4exp.cpp
++++ b/src/models/qwen4exp.cpp
+@@ -4,155 +4,7 @@
+ #include "llama-memory-recurrent.h"
+ 
+ #include <algorithm>
+-#include <cerrno>
+ #include <cinttypes>
+-#include <cstring>
+-#include <exception>
+-#include <stdexcept>
+-#include <thread>
+-#include <utility>
+-#include <vector>
+-
+-
+-#ifndef _WIN32
+-#include <fcntl.h>
+-#include <unistd.h>
+-#endif
+-
+-llama_model_qwen4exp::llama_model_qwen4exp(const struct llama_model_params & params) : llama_model_base(params) {}
+-llama_model_qwen4exp::~llama_model_qwen4exp() = default;
+-
+-#ifndef _WIN32
+-// Direct-read path for the lazy PLE table (--lazy-mode on-direct).
+-// The n-gram row indices of a whole ubatch are known host-side before the graph
+-// runs, so the rows can be read with explicit pread()s of exactly what the gather
+-// needs instead of demand-faulting file pages in through the mmap. Rows are sorted
+-// (dedup + ascending file offsets) and read by a small set of worker threads, so
+-// the block layer sees a sorted, parallel batch instead of one serialized page
+-// fault per ~90-byte row. The table stays on disk; the kernel page cache provides
+-// reuse across ubatches.
+-struct llama_model_qwen4exp::ple_direct_reader {
+-    ple_direct_reader(int fd, size_t base, size_t row_size, int64_t n_rows, int n_threads,
+-                      enum ggml_type type, int64_t head_dim)
+-        : fd(fd), base(base), row_size(row_size), n_rows(n_rows), n_threads(n_threads),
+-          head_dim(head_dim), to_float(type == GGML_TYPE_F32 ? nullptr : ggml_get_type_traits(type)->to_float) {
+-        // F32 rows have no dequantizer; they are staged as-is, like ggml_get_rows
+-        GGML_ASSERT((type == GGML_TYPE_F32 || to_float != nullptr) && head_dim > 0);
+-    }
+-    ~ple_direct_reader() {
+-        if (fd >= 0) {
+-            ::close(fd);
+-        }
+-    }
+-
+-    const int      fd;
+-    const size_t   base;       // file offset of row 0
+-    const size_t   row_size;   // bytes per quantized row
+-    const int64_t  n_rows;
+-    const int      n_threads;  // in-flight read workers
+-    const int64_t  head_dim;   // F32 elements per staged row
+-    ggml_to_float_t to_float;  // same dequantizer the ggml_get_rows CPU kernel uses
+-
+-    // fill dst with the n gathered rows, dequantized to F32:
+-    // dst[slot * head_dim, ...) = to_float(table[rows[slot]])
+-    // throws on IO errors; never lets an exception escape a worker thread
+-    void gather(const int32_t * rows, int64_t n, float * dst) const {
+-        std::vector<std::pair<int32_t, int32_t>> pairs; // (row, dst slot)
+-        pairs.reserve(n);
+-        for (int64_t i = 0; i < n; ++i) {
+-            GGML_ASSERT(rows[i] >= 0 && (int64_t) rows[i] < n_rows);
+-            pairs.emplace_back(rows[i], (int32_t) i);
+-        }
+-
+-        std::sort(pairs.begin(), pairs.end()); // equal rows adjacent, file order
+-
+-        // decodes gather a handful of rows; threads are not worth it there
+-        const int n_workers = (int) std::min<int64_t>(n_threads, std::max<int64_t>(1, n / 32));
+-
+-        // worker w reads rows pairs[n*w/n_workers, n*(w+1)/n_workers)
+-        auto run_chunk = [&](int w, std::exception_ptr & err) {
+-            try {
+-                run_range(pairs, n * w / n_workers, n * (w + 1) / n_workers, dst);
+-            } catch (...) {
+-                err = std::current_exception();
+-            }
+-        };
+-
+-        // an exception leaving a joinable std::thread, or destroying one,
+-        // terminates the process; keep worker creation failure-safe
+-        std::vector<std::exception_ptr> errs(n_workers);
+-        std::vector<std::thread> workers;
+-        try {
+-            for (int w = 1; w < n_workers; ++w) {
+-                workers.emplace_back([&run_chunk, &errs, w]() {
+-                    run_chunk(w, errs[w]);
+-                });
+-            }
+-        } catch (...) {
+-            for (auto & t : workers) {
+-                t.join();
+-            }
+-            throw;
+-        }
+-
+-        run_chunk(0, errs[0]); // this thread takes the first chunk
+-        for (auto & t : workers) {
+-            t.join();
+-        }
+-
+-        for (const auto & err : errs) {
+-            if (err) {
+-                std::rethrow_exception(err);
+-            }
+-        }
+-    }
+-
+-private:
+-    void run_range(const std::vector<std::pair<int32_t, int32_t>> & pairs,
+-                   int64_t begin, int64_t end, float * dst) const {
+-        std::vector<uint8_t> bounce(row_size);
+-        for (int64_t i = begin; i < end; ) {
+-            int64_t j = i;
+-            while (j + 1 < end && pairs[j + 1].first == pairs[i].first) {
+-                ++j; // dedup: one read serves the whole run
+-            }
+-            const size_t off = base + (size_t) pairs[i].first * row_size;
+-            for (size_t done = 0; done < row_size; ) {
+-                const ssize_t n_read = ::pread(fd, bounce.data() + done, row_size - done, off + done);
+-                if (n_read < 0 && errno == EINTR) {
+-                    continue; // interrupted by a signal without SA_RESTART
+-                }
+-                if (n_read <= 0) {
+-                    throw std::runtime_error(format("PLE direct read of %zu bytes at file offset %zu failed: %s",
+-                            row_size, off, n_read == 0 ? "unexpected EOF" : strerror(errno)));
+-                }
+-                done += n_read;
+-            }
+-            float * first = dst + (size_t) pairs[i].second * head_dim;
+-            if (to_float) {
+-                to_float(bounce.data(), first, head_dim);
+-            } else {
+-                memcpy(first, bounce.data(), (size_t) head_dim * sizeof(float));
+-            }
+-            for (int64_t k = i + 1; k <= j; ++k) {
+-                memcpy(dst + (size_t) pairs[k].second * head_dim, first, (size_t) head_dim * sizeof(float));
+-            }
+-            i = j + 1;
+-        }
+-    }
+-};
+-
+-// matching interface so the call sites compile; never constructed on this
+-// platform, see load_arch_tensors
+-#else
+-struct llama_model_qwen4exp::ple_direct_reader {
+-    const int64_t head_dim = 0;
+-
+-    void gather(const int32_t *, int64_t, float *) const {
+-        GGML_ABORT("PLE direct reads are not supported on this platform");
+-    }
+-};
+-#endif
+ 
+ // bad metadata must be catchable: GGML_ASSERT aborts the whole process
+ static void qwen4exp_require_nonzero(const llama_model_loader & ml, llm_kv kid, uint32_t value) {
+@@ -334,43 +186,10 @@ void llama_model_qwen4exp::load_arch_tensors(llama_model_loader & ml) {
+ 
+         per_layer_tok_embd = create_tensor(tn(LLM_TENSOR_PER_LAYER_TOKEN_EMBD, "weight"),
+                                            { hparams.ple_head_dim, ple_rows }, TENSOR_READ_LAZY);
++
+         // --lazy-mode on-direct: read the gathered rows with explicit pread()s
+         // instead of faulting them in through the mmap
+-        if (ml.lazy.mode == LLAMA_LAZY_MODE_DIRECT) {
+-#ifndef _WIN32
+-            const auto & ple_w = ml.require_weight(ple_name.c_str());
+-            // an independent buffered descriptor: dup() would share the loader's
+-            // open file description, whose readahead advice and O_DIRECT flag
+-            // (init_mappings applies POSIX_FADV_SEQUENTIAL, --load-mode dio)
+-            // would fight the small scattered row reads
+-            const int fd = ::open(ml.files[ple_w.idx]->name().c_str(), O_RDONLY | O_CLOEXEC);
+-            if (fd < 0) {
+-                // e.g. a FILE*-backed model has no reopenable path; the tensor is
+-                // still lazy, so keep serving it through the mmap reads
+-                LLAMA_LOG_WARN("%s: could not open %s for direct reads (%s), using lazy mmap reads\n",
+-                        __func__, ml.files[ple_w.idx]->name().c_str(), strerror(errno));
+-            } else {
+-#ifdef __linux__
+-                // rows are tiny and scattered, so sequential readahead would be
+-                // pure waste; Darwin has no posix_fadvise
+-                ::posix_fadvise(fd, 0, 0, POSIX_FADV_RANDOM);
+-#endif
+-
+-                // in-flight reads are IO queue depth, not compute; 2x cores worked
+-                // well on NVMe and stays sane on smaller machines
+-                const int n_threads = 2 * (int) std::max(1u, std::thread::hardware_concurrency());
+-
+-                ple_reader = std::make_unique<ple_direct_reader>(fd, ple_w.offs,
+-                        ggml_row_size(per_layer_tok_embd->type, per_layer_tok_embd->ne[0]), ple_rows, n_threads,
+-                        per_layer_tok_embd->type, hparams.ple_head_dim);
+-
+-                LLAMA_LOG_INFO("%s: PLE direct read enabled: %" PRId64 " rows of %zu bytes at file offset %zu, %d threads\n",
+-                        __func__, ple_rows, ple_reader->row_size, ple_w.offs, n_threads);
+-            }
+-#else
+-            LLAMA_LOG_WARN("%s: --lazy-mode on-direct is not supported on this platform, using lazy mmap reads\n", __func__);
+-#endif
+-        }
++        ple_reader = load_lazy_reader(ml, ple_name.c_str(), per_layer_tok_embd);
+     }
+ 
+     for (int il = 0; il < n_layer; ++il) {
+@@ -1370,7 +1189,7 @@ ggml_tensor * llama_model_qwen4exp::graph::build_inp_ple(
+ 
+     if (static_cast<const llama_model_qwen4exp &>(model).ple_reader) {
+         // direct-read mode: set_input() pre-gathers the rows host-side, so the
+-        // staged tensor replaces ggml_get_rows and the table pages stay untouched
++        // staged tensor replaces ggml_get_rows and the table pages stay untouched.
+         // F32 matches the ggml_get_rows output type, so the downstream mul_mats
+         // take the same kernels as the baseline path
+         ple_inp->data = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32,
+-- 
+2.55.0
+

@@ -134,6 +134,19 @@
     };
   };
 
+  # dGPU power envelope. The firmware boots the RTX 5080 at its 100 W TGP
+  # with Dynamic Boost at the 5 W minimum and a 75 C boost-temperature
+  # target; nvidia-smi -pl is refused on this laptop, but the ASUS WMI
+  # knobs are writable. 25 W extra boost / 87 C target is the top of the
+  # firmware range (2026-09-10: 85 W @ 1.9 GHz -> 105 W @ 2.4 GHz under
+  # llama-server load). vit sits on its 200 W supply and never runs on
+  # battery (sleep is disabled above). nvidia-powerd (hardware.nvidia.
+  # dynamicBoost, nvidia.nix) applies the boost budget at runtime.
+  systemd.tmpfiles.rules = [
+    "w /sys/devices/platform/asus-nb-wmi/nv_dynamic_boost - - - - 25"
+    "w /sys/devices/platform/asus-nb-wmi/nv_temp_target - - - - 87"
+  ];
+
   # sbox (the agent sandbox on amy) binds ~/.ssh/id_ed25519_github1 over
   # ~/.ssh/id_ed25519 (modules/nixos/sbox.nix), so this is the sandbox's
   # default identity. Root here, and only here: vit is the inference box the
