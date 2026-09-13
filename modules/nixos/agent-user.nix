@@ -17,7 +17,7 @@
   running the spaces module (see machines/vit/configuration.nix) — the
   declarative key below lands exactly there.
 */
-{ config, pkgs, ... }:
+{ config, options, lib, pkgs, ... }:
 let
   # amy: ~/.ssh/id_ed25519_github1.pub — the key sbox mounts into sandboxes.
   pubKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM7ptVA/R16UvtWJD3VfJUWdEL2nzonoFRz2Na6lg+UU agent@amy";
@@ -25,6 +25,17 @@ let
   pubFile = pkgs.writeText "agent-id_ed25519.pub" (pubKey + "\n");
 in
 {
+  # p0 inference over omp/afk, same as egg (./egg-hermes.nix): a root
+  # oneshot installs a 0400 copy of the shared token at
+  # /run/inference-api-key/agent/token, which `p0-api-key` (models.yml
+  # apiKey: "!p0-api-key") reads for the calling user
+  # (./inference-api-key.nix). That module only rides along dave.nix
+  # (amy, vit, som); this file is fleet-wide, so the option is set only
+  # where it exists — `lib.mkIf` would still declare the path and fail
+  # evaluation on the other hosts.
+  config = lib.optionalAttrs (options ? hyper && options.hyper ? inferenceApiKey) {
+    hyper.inferenceApiKey.users = [ "agent" ];
+  } // {
   users.groups.agent = { };
   users.users.agent = {
     isNormalUser = true;
@@ -60,4 +71,5 @@ in
     "L+ /home/agent/.ssh/id_ed25519 - - - - ${privKey.path}"
     "L+ /home/agent/.ssh/id_ed25519.pub - - - - ${pubFile}"
   ];
+  };
 }
