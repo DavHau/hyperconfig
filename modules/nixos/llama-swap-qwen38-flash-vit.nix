@@ -52,7 +52,8 @@
 #           -ub 1024, cache 48: prefill 258 tok/s, decode 22.3  <- chosen
 #           -ub 2048, cache 16: prefill 331 tok/s, decode 18.6
 #           -ub 2048, cache 40 / -ub 4096, cache 16: OOM (prefill staging)
-#         Depth curve (chosen): prefill 258 -> 236 tok/s from 32K to 122K
+#         Depth curve (chosen, lazy-mode on; on-direct adds ~+38 % cold):
+#         prefill 258 -> 236 tok/s from 32K to 122K
 #         (a cold 122K prompt is 8.6 min); decode 26.6 tok/s at 8K depth,
 #         22.3 at 32K, 15.2 at 96K, 13.6 at 120K (attention-bound decay).
 #         Turn 2 of a 32K chat reuses the KV prefix: 0.9 s prefill.
@@ -62,9 +63,16 @@
 #         128K. 4 keeps rollback for edited prompts at spacing 8192.
 #       GGML_CUDA_DISABLE_FUSION=1: fork issue #80 -- the fused MoE
 #         weighted reduction reserves ~512 MiB of workspace it never uses.
-#       --load-mode none --lazy-mode on: ordinary tensors in RAM, the
-#         27 GiB per-layer-token-embedding table stays file-backed on NVMe.
-#         Whole-model mmap loses grouped decode (fork wiki).
+#       --load-mode none --lazy-mode on-direct: ordinary tensors in RAM,
+#         the 27 GiB per-layer-token-embedding table stays on NVMe and is
+#         read per row with threaded pread() (patch #28136 below) instead
+#         of demand-faulted mmap. With 62 GiB RAM the table can never be
+#         page-cache resident, so `on` pays the fault cost on every
+#         prompt: measured 32K prompt, prompt cache off, cold/warm:
+#           --lazy-mode on:        258 / 361 tok/s
+#           --lazy-mode on-direct: 357 / 361 tok/s   <- chosen (+38 % cold)
+#         Decode and RAM floor unchanged. Whole-model mmap loses grouped
+#         decode (fork wiki).
 #       -fit off: the fork's fit logic does not account for the cache.
 #       -ctk/-ctv q8_0 + LLAMA_ATTN_ROT_DISABLE=1: q8_0 KV asserts on
 #         qwen4exp unless the KV Hadamard rotation is disabled (upstream
@@ -173,7 +181,7 @@ in
       "-fa on"
       "-fit off"
       "--load-mode none"
-      "--lazy-mode on"
+      "--lazy-mode on-direct"
       "--moe-expert-cache-size 48"
       "-ctk q8_0"
       "-ctv q8_0"
