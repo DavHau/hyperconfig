@@ -1691,10 +1691,10 @@
         "nixpkgs-regression": "nixpkgs-regression"
       },
       "locked": {
-        "lastModified": 1787899258,
-        "narHash": "sha256-MFRl1mlxqLnXOwWeuwwIK0vqDB4t9SdaYAgT6nLjBek=",
+        "lastModified": 1789387891,
+        "narHash": "sha256-wqZNEiJGQNFHjVseENbSCyv1uIRerhmLmHbGSFXVq10=",
         "ref": "parallel-downloads",
-        "rev": "31232b55a29180dfb5211b5af998b4c81b13a60f",
+        "rev": "636874ed02c4a7d31edae9b861a30d9940cc0521",
         "shallow": true,
         "type": "git",
         "url": "file:///home/grmpf/projects/nix"

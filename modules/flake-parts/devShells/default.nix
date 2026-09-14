@@ -2,9 +2,16 @@
   perSystem = { config, self', inputs', pkgs, system, ... }:
     let
       nixEvalCache = inputs.nix-eval-cache.packages.${system}.nix-cli;
+      # clan-cli's wrapper prepends its own bundled nix (pinned to 2.31 upstream)
+      # to PATH, so the client-side nix clan uses (nix copy, flake fetches) is
+      # whatever this override says -- not what's on the devshell PATH. Point it
+      # at the parallel-downloads build the daemon runs (modules/nixos/nix.nix).
+      clan-cli = inputs'.clan-core.packages.clan-cli.override {
+        nix = inputs.nix.packages.${system}.default;
+      };
       clan-fast = inputs.wrappers.lib.wrapPackage {
         inherit pkgs;
-        package = inputs'.clan-core.packages.clan-cli;
+        package = clan-cli;
         binName = "clan-fast";
         preHook = ''
           export PATH=${nixEvalCache}/bin:$PATH
@@ -36,7 +43,7 @@
     {
       devShells.default = pkgs.mkShell {
         packages = [
-          inputs'.clan-core.packages.clan-cli
+          clan-cli
           clan-fast
           esphome-fhs
           self'.packages.router-ais
