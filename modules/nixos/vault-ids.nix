@@ -30,7 +30,8 @@
 # account whose only writable data is its own directory.
 #
 # 1100/1101 sit above the auto-allocated range in use (agent landed on 1002
-# and already collides with stefan's pin on vit).
+# and already collides with stefan's pin on vit). 1102 is hsjobeki
+# (users/hsjobeki-vault.nix), a read-only consumer on momentum's footing.
 {
   users.groups.vault.gid = 1101;
   users.groups.momentum.gid = 1100;

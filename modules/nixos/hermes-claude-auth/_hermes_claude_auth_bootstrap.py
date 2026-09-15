@@ -1,5 +1,5 @@
 # Vendored from https://github.com/kristianvast/hermes-claude-auth
-# commit 6525928e13a2771ca0fcf0539ea286150e83c421 (2026-08-18), fetched 2026-09-06.
+# commit 6525928e13a2771ca0fcf0539ea286150e83c421 (2026-08-18), fetched 2026-09-06, re-checked 2026-09-15: still upstream HEAD.
 # Unmodified apart from this header. Loaded by ../hermes-claude-auth.nix.
 """
 hermes-claude-auth bootstrap — Claude Code OAuth bypass for hermes-agent.

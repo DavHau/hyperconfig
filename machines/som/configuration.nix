@@ -15,16 +15,22 @@
     ../../modules/nixos/vault-nfs-client.nix
     ../../modules/nixos/users/stefan-vault.nix
     ../../modules/nixos/users/momentum-vault.nix
+    ../../modules/nixos/users/hsjobeki-vault.nix
     ../../modules/nixos/momentum-state.nix
     ../../modules/nixos/momentum-hermes.nix
+    ../../modules/nixos/stefan-hermes.nix
     ../../modules/nixos/egg-hermes.nix
-    ../../modules/nixos/egg-dashboard.nix
+    ../../modules/nixos/hermes-dashboard-public.nix
     ../../modules/nixos/hermes-claude-auth.nix
     ../../modules/nixos/public-ipv6-token.nix
   ];
 
   # r8169 is the only wired NIC; the initrd needs it to be reachable for unlock.
   boot.initrd.availableKernelModules = [ "r8169" ];
+
+  # Public hermes dashboards: https://hermes.davhau.com/<user>/ (AAAA ->
+  # the token address below). Users opt in from their *-hermes.nix.
+  hyper.hermesDashboard.host = "hermes.davhau.com";
 
   # Public address 2405:9800:b901:94e3::c0de:ba5e (prefix from the RA); the
   # matching AIS router allow rule is `router-ais ipv6-rules list` -> "som".
