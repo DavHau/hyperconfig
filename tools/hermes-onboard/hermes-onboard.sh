@@ -16,19 +16,18 @@ machine=$1
 user=$2
 repo=${HYPERCONFIG:-.}
 
-# One eval for every fact. The dashboard vhost is the nginx server whose
-# proxyPass targets the native backend port (20000 + uid); its name is
-# also the public DNS name of the machine, so SSH uses it too. The user
-# name is spliced into the expression; \${n} is Nix's, not the shell's.
+# One eval for every fact. The public dashboard is declared in
+# hyper.hermesDashboard (modules/nixos/hermes-dashboard-public.nix):
+# https://<host>/<user>/, plus an optional legacy hostname at its root. The
+# shared host is also the public DNS name of the machine, so SSH uses it.
+# The user name is spliced into the expression; \${n} is Nix's, not the
+# shell's.
 expr=$(cat <<EOF
 c:
 let
   u = c.users.users.$user or null;
   h = c.services.hermes-microvm.users.$user or null;
-  backend = if u == null || u.uid == null then null else "http://127.0.0.1:" + toString (20000 + u.uid);
-  servesBackend = v: builtins.any (l: (l.proxyPass or null) == backend) (builtins.attrValues v.locations);
-  vhosts = builtins.filter (n: servesBackend c.services.nginx.virtualHosts.\${n})
-    (builtins.attrNames c.services.nginx.virtualHosts);
+  d = c.hyper.hermesDashboard.users.$user or null;
   comment = k: let p = builtins.filter builtins.isString (builtins.split " " k);
     in if builtins.length p > 2 then builtins.elemAt p 2 else "(no comment)";
 in
@@ -36,9 +35,12 @@ in
   exists = u != null && h != null && h.enable;
   native = h != null && h.native;
   keys = if u == null then [ ] else map comment u.openssh.authorizedKeys.keys;
-  vhost = if backend != null && vhosts != [ ] then builtins.head vhosts else null;
+  publicHost = if d == null then null else c.hyper.hermesDashboard.host;
+  dashboard = if d == null then null else "https://\${c.hyper.hermesDashboard.host}/$user/";
+  legacy = if d == null || d.legacyHost == null then null else "https://\${d.legacyHost}/";
   hasDashboardVars = c.clan.core.vars.generators ? "hermes-dashboard-$user";
   hasTelegram = (c.hyper.hermes.users.$user.telegram.enable or false);
+  claudeAuth = c.environment.etc ? "hermes-claude-auth";
 }
 EOF
 )
@@ -53,9 +55,11 @@ if [ "$(jq -r .exists <<<"$facts")" != true ]; then
 fi
 
 native=$(jq -r .native <<<"$facts")
-vhost=$(jq -r '.vhost // empty' <<<"$facts")
+dashboard=$(jq -r '.dashboard // empty' <<<"$facts")
+legacy=$(jq -r '.legacy // empty' <<<"$facts")
 keys=$(jq -r '.keys | join(", ")' <<<"$facts")
-host=${vhost:-$machine}
+host=$(jq -r '.publicHost // empty' <<<"$facts")
+host=${host:-$machine}
 
 echo "Hermes access for $user on $machine"
 echo
@@ -66,14 +70,19 @@ echo "Coding agent:     ssh -t $user@$host afk --model p0/qwen   (oh-my-pi, afk 
 if [ "$native" = true ]; then
   echo "                  (agent runs natively on $machine: full shell access to its own home)"
 fi
-if [ -n "$vhost" ] && [ "$(jq -r .hasDashboardVars <<<"$facts")" = true ]; then
+if [ -n "$dashboard" ] && [ "$(jq -r .hasDashboardVars <<<"$facts")" = true ]; then
   password=$(clan vars get "$machine" "hermes-dashboard-$user/password" 2>/dev/null) \
     || password="<not generated: clan vars generate $machine --generator hermes-dashboard-$user>"
-  echo "Web dashboard:    https://$vhost"
+  echo "Web dashboard:    $dashboard"
+  [ -n "$legacy" ] && echo "                  (also: $legacy)"
   echo "                  user: $user   password: $password"
 else
   echo "Web dashboard:    none (local only; hermes-desktop over SSH, see spaces hermes-remote)"
 fi
 if [ "$(jq -r .hasTelegram <<<"$facts")" = true ]; then
   echo "Telegram:         DM the bot; the allowlisted user id is in the telegram var"
+fi
+if [ "$native" = true ] && [ "$(jq -r .claudeAuth <<<"$facts")" = true ]; then
+  echo "Claude Pro/Max:   ssh -t $user@$host 'HOME=~/hermes claude'  then /login; afterwards /model -> anthropic in the TUI"
+  echo "                  (hermes-claude-auth is active; the login must land in the agent's HOME, ~/hermes)"
 fi

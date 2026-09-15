@@ -58,6 +58,12 @@
     environment.TELEGRAM_REQUIRE_MENTION = "true";
   };
 
+  # Web dashboard at https://hermes.davhau.com/momentum/ (password login,
+  # ./hermes-dashboard-public.nix):
+  #   clan vars generate som --generator hermes-dashboard-momentum
+  #   clan vars get som hermes-dashboard-momentum/password
+  hyper.hermesDashboard.users.momentum = { };
+
   # One shared session for the whole room. By default hermes keys a group
   # session per sender (agent:main:telegram:group:<chat>:<uid>, gateway/
   # session.py build_session_key), so members talk to separate agents and a

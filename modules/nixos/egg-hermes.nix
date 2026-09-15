@@ -17,7 +17,7 @@
   # The spaces desktop profile auto-provisions every normal user, which
   # merges with the entry below. uid pinned to what som allocated: native
   # mode binds the dashboard backend at 20000 + uid, and
-  # ./egg-dashboard.nix needs that port as a constant.
+  # ./hermes-dashboard-public.nix needs that port as a constant.
   users.users.egg = {
     isNormalUser = true;
     uid = 1004;
@@ -36,6 +36,10 @@
       env.TELEGRAM_HOME_CHANNEL = "allowed_users";
     };
   };
+
+  # Web dashboard at https://hermes.davhau.com/egg/; egg.davhau.com was
+  # the original address and stays up for links already handed out.
+  hyper.hermesDashboard.users.egg.legacyHost = "egg.davhau.com";
 
   # oh-my-pi: the `afk` wrapper (./afk.nix, on PATH for every user via
   # dave.nix) exports P0_API_KEY and ships a models.yml with the p0
