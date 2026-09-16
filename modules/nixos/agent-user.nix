@@ -42,6 +42,22 @@ in
     group = "agent";
     description = "fleet agent (sbox ssh identity)";
     openssh.authorizedKeys.keys = [ pubKey ];
+    # Rootless Docker maps container uids onto this range; task images with
+    # uids past 65535 (Windows-built layers, e.g. Terminal-Bench's ensembl-vep
+    # image at uid 197609) fail to extract with the 65536 default. Starts
+    # above grmpf's auto-allocated ranges.
+    subUidRanges = [
+      {
+        startUid = 200000;
+        count = 1000000;
+      }
+    ];
+    subGidRanges = [
+      {
+        startGid = 200000;
+        count = 1000000;
+      }
+    ];
   };
 
   clan.core.vars.generators.agent-ssh = {
