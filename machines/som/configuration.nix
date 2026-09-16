@@ -23,6 +23,7 @@
     ../../modules/nixos/hermes-dashboard-public.nix
     ../../modules/nixos/hermes-claude-auth.nix
     ../../modules/nixos/public-ipv6-token.nix
+    ../../modules/nixos/linger-normal-users.nix
   ];
 
   # r8169 is the only wired NIC; the initrd needs it to be reachable for unlock.
