@@ -44,7 +44,22 @@
     # "ipv6" above only covers docker0. Networks from `docker network create`
     # and compose stay v4-only unless asked for --ipv6; this asks for them.
     default-network-opts.bridge."com.docker.network.enable_ipv6" = "true";
+    # The netns resolv.conf names the resolved stub (127.0.0.53); dockerd
+    # treats a loopback nameserver as unreachable from containers and falls
+    # back to resolved's upstream, which skips /etc/hosts. 10.0.2.3 is
+    # pasta's --dns-forward address (rootlesskit's default), relayed to the
+    # host stub, so containers see the same answers as the host.
+    dns = [ "10.0.2.3" ];
   };
+  # Bridge containers only have a ULA source address, and RFC 6724 ranks a
+  # global v6 destination below IPv4 from a ULA-only host, so clients pick
+  # the public A record (proxy01 on Hetzner) over the direct v6 route: a
+  # detour through Hetzner for a host on the local network, and a dead one
+  # whenever Hetzner<->AIS v6 transit is down. The containers' DNS forwards
+  # to systemd-resolved, which serves this entry alone, so they never see
+  # the A record. Keep in sync with `inference` in project-zero's
+  # modules/fleet-hosts.nix.
+  networking.extraHosts = "2405:9800:b901:94e3::feed:da7a inference.p0.contact";
   virtualisation.podman.enable = true;
   virtualisation.waydroid.enable = true;
   # virtualisation.podman.dockerSocket.enable = true;
