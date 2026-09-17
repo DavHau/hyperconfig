@@ -129,6 +129,6 @@ in
     environment.profiles = lib.mkIf anyNative [ "${hookedShim}" ];
     # For the owner's OAuth login on the host (HOME=~/hermes claude).
     environment.systemPackages = lib.mkIf anyNative [ pkgs.claude-code ];
-    environment.etc."hermes-claude-auth".source = lib.mkIf anyNative site;
+    environment.etc."hermes-claude-auth" = lib.mkIf anyNative { source = site; };
   };
 }
