@@ -46,7 +46,13 @@
 #
 # The Claude Code CLI is on the agent's PATH (extraPackages feeds both the
 # guest and the native runtime): the patch signs headers with
-# `claude --version`. The OAuth login (`claude` -> /login) must write
+# `claude --version`, and Anthropic rejects versions below a moving
+# minimum ("Claude Code 2.1.238 does not support this model; version
+# 2.1.251 or newer is required"). Hence the llm-agents.nix package, the
+# one packages.nix ships system-wide, not nixpkgs' lagging one: the
+# agent's PATH puts extraPackages ahead of /run/current-system/sw, so a
+# stale pin here beats a fresh system profile. Bump llm-agents when it
+# hits again. The OAuth login (`claude` -> /login) must write
 # ~/.claude/.credentials.json into the AGENT's HOME, the exchange dir:
 # inside the guest that is just $HOME; a native owner runs
 # `HOME=~/hermes claude` on the host (claude-code is in systemPackages
@@ -58,11 +64,13 @@
 # namespacing, thinking-replay and 429 handling).
 {
   config,
+  inputs,
   lib,
   pkgs,
   ...
 }:
 let
+  claude-code = inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.claude-code;
   cfg = config.services.hermes-microvm;
 
   site = pkgs.runCommand "hermes-claude-auth-site" { } ''
@@ -114,7 +122,7 @@ let
 in
 {
   config = lib.mkIf cfg.enable {
-    services.hermes-microvm.extraPackages = [ pkgs.claude-code ];
+    services.hermes-microvm.extraPackages = [ claude-code ];
     # VM name = hlib.vmName in the spaces hermes module ("hermes-<user>").
     # VM users only: a native user runs host units, and a microvm.vms
     # entry for it would declare a guest nobody builds.
@@ -128,7 +136,7 @@ in
     });
     environment.profiles = lib.mkIf anyNative [ "${hookedShim}" ];
     # For the owner's OAuth login on the host (HOME=~/hermes claude).
-    environment.systemPackages = lib.mkIf anyNative [ pkgs.claude-code ];
+    environment.systemPackages = lib.mkIf anyNative [ claude-code ];
     environment.etc."hermes-claude-auth" = lib.mkIf anyNative { source = site; };
   };
 }
