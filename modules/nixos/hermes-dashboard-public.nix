@@ -5,6 +5,12 @@
 # dedicated hostname (`legacyHost`, served at its root) for links in the
 # wild; both front the same backend and session.
 #
+# Clan-internal mirror at http://<internalHost>/hermes/<user>/
+# (<machine>.<clan domain>, yggdrasil IPv6 from the clan /etc/hosts):
+# plain HTTP, since nothing can issue certificates for the private zone
+# and yggdrasil already encrypts end to end. Same backends, same login;
+# cookies are host-scoped, so the sessions never mix.
+#
 # Sub-path serving is upstream's X-Forwarded-Prefix contract
 # (hermes_cli/web_server.py mount_spa, dashboard_auth/prefix.py): nginx
 # strips the prefix off the upstream URI and names it in the header;
@@ -24,6 +30,15 @@
 # sub_filter (text/html only, one hit each; the SPA's index carries
 # neither string). sub_filter needs an uncompressed upstream body, hence
 # the blank Accept-Encoding; TLS-side compression is unaffected.
+#
+# Second upstream gap: the SPA is a Vite build with base `/`, so its
+# lazy route chunks (ChatPage, xterm, ...) are loaded by the preload
+# helper from the root-absolute `/assets/<name>-<hash>.<ext>`, not from
+# `import.meta.url`; mount_spa only rewrites index.html and CSS, never
+# the JS. Every route past the entry point therefore rendered blank. The
+# shared vhost serves `/assets/` from one backend: assets are unauthed,
+# content-hashed and identical across users (one hermes package per
+# host), so any native user's backend answers for all of them.
 #
 # Why the dashboard unit is re-scripted: spaces' native.nix binds the
 # dashboard to 127.0.0.1, and hermes treats a loopback bind as "trusted
@@ -80,6 +95,20 @@ let
     '';
   };
 
+  # Locations of a vhost that carries every user under `base`/<user>/
+  # (base "" or "/hermes"). Nothing at the root: the user list is not
+  # public. nginx answers `base`/<user> with a 301 to `base`/<user>/ on its
+  # own (prefix location with trailing slash + proxy_pass). `/assets/`:
+  # see the header; the URI passes through unchanged (no trailing slash
+  # on proxy_pass).
+  userLocations = base: {
+    "/".return = "404";
+    "/assets/".proxyPass = "http://127.0.0.1:${toString (portOf (lib.head (lib.attrNames cfg.users)))}";
+  }
+  // lib.mapAttrs' (
+    user: _: lib.nameValuePair "${base}/${user}/" (proxyLocation user "${base}/${user}")
+  ) cfg.users;
+
   forEachUser = f: lib.mkMerge (lib.mapAttrsToList f cfg.users);
   legacyUsers = lib.filterAttrs (_: u: u.legacyHost != null) cfg.users;
 in
@@ -88,6 +117,12 @@ in
     host = lib.mkOption {
       type = lib.types.str;
       description = "Shared public hostname; each user's dashboard lives at https://<host>/<user>/.";
+    };
+    internalHost = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = "${config.networking.hostName}.${config.clan.core.settings.domain}";
+      defaultText = "<hostName>.<clan domain>";
+      description = "Clan-internal hostname serving http://<internalHost>/hermes/<user>/ without TLS; null disables.";
     };
     users = lib.mkOption {
       default = { };
@@ -203,17 +238,12 @@ in
           ${cfg.host} = {
             forceSSL = true;
             enableACME = true;
-            # Nothing at the root: the user list is not public. nginx
-            # answers /<user> with a 301 to /<user>/ on its own (prefix
-            # location with trailing slash + proxy_pass).
-            locations = {
-              "/".return = "404";
-            }
-            // lib.mapAttrs' (
-              user: _: lib.nameValuePair "/${user}/" (proxyLocation user "/${user}")
-            ) cfg.users;
+            locations = userLocations "";
           };
         }
+        (lib.mkIf (cfg.internalHost != null) {
+          ${cfg.internalHost}.locations = userLocations "/hermes";
+        })
         (lib.mapAttrs' (
           user: u:
           lib.nameValuePair u.legacyHost {
