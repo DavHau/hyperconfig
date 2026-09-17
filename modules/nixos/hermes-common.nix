@@ -146,6 +146,14 @@ in
         # of omp's compat.thinkingFormat: qwen-chat-template (omp-common.nix).
         extra_body.chat_template_kwargs.enable_thinking = true;
       };
+      # Anthropic prompt-cache tier (agent/agent_init.py reads
+      # prompt_caching.cache_ttl; "5m" | "1h", clamped back to 5m per
+      # destination by prompt_caching.effective_cache_ttl, so non-Anthropic
+      # routes are unaffected). Sessions here pause for more than five
+      # minutes between turns, which is where the 1h tier's 2x write
+      # premium beats re-warming the whole context; under the Claude
+      # subscription (hermes-claude-auth.nix) it is flat-rate anyway.
+      settings.prompt_caching.cache_ttl = "1h";
       # Above the spaces module's own mkDefault (llama-swap g9v3:3b on a
       # desktop), below a plain site definition (amy's vit seed).
       initialModel = lib.mkOverride 900 {
