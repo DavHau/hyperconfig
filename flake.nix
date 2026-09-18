@@ -19,7 +19,10 @@
     # Newer nixpkgs ONLY for llama-cpp: the fleet nixpkgs (via spaces) lags
     # the llama.cpp release train, and inference modules that need a recent
     # arch/spec-decode fix pull their engine from here instead of forcing a
-    # fleet-wide bump. Consumers: llama-swap-nanbeige42-amy.nix.
+    # fleet-wide bump. Consumers: llama-swap-nanbeige42-amy.nix,
+    # llama-swap-ling30-tiny-amy.nix, llama-swap-qwen38-flash-vit.nix.
+    # Lock: llama-cpp 0.4.1 (b10964); ling needs >= 0.4.1 for its
+    # vendored parser patch.
     nixpkgs-llama-cpp.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
     home-manager.url = "github:nix-community/home-manager";

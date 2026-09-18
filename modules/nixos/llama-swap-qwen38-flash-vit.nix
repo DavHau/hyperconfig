@@ -21,7 +21,7 @@
 # some of that decode speed for a 128K context; see "Launch flags".
 #
 #   - Engine: fork commit b46f7f7a4 (base b10845) built through the
-#     nixpkgs-llama-cpp `llama-cpp` derivation (v0.4.0 = b10809; same UI
+#     nixpkgs-llama-cpp `llama-cpp` derivation (v0.4.1 = b10964; same UI
 #     lock file, so npmDepsHash carries over). CUDA only, sm_120 only
 #     (nixpkgs has no `120a` capability; ggml uses no 120a-only PTX).
 #     GGML_BACKEND_DL off: the MoE cache at this commit assumes the CUDA
@@ -133,6 +133,8 @@ let
       rocmSupport = false;
       blasSupport = false;
       cpuArchDynamicDispatch = false;
+      # See llama-swap-ling30-tiny-amy.nix: nodejs_latest 26.9.0 uncached.
+      nodejs_latest = pkgsLlama.nodejs;
     }).overrideAttrs (old: {
       pname = "llama-cpp-moe-cache";
       version = "b10845-${builtins.substring 0 7 forkRev}";
