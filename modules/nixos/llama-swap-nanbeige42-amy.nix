@@ -20,7 +20,7 @@
 #     block size (clamped there anyway).
 #     Measured on amy (2026-09-10, 600-token thinking gen, greedy):
 #     14 t/s plain -> 24 t/s with DSpark (1.7x), ~45% draft acceptance.
-#   - Engine: pinned to inputs.nixpkgs-llama-cpp (v0.4.0 = b10809), NOT
+#   - Engine: pinned to inputs.nixpkgs-llama-cpp (v0.4.1 = b10964), NOT
 #     the fleet pkgs.llama-cpp (b10408). The nanbeige graph only exports
 #     per-layer inputs for DFlash/DSpark drafts since b10644
 #     (ggml-org/llama.cpp#27730); on b10408 the model loads but the
@@ -61,11 +61,13 @@ let
     curlOptsList = bigFetchCurlOpts;
   };
 
+  # nodejs_latest: see llama-swap-ling30-tiny-amy.nix (uncached 26.9.0).
   llama-cpp-vulkan =
     inputs.nixpkgs-llama-cpp.legacyPackages.${pkgs.stdenv.hostPlatform.system}.llama-cpp.override {
       vulkanSupport = true;
       cudaSupport = false;
       rocmSupport = false;
+      nodejs_latest = inputs.nixpkgs-llama-cpp.legacyPackages.${pkgs.stdenv.hostPlatform.system}.nodejs;
     };
 in
 {

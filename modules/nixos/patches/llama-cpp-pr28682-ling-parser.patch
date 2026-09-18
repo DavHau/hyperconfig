@@ -1,0 +1,642 @@
+From 1fc5c42f304583b50eaf602777fb0807c15349de Mon Sep 17 00:00:00 2001
+From: aetherbird <aetherbird@users.noreply.github.com>
+Date: Mon, 14 Sep 2026 17:47:29 -0400
+Subject: [PATCH] chat: add dedicated Ling 3.0 (Bailing V3) parser
+
+Ling 3.0 Flash templates pre-open the think block in the generation
+prompt, so the model never emits an opening <think>, and a tool call can
+arrive before any </think>. The generated autoparser terminated reasoning
+only at the close tag, which classified such tool calls entirely as
+reasoning_content: clients received content="" with no tool_calls and
+agent loops died as reasoning-only turns.
+
+Adds a specialized parser that terminates reasoning at the think close
+tag or at a <tool_call> start, mirroring the hand-written Qwen3-Coder and
+Kimi K3 parsers and the reference vLLM/SGLang Ling3 parser (which treats
+<tool_call> as an implicit reasoning terminator). Detection is gated on
+the <role>...</role> section markers, unique to this family among the
+tagged-argument templates.
+
+Adds the Ling 3.0 Flash chat template and tests covering the
+unclosed-think tool call (full parse and streaming), healthy closed-think
+paths, trailing prose, parallel calls, marker-like strings in argument
+values, string-union and non-string argument types, and
+reasoning_format=none.
+
+Assisted-by: Kimi Code
+---
+ common/chat.cpp                               |   8 +
+ common/parsers/ling3.cpp                      | 194 ++++++++++++++++
+ common/parsers/parsers.h                      |   2 +
+ common/parsers/sources.cmake                  |   1 +
+ .../inclusionai-ling-3.0-flash.jinja          | 130 +++++++++++
+ tests/test-chat.cpp                           | 210 ++++++++++++++++++
+ 6 files changed, 545 insertions(+)
+ create mode 100644 common/parsers/ling3.cpp
+ create mode 100644 models/templates/inclusionai-ling-3.0-flash.jinja
+
+diff --git a/common/chat.cpp b/common/chat.cpp
+index 3a204e12d..6c8099cf2 100644
+--- a/common/chat.cpp
++++ b/common/chat.cpp
+@@ -1133,6 +1133,14 @@ std::optional<common_chat_params> common_chat_try_specialized_template(
+         return common_chat_params_init_kimi_k3(tmpl, params);
+     }
+ 
++    // Ling 3.0 / Bailing V3 - <role>X</role> sections with <arg_key>/<arg_value> tagged
++    // tool calls. <role> sections are unique to this family among the tagged-arg templates.
++    if (src.find("<role>ASSISTANT</role>") != std::string::npos &&
++        src.find("<arg_key>") != std::string::npos) {
++        LOG_DBG("Using specialized template: Ling 3.0 (Bailing V3)\n");
++        return common_chat_params_init_ling3(tmpl, params);
++    }
++
+     // Cohere2 MoE / North Code - marker-wrapped format with <|START_TEXT|> content and
+     // <|START_ACTION|> JSON tool calls. <|START_TEXT|> is unique to this template (the older
+     // Command-R templates use <|START_RESPONSE|>).
+diff --git a/common/parsers/ling3.cpp b/common/parsers/ling3.cpp
+new file mode 100644
+index 000000000..8b49847e2
+--- /dev/null
++++ b/common/parsers/ling3.cpp
+@@ -0,0 +1,194 @@
++#include "parsers.h"
++
++// Ling 3.0 / Bailing V3 - <role>X</role> sections with tagged tool calls:
++//   assistant := [<think> ... </think>] [content] {<tool_call>name
++//                  <arg_key>k</arg_key>\n<arg_value>v</arg_value> ...</tool_call>}
++// The generation prompt ends with "<role>ASSISTANT</role>\n<think>", so the model
++// never emits the opening think tag, and a tool call can arrive before any
++// </think>. Reasoning therefore terminates at the think close tag or at a tool
++// call start, like the Qwen3-Coder and Kimi K3 parsers. With thinking off the
++// template pre-closes the think block instead, and the model emits bare content.
++common_chat_params common_chat_params_init_ling3(const common_chat_template &          tmpl,
++                                                        const autoparser::generation_params & inputs) {
++    common_chat_params data;
++
++    data.prompt            = common_chat_template_direct_apply_impl(tmpl, inputs);
++    data.generation_prompt = common_chat_template_generation_prompt_impl(tmpl, inputs);
++    data.format            = COMMON_CHAT_FORMAT_PEG_NATIVE;
++    data.supports_thinking = true;
++
++    const std::string ROLE        = "<role>ASSISTANT</role>";
++    const std::string THINK_START = "<think>";
++    const std::string THINK_END   = "</think>";
++    const std::string CALL_START  = "<tool_call>";
++    const std::string CALL_END    = "</tool_call>";
++    const std::string ARG_KEY     = "<arg_key>";
++    const std::string ARG_KEY_END = "</arg_key>";
++    const std::string ARG_VAL     = "<arg_value>";
++    const std::string ROLE_END    = "<|role_end|>";
++    const std::string ARG_VAL_END = "</arg_value>";
++
++    data.preserved_tokens = {
++        THINK_START, THINK_END, CALL_START, CALL_END,
++        ARG_KEY, ARG_KEY_END, ARG_VAL, ARG_VAL_END, ROLE_END,
++    };
++
++    data.thinking_start_tag = THINK_START;
++    // Support both </think> and <tool_call> as reasoning end sequences: a call
++    // can be emitted before the think block is closed.
++    data.thinking_end_tags  = { THINK_END, CALL_START };
++
++    data.message_delimiters = {
++        { COMMON_CHAT_ROLE_ASSISTANT, "<role>ASSISTANT</role>" },
++        { COMMON_CHAT_ROLE_USER,      "<role>HUMAN</role>"     },
++        { COMMON_CHAT_ROLE_TOOL,      "<role>OBSERVATION</role>" },
++        { COMMON_CHAT_ROLE_SYSTEM,    "<role>SYSTEM</role>"    },
++    };
++
++    // the model may spell the end-of-turn control token out as text tokens,
++    // which does not stop generation; a literal stop string catches it either
++    // way (as the Laguna patch does for its </assistant> token)
++    data.additional_stops = { ROLE_END };
++
++    if (inputs.has_continuation()) {
++        const auto & msg = inputs.continue_msg;
++
++        data.generation_prompt = ROLE + "\n" + THINK_START + msg.reasoning_content;
++        if (inputs.continue_final_message == COMMON_CHAT_CONTINUATION_CONTENT) {
++            data.generation_prompt += THINK_END + msg.render_content();
++        }
++
++        data.prompt += data.generation_prompt;
++    }
++
++    // The generation prompt pre-opens the think block when thinking is on, so
++    // the opening tag is optional here and reasoning runs until </think> or a
++    // tool call start; with thinking off the template pre-closes the block and
++    // everything the model emits is content.
++    bool think_open = false;
++    if (inputs.has_continuation()) {
++        think_open = inputs.continue_final_message != COMMON_CHAT_CONTINUATION_CONTENT;
++    } else {
++        auto last_open  = data.generation_prompt.rfind(THINK_START);
++        auto last_close = data.generation_prompt.rfind(THINK_END);
++        think_open      = last_open != std::string::npos &&
++                     (last_close == std::string::npos || last_open > last_close);
++    }
++
++    auto has_tools         = inputs.tools.is_array() && !inputs.tools.empty();
++    auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
++    auto include_grammar   = has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE;
++
++    auto parser = build_chat_peg_parser([&](common_chat_peg_builder & p) {
++        auto end = p.end();
++
++        // the effective parse input is generation_prompt + model output, so the
++        // assistant opener is optionally consumed here
++        auto opener = p.optional(p.literal(ROLE) + p.optional(p.space()));
++
++        // the generation prompt pre-opens the think block, so the opening tag
++        // is optional; a missing close tag does not swallow a tool call
++        auto body_end   = think_open ? p.until_one_of({ THINK_END, CALL_START }) : p.until_one_of({ THINK_END });
++        auto think_body = extract_reasoning ? p.reasoning(body_end) : p.content(body_end);
++
++        auto reasoning = p.optional(p.optional(p.literal(THINK_START)) + think_body +
++                                    p.optional(p.literal(THINK_END)));
++
++        // content between the think block and the first tool call, plus any
++        // trailing text after the last tool call, are plain content
++        auto content = p.optional(p.content(p.until_one_of({ CALL_START })));
++
++        // a trailing end-of-turn token is consumed instead of leaking into content
++        auto tail = p.optional(p.content(p.until(ROLE_END))) + p.optional(p.literal(ROLE_END));
++
++        if (!has_tools || inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_NONE) {
++            return opener + reasoning + tail + end;
++        }
++
++        auto tool_choices = p.choice();
++        auto arg_close    = p.tool_arg_close(p.literal(ARG_VAL_END));
++        auto arg_string   = p.rule("ling3-arg-string",
++                                   p.tool_arg_string_value(p.until(ARG_VAL_END)) + arg_close);
++
++        foreach_function(inputs.tools, [&](const json & tool) {
++            const auto & function = tool.at("function");
++            std::string  name     = function.at("name");
++
++            std::vector<common_peg_parser> required_args;
++            std::vector<common_peg_parser> optional_args;
++
++            // each argument may be preceded by whitespace: the model emits
++            // newlines between arguments, the template history does not
++            foreach_parameter(function, [&](const common_chat_schema_property & param, const common_chat_schema_document_ptr & doc) {
++                auto rule_name = "ling3-arg-" + name + "-" + param.name;
++
++                auto types = param.schema->value_types();
++
++                // string arguments are raw text up to the closing tag, other
++                // types parse as JSON per their schema; each alternative
++                // consumes the closing tag itself so a JSON prefix can not
++                // commit the choice before the tag matches
++                auto arg_value = p.eps();
++                if (!types.has(common_chat_schema::TYPE_STRING)) {
++                    arg_value = p.tool_arg_json_value(p.schema(p.json(), rule_name + "-schema", doc, *param.schema)) + arg_close;
++                } else if (types.is_only(common_chat_schema::TYPE_STRING)) {
++                    arg_value = arg_string;
++                } else {
++                    // the parser tries the JSON alternative first to type the value
++                    arg_value = p.gbnf(p.atomic(p.tool_arg_json_value(p.schema(p.json(), rule_name + "-schema", doc, *param.schema)) + arg_close) | arg_string,
++                                       "ling3-arg-string");
++                }
++
++                auto arg = p.rule(rule_name,
++                    p.optional(p.space()) +
++                    p.tool_arg(p.tool_arg_open(p.literal(ARG_KEY) + p.tool_arg_name(p.literal(param.name)) +
++                                               p.literal(ARG_KEY_END)) +
++                               p.optional(p.space()) + p.literal(ARG_VAL) +
++                               arg_value));
++
++                (param.required ? required_args : optional_args).push_back(arg);
++            });
++
++            // required arguments in any order (as Qwen3-Coder does), then
++            // optional ones in any order and number
++            auto args = p.permute("ling3-" + name + "-args", required_args);
++            if (!optional_args.empty()) {
++                args = args + p.zero_or_more(p.choice(optional_args));
++            }
++
++            auto call = p.tool(p.tool_open(p.literal(CALL_START) + p.tool_name(p.literal(name)) +
++                                           p.optional(p.space())) +
++                               p.tool_args(args) +
++                               p.tool_close(p.optional(p.space()) + p.literal(CALL_END)));
++
++            tool_choices |= p.rule("ling3-tool-" + name, call);
++        });
++
++        auto calls = inputs.parallel_tool_calls ?
++                     tool_choices + p.zero_or_more(p.space() + tool_choices) :
++                     tool_choices;
++
++        auto tools_section = p.trigger_rule("ling3-tool-call", calls + p.space() +
++                                        p.optional(p.content(p.until(ROLE_END))) + p.optional(p.literal(ROLE_END)));
++
++        auto tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? tools_section :
++                                                                             p.optional(tools_section);
++
++        return opener + reasoning + content + tools + tail + end;
++    });
++
++    data.parser = parser.save();
++
++    if (include_grammar) {
++        data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
++        data.grammar      = build_grammar([&](const common_grammar_builder & builder) {
++            parser.build_grammar(builder, data.grammar_lazy);
++        });
++
++        data.grammar_triggers = {
++            { COMMON_GRAMMAR_TRIGGER_TYPE_WORD, CALL_START },
++        };
++    }
++
++    return data;
++}
+diff --git a/common/parsers/parsers.h b/common/parsers/parsers.h
+index 73fc719fd..f86636007 100644
+--- a/common/parsers/parsers.h
++++ b/common/parsers/parsers.h
+@@ -63,6 +63,8 @@ common_chat_params common_chat_params_init_kimi_k2(const common_chat_template &
+ 
+ common_chat_params common_chat_params_init_kimi_k3(const common_chat_template & tmpl, const autoparser::generation_params & inputs);
+ 
++common_chat_params common_chat_params_init_ling3(const common_chat_template & tmpl, const autoparser::generation_params & inputs);
++
+ // tool_list_tokens preserves the LFM2 system tool-list markers; LFM2.5 renders without them
+ common_chat_params common_chat_params_init_lfm2(const common_chat_template & tmpl, const autoparser::generation_params & inputs, bool tool_list_tokens);
+ 
+diff --git a/common/parsers/sources.cmake b/common/parsers/sources.cmake
+index 9d7fb0992..70af84e25 100644
+--- a/common/parsers/sources.cmake
++++ b/common/parsers/sources.cmake
+@@ -11,6 +11,7 @@ set(LLAMA_CHAT_PARSERS_SOURCES
+     ${CMAKE_CURRENT_LIST_DIR}/gpt-oss.cpp
+     ${CMAKE_CURRENT_LIST_DIR}/kimi-k2.cpp
+     ${CMAKE_CURRENT_LIST_DIR}/kimi-k3.cpp
++    ${CMAKE_CURRENT_LIST_DIR}/ling3.cpp
+     ${CMAKE_CURRENT_LIST_DIR}/lfm2.cpp
+     ${CMAKE_CURRENT_LIST_DIR}/minicpm5.cpp
+     ${CMAKE_CURRENT_LIST_DIR}/minimax-m3.cpp
+diff --git a/models/templates/inclusionai-ling-3.0-flash.jinja b/models/templates/inclusionai-ling-3.0-flash.jinja
+new file mode 100644
+index 000000000..ed32bb978
+--- /dev/null
++++ b/models/templates/inclusionai-ling-3.0-flash.jinja
+@@ -0,0 +1,130 @@
++{#- Bailing V3 chat template -#}
++{#- Supports: thinking option, tool calling -#}
++
++{#- ==================== thinking option normalization ==================== -#}
++{%- if enable_thinking is defined %}
++    {%- if enable_thinking %}
++        {%- set thinking_option = 'on' %}
++    {%- else %}
++        {%- set thinking_option = 'off' %}
++    {%- endif %}
++{%- elif thinking_option is not defined %}
++    {%- set thinking_option = 'on' %}
++{%- endif %}
++
++{#- ==================== preserved thinking  ==================== -#}
++{% set preserved_thinking = true %}
++
++{#- ==================== system message ==================== -#}
++{{- '<role>SYSTEM</role>' }}
++{%- if tools %}
++    {%- if messages[0].role == 'system' %}
++        {{- messages[0].content + '\n' }}
++    {%- endif %}
++    {{- "# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>" }}
++    {%- for tool in tools %}
++        {{- "\n" }}
++        {{- tool | tojson }}
++    {%- endfor %}
++    {{- "\n</tools>\n\nIf none of the functions can be used, point it out. If the given question lacks the parameters required by the function, also point it out.\nIf you need to use a function, for each function call, output the function name and arguments within the following XML format:\n<tool_call>{function-name}\n<arg_key>{arg-key-1}</arg_key>\n<arg_value>{arg-value-1}</arg_value>\n<arg_key>{arg-key-2}</arg_key>\n<arg_value>{arg-value-2}</arg_value>\n...\n</tool_call>\n" }}
++    {%- if messages[0].role == 'system' and messages[0].content is string and ('detailed thinking on' in messages[0].content or 'detailed thinking off' in messages[0].content) %}
++        {{- '<|role_end|>' }}
++    {%- else %}
++        {{- 'detailed thinking ' + thinking_option + '<|role_end|>' }}
++    {%- endif %}
++{%- else %}
++    {%- if messages[0].role == 'system' %}
++        {%- if 'detailed thinking on' in messages[0].content or 'detailed thinking off' in messages[0].content %}
++            {{- messages[0].content + '<|role_end|>' }}
++        {%- else %}
++            {{- messages[0].content + '\n' }}
++            {{- 'detailed thinking ' + thinking_option + '<|role_end|>' }}
++        {%- endif %}
++    {% else %}
++        {{- 'detailed thinking ' + thinking_option + '<|role_end|>' }}
++    {%- endif %}
++{%- endif %}
++{%- set ns = namespace(multi_step_tool=true, last_query_index=messages|length - 1) %}
++{%- for message in messages[::-1] %}
++    {%- set index = (messages|length - 1) - loop.index0 %}
++    {%- if ns.multi_step_tool and message.role == "user" and message.content is string and not(message.content.startswith('<tool_response>') and message.content.endswith('</tool_response>')) %}
++        {%- set ns.multi_step_tool = false %}
++        {%- set ns.last_query_index = index %}
++    {%- endif %}
++{%- endfor %}
++{%- for message in messages %}
++    {%- if message.content is string %}
++        {%- set content = message.content %}
++    {%- else %}
++        {%- set content = '' %}
++    {%- endif %}
++    {%- if message.role == "user" %}
++        {{- '<role>HUMAN</role>' + message.content + '<|role_end|>' }}
++    {%- elif message.role == "system" and not loop.first %}
++        {{- '<role>SYSTEM</role>' + message.content + '<|role_end|>' }}
++    {%- elif message.role == "assistant" %}
++        {%- set reasoning_content = '' %}
++        {%- if message.reasoning_content is string and message.reasoning_content != '' %}
++            {%- set reasoning_content = message.reasoning_content %}
++        {%- else %}
++            {%- if '</think>' in content %}
++                {%- set reasoning_content = content.split('</think>')[0].rstrip('\n').split('<think>')[-1].lstrip('\n') %}
++                {%- set content = content.split('</think>')[-1].lstrip('\n') %}
++            {%- endif %}
++        {%- endif %}
++        {%- if preserved_thinking or loop.index0 > ns.last_query_index %}
++            {%- if reasoning_content != '' %}
++                {{- '<role>ASSISTANT</role>' + '\n<think>' + reasoning_content.strip('\n') + '</think>' + content.lstrip('\n') }}
++            {%- else %}
++                {{- '<role>ASSISTANT</role>\n<think></think>' + content }}
++            {%- endif %}
++        {%- else %}
++            {{- '<role>ASSISTANT</role>\n<think></think>' + content }}
++        {%- endif %}
++        {%- if message.tool_calls %}
++            {%- for tool_call in message.tool_calls %}
++                {%- if (loop.first and content) or (not loop.first) %}
++                    {{- '\n' }}
++                {%- endif %}
++                {%- set tc = tool_call %}
++                {%- if tool_call.function %}
++                    {%- set tc = tool_call.function %}
++                {%- endif %}
++                {{- '<tool_call>' + tc.name }}
++                {% set _args = tc.arguments %}
++                {%- for k, v in _args.items() %}
++                    {{- '<arg_key>' + k + '</arg_key>' }}
++                    {{- '\n<arg_value>' }}
++                    {%- if v is string %}
++                        {{- v }}
++                    {%- else %}
++                        {{- v | tojson(ensure_ascii=False) }}
++                    {%- endif %}
++                    {{- '</arg_value>' }}
++                {%- endfor %}
++                {{- '\n</tool_call>' }}
++            {%- endfor %}
++        {%- endif %}
++        {{- '<|role_end|>' }}
++    {%- elif message.role == "tool" %}
++        {%- if loop.first or (messages[loop.index0 - 1].role != "tool") %}
++            {{- '<role>OBSERVATION</role>' }}
++        {%- endif %}
++        {{- '\n<tool_response>\n' }}
++        {{- content }}
++        {{- '\n</tool_response>' }}
++        {%- if loop.last or (messages[loop.index0 + 1].role != "tool") %}
++            {{- '<|role_end|>' }}
++        {%- endif %}
++    {%- endif %}
++{%- endfor %}
++
++{#- ==================== generation prompt ==================== -#}
++{%- if add_generation_prompt %}
++    {{- '<role>ASSISTANT</role>' }}
++    {%- if thinking_option == 'on' %}
++        {{- '\n<think>' }}
++    {%- elif thinking_option == 'off' %}
++        {{- '\n<think></think>' }}
++    {%- endif %}
++{%- endif %}
+\ No newline at end of file
+diff --git a/tests/test-chat.cpp b/tests/test-chat.cpp
+index 30a7237e3..a0b874c17 100644
+--- a/tests/test-chat.cpp
++++ b/tests/test-chat.cpp
+@@ -2120,6 +2120,216 @@ static void test_lfm2_parser(const std::string & template_path, bool detailed_de
+ static void test_template_output_peg_parsers(bool detailed_debug) {
+     LOG_DBG("%s\n", __func__);
+ 
++    // Ling 3.0 / Bailing V3 dedicated parser
++    {
++        auto tst = peg_tester("models/templates/inclusionai-ling-3.0-flash.jinja", detailed_debug);
++
++        const std::string get_time_call =
++            "<tool_call>get_time\n"
++            "<arg_key>city</arg_key>\n"
++            "<arg_value>Paris</arg_value>\n"
++            "</tool_call>";
++
++        // A tool call emitted before the think block is closed must be extracted,
++        // with the preceding text kept as reasoning.
++        tst.test("I need to check the time first.\n" + get_time_call)
++            .reasoning_format(COMMON_REASONING_FORMAT_DEEPSEEK)
++            .tools({ get_time_tool })
++            .expect_reasoning("I need to check the time first.\n")
++            .expect_tool_calls({ { "get_time", R"({"city": "Paris"})", "" } })
++            .run();
++
++        // Closed think block, prose, then a tool call.
++        tst.test("Let me check the time.\n</think>\nChecking it now.\n" + get_time_call)
++            .reasoning_format(COMMON_REASONING_FORMAT_DEEPSEEK)
++            .tools({ get_time_tool })
++            .expect_reasoning("Let me check the time.\n")
++            .expect_content("Checking it now.\n")
++            .expect_tool_calls({ { "get_time", R"({"city": "Paris"})", "" } })
++            .run();
++
++        // Prose after the last tool call is content, not a parse failure.
++        tst.test(get_time_call + "\nThe time has been checked.")
++            .reasoning_format(COMMON_REASONING_FORMAT_DEEPSEEK)
++            .tools({ get_time_tool })
++            .expect_content("\nThe time has been checked.")
++            .expect_tool_calls({ { "get_time", R"({"city": "Paris"})", "" } })
++            .run();
++
++        // Parallel tool calls.
++        tst.test("</think>\n" + get_time_call + "\n" + get_time_call)
++            .reasoning_format(COMMON_REASONING_FORMAT_DEEPSEEK)
++            .tools({ get_time_tool })
++            .parallel_tool_calls(true)
++            .expect_content("")
++            .expect_tool_calls({
++                { "get_time", R"({"city": "Paris"})", "" },
++                { "get_time", R"({"city": "Paris"})", "" },
++            })
++            .run();
++
++        // Argument values may contain marker-like strings.
++        tst.test("check this\n</think>\n<tool_call>tool_2req_4opt\n"
++                 "<arg_key>req1</arg_key>\n<arg_value>contains </think> and <tool_call> strings</arg_value>\n"
++                 "<arg_key>req2</arg_key>\n<arg_value>1</arg_value>\n"
++                 "</tool_call>")
++            .reasoning_format(COMMON_REASONING_FORMAT_DEEPSEEK)
++            .tools({ tool_2req_4opt })
++            .expect_reasoning("check this\n")
++            .expect_tool_calls({
++                { "tool_2req_4opt", R"({"req1": "contains </think> and <tool_call> strings", "req2": 1})", "" },
++            })
++            .run();
++
++        // reasoning_format=none keeps extracting tool calls.
++        tst.test("I need to check the time first.\n" + get_time_call)
++            .reasoning_format(COMMON_REASONING_FORMAT_NONE)
++            .tools({ get_time_tool })
++            .expect_content("I need to check the time first.\n")
++            .expect_tool_calls({ { "get_time", R"({"city": "Paris"})", "" } })
++            .run();
++
++        // With thinking off the template pre-closes the think block, so the model
++        // emits bare content: it must not be classified as reasoning.
++        tst.test("Here is the answer.\nNo think block at all.")
++            .reasoning_format(COMMON_REASONING_FORMAT_DEEPSEEK)
++            .enable_thinking(false)
++            .expect_reasoning("")
++            .expect_content("Here is the answer.\nNo think block at all.")
++            .run();
++
++        tst.test(get_time_call)
++            .reasoning_format(COMMON_REASONING_FORMAT_DEEPSEEK)
++            .enable_thinking(false)
++            .tools({ get_time_tool })
++            .expect_reasoning("")
++            .expect_tool_calls({ { "get_time", R"({"city": "Paris"})", "" } })
++            .run();
++
++        // Continuation: the partial assistant turn is spliced back into the prompt.
++        {
++            common_chat_msg prefill = simple_assist_msg("", "I'm thinking");
++
++            tst.test("Hello, world!")
++                .reasoning_format(COMMON_REASONING_FORMAT_DEEPSEEK)
++                .enable_thinking(true)
++                .messages({ message_user, prefill })
++                .add_generation_prompt(false)
++                .continue_final_message(COMMON_CHAT_CONTINUATION_CONTENT)
++                .expect_reasoning("I'm thinking")
++                .expect_content("Hello, world!")
++                .run();
++
++            tst.test(" more</think>Hello, world!")
++                .reasoning_format(COMMON_REASONING_FORMAT_DEEPSEEK)
++                .enable_thinking(true)
++                .messages({ message_user, prefill })
++                .add_generation_prompt(false)
++                .continue_final_message(COMMON_CHAT_CONTINUATION_REASONING)
++                .expect_reasoning("I'm thinking more")
++                .expect_content("Hello, world!")
++                .run();
++        }
++
++        // The end-of-turn token may arrive spelled out as text tokens instead of
++        // the single control token; it must not leak into content.
++        tst.test("Here is the answer.<|role_end|>")
++            .reasoning_format(COMMON_REASONING_FORMAT_DEEPSEEK)
++            .enable_thinking(false)
++            .expect_content("Here is the answer.")
++            .run();
++
++        tst.test(get_time_call + "<|role_end|>")
++            .reasoning_format(COMMON_REASONING_FORMAT_DEEPSEEK)
++            .tools({ get_time_tool })
++            .expect_tool_calls({ { "get_time", R"({"city": "Paris"})", "" } })
++            .run();
++
++        // Real output tolerates whitespace variation between tags (the template
++        // renders historical calls with no newline after the tool name).
++        tst.test("</think>\n<tool_call>get_time<arg_key>city</arg_key><arg_value>Paris</arg_value></tool_call>")
++            .reasoning_format(COMMON_REASONING_FORMAT_DEEPSEEK)
++            .tools({ get_time_tool })
++            .expect_tool_calls({ { "get_time", R"({"city": "Paris"})", "" } })
++            .run();
++
++        // Required arguments may arrive in any order.
++        tst.test("</think>\n<tool_call>tool_2req_4opt\n"
++                 "<arg_key>req2</arg_key>\n<arg_value>7</arg_value>\n"
++                 "<arg_key>req1</arg_key>\n<arg_value>hello</arg_value>\n"
++                 "</tool_call>")
++            .reasoning_format(COMMON_REASONING_FORMAT_DEEPSEEK)
++            .tools({ tool_2req_4opt })
++            .expect_tool_calls({ { "tool_2req_4opt", R"({"req2": 7, "req1": "hello"})", "" } })
++            .run();
++
++        // Optional arguments may follow the required ones.
++        tst.test("</think>\n<tool_call>tool_2req_4opt\n"
++                 "<arg_key>req1</arg_key>\n<arg_value>hello</arg_value>\n"
++                 "<arg_key>req2</arg_key>\n<arg_value>7</arg_value>\n"
++                 "<arg_key>opt1</arg_key>\n<arg_value>extra</arg_value>\n"
++                 "</tool_call>")
++            .reasoning_format(COMMON_REASONING_FORMAT_DEEPSEEK)
++            .tools({ tool_2req_4opt })
++            .expect_tool_calls({ { "tool_2req_4opt", R"({"req1": "hello", "req2": 7, "opt1": "extra"})", "" } })
++            .run();
++
++        // Non-string arguments parse as JSON.
++        tst.test("</think>\n<tool_call>magic_int\n"
++                 "<arg_key>ref</arg_key>\n<arg_value>42</arg_value>\n"
++                 "</tool_call>")
++            .reasoning_format(COMMON_REASONING_FORMAT_DEEPSEEK)
++            .tools({ magic_int_tool })
++            .expect_tool_calls({ { "magic_int", R"({"ref": 42})", "" } })
++            .run();
++
++        // A nullable string accepts a JSON null and raw text.
++        tst.test("</think>\n<tool_call>set_nullable_str\n"
++                 "<arg_key>name</arg_key>\n<arg_value>null</arg_value>\n"
++                 "</tool_call>")
++            .reasoning_format(COMMON_REASONING_FORMAT_DEEPSEEK)
++            .tools({ nullable_string_tool })
++            .expect_tool_calls({ { "set_nullable_str", R"({"name": null})", "" } })
++            .run();
++
++        tst.test("</think>\n<tool_call>set_nullable_str\n"
++                 "<arg_key>name</arg_key>\n<arg_value>hello world</arg_value>\n"
++                 "</tool_call>")
++            .reasoning_format(COMMON_REASONING_FORMAT_DEEPSEEK)
++            .tools({ nullable_string_tool })
++            .expect_tool_calls({ { "set_nullable_str", R"({"name": "hello world"})", "" } })
++            .run();
++
++        // A raw string that starts like a JSON value must not be taken as JSON:
++        // the choice falls back to the string alternative.
++        tst.test("</think>\n<tool_call>set_nullable_str\n"
++                 "<arg_key>name</arg_key>\n<arg_value>123 Main St</arg_value>\n"
++                 "</tool_call>")
++            .reasoning_format(COMMON_REASONING_FORMAT_DEEPSEEK)
++            .tools({ nullable_string_tool })
++            .expect_tool_calls({ { "set_nullable_str", R"({"name": "123 Main St"})", "" } })
++            .run();
++
++        // String unions: object and integer values parse as JSON, strings stay raw.
++        tst.test("</think>\n<tool_call>set_union\n"
++                 "<arg_key>value</arg_key>\n<arg_value>{\"a\": 1}</arg_value>\n"
++                 "<arg_key>amount</arg_key>\n<arg_value>7</arg_value>\n"
++                 "</tool_call>")
++            .reasoning_format(COMMON_REASONING_FORMAT_DEEPSEEK)
++            .tools({ string_union_tool })
++            .expect_tool_calls({ { "set_union", R"({"value": {"a": 1}, "amount": 7})", "" } })
++            .run();
++
++        tst.test("</think>\n<tool_call>set_union\n"
++                 "<arg_key>value</arg_key>\n<arg_value>plain text</arg_value>\n"
++                 "<arg_key>amount</arg_key>\n<arg_value>1abc</arg_value>\n"
++                 "</tool_call>")
++            .reasoning_format(COMMON_REASONING_FORMAT_DEEPSEEK)
++            .tools({ string_union_tool })
++            .expect_tool_calls({ { "set_union", R"({"value": "plain text", "amount": "1abc"})", "" } })
++            .run();
++    }
++
+     // JSON schemas
+     const char * invoice_schema = R"({
+         "type": "object",
+-- 
+2.55.0
+
