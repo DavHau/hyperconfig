@@ -1,6 +1,13 @@
 # Vendored from https://github.com/kristianvast/hermes-claude-auth
 # commit 6525928e13a2771ca0fcf0539ea286150e83c421 (2026-08-18), fetched 2026-09-06.
-# Unmodified apart from this header. Loaded by ../hermes-claude-auth.nix.
+# Loaded by ../hermes-claude-auth.nix.
+#
+# Local patch (2026-09-20, not upstream as of that date): the injected
+# Claude Code identity block used to hardcode cache_control ttl=1h. Anthropic
+# rejects a ttl=1h block placed after a ttl=5m block (order: tools, system,
+# messages), and hermes marks tools[-1]/messages with prompt_caching.cache_ttl
+# (default 5m), so every request 400ed unless the user set cache_ttl: 1h.
+# _identity_cache_control() now mirrors the tier hermes chose for the request.
 """
 Claude Code OAuth bypass for hermes-agent.
 ==========================================
@@ -1034,6 +1041,52 @@ def _prepend_to_first_user_message(
         return
 
 
+def _identity_cache_control(
+    api_kwargs: Dict[str, Any],
+    system: List[Any],
+) -> Dict[str, str]:
+    """cache_control for the injected identity system block.
+
+    Anthropic processes cache breakpoints in the order tools, system,
+    messages and rejects a ``ttl='1h'`` block that follows a ``ttl='5m'``
+    one.  Hermes stamps its own breakpoints (``tools[-1]``, system prefix,
+    completed message turns) with one tier from ``prompt_caching.cache_ttl``
+    (default 5m = no ``ttl`` key), so the identity block must carry the same
+    tier.  Without any hermes marker there is nothing to conflict with and
+    the Claude Code default (1h) stands.
+    """
+    tools = api_kwargs.get("tools")
+    candidates: List[Any] = list(tools) if isinstance(tools, list) else []
+    # Skip entries this bypass planted on an earlier pass (idempotent
+    # re-application): only hermes-owned markers decide the tier.
+    candidates.extend(
+        e for e in system
+        if not (
+            isinstance(e, dict)
+            and str(e.get("text") or "").startswith(
+                (_BILLING_PREFIX, _SYSTEM_IDENTITY, _OLD_SYSTEM_IDENTITY)
+            )
+        )
+    )
+    for msg in api_kwargs.get("messages") or []:
+        if not isinstance(msg, dict):
+            continue
+        candidates.append(msg)
+        content = msg.get("content")
+        if isinstance(content, list):
+            candidates.extend(content)
+    for block in candidates:
+        if not isinstance(block, dict):
+            continue
+        marker = block.get("cache_control")
+        if not isinstance(marker, dict):
+            continue
+        if marker.get("ttl") == "1h":
+            return {"type": "ephemeral", "ttl": "1h"}
+        return {"type": "ephemeral"}
+    return {"type": "ephemeral", "ttl": "1h"}
+
+
 # ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
@@ -1085,6 +1138,7 @@ def apply_claude_code_bypass(api_kwargs: Dict[str, Any], version: str) -> None:
         logger.warning("Failed to build billing header: %s", exc)
         return
     billing_entry = {"type": "text", "text": billing_value}
+    identity_cache_control = _identity_cache_control(api_kwargs, system)
 
     kept: List[Any] = []
     moved_texts: List[str] = []
@@ -1114,7 +1168,7 @@ def apply_claude_code_bypass(api_kwargs: Dict[str, Any], version: str) -> None:
             kept.append({
                 "type": "text",
                 "text": _SYSTEM_IDENTITY,
-                "cache_control": {"type": "ephemeral", "ttl": "1h"},
+                "cache_control": dict(identity_cache_control),
             })
             if rest:
                 moved_texts.append(rest)
@@ -1126,7 +1180,7 @@ def apply_claude_code_bypass(api_kwargs: Dict[str, Any], version: str) -> None:
         kept.insert(0, {
             "type": "text",
             "text": _SYSTEM_IDENTITY,
-            "cache_control": {"type": "ephemeral", "ttl": "1h"},
+            "cache_control": dict(identity_cache_control),
         })
 
     api_kwargs["system"] = [billing_entry] + kept
