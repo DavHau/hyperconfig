@@ -154,6 +154,17 @@ in
       # premium beats re-warming the whole context; under the Claude
       # subscription (hermes-claude-auth.nix) it is flat-rate anyway.
       settings.prompt_caching.cache_ttl = "1h";
+      # Session titles come from p0's Qwen regardless of the chat model.
+      # hermes 0.20.2 title_generator.py passes extra_body.response_format
+      # through auxiliary_client into the native Anthropic request body,
+      # which api.anthropic.com rejects (400 "response_format: Extra inputs
+      # are not permitted"), so on a Claude session every turn logged a
+      # failed title. Named ``providers`` entries resolve here through
+      # _get_named_custom_provider (key_env -> P0_API_KEY from the .env).
+      settings.auxiliary.title_generation = {
+        provider = "p0";
+        model = "qwen";
+      };
       # Above the spaces module's own mkDefault (llama-swap g9v3:3b on a
       # desktop), below a plain site definition (amy's vit seed).
       initialModel = lib.mkOverride 900 {
