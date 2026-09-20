@@ -18,8 +18,6 @@ let
   };
 in
 {
-  imports = [ ./wifi.nix ];
-
   # The stock prompt blocks the import service, which would leave the remote
   # path unable to finish the boot. ./ask-key.sh asks on the console instead,
   # re-arming on a timeout so either route wins.
@@ -54,7 +52,7 @@ in
     # which the clan admin role fills.
   };
 
-  # The per-interface networks (40-enp6s0, 40-wlan0) already carry DHCP.
+  # The wired interface's 40-<iface> network (nixos-facter) already carries DHCP.
   boot.initrd.systemd.network.enable = true;
 
   # Read by append-initrd-secrets at bootloader install, which runs after the

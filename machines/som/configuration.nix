@@ -27,16 +27,26 @@
     ../../modules/nixos/linger-normal-users.nix
   ];
 
-  # r8169 is the only wired NIC; the initrd needs it to be reachable for unlock.
+  # r8169 is the only NIC that matters; the initrd needs it to be reachable
+  # for unlock (../../modules/nixos/zfs-remote-unlock, wired only).
   boot.initrd.availableKernelModules = [ "r8169" ];
+
+  # No wifi on this desktop: it sits on the LAN cable. The AX210 stays
+  # unbound (no wlan0, no supplicant, no initrd PSK); nixos-facter's
+  # wlan0 network unit just never matches.
+  boot.blacklistedKernelModules = [ "iwlwifi" ];
 
   # Public hermes dashboards: https://hermes.davhau.com/<user>/ (AAAA ->
   # the token address below). Users opt in from their *-hermes.nix.
   hyper.hermesDashboard.host = "hermes.davhau.com";
 
-  # Public address 2405:9800:b901:94e3::c0de:ba5e (prefix from the RA); the
-  # matching AIS router allow rule is `router-ais ipv6-rules list` -> "som".
-  networking.publicIPv6Token = "::c0de:ba5e";
+  # Public address 2405:9800:b901:94e3::c0de:ba5e on the LAN NIC (prefix from
+  # the RA, ../../modules/nixos/public-ipv6-token.nix); the matching AIS
+  # router allow rule is `router-ais ipv6-rules list` -> "som".
+  networking.publicIPv6 = {
+    token = "::c0de:ba5e";
+    interface = "enp6s0";
+  };
 
   # The spaces desktop profile defaults llama-swap on, which registers a
   # local provider in every harness's models.yml (omp-common.nix) and in the
