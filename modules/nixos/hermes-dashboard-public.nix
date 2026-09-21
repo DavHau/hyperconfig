@@ -28,7 +28,10 @@
 # they hit this vhost's root and 404. Until upstream threads the prefix
 # through, the prefixed location patches those two literals with
 # sub_filter (text/html only, one hit each; the SPA's index carries
-# neither string). sub_filter needs an uncompressed upstream body, hence
+# neither string). `next` is only prefixed when relative: for the desktop
+# app's RFC 8252 sign-in (routes.py auth_password_login, native branch) it
+# is the app's absolute http://127.0.0.1:<port>/callback and must pass
+# through untouched. sub_filter needs an uncompressed upstream body, hence
 # the blank Accept-Encoding; TLS-side compression is unaffected.
 #
 # Second upstream gap: the SPA is a Vite build with base `/`, so its
@@ -87,7 +90,7 @@ let
         proxy_set_header X-Forwarded-Prefix ${prefix};
         proxy_set_header Accept-Encoding "";
         sub_filter "fetch('/auth/password-login'" "fetch('${prefix}/auth/password-login'";
-        sub_filter "window.location.assign((data && data.next) || '/')" "window.location.assign('${prefix}' + ((data && data.next) || '/'))";
+        sub_filter "window.location.assign((data && data.next) || '/')" "window.location.assign((function (n) { return /^https?:\\/\\//.test(n) ? n : '${prefix}' + n; })((data && data.next) || '/'))";
       ''}
       proxy_read_timeout 1h;
       proxy_send_timeout 1h;
