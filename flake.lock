@@ -2669,13 +2669,10 @@
         "voxtype": "voxtype_2"
       },
       "locked": {
-        "lastModified": 1788865772,
-        "narHash": "sha256-mgSGobufebS66LCig1C2j9EMT2ihm/7j2CimdY2wK1U=",
-        "ref": "refs/heads/main",
-        "rev": "132ed277ccbd9769bc82bb574cde547a4c21c175",
-        "revCount": 829,
-        "type": "git",
-        "url": "https://git.geninf.io/spaces/spaces-os"
+        "lastModified": 1790001935,
+        "narHash": "sha256-G+Jar4NSBOwXDTwt//NUDNqNJVo5+ZwzqT6W8Ig4yXk=",
+        "path": "/home/grmpf/synced/projects/spaces",
+        "type": "path"
       },
       "original": {
         "type": "git",
