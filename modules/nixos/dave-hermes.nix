@@ -11,7 +11,7 @@
 #
 # dave's own account keeps whatever the spaces desktop profile
 # auto-provisions for it (a VM on som); this file does not touch it.
-{ config, ... }:
+{ config, pkgs, ... }:
 {
   imports = [ ./hermes-common.nix ];
 
@@ -26,6 +26,10 @@
     # SSH login (hermes CLI over ssh): the clan admin role fills root's
     # list, reuse it (same as ./users/momentum-vault.nix).
     openssh.authorizedKeys.keys = config.users.users.root.openssh.authorizedKeys.keys;
+    # Not the site default fish: hermes-desktop's SSH connection kind runs
+    # its remote probe and `hermes serve` as POSIX sh one-liners
+    # (`help="$(...)"`) in the login shell, which fish rejects.
+    shell = pkgs.bash;
   };
 
   hyper.hermes.users.dave-hermes = {
