@@ -12,6 +12,7 @@
   imports = [
     inputs.spaces.nixosModules.hermes
     ../hermes-common.nix
+    ./desktop-connections.nix
   ];
 
   # The module derives ports/CID/MAC from the uid and asserts it matches

@@ -2669,10 +2669,12 @@
         "voxtype": "voxtype_2"
       },
       "locked": {
-        "lastModified": 1790001935,
-        "narHash": "sha256-G+Jar4NSBOwXDTwt//NUDNqNJVo5+ZwzqT6W8Ig4yXk=",
-        "path": "/home/grmpf/synced/projects/spaces",
-        "type": "path"
+        "lastModified": 1790001861,
+        "narHash": "sha256-9iEoaY7O0eju5ZoVMvz4dMLneL7kIjsAikRk+gRo2oQ=",
+        "rev": "3a4bbb57d7b2dbba254e95794439ce2483b8aa82",
+        "revCount": 882,
+        "type": "git",
+        "url": "file:///home/grmpf/synced/projects/spaces"
       },
       "original": {
         "type": "git",
