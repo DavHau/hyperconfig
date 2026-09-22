@@ -21,6 +21,8 @@
   users.users.egg = {
     isNormalUser = true;
     uid = 1004;
+    # Read-only on /vault/parquet (./vault-ids.nix).
+    extraGroups = [ "vault-ro" ];
     openssh.authorizedKeys.keys = [
       # github.com/allouis.keys (fetched 2026-09-09)
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBcx+vaa7+HgTcP0tpFpgs4SpzoViy8/fERFL6YWBfb0 allouis"

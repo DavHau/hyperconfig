@@ -32,6 +32,8 @@ in
     isNormalUser = true;
     uid = 1005;
     description = "dave's hermes agent";
+    # Read-only on /vault/parquet (./vault-ids.nix).
+    extraGroups = [ "vault-ro" ];
     # SSH login (hermes CLI over ssh): the clan admin role fills root's
     # list, reuse it (same as ./users/momentum-vault.nix). Plus amy's
     # desktop key, restricted.
