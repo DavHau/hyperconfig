@@ -16,11 +16,11 @@
     ../../modules/nixos/users/stefan-vault.nix
     ../../modules/nixos/users/momentum-vault.nix
     ../../modules/nixos/users/hsjobeki-vault.nix
-    ../../modules/nixos/momentum-state.nix
     ../../modules/nixos/momentum-hermes.nix
     ../../modules/nixos/stefan-hermes.nix
     ../../modules/nixos/egg-hermes.nix
     ../../modules/nixos/dave-hermes.nix
+    ../../modules/nixos/pinpox-hermes.nix
     ../../modules/nixos/hermes-dashboard-public.nix
     ../../modules/nixos/hermes-claude-auth.nix
     ../../modules/nixos/public-ipv6-token.nix

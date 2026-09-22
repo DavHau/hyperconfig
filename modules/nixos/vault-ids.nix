@@ -3,43 +3,47 @@
 # uid/gid on a client IS the identity nfsd checks against bam's file modes;
 # anything not pinned identically on both sides is meaningless as an ACL.
 #
-# Authorization on the pool is Unix modes plus one POSIX ACL, set once by
-# hand on bam (not tmpfiles: the datasets are nofail mounts and a rule that
-# ran against an unmounted /vault would chmod the XFS root's placeholder
-# dirs). The datasets are acltype=posix; a default ACL `g:vault:rwx` on every
-# directory makes files written by any writer group-writable regardless of
-# that writer's umask:
+# Two tiers:
+#   `vault`    (gid 1101) read+write on the datasets. Members: dave (uid 1000
+#              on bam/som/vit, 1001 on amy), grmpf (amy, uid 1000 - on the
+#              wire the same principal as dave elsewhere).
+#   `vault-ro` (gid 1103) read-only on /vault/parquet. Members: stefan,
+#              momentum, hsjobeki, dave-hermes, egg, pinpox - each user's own
+#              module adds the group (users/*-vault.nix, *-hermes.nix).
+# The client sends its own gid list, so membership is granted per host: a
+# reader reads from every wg-vault client whose config imports its module.
+# root on any client is root on the pool (no_root_squash,
+# vault-nfs-server.nix).
 #
-#   setfacl -R -m g:vault:rwX -m d:g:vault:rwx <dir>
+# Authorization on the pool is Unix modes plus POSIX ACLs, set by hand on
+# bam (not tmpfiles: the datasets are nofail mounts and a rule that ran
+# against an unmounted /vault would chmod the XFS root's placeholder dirs;
+# and the layout below /vault/parquet is data, not this repo's business).
+# The datasets are acltype=posix. Rule: /vault and the dataset mountpoints
+# are root:root 0755 (traversal); every tree below is root:vault 2770 with
+# default ACLs, so files written by any writer come out group-writable and
+# reader-readable regardless of umask, and nothing for "other":
 #
-#   /vault, /vault/parquet            root:root  0755   traversal for everyone
-#   /vault/parquet/depth, photos,
-#     media, misc                      root:vault 2770   group writes, setgid so
-#                                      new subdirs stay group vault; nothing
-#                                      for others (momentum stays out)
-#   /vault/parquet/momentum            momentum:vault 2775, files 664: momentum
-#                                      and group vault write; readable by any
-#                                      uid inside the wg-vault perimeter (its
-#                                      hermes microVM, see momentum-state.nix)
+#   setfacl -R -m g:vault:rwX -m d:g:vault:rwx <tree>          # any dataset
+#   setfacl -R -m g:vault-ro:rX -m d:g:vault-ro:rx <tree>      # /vault/parquet
 #
-# `vault` = read+write on the datasets. Members: dave (uid 1000 on bam/som/
-# vit, 1001 on amy), grmpf (amy, uid 1000 - on the wire the same principal
-# as dave elsewhere), stefan. The client sends its own gid list, so
-# membership is granted per host. root on any client is root on the pool
-# (no_root_squash, vault-nfs-server.nix). `momentum` = a single-purpose
-# account whose only writable data is its own directory.
+# When adding readers to an existing tree, set the ACL before closing the
+# modes, or the readers lose access in between.
 #
-# 1100/1101 sit above the auto-allocated range in use (agent landed on 1002
-# and already collides with stefan's pin on vit). 1102 is hsjobeki
-# (users/hsjobeki-vault.nix), a read-only consumer on momentum's footing.
+# 1100-1104 sit above the auto-allocated range in use (agent landed on 1002
+# and already collides with stefan's pin on vit): 1100 momentum, 1101 vault,
+# 1102 hsjobeki (users/hsjobeki-vault.nix), 1103 vault-ro, 1104 pinpox
+# (pinpox-hermes.nix). gid 1100 was the retired `momentum` primary group and
+# stays unallocated so a stale gid on a forgotten file never maps to a new
+# group.
 {
   users.groups.vault.gid = 1101;
-  users.groups.momentum.gid = 1100;
+  users.groups.vault-ro.gid = 1103;
 
   users.users.momentum = {
     isNormalUser = true;
     uid = 1100;
-    group = "momentum";
-    description = "momentum - /vault/parquet/momentum only";
+    description = "momentum - read-only vault consumer";
+    extraGroups = [ "vault-ro" ];
   };
 }
