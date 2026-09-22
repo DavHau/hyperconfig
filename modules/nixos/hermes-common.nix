@@ -167,8 +167,18 @@ in
       };
       # Above the spaces module's own mkDefault (llama-swap g9v3:3b on a
       # desktop), below a plain site definition (amy's vit seed).
+      #
+      # `custom:p0`, not `p0`: hermes 0.21.3 resolves both to the same
+      # providers.p0 entry at runtime (runtime_provider source
+      # custom_provider:p0), but the boot inventory (hermes_cli/
+      # free_tier_bootstrap -> auth.resolve_provider("auto") ->
+      # _config_model_provider) only recognises `custom`, `custom:<name>`,
+      # registry ids and loopback base_urls as "configured". With a bare
+      # `p0` every dashboard TUI session parked on "Setup Required" while
+      # the chat itself worked. Already-seeded states were edited in place
+      # (2026-09-22); the seed only writes once.
       initialModel = lib.mkOverride 900 {
-        provider = "p0";
+        provider = "custom:p0";
         base_url = "https://inference.p0.contact/v1";
         default = "qwen";
       };
