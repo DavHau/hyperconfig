@@ -58,10 +58,9 @@
     environment.TELEGRAM_REQUIRE_MENTION = "true";
   };
 
-  # Web dashboard at https://hermes.davhau.com/momentum/ (password login,
-  # ./hermes-dashboard-public.nix):
-  #   clan vars generate som --generator hermes-dashboard-momentum
-  #   clan vars get som hermes-dashboard-momentum/password
+  # Web dashboard at https://hermes.davhau.com/ for the pocket-id account
+  # `momentum` (./hermes-dashboard-public.nix; passkey, enroll with
+  # pocket-id-enroll on edi).
   hyper.hermesDashboard.users.momentum = { };
 
   # One shared session for the whole room. By default hermes keys a group

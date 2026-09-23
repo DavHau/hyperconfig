@@ -36,9 +36,10 @@ in
   native = h != null && h.native;
   keys = if u == null then [ ] else map comment u.openssh.authorizedKeys.keys;
   publicHost = if d == null then null else c.hyper.hermesDashboard.host;
-  dashboard = if d == null then null else "https://\${c.hyper.hermesDashboard.host}/$user/";
+  dashboard = if d == null then null else "https://\${c.hyper.hermesDashboard.host}/";
   legacy = if d == null || d.legacyHost == null then null else "https://\${d.legacyHost}/";
-  hasDashboardVars = c.clan.core.vars.generators ? "hermes-dashboard-$user";
+  account = if d == null then null else d.account;
+  issuer = if d == null then null else c.hyper.oidc.issuer;
   hasTelegram = (c.hyper.hermes.users.$user.telegram.enable or false);
   claudeAuth = c.environment.etc ? "hermes-claude-auth";
 }
@@ -70,12 +71,11 @@ echo "Coding agent:     ssh -t $user@$host afk --model p0/qwen   (oh-my-pi, afk 
 if [ "$native" = true ]; then
   echo "                  (agent runs natively on $machine: full shell access to its own home)"
 fi
-if [ -n "$dashboard" ] && [ "$(jq -r .hasDashboardVars <<<"$facts")" = true ]; then
-  password=$(clan vars get "$machine" "hermes-dashboard-$user/password" 2>/dev/null) \
-    || password="<not generated: clan vars generate $machine --generator hermes-dashboard-$user>"
+if [ -n "$dashboard" ]; then
   echo "Web dashboard:    $dashboard"
-  [ -n "$legacy" ] && echo "                  (also: $legacy)"
-  echo "                  user: $user   password: $password"
+  [ -n "$legacy" ] && echo "                  (also: $legacy, redirects there)"
+  echo "                  sign in with the $(jq -r .issuer <<<"$facts") account '$(jq -r .account <<<"$facts")' (passkey)"
+  echo "                  enroll: pocket-id-enroll $(jq -r .account <<<"$facts")  on the pocket-id host, send the link"
 else
   echo "Web dashboard:    none (local only; hermes-desktop over SSH, see spaces hermes-remote)"
 fi

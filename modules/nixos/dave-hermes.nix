@@ -51,11 +51,10 @@ in
     openrouter = false;
   };
 
-  # Web dashboard at https://hermes.davhau.com/dave-hermes/ (password
-  # login, ./hermes-dashboard-public.nix):
-  #   clan vars generate som --generator hermes-dashboard-dave-hermes
-  #   clan vars get som hermes-dashboard-dave-hermes/password
-  hyper.hermesDashboard.users.dave-hermes = { };
+  # Web dashboard at https://hermes.davhau.com/ for the pocket-id account
+  # `dave` (./hermes-dashboard-public.nix; passkey, enroll with
+  # pocket-id-enroll on edi).
+  hyper.hermesDashboard.users.dave-hermes.account = "dave";
 
   # oh-my-pi on p0's Qwen: models.yml (./omp-common.nix) resolves the key
   # through `p0-api-key`, which reads the per-user copy this installs at
