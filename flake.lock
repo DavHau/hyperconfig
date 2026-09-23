@@ -1421,9 +1421,7 @@
         "flake-compat": "flake-compat_2",
         "flake-parts": "flake-parts_3",
         "git-hooks-nix": "git-hooks-nix",
-        "nixpkgs": [
-          "nixpkgs"
-        ],
+        "nixpkgs": "nixpkgs_2",
         "nixpkgs-23-11": [
           "nixpkgs"
         ],
@@ -1539,7 +1537,7 @@
         "flake-compat": "flake-compat_3",
         "flake-parts": "flake-parts_4",
         "git-hooks-nix": "git-hooks-nix_2",
-        "nixpkgs": "nixpkgs_2",
+        "nixpkgs": "nixpkgs_3",
         "nixpkgs-23-11": "nixpkgs-23-11",
         "nixpkgs-regression": "nixpkgs-regression"
       },
@@ -1818,6 +1816,19 @@
     },
     "nixpkgs_2": {
       "locked": {
+        "lastModified": 1790113641,
+        "narHash": "sha256-DfkF+sEdKXCrvkg7olt82Q9cfP3p7Ro2R851fcTcSxI=",
+        "rev": "1bc55b9def8165e82073919945c3239903fe4dc2",
+        "type": "tarball",
+        "url": "https://releases.nixos.org/nixos/26.05/nixos-26.05.10478.1bc55b9def81/nixexprs.tar.xz"
+      },
+      "original": {
+        "type": "tarball",
+        "url": "https://channels.nixos.org/nixos-26.05/nixexprs.tar.xz"
+      }
+    },
+    "nixpkgs_3": {
+      "locked": {
         "lastModified": 1747179050,
         "narHash": "sha256-qhFMmDkeJX9KJwr5H32f1r7Prs7XbQWtO0h3V0a0rFY=",
         "owner": "NixOS",
@@ -1832,7 +1843,7 @@
         "type": "github"
       }
     },
-    "nixpkgs_3": {
+    "nixpkgs_4": {
       "locked": {
         "lastModified": 1790046670,
         "narHash": "sha256-MYiI+CzL0tuWgRPjGsKCDHqYs2T3OzMlMQWOYWG0qso=",
@@ -2124,16 +2135,15 @@
         ]
       },
       "locked": {
-        "lastModified": 1786253040,
-        "narHash": "sha256-XcD1v8HdBSr29WDV3bQDS+VaajR0vCANTU5Yf/OapEU=",
-        "owner": "DavHau",
+        "lastModified": 1789890976,
+        "narHash": "sha256-GKwH3zpy7tartuJMG0Rv/xUsdetG1QLmTVv8UKgJLmA=",
+        "owner": "Mic92",
         "repo": "sops-nix",
-        "rev": "f1bf134f01027bd24ef7e1693b44020ed46e060a",
+        "rev": "7214124c20c1542c90deb54af50e2f53ae02711f",
         "type": "github"
       },
       "original": {
-        "owner": "DavHau",
-        "ref": "fix/partial-secret-install",
+        "owner": "Mic92",
         "repo": "sops-nix",
         "type": "github"
       }
@@ -2172,7 +2182,7 @@
         "home-manager": "home-manager_4",
         "llm-agents": "llm-agents_3",
         "microvm": "microvm",
-        "nixpkgs": "nixpkgs_3",
+        "nixpkgs": "nixpkgs_4",
         "systems": "systems_9",
         "treefmt-nix": "treefmt-nix_9",
         "voxtype": "voxtype_2"

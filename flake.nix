@@ -41,7 +41,8 @@
     # (parallel-downloads bookmark; see modules/nixos/nix-parallel-downloads.nix).
     # nix.url = "https://flakehub.com/f/NixOS/nix/2.*.*.tar.gz";
     nix.url = "git+file:///home/grmpf/projects/nix?ref=parallel-downloads&shallow=1";
-    nix.inputs.nixpkgs.follows = "nixpkgs";
+    # nix builds on its own pinned nixpkgs: against nixpkgs 2026-09-22
+    # (boost 1.91) its URL-parsing unit tests fail (IPv6 cases).
     nix.inputs.nixpkgs-23-11.follows = "nixpkgs";
     nix.inputs.nixpkgs-regression.follows = "nixpkgs";
     # nix-lazy stays on its own nixpkgs: nix 2.30pre (2025-05) no longer
@@ -59,12 +60,11 @@
     clan-core-monitoring.inputs.flake-parts.follows = "flake-parts";
     clan-core-monitoring.inputs.nixpkgs.follows = "nixpkgs";
 
-    # Fork carrying https://github.com/Mic92/sops-nix/pull/973: one secret with
-    # an owner that does not resolve to an existing user used to abort the whole
-    # activation, leaving the machine with zero secrets (vit, 2026-08-08). Drop
-    # this input once the PR lands. sops-nix is a transitive input of clan-core
-    # only, hence the follows below.
-    sops-nix.url = "github:DavHau/sops-nix/fix/partial-secret-install";
+    # Upstream, pinned here so clan-core's sops-nix follows our nixpkgs.
+    # Without https://github.com/Mic92/sops-nix/pull/973 (still open), one
+    # secret whose owner does not resolve to an existing user aborts the whole
+    # activation and leaves the machine with zero secrets (vit, 2026-08-08).
+    sops-nix.url = "github:Mic92/sops-nix";
     sops-nix.inputs.nixpkgs.follows = "nixpkgs";
     clan-core.inputs.sops-nix.follows = "sops-nix";
     clan-core-monitoring.inputs.sops-nix.follows = "sops-nix";
