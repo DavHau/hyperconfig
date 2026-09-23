@@ -39,8 +39,8 @@
     };
   };
 
-  # Web dashboard at https://hermes.davhau.com/egg/; egg.davhau.com was
-  # the original address and stays up for links already handed out.
+  # Web dashboard at https://hermes.davhau.com/ (pocket-id account `egg`);
+  # egg.davhau.com was the original address and redirects there.
   hyper.hermesDashboard.users.egg.legacyHost = "egg.davhau.com";
 
   # oh-my-pi: the `afk` wrapper (./afk.nix, on PATH for every user via

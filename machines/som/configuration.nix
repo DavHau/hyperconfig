@@ -36,8 +36,9 @@
   # wlan0 network unit just never matches.
   boot.blacklistedKernelModules = [ "iwlwifi" ];
 
-  # Public hermes dashboards: https://hermes.davhau.com/<user>/ (AAAA ->
-  # the token address below). Users opt in from their *-hermes.nix.
+  # Public hermes dashboards: https://hermes.davhau.com/ (AAAA -> the token
+  # address below), pocket-id login through oauth2-proxy, each account
+  # routed to its own backend. Users opt in from their *-hermes.nix.
   hyper.hermesDashboard.host = "hermes.davhau.com";
 
   # Public address 2405:9800:b901:94e3::c0de:ba5e on the LAN NIC (prefix from

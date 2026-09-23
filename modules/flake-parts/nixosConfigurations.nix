@@ -62,6 +62,7 @@ in {
           monitoring = inputs.clan-core-monitoring + "/modules/monitoring";
           cctl = ../../modules/clan/cctl;
           remote-building = ../../modules/clan/remote-building;
+          oidc = ../../modules/clan/oidc;
         };
 
         # add machines to their hosts
@@ -186,6 +187,61 @@ in {
                 "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHfFgVZxuSVWvuNua41SaxGQxpMb6oUuCEiIF7SZpAD1 root@nintendo-ds"
               ];
               roles.client.machines.amy.settings.barToggle = true;
+            };
+
+            # Pocket ID at id.davhau.com (modules/clan/oidc). The hermes
+            # dashboards share one client behind oauth2-proxy on som
+            # (modules/nixos/hermes-dashboard-public.nix): the `hermes` group
+            # may sign in, nginx routes each account to its own backend.
+            oidc = {
+              module.name = "oidc";
+              module.input = "self";
+              roles.server.machines.edi.settings = {
+                appUrl = "https://id.davhau.com";
+                appName = "DavHau";
+                logo = ../../assets/davhau-avatar.png;
+                users = {
+                  dave = {
+                    email = "need-more-ram@davhau.com";
+                    displayName = "Dave";
+                    admin = true;
+                    groups = [ "apps" "hermes" ];
+                  };
+                  stefan = { displayName = "Stefan"; groups = [ "hermes" ]; };
+                  pinpox = { displayName = "Pinpox"; groups = [ "hermes" ]; };
+                  egg = { displayName = "Egg"; groups = [ "hermes" ]; };
+                  momentum = { displayName = "Momentum"; groups = [ "hermes" ]; };
+                  # The coding agent's account for end-to-end login tests
+                  # (`pocket-id-enroll agent` on edi gives it a one-time
+                  # session, no passkey needed). In `hermes` on purpose: it
+                  # has no dashboard, so it exercises nginx's 403 path.
+                  agent = { email = "agent@davhau.com"; displayName = "Agent"; groups = [ "apps" "hermes" ]; };
+                };
+              };
+              roles.client.machines.bam.settings.clients = {
+                nextcloud = {
+                  name = "Nextcloud";
+                  callbackURLs = [ "https://nc.davhau.com/apps/user_oidc/code" ];
+                  allowedGroups = [ "apps" ];
+                };
+                vikunja = {
+                  name = "Vikunja";
+                  callbackURLs = [ "https://tasks.davhau.com/auth/openid/davhau" ];
+                  allowedGroups = [ "apps" ];
+                };
+              };
+              roles.client.machines.cm-pi.settings.clients.home-assistant = {
+                name = "Home Assistant";
+                callbackURLs = [ "https://bearhouse.davhau.com/auth/oidc/callback" ];
+                public = true;
+                allowedGroups = [ "apps" ];
+              };
+              roles.client.machines.som.settings.clients.hermes = {
+                name = "Hermes dashboards";
+                callbackURLs = [ "https://hermes.davhau.com/oauth2/callback" ];
+                pkce = true; # oauth2-proxy sends S256
+                allowedGroups = [ "hermes" ];
+              };
             };
 
             p2p-ssh-iroh = {

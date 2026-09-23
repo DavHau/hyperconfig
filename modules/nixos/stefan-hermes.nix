@@ -13,10 +13,9 @@
     openrouter = false;
   };
 
-  # Web dashboard at https://hermes.davhau.com/stefan/ (password login,
-  # ./hermes-dashboard-public.nix):
-  #   clan vars generate som --generator hermes-dashboard-stefan
-  #   clan vars get som hermes-dashboard-stefan/password
+  # Web dashboard at https://hermes.davhau.com/ for the pocket-id account
+  # `stefan` (./hermes-dashboard-public.nix; passkey, enroll with
+  # pocket-id-enroll on edi).
   hyper.hermesDashboard.users.stefan = { };
 
   # oh-my-pi on p0's Qwen: models.yml (./omp-common.nix) resolves the key

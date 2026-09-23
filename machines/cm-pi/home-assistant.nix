@@ -6,6 +6,16 @@
   services.home-assistant = {
     enable = true;
     config = null;
+    # Login via the clan's pocket-id (modules/clan/oidc, public client
+    # `home-assistant`). With config = null the YAML is hand-managed on the
+    # host; the component only gets symlinked. configuration.yaml needs:
+    #   auth_oidc:
+    #     client_id: home-assistant
+    #     discovery_url: https://id.davhau.com/.well-known/openid-configuration
+    #     display_name: DavHau
+    #     features:
+    #       automatic_user_linking: true   # OIDC `dave` -> existing HA user `dave`
+    customComponents = [ pkgs.home-assistant-custom-components.auth_oidc ];
     extraComponents = [
       # List of components required to complete the onboarding
       # "default_config"

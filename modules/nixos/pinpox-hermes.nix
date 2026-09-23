@@ -37,10 +37,9 @@
     openrouter = false;
   };
 
-  # Web dashboard at https://hermes.davhau.com/pinpox/ (password login,
-  # ./hermes-dashboard-public.nix):
-  #   clan vars generate som --generator hermes-dashboard-pinpox
-  #   clan vars get som hermes-dashboard-pinpox/password
+  # Web dashboard at https://hermes.davhau.com/ for the pocket-id account
+  # `pinpox` (./hermes-dashboard-public.nix; passkey, enroll with
+  # pocket-id-enroll on edi).
   hyper.hermesDashboard.users.pinpox = { };
 
   # oh-my-pi on p0's Qwen: models.yml (./omp-common.nix) resolves the key
