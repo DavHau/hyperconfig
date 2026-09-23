@@ -19,10 +19,12 @@
 # bam (not tmpfiles: the datasets are nofail mounts and a rule that ran
 # against an unmounted /vault would chmod the XFS root's placeholder dirs;
 # and the layout below /vault/parquet is data, not this repo's business).
-# The datasets are acltype=posix. Rule: /vault and the dataset mountpoints
-# are root:root 0755 (traversal); every tree below is root:vault 2770 with
-# default ACLs, so files written by any writer come out group-writable and
-# reader-readable regardless of umask, and nothing for "other":
+# The datasets are acltype=posix. Rule: /vault (a plain dir on bam's XFS
+# root) is root:root 0755, traversal only - nothing is written there; every
+# dataset mountpoint and every tree below grants g:vault rwx plus a default
+# ACL (media/misc/photos: root:vault 2770; parquet keeps "other" r-x), so
+# files written by any writer come out group-writable and reader-readable
+# regardless of umask.
 #
 #   setfacl -R -m g:vault:rwX -m d:g:vault:rwx <tree>          # any dataset
 #   setfacl -R -m g:vault-ro:rX -m d:g:vault-ro:rx <tree>      # /vault/parquet
