@@ -32,6 +32,7 @@
     nixos-generators.inputs.nixpkgs.follows = "nixpkgs";
 
     nixos-hardware.url = "github:nixos/nixos-hardware";
+    nixos-hardware.inputs.nixpkgs.follows = "nixpkgs";
 
     nil.url = "github:oxalica/nil";
     nil.inputs.nixpkgs.follows = "nixpkgs";
@@ -40,8 +41,12 @@
     # (parallel-downloads bookmark; see modules/nixos/nix-parallel-downloads.nix).
     # nix.url = "https://flakehub.com/f/NixOS/nix/2.*.*.tar.gz";
     nix.url = "git+file:///home/grmpf/projects/nix?ref=parallel-downloads&shallow=1";
+    nix.inputs.nixpkgs.follows = "nixpkgs";
+    nix.inputs.nixpkgs-23-11.follows = "nixpkgs";
+    nix.inputs.nixpkgs-regression.follows = "nixpkgs";
+    # nix-lazy stays on its own nixpkgs: nix 2.30pre (2025-05) no longer
+    # builds against current nixpkgs (mdbook-linkcheck was removed).
     nix-lazy.url = "github:nixos/nix/lazy-trees-v2";
-    nix-eval-cache.url = "github:roberth/nix/eval-cache-next";
     retiolum.url = "github:mic92/retiolum";
 
     clan-core.url = "git+https://git.clan.lol/clan/clan-core";
@@ -122,23 +127,20 @@
 
     sbox.url = "github:DavHau/sbox";
 
+    # llm-agents keeps its OWN nixpkgs on purpose: its derivations then
+    # hash-match what numtide's CI pushed to cache.numtide.com and substitute
+    # instead of building, and upstream tracks nixpkgs faster than spaces
+    # does (2026-09: omp 18.2.10 needs bun >= 1.3.14, t3code electron_44;
+    # spaces' pin has neither). Following our nixpkgs would rebuild every
+    # agent from source on each bump and currently cannot build at all.
+    # afk (the omp harness) shares this pin so its patch set and omp agree.
     llm-agents.url = "github:numtide/llm-agents.nix";
-    llm-agents.inputs.nixpkgs.follows = "nixpkgs";
     llm-agents.inputs.flake-parts.follows = "flake-parts";
     llm-agents.inputs.systems.follows = "systems";
 
-    # Same flake, but with NOTHING deduplicated: it keeps its own nixpkgs, so
-    # its derivations hash-match what numtide's CI pushed to cache.numtide.com
-    # and substitute instead of building. Use this for machines that must
-    # update fast and take the packages as-is (joy); `llm-agents` above stays
-    # nixpkgs-follows so it shares one nixpkgs closure with the rest of the
-    # fleet. Nothing here patches omp any more — the omp harness is afk, which
-    # carries its own patch set against its own pinned llm-agents (see below);
-    # this input now only supplies `pi` (pi-agent.nix) and claude-code.
-    llm-agents-cached.url = "github:numtide/llm-agents.nix";
-
-    afk.url = "git+file:///home/grmpf/synced/projects/afk?rev=b419098e9ae41f3463ad68b472399561e896de4a";
+    afk.url = "git+file:///home/grmpf/synced/projects/afk?rev=e3d373fdd4dbc36ccf8e1017c5365240b67e9a02";
     afk.inputs.nixpkgs.follows = "nixpkgs";
+    afk.inputs.llm-agents.follows = "llm-agents";
 
     # ntop: nix-native htop (live builds, transfers, store, remotes) from the
     # local checkout. git+file: rather than path: — the worktree carries a
@@ -169,6 +171,11 @@
     nixos-example.inputs.llm-agents.follows = "llm-agents";
     nixos-example.inputs.sbox.follows = "sbox";
     nixos-example.inputs.wrappers.follows = "wrappers";
+    # nixos-example's hermes.nix takes inputs.hermes-agent from OUR specialArgs
+    # (spaces' pin, see nixosConfigurations.nix); its own copy is dead weight
+    # and dragged a third nixpkgs along. aztec-packages likewise.
+    nixos-example.inputs.hermes-agent.follows = "spaces/hermes-agent";
+    nixos-example.inputs.aztec-packages.inputs.nixpkgs.follows = "nixpkgs";
     # hermes-agent moved into the spaces flake (nixosModules.hermes); no
     # root-level hermes-agent input anymore. nixos-example's hermes.nix
     # still references inputs.hermes-agent via OUR specialArgs (path
