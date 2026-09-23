@@ -5,14 +5,10 @@
   ...
 }: let
   sys = pkgs.stdenv.hostPlatform.system;
-  # `llm-agents-cached`, NOT `llm-agents`: the latter has
-  # inputs.nixpkgs.follows = "nixpkgs", which rehashes every derivation away
-  # from what numtide's CI built -- omp then compiles from source on every
-  # bump. The cached input keeps upstream's own nixpkgs, so these two paths
-  # substitute straight from cache.numtide.com (verified 2026-07-29: narinfo
-  # 200 for both). Joy's laptop must update fast, and it takes both packages
-  # as-is, so the duplicated nixpkgs closure is worth it here.
-  agents = inputs.llm-agents-cached.packages.${sys};
+  # llm-agents keeps upstream's own nixpkgs (see flake.nix), so both of these
+  # substitute straight from cache.numtide.com; joy's laptop must update fast
+  # and takes them as-is.
+  agents = inputs.llm-agents.packages.${sys};
   # Upstream claude-desktop is a prebuilt Electron app. At GPU init its ANGLE
   # backend dlopens libEGL.so.1 -- the GLVND *dispatch* loader -- by soname.
   # NixOS's /run/opengl-driver/lib ships only mesa's *vendor* lib
