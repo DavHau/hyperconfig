@@ -24,7 +24,8 @@
 # dataset mountpoint and every tree below grants g:vault rwx plus a default
 # ACL (media/misc/photos: root:vault 2770; parquet keeps "other" r-x), so
 # files written by any writer come out group-writable and reader-readable
-# regardless of umask.
+# regardless of umask. Keep secrets off /vault entirely: the recursive
+# setfacl below re-grants readers on every file, whatever its mode.
 #
 #   setfacl -R -m g:vault:rwX -m d:g:vault:rwx <tree>          # any dataset
 #   setfacl -R -m g:vault-ro:rX -m d:g:vault-ro:rx <tree>      # /vault/parquet
