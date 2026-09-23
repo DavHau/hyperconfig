@@ -181,6 +181,8 @@ in rec {
        working-copy commit. This is not optional and not "later" — it is the
        last tool call of the task, after verification, before your final
        message. A task with an undescribed `@` commit is an incomplete task.
+       Git-style message: subject line ≤ 72 characters, then a blank line,
+       then the details as body paragraphs — never everything on one line.
 
     Yielding without running `jj describe` is a contract violation equivalent
     to leaving a TODO in shipped code.
