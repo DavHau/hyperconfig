@@ -250,27 +250,31 @@
         ],
         "nixpkgs": [
           "spaces",
+          "llm-agents",
           "nixpkgs"
         ],
         "systems": [
           "spaces",
+          "llm-agents",
           "systems"
         ],
         "treefmt-nix": [
           "spaces",
+          "llm-agents",
           "treefmt-nix"
         ]
       },
       "locked": {
-        "lastModified": 1784665499,
-        "narHash": "sha256-9BMxlTxCCDAeoNLtb1a/st7udtTIJep+wpUzquA29VU=",
-        "owner": "nix-community",
+        "lastModified": 1790001035,
+        "narHash": "sha256-1/SLBjSYBzDdDhvLQ83wrzBakyS/xNGgtxHGNuveOEQ=",
+        "owner": "Mic92",
         "repo": "bun2nix",
-        "rev": "0f2a1f0b6f42cebe3b149bf62d38754c5e0e9729",
+        "rev": "07a5bfc8ac36c5370199343fa620b69f63186e33",
         "type": "github"
       },
       "original": {
-        "owner": "nix-community",
+        "owner": "Mic92",
+        "ref": "llm-agents",
         "repo": "bun2nix",
         "type": "github"
       }
@@ -745,11 +749,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1785627969,
-        "narHash": "sha256-4dtXQk/NMePegK/nWp5NSeuZKLATItOq61lpEvmXqGw=",
+        "lastModified": 1788450739,
+        "narHash": "sha256-glZLQlzIn1fXH6PazR2iUmTo7kzzyYSshrWhLS9TqCU=",
         "owner": "hercules-ci",
         "repo": "flake-parts",
-        "rev": "427bf4bd9435fdf21321c8cc628c24efc14c0f7a",
+        "rev": "31729ca8cbdb4fa927b34e5f4353e6a83f39e993",
         "type": "github"
       },
       "original": {
@@ -1246,11 +1250,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1786511588,
-        "narHash": "sha256-whEQ6o21DtquR08u+yuLdHXX8dgjlyNJIyMWcVk+PFU=",
+        "lastModified": 1790156627,
+        "narHash": "sha256-MLkgJ1hA+U7pEV5bZyfhkcOkCAPzLygYa462cLRYmMA=",
         "owner": "numtide",
         "repo": "llm-agents.nix",
-        "rev": "8651bf95690800f5361d53a9abda0fc3fbe0e2ec",
+        "rev": "1783f8a53c5689ec547f20da7f56750f38371871",
         "type": "github"
       },
       "original": {
@@ -1830,11 +1834,11 @@
     },
     "nixpkgs_3": {
       "locked": {
-        "lastModified": 1787360063,
-        "narHash": "sha256-dt4WdcvsA8/RCe+VZZwqU0X+XMM3wBbGCWA0/sFWzGo=",
+        "lastModified": 1790046670,
+        "narHash": "sha256-MYiI+CzL0tuWgRPjGsKCDHqYs2T3OzMlMQWOYWG0qso=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "2c423e03bbafcff28bfadc6781a4a8257f205cb5",
+        "rev": "6774f7bc253789b113a4f39285dc0fa100abeacc",
         "type": "github"
       },
       "original": {
@@ -2174,10 +2178,10 @@
         "voxtype": "voxtype_2"
       },
       "locked": {
-        "lastModified": 1790004628,
-        "narHash": "sha256-22T8c8phKGPRRehfoJpLoqSJmF+BDefAk7yI9Vu3GZo=",
-        "rev": "618f87033bf9c02a0619690d70cda7790ee05854",
-        "revCount": 884,
+        "lastModified": 1790177655,
+        "narHash": "sha256-Nz/brvZaSeWhjd2JHK7FV/MXabLRTSQv6q48G0k96RA=",
+        "rev": "71f5e06567f05292ca0a8b456c78dc16e62d0a90",
+        "revCount": 888,
         "type": "git",
         "url": "file:///home/grmpf/synced/projects/spaces"
       },
