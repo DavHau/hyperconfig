@@ -17,6 +17,8 @@
     # var and the host-key pin), so it is the only line needed here.
     ../../modules/nixos/storagebox-sync.nix
     ../../modules/nixos/vault-nfs-server.nix
+    # RAM LEDs dark.
+    ../../modules/nixos/rgb-off.nix
   ];
 
   nixpkgs.hostPlatform = "x86_64-linux";
