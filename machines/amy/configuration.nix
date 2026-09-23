@@ -84,8 +84,8 @@
   # amy-specific: on other machines dave may legitimately be 1000.
   users.users.dave.uid = 1001;
   # Consequence for the vault NFS export (sec=sys): uid 1000 from amy is
-  # `dave` on bam, so grmpf - not amy's dave - is the principal that reads
-  # /vault. Give grmpf the `vault` reader group (vault-nfs-client.nix only
+  # `dave` on bam, so grmpf - not amy's dave - is the principal that owns
+  # files on /vault. Give grmpf the `vault` read-write group (vault-nfs-client.nix only
   # adds dave); the client sends its own gid list, so membership must be
   # local.
   users.users.grmpf.extraGroups = [ "vault" ];
