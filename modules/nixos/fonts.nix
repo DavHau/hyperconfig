@@ -1,23 +1,12 @@
-{pkgs, lib, ...}: {
-  fonts.packages = [
-    pkgs.nerd-fonts.fira-code
-    pkgs.julia-mono
-  ];
+{pkgs, ...}: {
+  fonts.packages = [ pkgs.nerd-fonts.fira-code ];
 
-  # FiraCode has no braille glyphs (U+2800-U+28FF). Without an explicit
-  # fallback, fontconfig resolves braille to FreeMono, which draws the
-  # *empty* dot positions as hollow circles -> braille art/spinners render
-  # as a grid of rings. JuliaMono leaves empty dots blank.
-  fonts.fontconfig.localConf = ''
-    <?xml version="1.0"?>
-    <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
-    <fontconfig>
-      <alias>
-        <family>FiraCode Nerd Font</family>
-        <prefer>
-          <family>JuliaMono</family>
-        </prefer>
-      </alias>
-    </fontconfig>
-  '';
+  # The generic monospace font must cover Braille (U+2800-U+28FF: logos,
+  # spinners, plots). NixOS' default, DejaVu Sans Mono, does not, and the
+  # next monospace fallback fontconfig knows (40-nonlatin.conf) is FreeMono
+  # from the default font set, which draws the *unset* dot positions as
+  # hollow rings - braille art turns into a grid of circles in browsers
+  # and terminals alike. FiraCode Nerd Font has the block and draws it
+  # right; naming it here makes it the first choice for `monospace`.
+  fonts.fontconfig.defaultFonts.monospace = [ "FiraCode Nerd Font" ];
 }
