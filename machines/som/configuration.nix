@@ -25,6 +25,7 @@
     ../../modules/nixos/hermes-claude-auth.nix
     ../../modules/nixos/public-ipv6-token.nix
     ../../modules/nixos/linger-normal-users.nix
+    ../../modules/nixos/rgb-off.nix
   ];
 
   # r8169 is the only NIC that matters; the initrd needs it to be reachable
@@ -35,6 +36,9 @@
   # unbound (no wlan0, no supplicant, no initrd PSK); nixos-facter's
   # wlan0 network unit just never matches.
   boot.blacklistedKernelModules = [ "iwlwifi" ];
+
+  # RAM and the cooler's fans/water block (on the board's ARGB headers) dark.
+  hyper.rgbOff.colorfulArgb = true;
 
   # Public hermes dashboards: https://hermes.davhau.com/ (AAAA -> the token
   # address below), pocket-id login through oauth2-proxy, each account
