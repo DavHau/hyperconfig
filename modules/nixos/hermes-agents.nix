@@ -12,7 +12,10 @@
 #   - the web dashboard on the shared host (./hermes-dashboard-public.nix;
 #     pocket-id account = the agent name unless `dashboard.account` says
 #     otherwise; passkey, enroll with pocket-id-enroll on edi),
-#   - oh-my-pi on p0 through a per-user token copy (./inference-api-key.nix).
+#   - oh-my-pi on p0 through a per-user token copy (./inference-api-key.nix),
+#   - bash as login shell, not the site default fish: hermes-desktop's SSH
+#     connection kind runs its remote probe and `hermes serve` as POSIX sh
+#     one-liners (`help="$(...)"`) in the login shell, which fish rejects.
 #
 # uid: native mode binds the dashboard backend at 20000 + uid and nginx
 # needs that port as a constant, so every agent's uid must be pinned. Set it
@@ -35,7 +38,7 @@
 # /newbot -> token; Bot Settings -> Group Privacy -> OFF; then add (or remove
 # and re-add: privacy state is cached at join) the bot to the group. Fill
 # the prompts with `clan vars generate <machine> --generator <generator>`.
-{ config, lib, ... }:
+{ config, lib, pkgs, ... }:
 let
   cfg = config.hyper.hermesAgents;
 in
@@ -66,20 +69,10 @@ in
             default = [ ];
             description = "SSH keys that log in as the agent account (hermes CLI, afk).";
           };
-          shell = lib.mkOption {
-            type = lib.types.nullOr lib.types.package;
-            default = null;
-            description = "Login shell; null keeps the site default.";
-          };
           openrouter = lib.mkOption {
             type = lib.types.bool;
             default = false;
             description = "Hand the shared OpenRouter key to the agent.";
-          };
-          omp = lib.mkOption {
-            type = lib.types.bool;
-            default = true;
-            description = "Install the account's p0 token copy for oh-my-pi.";
           };
           hermes = lib.mkOption {
             type = lib.types.deferredModule;
@@ -89,7 +82,7 @@ in
           dashboard = lib.mkOption {
             type = lib.types.deferredModule;
             default = { };
-            description = "Merged into hyper.hermesDashboard.users.<name> (account, legacyHost).";
+            description = "Merged into hyper.hermesDashboard.users.<name> (account).";
           };
         };
       }
@@ -108,11 +101,11 @@ in
       {
         isNormalUser = true;
         extraGroups = [ "vault-ro" ];
+        shell = pkgs.bash;
         openssh.authorizedKeys.keys = a.sshKeys;
       }
       // lib.optionalAttrs (a.uid != null) { inherit (a) uid; }
       // lib.optionalAttrs (a.description != null) { inherit (a) description; }
-      // lib.optionalAttrs (a.shell != null) { inherit (a) shell; }
     ) cfg;
 
     # Function definitions: types.submodule reads a plain attrset as
@@ -131,6 +124,6 @@ in
 
     hyper.hermesDashboard.users = lib.mapAttrs (_: a: { ... }: { imports = [ a.dashboard ]; }) cfg;
 
-    hyper.inferenceApiKey.users = lib.attrNames (lib.filterAttrs (_: a: a.omp) cfg);
+    hyper.inferenceApiKey.users = lib.attrNames cfg;
   };
 }

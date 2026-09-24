@@ -21,13 +21,15 @@
 # the upstream X-Forwarded-Prefix gaps apply. The root-held forward at
 # users.<user>.dashboardPort and hermes-desktop keep working unchanged.
 #
-# A user may keep an older dedicated hostname (`legacyHost`) for links in
-# the wild; it 301s to the shared host.
-#
 # Secrets (clan vars, root-owned, LoadCredential): the `hermes` client
 # secret is the shared oidc var the oidc service declares; the cookie
 # secret is per-machine (`hermes-oauth2-proxy`).
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   cfg = config.hyper.hermesDashboard;
   portOf = user: 20000 + config.users.users.${user}.uid;
@@ -35,7 +37,6 @@ let
   # Nothing listens here on purpose: nginx answers 403 for accounts
   # without a dashboard from its own server block on this port.
   forbiddenPort = 20000 - 1;
-  legacyUsers = lib.filterAttrs (_: u: u.legacyHost != null) cfg.users;
 in
 {
   options.hyper.hermesDashboard = {
@@ -61,11 +62,6 @@ in
                 default = name;
                 description = "pocket-id username that lands on this dashboard.";
               };
-              legacyHost = lib.mkOption {
-                type = lib.types.nullOr lib.types.str;
-                default = null;
-                description = "Older dedicated hostname; redirects to the shared host.";
-              };
             };
           }
         )
@@ -74,20 +70,23 @@ in
   };
 
   config = lib.mkIf (cfg.users != { }) {
-    assertions = lib.mapAttrsToList (user: _: {
-      assertion = config.services.hermes-microvm.users.${user}.native or false;
-      message = "hyper.hermesDashboard.users.${user}: only a native hermes user has a host dashboard unit to publish.";
-    }) cfg.users
-    ++ [
-      {
-        assertion = config.hyper.oidc.clients ? ${cfg.oidcClient};
-        message = "hyper.hermesDashboard: the inventory declares no oidc client `${cfg.oidcClient}` for this machine.";
-      }
-      {
-        assertion = lib.length (lib.unique (lib.mapAttrsToList (_: u: u.account) cfg.users)) == lib.length (lib.attrNames cfg.users);
-        message = "hyper.hermesDashboard: two dashboards claim the same account.";
-      }
-    ];
+    assertions =
+      lib.mapAttrsToList (user: _: {
+        assertion = config.services.hermes-microvm.users.${user}.native or false;
+        message = "hyper.hermesDashboard.users.${user}: only a native hermes user has a host dashboard unit to publish.";
+      }) cfg.users
+      ++ [
+        {
+          assertion = config.hyper.oidc.clients ? ${cfg.oidcClient};
+          message = "hyper.hermesDashboard: the inventory declares no oidc client `${cfg.oidcClient}` for this machine.";
+        }
+        {
+          assertion =
+            lib.length (lib.unique (lib.mapAttrsToList (_: u: u.account) cfg.users))
+            == lib.length (lib.attrNames cfg.users);
+          message = "hyper.hermesDashboard: two dashboards claim the same account.";
+        }
+      ];
 
     clan.core.vars.generators.hermes-oauth2-proxy = {
       files.cookie_secret = { };
@@ -147,62 +146,54 @@ in
       appendHttpConfig = ''
         map $hermes_account $hermes_backend {
           default 127.0.0.1:${toString forbiddenPort};
-        ${lib.concatStrings (lib.mapAttrsToList (user: u: ''
-          "${u.account}" 127.0.0.1:${toString (portOf user)};
-        '') cfg.users)}
+        ${lib.concatStrings (
+          lib.mapAttrsToList (user: u: ''
+            "${u.account}" 127.0.0.1:${toString (portOf user)};
+          '') cfg.users
+        )}
         }
       '';
-      virtualHosts = lib.mkMerge [
-        {
-          ${cfg.host} = {
-            forceSSL = true;
-            enableACME = true;
-            locations."/" = {
-              proxyPass = "http://$hermes_backend";
-              # /api/ws and /api/pty are long-lived websockets; the PTY
-              # stream and SSE status feeds sit idle far longer than 60s.
-              proxyWebsockets = true;
-              # hermes accepts only a loopback Host (and WS Origin) on a
-              # loopback bind (web_server.py _is_accepted_host,
-              # web_server_chat.py _ws_host_origin_reason); declaring the
-              # public host instead would re-arm its own auth gate. So the
-              # recommended header set (Host $host) is replaced by hand.
-              recommendedProxySettings = false;
-              extraConfig = ''
-                auth_request_set $hermes_account $upstream_http_x_auth_request_preferred_username;
-                proxy_set_header Host 127.0.0.1;
-                proxy_set_header Origin "";
-                proxy_set_header X-Real-IP $remote_addr;
-                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                proxy_set_header X-Forwarded-Proto $scheme;
-                proxy_set_header X-Forwarded-Host $host;
-                proxy_read_timeout 1h;
-                proxy_send_timeout 1h;
-                client_max_body_size 256m;
-              '';
-            };
+      virtualHosts = {
+        ${cfg.host} = {
+          forceSSL = true;
+          enableACME = true;
+          locations."/" = {
+            proxyPass = "http://$hermes_backend";
+            # /api/ws and /api/pty are long-lived websockets; the PTY
+            # stream and SSE status feeds sit idle far longer than 60s.
+            proxyWebsockets = true;
+            # hermes accepts only a loopback Host (and WS Origin) on a
+            # loopback bind (web_server.py _is_accepted_host,
+            # web_server_chat.py _ws_host_origin_reason); declaring the
+            # public host instead would re-arm its own auth gate. So the
+            # recommended header set (Host $host) is replaced by hand.
+            recommendedProxySettings = false;
+            extraConfig = ''
+              auth_request_set $hermes_account $upstream_http_x_auth_request_preferred_username;
+              proxy_set_header Host 127.0.0.1;
+              proxy_set_header Origin "";
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $scheme;
+              proxy_set_header X-Forwarded-Host $host;
+              proxy_read_timeout 1h;
+              proxy_send_timeout 1h;
+              client_max_body_size 256m;
+            '';
           };
-          hermes-forbidden = {
-            serverName = "_";
-            listen = [
-              {
-                addr = "127.0.0.1";
-                port = forbiddenPort;
-              }
-            ];
-            locations."/".return = "403 'No hermes dashboard for this account.\\n'";
-            extraConfig = "default_type text/plain;";
-          };
-        }
-        (lib.mapAttrs' (
-          _: u:
-          lib.nameValuePair u.legacyHost {
-            forceSSL = true;
-            enableACME = true;
-            locations."/".return = "301 https://${cfg.host}$request_uri";
-          }
-        ) legacyUsers)
-      ];
+        };
+        hermes-forbidden = {
+          serverName = "_";
+          listen = [
+            {
+              addr = "127.0.0.1";
+              port = forbiddenPort;
+            }
+          ];
+          locations."/".return = "403 'No hermes dashboard for this account.\\n'";
+          extraConfig = "default_type text/plain;";
+        };
+      };
     };
   };
 }

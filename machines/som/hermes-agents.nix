@@ -3,7 +3,6 @@
 {
   config,
   inputs,
-  pkgs,
   ...
 }:
 let
@@ -55,8 +54,6 @@ in
         prompts.allowed_users = "egg's numeric Telegram user id (DM chat id; ask @userinfobot)";
         env.TELEGRAM_HOME_CHANNEL = "allowed_users";
       };
-      # egg.davhau.com was the original address.
-      dashboard.legacyHost = "egg.davhau.com";
     };
 
     # dave's agent, in its OWN account, not the dave login: the agent is
@@ -67,10 +64,6 @@ in
       sshKeys = adminKeys ++ [
         ''restrict,port-forwarding,permitopen="127.0.0.1:*" ${desktopKey}''
       ];
-      # Not the site default fish: hermes-desktop's SSH connection kind runs
-      # its remote probe and `hermes serve` as POSIX sh one-liners
-      # (`help="$(...)"`) in the login shell, which fish rejects.
-      shell = pkgs.bash;
       dashboard.account = "dave";
     };
 
@@ -81,7 +74,6 @@ in
     momentum = {
       sshKeys = adminKeys;
       openrouter = true;
-      omp = false;
       hermes = {
         # Everything telegram-side is a secret (the chat id would let anyone
         # target the room; the wake words name the bot), so all ride in as
