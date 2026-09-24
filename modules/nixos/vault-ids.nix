@@ -36,7 +36,7 @@
 # 1100-1104 sit above the auto-allocated range in use (agent landed on 1002
 # and already collides with stefan's pin on vit): 1100 momentum, 1101 vault,
 # 1102 hsjobeki (users/hsjobeki-vault.nix), 1103 vault-ro, 1104 pinpox
-# (pinpox-hermes.nix). gid 1100 was the retired `momentum` primary group and
+# (machines/som/hermes-agents.nix). gid 1100 was the retired `momentum` primary group and
 # stays unallocated so a stale gid on a forgotten file never maps to a new
 # group.
 {
