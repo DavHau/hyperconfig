@@ -1375,6 +1375,26 @@
         "url": "https://git.clan.lol/TakodaS/clan-core.git"
       }
     },
+    "ncro": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1790039094,
+        "narHash": "sha256-o5qPU/QPxcAmeVwFydXqEkn1HI6TbPgkHpecXyme6Bs=",
+        "owner": "manic-systems",
+        "repo": "ncro",
+        "rev": "bb4fb8329e30dc294b2298618ba96379860dfd4d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "manic-systems",
+        "repo": "ncro",
+        "type": "github"
+      }
+    },
     "ndg": {
       "inputs": {
         "nixpkgs": [
@@ -2082,6 +2102,7 @@
         "messaging-daemon": "messaging-daemon",
         "mics-skills": "mics-skills",
         "ncps": "ncps",
+        "ncro": "ncro",
         "nil": "nil",
         "nix": "nix",
         "nix-heuristic-gc": "nix-heuristic-gc",
