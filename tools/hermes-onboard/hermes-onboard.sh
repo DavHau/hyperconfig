@@ -18,7 +18,7 @@ repo=${HYPERCONFIG:-.}
 
 # One eval for every fact. The public dashboard is declared in
 # hyper.hermesDashboard (modules/nixos/hermes-dashboard-public.nix):
-# https://<host>/<user>/, plus an optional legacy hostname at its root. The
+# https://<host>/. The
 # shared host is also the public DNS name of the machine, so SSH uses it.
 # The user name is spliced into the expression; \${n} is Nix's, not the
 # shell's.
@@ -37,7 +37,6 @@ in
   keys = if u == null then [ ] else map comment u.openssh.authorizedKeys.keys;
   publicHost = if d == null then null else c.hyper.hermesDashboard.host;
   dashboard = if d == null then null else "https://\${c.hyper.hermesDashboard.host}/";
-  legacy = if d == null || d.legacyHost == null then null else "https://\${d.legacyHost}/";
   account = if d == null then null else d.account;
   issuer = if d == null then null else c.hyper.oidc.issuer;
   hasTelegram = (c.hyper.hermes.users.$user.telegram.enable or false);
@@ -57,7 +56,6 @@ fi
 
 native=$(jq -r .native <<<"$facts")
 dashboard=$(jq -r '.dashboard // empty' <<<"$facts")
-legacy=$(jq -r '.legacy // empty' <<<"$facts")
 keys=$(jq -r '.keys | join(", ")' <<<"$facts")
 host=$(jq -r '.publicHost // empty' <<<"$facts")
 host=${host:-$machine}
@@ -73,7 +71,6 @@ if [ "$native" = true ]; then
 fi
 if [ -n "$dashboard" ]; then
   echo "Web dashboard:    $dashboard"
-  [ -n "$legacy" ] && echo "                  (also: $legacy, redirects there)"
   echo "                  sign in with the $(jq -r .issuer <<<"$facts") account '$(jq -r .account <<<"$facts")' (passkey)"
   echo "                  enroll: pocket-id-enroll $(jq -r .account <<<"$facts")  on the pocket-id host, send the link"
 else
