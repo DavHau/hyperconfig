@@ -33,12 +33,9 @@
 # When adding readers to an existing tree, set the ACL before closing the
 # modes, or the readers lose access in between.
 #
-# 1100-1104 sit above the auto-allocated range in use (agent landed on 1002
-# and already collides with stefan's pin on vit): 1100 momentum, 1101 vault,
-# 1102 hsjobeki (users/hsjobeki-vault.nix), 1103 vault-ro, 1104 pinpox
-# (machines/som/hermes-agents.nix). gid 1100 was the retired `momentum` primary group and
-# stays unallocated so a stale gid on a forgotten file never maps to a new
-# group.
+# Pinned ids: 1002 stefan, 1004 egg, 1005 dave-hermes, 1100 momentum,
+# 1101 vault (gid), 1102 hsjobeki, 1103 vault-ro (gid), 1104 pinpox,
+# 1200 agent. gid 1100 stays unallocated.
 {
   users.groups.vault.gid = 1101;
   users.groups.vault-ro.gid = 1103;
