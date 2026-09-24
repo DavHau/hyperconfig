@@ -121,6 +121,9 @@
     easytier.url = "github:EasyTier/EasyTier";
     easytier.flake = false;
 
+    ncro.url = "github:manic-systems/ncro";
+    ncro.inputs.nixpkgs.follows = "nixpkgs";
+
     # external clan services
     ncps.url = "git+https://git.clan.lol/TakodaS/clan-core.git?shallow=1&ref=ncps";
     ncps.flake = false;

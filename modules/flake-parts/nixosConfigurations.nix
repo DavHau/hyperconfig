@@ -153,13 +153,17 @@ in {
               roles.default.settings.networks.home = {};
               roles.default.tags.wifi-home = {};
             };
-            # dave-cache = {
-            #   module.name = "nix-cache";
-            #   module.input = "self";
-            #   roles.server.machines.bam = {};
-            #   roles.server.settings.priority = 41;
-            #   roles.client.tags.all = {};
-            # };
+            nix-cache = {
+              module.name = "nix-cache";
+              module.input = "self";
+              roles.server.machines = {
+                amy = { };
+                som = { };
+                vit = { };
+                bam = { };
+              };
+              roles.client.tags.all = { };
+            };
             # TODO: enable backups again
             dave-backup = {
               module.name = "borgbackup";
