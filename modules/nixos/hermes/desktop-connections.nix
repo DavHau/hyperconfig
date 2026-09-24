@@ -26,7 +26,7 @@
 # The `Host` alias fixes that on the client side (the app passes the host
 # field verbatim, so aliases work; port/key stay unset in the entry).
 # The public half lands on som's dave-hermes account with `restrict` +
-# port-forwarding only (../dave-hermes.nix reads it from this machine's
+# port-forwarding only (machines/som/hermes-agents.nix reads it from this machine's
 # vars): no pty, no agent/X11 forwarding, loopback forwards only, which is
 # exactly the app's bootstrap (`-L 127.0.0.1:*:127.0.0.1:<port>`); the
 # desktop's remote-terminal tab (needs a pty) is deliberately not served.

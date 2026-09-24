@@ -27,7 +27,8 @@
 # is the per-sender allowlist (DMs and groups, numeric ids from
 # @userinfobot); TELEGRAM_ALLOWED_CHATS restricts group replies to one chat;
 # TELEGRAM_HOME_CHANNEL receives proactive/cron output. The defaults cover
-# a DM bot; a group bot adds prompts and env mappings (see momentum-hermes.nix).
+# a DM bot; a group bot adds prompts and env mappings (momentum in
+# machines/som/hermes-agents.nix).
 { config, lib, ... }:
 let
   cfg = config.hyper.hermes;

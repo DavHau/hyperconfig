@@ -25,7 +25,7 @@ let
   pubFile = pkgs.writeText "agent-id_ed25519.pub" (pubKey + "\n");
 in
 {
-  # p0 inference over omp/afk, same as egg (./egg-hermes.nix): a root
+  # p0 inference over omp/afk, same as the hermes agents (./hermes-agents.nix): a root
   # oneshot installs a 0400 copy of the shared token at
   # /run/inference-api-key/agent/token, which `p0-api-key` (models.yml
   # apiKey: "!p0-api-key") reads for the calling user

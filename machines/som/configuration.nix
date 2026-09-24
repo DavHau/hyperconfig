@@ -13,15 +13,8 @@
     ./disko.nix
     ../../modules/nixos/storagebox.nix
     ../../modules/nixos/vault-nfs-client.nix
-    ../../modules/nixos/users/stefan-vault.nix
-    ../../modules/nixos/users/momentum-vault.nix
     ../../modules/nixos/users/hsjobeki-vault.nix
-    ../../modules/nixos/momentum-hermes.nix
-    ../../modules/nixos/stefan-hermes.nix
-    ../../modules/nixos/egg-hermes.nix
-    ../../modules/nixos/dave-hermes.nix
-    ../../modules/nixos/pinpox-hermes.nix
-    ../../modules/nixos/hermes-dashboard-public.nix
+    ./hermes-agents.nix
     ../../modules/nixos/hermes-claude-auth.nix
     ../../modules/nixos/public-ipv6-token.nix
     ../../modules/nixos/linger-normal-users.nix
@@ -42,7 +35,7 @@
 
   # Public hermes dashboards: https://hermes.davhau.com/ (AAAA -> the token
   # address below), pocket-id login through oauth2-proxy, each account
-  # routed to its own backend. Users opt in from their *-hermes.nix.
+  # routed to its own backend. Every agent in ./hermes-agents.nix is published.
   hyper.hermesDashboard.host = "hermes.davhau.com";
 
   # Public address 2405:9800:b901:94e3::c0de:ba5e on the LAN NIC (prefix from
