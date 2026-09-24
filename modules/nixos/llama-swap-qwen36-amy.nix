@@ -1,9 +1,8 @@
 # Qwen3.6-35B-A3B (unsloth dynamic quants, MTP variant) for llama-swap,
 # tuned for amy: Framework 13, Ryzen AI 9 HX 370, Radeon 890M iGPU,
-# ~80 GiB unified RAM. Counterpart of llama-swap-qwen36.nix (vit, dGPU).
+# ~80 GiB unified RAM.
 #
-#   - Same GGUFs as vit's module (identical url+hash => identical store
-#     path, downloaded once per store): unsloth Dynamic 2.0 quants from
+#   - Unsloth Dynamic 2.0 quants from
 #     the MTP repo -- UD-IQ4_XS (~17 GiB, default) and UD-IQ2_XXS
 #     (~11 GiB, lighter/faster; RAM headroom for VMs) + F16 vision
 #     projector.
@@ -25,7 +24,7 @@
 let
   cfg = config.services.llama-swap;
 
-  # See llama-swap-qwen36.nix: HF's CDN resets long-lived h2 streams on
+  # HF's CDN resets long-lived h2 streams on
   # slow links; http1.1 + big retry budget keeps the resumed fixed-output
   # fetch monotone to completion.
   bigFetchCurlOpts = [ "--http1.1" "--retry" "99" "--retry-delay" "2" ];

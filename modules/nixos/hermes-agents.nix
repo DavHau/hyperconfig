@@ -38,9 +38,20 @@
 # /newbot -> token; Bot Settings -> Group Privacy -> OFF; then add (or remove
 # and re-add: privacy state is cached at join) the bot to the group. Fill
 # the prompts with `clan vars generate <machine> --generator <generator>`.
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  inputs,
+  ...
+}:
 let
   cfg = config.hyper.hermesAgents;
+  gpuHost = config.hyper.hermesAgentsGpuHost;
+  gpuSkill = inputs.spaces.lib.mkAgentSkill pkgs {
+    name = "gpu-host";
+    src = ./hermes-agents-gpu-skill;
+  };
 in
 {
   imports = [
@@ -89,6 +100,17 @@ in
     );
   };
 
+  options.hyper.hermesAgentsGpuHost = lib.mkOption {
+    type = lib.types.nullOr lib.types.str;
+    default = null;
+    example = "vit.d";
+    description = ''
+      Host the agents ssh into for GPU jobs, each as its own user with its
+      own key (hermes-agent-ssh-<name>). The host imports
+      ./hermes-agents-gpu-host.nix, which creates the matching accounts.
+    '';
+  };
+
   # No mkIf around this: every value is empty without agents.
   config = {
     assertions = lib.mapAttrsToList (name: _: {
@@ -125,5 +147,57 @@ in
     hyper.hermesDashboard.users = lib.mapAttrs (_: a: { ... }: { imports = [ a.dashboard ]; }) cfg;
 
     hyper.inferenceApiKey.users = lib.attrNames cfg;
+
+    # One key per agent, readable only by that agent; the GPU host
+    # authorizes the public half.
+    clan.core.vars.generators = lib.mkIf (gpuHost != null) (
+      lib.mapAttrs' (
+        name: _:
+        lib.nameValuePair "hermes-agent-ssh-${name}" {
+          files.key = {
+            secret = true;
+            owner = name;
+          };
+          files."key.pub".secret = false;
+          runtimeInputs = [ pkgs.openssh ];
+          script = ''
+            ssh-keygen -q -t ed25519 -N "" -C "${name}@${config.networking.hostName}" -f "$out"/key
+          '';
+        }
+      ) cfg
+    );
+
+    programs.ssh.extraConfig = lib.mkIf (gpuHost != null) (
+      lib.concatStrings (
+        lib.mapAttrsToList (name: _: ''
+          Match host ${gpuHost} localuser ${name}
+            IdentityFile ${config.clan.core.vars.generators."hermes-agent-ssh-${name}".files.key.path}
+            IdentitiesOnly yes
+        '') cfg
+      )
+    );
+
+    # ssh.nix sets ControlPath ~/.ssh/control/%C fleet-wide; without the
+    # directory every ssh fails. Both homes: the login one and the agent's
+    # HOME under native hermes (~/hermes).
+    systemd.tmpfiles.rules = lib.concatLists (
+      lib.mapAttrsToList (
+        name: _:
+        let
+          home = config.users.users.${name}.home;
+        in
+        lib.concatMap (h: [
+          "d ${h}/.ssh 0700 ${name} users -"
+          "d ${h}/.ssh/control 0700 ${name} users -"
+        ]) [ home "${home}/hermes" ]
+      ) cfg
+    );
+
+    # Every harness, not only hermes: spaces links it into each user's
+    # skill roots (pi, omp, claude-code) and hermes reads it as a root.
+    spaces.agentHarnesses.skills = lib.mkIf (gpuHost != null) [ gpuSkill ];
+    services.hermes-microvm.settings.skills.external_dirs = lib.mkIf (gpuHost != null) [
+      "${gpuSkill}/share/skills"
+    ];
   };
 }

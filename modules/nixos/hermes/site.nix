@@ -1,7 +1,7 @@
 # Hermes Agent (NousResearch), one microvm per user — the machinery lives
 # in the spaces flake (nixosModules.hermes); the shared site wiring (p0
 # provider, secrets, restart hooks) in ../hermes-common.nix. This file
-# keeps only amy's own choices: the vit.d model seed, simplex/gpu, and
+# keeps only amy's own choices: simplex/gpu and
 # grmpf's agent.
 #
 # Entry points (as grmpf): `hermes` (CLI/TUI via ssh into the VM) and
@@ -39,17 +39,6 @@
     # user role) that must not get a VM; keep the pre-port behavior of
     # explicitly declared users only.
     provisionNormalUsers = false;
-    # Default brain: qwen3.6 on vit's llama-swap over yggdrasil, over the
-    # common p0 default. Seeded ONCE into a fresh guest config; runtime
-    # /model switches persist (amy's existing guest already has a model —
-    # the seed never fires). p0 stays registered as a second provider
-    # (hermes-common.nix); switch with /model in the TUI once and it
-    # persists.
-    initialModel = {
-      provider = "custom";
-      base_url = "http://vit.d:8012/v1";
-      default = "qwen3.6:35b-iq4_xs";
-    };
     # Second control channel beside telegram. The guest runs its own
     # simplex-chat daemon; the profile address lands in
     # ~/hermes/simplex-address.txt (same path on the host). Connect to it
