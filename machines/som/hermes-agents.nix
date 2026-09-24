@@ -23,6 +23,8 @@ in
     ../../modules/nixos/users/stefan-vault.nix
   ];
 
+  hyper.hermesAgentsGpuHost = "vit.d";
+
   hyper.hermesAgents = {
     # uid and vault-ro from users/stefan-vault.nix.
     stefan = { };

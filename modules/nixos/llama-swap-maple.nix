@@ -21,7 +21,7 @@
 let
   cfg = config.services.llama-swap;
 
-  # See llama-swap-qwen36.nix: HF's CDN resets long-lived h2 streams on
+  # HF's CDN resets long-lived h2 streams on
   # slow links; http1.1 + big retry budget keeps the resumed fixed-output
   # fetch monotone to completion.
   bigFetchCurlOpts = [ "--http1.1" "--retry" "99" "--retry-delay" "2" ];

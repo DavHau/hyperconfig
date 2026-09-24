@@ -19,7 +19,7 @@
 #
 # Host-global (one value per machine, the spaces module has no per-user
 # settings): providers.p0 and the seed-once initialModel. initialModel is
-# mkDefault so a site can keep another brain (amy: vit's llama-swap).
+# mkOverride 900 so a site can seed another brain with a plain definition.
 # Seeding is safe on a host with existing agents: modelSeedScript writes
 # only when config.yaml has no `model` key.
 #
@@ -167,7 +167,7 @@ in
         model = "qwen";
       };
       # Above the spaces module's own mkDefault (llama-swap g9v3:3b on a
-      # desktop), below a plain site definition (amy's vit seed).
+      # desktop), below a plain site definition.
       #
       # `custom:p0`, not `p0`: hermes 0.21.3 resolves both to the same
       # providers.p0 entry at runtime (runtime_provider source

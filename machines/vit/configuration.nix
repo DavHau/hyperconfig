@@ -7,12 +7,9 @@
     ../../modules/nixos/user-dave.nix
     ./disko.nix
     ../../modules/nixos/nvidia.nix
-    ../../modules/nixos/llama-swap.nix
-    ../../modules/nixos/llama-swap-qwen36.nix
-    ../../modules/nixos/llama-swap-qwen38-flash-vit.nix
-    ../../modules/nixos/llama-swap-yggdrasil.nix
     ../../modules/nixos/storagebox.nix
     ../../modules/nixos/vault-nfs-client.nix
+    ../../modules/nixos/hermes-agents-gpu-host.nix
     ../../modules/nixos/users/stefan-vault.nix
   ];
 
@@ -68,8 +65,8 @@
   # That fix held (no nvme timeouts since) but freezes continued — see the
   # 2026-07-24 Arrow Lake idle C-state diagnosis above.
   #
-  # vit serves qwen3.6 to the hermes VMs (vit.d:8012), so a hang takes the
-  # agents' brain offline until someone walks to the machine. Self-recover
+  # vit is the GPU box the hermes agents run jobs on, so a hang takes it
+  # offline until someone walks to the machine. Self-recover
   # where possible: hardware watchdog reboots a wedged kernel, hung tasks
   # (D-state > 120s) escalate to a panic, hard/soft lockups panic too
   # (2026-07-24: they defaulted to backtrace-and-continue, which on a dead
@@ -84,21 +81,21 @@
     "kernel.softlockup_panic" = 1;
     "kernel.panic" = 10;
   };
-  # Inference-server duty: sleeping breaks vit.d for every consumer, and
-  # the resume path is the prime suspect for the freeze. This machine is a
+  # Compute-box duty: sleeping breaks vit.d for every consumer, and the
+  # resume path is the prime suspect for the freeze. This machine is a
   # laptop, but it must not sleep — lid close no longer suspends.
   systemd.targets.sleep.enable = false;
   systemd.targets.suspend.enable = false;
   systemd.targets.hibernate.enable = false;
   systemd.targets.hybrid-sleep.enable = false;
 
-  # The spaces desktop profile now defaults hermes-microvm on
-  # (auto-provisioning a VM per normal user), but vit's job is SERVING the
-  # model to amy's agent VMs, not running its own: RAM/VRAM are budgeted
-  # for qwen3.6 (see llama-swap-qwen36.nix), and dave has no declared uid
-  # (the module asserts one). Opt out; to enable later, declare
-  # users.users.dave.uid = 1000 and drop this line.
+  # The spaces desktop profile defaults hermes-microvm, llama-swap, ollama
+  # and docker on. vit runs none of them: it is the GPU box the som agents
+  # ssh into, and dave has no declared uid (hermes-microvm asserts one).
   services.hermes-microvm.enable = false;
+  services.llama-swap.enable = false;
+  services.ollama.enable = lib.mkForce false;
+  virtualisation.docker.enable = lib.mkForce false;
 
   # Belt-and-braces on top of the disabled sleep targets above: logind's
   # default HandleLidSwitch=suspend still fires a (failing) suspend attempt
