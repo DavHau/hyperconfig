@@ -21,6 +21,9 @@ let
 in {
   services.nextcloud = {
     enable = true;
+    # Nextcloud upgrades one major version at a time: bump this by one
+    # and deploy before the next.
+    package = pkgs.nextcloud33;
     hostName = "nextcloud";
     config.adminpassFile = config.clan.core.vars.generators.nextcloud.files.admin-password.path;
     config.dbtype = "pgsql";
