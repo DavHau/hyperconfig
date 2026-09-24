@@ -41,6 +41,8 @@ in
     isNormalUser = true;
     group = "agent";
     description = "fleet agent (sbox ssh identity)";
+    # Same uid on every host; id ladder in ./vault-ids.nix.
+    uid = 1200;
     openssh.authorizedKeys.keys = [ pubKey ];
     # Rootless Docker maps container uids onto this range; task images with
     # uids past 65535 (Windows-built layers, e.g. Terminal-Bench's ensembl-vep
