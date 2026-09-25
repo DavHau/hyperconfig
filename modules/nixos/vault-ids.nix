@@ -8,7 +8,7 @@
 #              on bam/som/vit, 1001 on amy), grmpf (amy, uid 1000 - on the
 #              wire the same principal as dave elsewhere).
 #   `vault-ro` (gid 1103) read-only on /vault/parquet. Members: stefan,
-#              momentum, hsjobeki, dave-hermes, egg, pinpox - each user's own
+#              momentum, hsjobeki, dave-hermes, egg, pinpox, adam, j - each user's own
 #              module adds the group (users/*-vault.nix, *-hermes.nix).
 # The client sends its own gid list, so membership is granted per host: a
 # reader reads from every wg-vault client whose config imports its module.
@@ -35,7 +35,7 @@
 #
 # Pinned ids: 1002 stefan, 1004 egg, 1005 dave-hermes, 1100 momentum,
 # 1101 vault (gid), 1102 hsjobeki, 1103 vault-ro (gid), 1104 pinpox,
-# 1200 agent. gid 1100 stays unallocated.
+# 1105 adam, 1106 j, 1200 agent. gid 1100 stays unallocated.
 {
   users.groups.vault.gid = 1101;
   users.groups.vault-ro.gid = 1103;
