@@ -44,6 +44,26 @@ in
       ];
     };
 
+    adam = {
+      uid = 1105;
+      description = "adam - hermes agent, read-only vault consumer";
+      sshKeys = [
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICwDM+8310VQgkMpUu1Oz+ihDBBfCZ/akKMmUIPLgevR adambartnik@Adams-MacBook-Pro-2"
+      ];
+    };
+
+    j = {
+      uid = 1106;
+      description = "j - hermes agent, read-only vault consumer";
+      sshKeys = [
+        # j's GitHub keys (fetched 2026-09-25)
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOirp5rceowRPLnkCT2/vlTPgxtRWPeKdMIPnJ7ixJfi j"
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOEkNzWyFiIeI3dtF5nteYbwsvQTpBUdJ5Ona3Hne0wf j"
+        "sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAINh8AcDMFJ9YqXfZoCWp7qOBVBRYD0raLeo7oetwBcwDAAAABHNzaDo= j"
+        "sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAIOtVR8T3XmFOIgHNpu5sHJg50ujmKCKER2OZOY2oynL+AAAABHNzaDo= j"
+      ];
+    };
+
     # egg (fabien, github.com/allouis): controlled through a Telegram DM bot.
     egg = {
       uid = 1004;
