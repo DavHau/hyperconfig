@@ -14,6 +14,7 @@ in
     ./sbox-age.nix
     ./sbox-mullvad.nix
     ./nix-ssh-client.nix
+    ./hermes-desktop-dave-hermes.nix
     ./ssh-tpm-agent.nix
     ./etc-hosts.nix
     ./nix-development.nix
