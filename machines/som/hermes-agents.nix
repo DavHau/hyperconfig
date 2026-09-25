@@ -2,19 +2,19 @@
 # ../../modules/nixos/hermes-agents.nix; entries here carry only what differs.
 {
   config,
-  inputs,
   ...
 }:
 let
   # The clan admin role fills root's list; accounts without keys of their
   # own reuse it.
   adminKeys = config.users.users.root.openssh.authorizedKeys.keys;
-  # amy's hermes-desktop dials dave-hermes over ssh (spaces' SSH connection
-  # kind; hermes/desktop-connections.nix on amy owns the key and the
-  # rationale). Its bootstrap needs command execution plus one loopback -L
-  # forward to the port `hermes serve --port 0` picks, nothing else: no pty,
-  # no agent/X11 forwarding.
-  desktopKey = inputs.self.nixosConfigurations.amy.config.clan.core.vars.generators.hermes-desktop-ssh.files."key.pub".value;
+  # hermes-desktop on the dave machines dials dave-hermes over ssh with a
+  # shared restricted key (../../modules/nixos/hermes-desktop-dave-hermes.nix
+  # owns the key and the rationale; dave.nix imports it here too). Its
+  # bootstrap needs command execution plus one loopback -L forward to the
+  # port `hermes serve --port 0` picks, nothing else: no pty, no agent/X11
+  # forwarding.
+  desktopKey = config.clan.core.vars.generators.hermes-desktop-ssh.files."key.pub".value;
 in
 {
   imports = [
