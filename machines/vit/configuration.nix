@@ -110,7 +110,8 @@
   # Turn off the "Slash" LED array on the back of the lid. asusd (enabled by
   # the nixos-hardware gu605cw module) owns the ledbar, but the NixOS asusd
   # module has no declarative slash.ron option, so apply it via asusctl at
-  # boot. --disable kills the runtime animation; the show-on-* flags are
+  # boot. `slash set --disable` kills the runtime animation (asusctl 6.5 moved
+  # the flags under the `set` subcommand); the show-on-* flags are
   # firmware-persisted and cover boot/shutdown/sleep/low-battery, where the
   # lid would otherwise still light up outside asusd's control.
   systemd.services.disable-slash-led = {
@@ -121,7 +122,7 @@
     serviceConfig = {
       Type = "oneshot";
       ExecStart = lib.concatStringsSep " " [
-        "${config.services.asusd.package}/bin/asusctl slash --disable"
+        "${config.services.asusd.package}/bin/asusctl slash set --disable"
         "--show-on-boot false"
         "--show-on-shutdown false"
         "--show-on-sleep false"

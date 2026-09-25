@@ -92,6 +92,12 @@ in
     # unit terminates sshfs, which unmounts. reconnect + ServerAlive ride out
     # network blips.
     #
+    # ControlMaster=no: ssh.nix turns on multiplexing fleet-wide with
+    # ControlPath ~/.ssh/control/%C. If root has no such directory, the ssh
+    # under sshfs fails ("unix_listener: cannot bind" and then "read:
+    # Connection reset by peer"). A mount needs its own connection anyway.
+    # It must not be a mux master that interactive root ssh piggybacks on.
+    #
     # Read-only, by mount: -o ro makes every local user read-only at the
     # filesystem layer — no uid/gid remapping (files keep the sub-account's
     # ownership). allow_other is what grants the other users access in the
@@ -105,7 +111,7 @@ in
     # whole cost.
     script = ''
       exec sshfs -f \
-        -o password_stdin,reconnect,ServerAliveInterval=15,ServerAliveCountMax=3 \
+        -o password_stdin,reconnect,ServerAliveInterval=15,ServerAliveCountMax=3,ControlMaster=no \
         -o allow_other,default_permissions \
         -o ro \
         -o max_read=65536 \
