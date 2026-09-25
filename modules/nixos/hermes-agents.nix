@@ -178,18 +178,18 @@ in
     );
 
     # ssh.nix sets ControlPath ~/.ssh/control/%C fleet-wide; without the
-    # directory every ssh fails. Both homes: the login one and the agent's
-    # HOME under native hermes (~/hermes).
+    # directory every ssh fails. Native hermes runs with HOME = the account
+    # home, so the login home is the only one.
     systemd.tmpfiles.rules = lib.concatLists (
       lib.mapAttrsToList (
         name: _:
         let
           home = config.users.users.${name}.home;
         in
-        lib.concatMap (h: [
-          "d ${h}/.ssh 0700 ${name} users -"
-          "d ${h}/.ssh/control 0700 ${name} users -"
-        ]) [ home "${home}/hermes" ]
+        [
+          "d ${home}/.ssh 0700 ${name} users -"
+          "d ${home}/.ssh/control 0700 ${name} users -"
+        ]
       ) cfg
     );
 

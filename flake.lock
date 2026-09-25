@@ -2209,10 +2209,10 @@
         "voxtype": "voxtype_2"
       },
       "locked": {
-        "lastModified": 1790221279,
-        "narHash": "sha256-bId6K9aFGYe9d3uCla8qtKIEkCvVyOQWEMq3Ufojafw=",
-        "rev": "a059f73d8c8702696b61b84e8ef2d475c4d82099",
-        "revCount": 889,
+        "lastModified": 1790324813,
+        "narHash": "sha256-qhoC0U9UndzUadihPL56oNszCffnNvJ5yofGO6MXSyc=",
+        "rev": "bfe6f4e8bb7ab57b6bdcb9ae203fea8179b1c161",
+        "revCount": 890,
         "type": "git",
         "url": "file:///home/grmpf/synced/projects/spaces"
       },
