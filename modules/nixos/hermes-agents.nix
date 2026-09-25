@@ -12,6 +12,9 @@
 #   - the web dashboard on the shared host (./hermes-dashboard-public.nix;
 #     pocket-id account = the agent name unless `dashboard.account` says
 #     otherwise; passkey, enroll with pocket-id-enroll on edi),
+#   - 10 loopback ports published at https://<port>.<dashboard host>/, five
+#     private (owner's pocket-id login) and five public
+#     (./hermes-agents-serve.nix, taught by the serve-ports skill),
 #   - oh-my-pi on p0 through a per-user token copy (./inference-api-key.nix),
 #   - bash as login shell, not the site default fish: hermes-desktop's SSH
 #     connection kind runs its remote probe and `hermes serve` as POSIX sh
@@ -57,6 +60,7 @@ in
   imports = [
     ./hermes-common.nix
     ./hermes-dashboard-public.nix
+    ./hermes-agents-serve.nix
   ];
 
   options.hyper.hermesAgents = lib.mkOption {
