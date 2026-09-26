@@ -32,12 +32,34 @@
 #     the slot's profile if it has none yet. After that the profile belongs
 #     to the deployer.
 #
-# Isolation: every slot runs in its own user namespace (privateUsers =
-# "pick"), so its root is an unprivileged uid here and an untrusted user of
+# Isolation: every slot runs in its own user namespace, at a fixed host uid
+# base (uidBase: 0x60000000 + id * 0x10000; container uid n is host uid
+# base + n), so its root is an unprivileged uid here and an untrusted user of
 # this host's nix-daemon (sandboxed builds, cache substitution; no unsigned
 # imports, no settings). It still reads the whole host /nix/store and shares
 # the host kernel; its builds run in nix-daemon's cgroup, outside memoryMax
 # and cpuQuota.
+#
+# Shares: `shares.<path in slot> = { source; user; }` serves a host directory
+# into the slot through bindfs running as host account `user`. Every
+# operation reaches `source` as that account, so its uid/gids alone decide
+# what the slot may do there (for NFS sec=sys: what the server grants those
+# ids). The slot sees the tree owned by its root and a+rwX, so any slot user
+# can try anything and the host-side identity says yes or no; chown/chgrp are
+# ignored. The kernel resolves symlinks inside the slot, but bindfs itself
+# works by path, so a racing slot could steer an operation through a symlink
+# it swaps in: give `user` rights on `source` only, never broader groups.
+#
+# Shares come and go without the slot noticing more than an empty directory
+# meanwhile: the slot never waits for them (bam down at boot does not keep
+# the slot down), and they reach it by mount propagation, not by the bind
+# taken at slot start. The slot binds the (still empty) share directory
+# under /run/container-slots/<slot> at start; each share unit mounts bindfs
+# there afterwards (ordered after the slot). /run is a shared mount
+# (systemd's default), and the slot's bind of a directory inside it is a
+# slave of that peer group, so every later (re)mount there propagates into
+# the running slot. A share retries forever; a hung NFS source only stalls
+# I/O until its server is back.
 #
 # Modes (host-side only; the guest cannot tell and need not care):
 #   isolated  routed veth; this host answers NDP on the bridge for the /128
@@ -115,6 +137,43 @@ let
       fi
     '';
 
+  uidBase = slot: 1610612736 + slot.id * 65536;
+
+  shareName = path: lib.removePrefix "-" (lib.replaceStrings [ "/" ] [ "-" ] path);
+  slotRun = name: "/run/container-slots/${name}";
+  shareMount = name: path: "${slotRun name}/${shareName path}";
+  shareUnit = name: path: "container-slot-${name}-${shareName path}";
+
+  # Before the slot starts: create the share mount points (owned by the
+  # share's account, which fusermount requires). findmnt reads mountinfo
+  # only: nothing here may stat a FUSE mount whose NFS source might hang.
+  slotPrep =
+    name: slot:
+    pkgs.writeShellScript "container-slot-prep-${name}" ''
+      PATH=${lib.makeBinPath [ pkgs.coreutils pkgs.util-linux ]}
+      install -d -m 0711 /run/container-slots ${slotRun name}
+      ${lib.concatStrings (
+        lib.mapAttrsToList (path: share: ''
+          m=${shareMount name path}
+          findmnt -rn --mountpoint "$m" >/dev/null || install -d -m 0700 -o ${share.user} "$m"
+        '') slot.shares
+      )}
+    '';
+
+  shareOptions = {
+    options = {
+      source = mkOption {
+        type = types.str;
+        example = "/vault/parquet";
+        description = "Host directory served into the slot.";
+      };
+      user = mkOption {
+        type = types.str;
+        description = "Host account every operation on `source` runs as; its rights are the slot's rights.";
+      };
+    };
+  };
+
   slotOptions = {
     options = {
       id = mkOption {
@@ -147,6 +206,17 @@ let
         default = null;
         example = "200%";
         description = "CPUQuota= of container@<slot>.";
+      };
+      shares = mkOption {
+        type = types.attrsOf (types.submodule shareOptions);
+        default = { };
+        example = {
+          "/vault/parquet" = {
+            source = "/vault/parquet";
+            user = "slot-foo";
+          };
+        };
+        description = "Host directories served into the slot, keyed by their path inside it (see the module header).";
       };
     };
   };
@@ -247,9 +317,18 @@ in
       name: slot:
       {
         autoStart = true;
-        privateUsers = "pick";
+        privateUsers = uidBase slot;
         privateNetwork = true;
-        extraFlags = [ "--bind-ro=${nixStateStub}:/nix/var/nix" ];
+        extraFlags = [
+          "--bind-ro=${nixStateStub}:/nix/var/nix"
+          # implied by "pick", not by a numeric base: without it the root
+          # tree stays host-root-owned, i.e. nobody's inside the slot
+          "--private-users-ownership=auto"
+        ];
+        bindMounts = lib.mapAttrs (path: _: {
+          hostPath = shareMount name path;
+          isReadOnly = false;
+        }) slot.shares;
         # mkForce + an empty `config`: the containers module's own
         # assertions read `containers.<n>.config.nix.*` unconditionally, so a
         # path-only container fails to evaluate without one. The forced
@@ -276,19 +355,76 @@ in
       )
     ) cfg.slots;
 
-    systemd.services = lib.mapAttrs' (
-      name: slot:
-      lib.nameValuePair "container@${name}" {
-        serviceConfig = {
-          ExecStartPre = [ (seed name slot) ];
-          # The start script copies the host's /etc/resolv.conf into the
-          # slot; in this unit's mount namespace that is the public one.
-          BindReadOnlyPaths = [ "${resolvConf}:/etc/resolv.conf" ];
+    systemd.services = lib.mkMerge [
+      (lib.mapAttrs' (
+        name: slot:
+        lib.nameValuePair "container@${name}" {
+          serviceConfig = {
+            ExecStartPre = [
+              "+${slotPrep name slot}"
+              (seed name slot)
+            ];
+            # The start script copies the host's /etc/resolv.conf into the
+            # slot; in this unit's mount namespace that is the public one.
+            BindReadOnlyPaths = [ "${resolvConf}:/etc/resolv.conf" ];
+          }
+          // lib.optionalAttrs (slot.memoryMax != null) { MemoryMax = slot.memoryMax; }
+          // lib.optionalAttrs (slot.cpuQuota != null) { CPUQuota = slot.cpuQuota; };
         }
-        // lib.optionalAttrs (slot.memoryMax != null) { MemoryMax = slot.memoryMax; }
-        // lib.optionalAttrs (slot.cpuQuota != null) { CPUQuota = slot.cpuQuota; };
-      }
-    ) cfg.slots;
+      ) cfg.slots)
+
+      (lib.concatMapAttrs (
+        name: slot:
+        lib.mapAttrs' (
+          path: share:
+          let
+            mnt = shareMount name path;
+            owner = toString (uidBase slot);
+          in
+          lib.nameValuePair (shareUnit name path) {
+            description = "Share ${share.source} into slot ${name} at ${path}";
+            # Started with the slot, after it (its bind of the empty mount
+            # point must predate this mount), restarted and stopped with it.
+            wantedBy = [ "container@${name}.service" ];
+            partOf = [ "container@${name}.service" ];
+            after = [ "container@${name}.service" ];
+            unitConfig = {
+              RequiresMountsFor = [ share.source ];
+              StartLimitIntervalSec = 0;
+            };
+            # fusermount3 (setuid wrapper) mounts for the unprivileged user
+            path = [ "/run/wrappers" ];
+            serviceConfig = {
+              User = share.user;
+              ExecStart = lib.escapeShellArgs [
+                "${pkgs.bindfs}/bin/bindfs"
+                "-f"
+                "-o"
+                "allow_other"
+                "--force-user=${owner}"
+                "--force-group=${owner}"
+                "--perms=a+rwX"
+                "--chown-ignore"
+                "--chgrp-ignore"
+                "--xattr-none"
+                # The slot's umask reaches bindfs as the create mode, and on
+                # an ACL'd tree the group bits are the mask: 0644 would cap
+                # every group ACL (vault's own writers too) at read-only.
+                "--create-with-perms=g+rwX"
+                share.source
+                mnt
+              ];
+              # -c: no canonicalisation, i.e. no stat of a possibly hung mount
+              ExecStopPost = "-+${pkgs.util-linux}/bin/umount -l -c ${mnt}";
+              Restart = "always";
+              RestartSec = 5;
+            };
+          }
+        ) slot.shares
+      ) cfg.slots)
+    ];
+
+    programs.fuse.userAllowOther = lib.mkIf (lib.any (s: s.shares != { }) (lib.attrValues cfg.slots)) true;
 
     # --- isolated-mode policy --------------------------------------------
     networking.nftables.tables.container-slots = lib.mkIf (isolated != { }) {
