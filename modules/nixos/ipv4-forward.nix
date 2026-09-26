@@ -4,9 +4,12 @@
 # keepalives.
 #
 # gateway (sgp): every new inbound IPv4 connection to its public address is
-#   DNATed through the tunnel to som, except SSH (22/tcp) and the tunnel
-#   itself. Replies to sgp's own outbound connections are conntrack-matched
-#   and never reach the DNAT chain, so sgp's meshes and updates keep working.
+#   DNATed through the tunnel to som, including 22/tcp (hermes dashboards
+#   reach som over SSH). sgp's own SSH on the public address moves to
+#   `gatewaySshPort`; 22 still works over the meshes. Only that port and the
+#   tunnel stay on sgp. Replies to sgp's own outbound connections are
+#   conntrack-matched and never reach the DNAT chain, so sgp's meshes and
+#   updates keep working.
 # backend (som): receives those connections with the client's source address
 #   intact. Only traffic sourced from the tunnel address is policy-routed back
 #   through the tunnel; som's own traffic keeps using the home uplink. som's
@@ -24,6 +27,7 @@ let
   backendName = "som";
   publicIPv4 = "38.89.142.76";
   port = 51820;
+  gatewaySshPort = 21;
   gatewayAddress = "10.99.0.1";
   backendAddress = "10.99.0.2";
   interface = "wg-v4fwd";
@@ -83,6 +87,11 @@ in
       };
 
       networking.firewall.allowedUDPPorts = [ port ];
+      # openssh.openFirewall opens both ports.
+      services.openssh.ports = [
+        22
+        gatewaySshPort
+      ];
       boot.kernel.sysctl."net.ipv4.conf.all.forwarding" = true;
 
       networking.nftables.enable = true;
@@ -93,7 +102,7 @@ in
             type nat hook prerouting priority dstnat; policy accept;
             iifname "${interface}" return
             ip daddr != ${publicIPv4} return
-            tcp dport 22 return
+            tcp dport ${toString gatewaySshPort} return
             udp dport ${toString port} return
             dnat to ${backendAddress}
           }
