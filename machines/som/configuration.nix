@@ -20,6 +20,7 @@
     ../../modules/nixos/linger-normal-users.nix
     ../../modules/nixos/rgb-off.nix
     ../../modules/nixos/ipv4-forward.nix
+    ../../modules/nixos/container-slots.nix
   ];
 
   # Public IPv4 38.89.142.76, borrowed from sgp through a WireGuard tunnel
@@ -44,12 +45,22 @@
   # routed to its own backend. Every agent in ./hermes-agents.nix is published.
   hyper.hermesDashboard.host = "hermes.davhau.com";
 
-  # Public address 2405:9800:b901:94e3::c0de:ba5e on the LAN NIC (prefix from
-  # the RA, ../../modules/nixos/public-ipv6-token.nix); the matching AIS
+  # Public address 2405:9800:b901:94e3::c0de:ba5e on the LAN bridge (prefix
+  # from the RA, ../../modules/nixos/public-ipv6-token.nix); the matching AIS
   # router allow rule is `router-ais ipv6-rules list` -> "som".
   networking.publicIPv6 = {
     token = "::c0de:ba5e";
-    interface = "enp6s0";
+    interface = "br0";
+  };
+
+  # Container slots for other repos to deploy into
+  # (../../modules/nixos/container-slots.nix). enp6s0 is a port of br0,
+  # which keeps its MAC and carries som's own DHCP/SLAAC addresses. Add a
+  # slot as `slots.<name> = { id; mode; deployKeys; }`.
+  hyper.containerSlots = {
+    enable = true;
+    uplink = "enp6s0";
+    uplinkMac = "a4:0c:66:1b:29:f1";
   };
 
   # The spaces desktop profile defaults llama-swap on, which registers a

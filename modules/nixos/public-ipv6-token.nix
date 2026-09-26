@@ -34,7 +34,7 @@ in
     interface = lib.mkOption {
       type = lib.types.str;
       example = "enp6s0";
-      description = "The uplink NIC; must be one nixos-facter declares (40-<interface>.network exists).";
+      description = "The uplink link; needs a 40-<interface>.network (nixos-facter's for a NIC, or container-slots.nix's bridge).";
     };
   };
 
@@ -42,7 +42,7 @@ in
     assertions = [
       {
         assertion = config.systemd.network.networks ? "40-${cfg.interface}";
-        message = "networking.publicIPv6.interface: no 40-${cfg.interface}.network unit; the NIC is not facter-declared on this host";
+        message = "networking.publicIPv6.interface: no 40-${cfg.interface}.network unit on this host";
       }
     ];
     systemd.network.networks."40-${cfg.interface}".ipv6AcceptRAConfig.Token = "static:${cfg.token}";
