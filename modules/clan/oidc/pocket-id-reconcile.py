@@ -143,6 +143,9 @@ def reconcile_clients(desired, group_ids):
             "skipConsent": True,
             "requiresReauthentication": False,
             "requiresPushedAuthorizationRequests": False,
+            # Without this pocket-id ignores allowedUserGroups (anyone may
+            # sign in) and an update clears them. Every client declares groups.
+            "isGroupRestricted": True,
         }
         if client_id not in existing:
             request("POST", "/oidc/clients", {"id": client_id, **body})

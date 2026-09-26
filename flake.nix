@@ -55,10 +55,6 @@
     clan-core.inputs.disko.follows = "disko";
     clan-core.inputs.flake-parts.follows = "flake-parts";
     # clan-core.inputs.systems.follows = "systems";
-    clan-core-monitoring.url = "git+https://git.clan.lol/friedow/clan-core?ref=feat/monitoring-service&shallow=1";
-    clan-core-monitoring.inputs.disko.follows = "disko";
-    clan-core-monitoring.inputs.flake-parts.follows = "flake-parts";
-    clan-core-monitoring.inputs.nixpkgs.follows = "nixpkgs";
 
     # Upstream, pinned here so clan-core's sops-nix follows our nixpkgs.
     # Without https://github.com/Mic92/sops-nix/pull/973 (still open), one
@@ -67,7 +63,6 @@
     sops-nix.url = "github:Mic92/sops-nix";
     sops-nix.inputs.nixpkgs.follows = "nixpkgs";
     clan-core.inputs.sops-nix.follows = "sops-nix";
-    clan-core-monitoring.inputs.sops-nix.follows = "sops-nix";
 
     disko.url = "github:nix-community/disko";
     disko.inputs.nixpkgs.follows = "nixpkgs";

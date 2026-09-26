@@ -59,7 +59,6 @@ in {
           # easytier = ../../modules/clan/easytier;
           wireguard = ../../modules/clan/wireguard;
           ncps = inputs.ncps + "/clanServices/ncps";
-          monitoring = inputs.clan-core-monitoring + "/modules/monitoring";
           cctl = ../../modules/clan/cctl;
           remote-building = ../../modules/clan/remote-building;
           oidc = ../../modules/clan/oidc;
@@ -209,7 +208,7 @@ in {
                     email = "need-more-ram@davhau.com";
                     displayName = "Dave";
                     admin = true;
-                    groups = [ "apps" "hermes" ];
+                    groups = [ "apps" "hermes" "stats" ];
                   };
                   stefan = { displayName = "Stefan"; groups = [ "hermes" ]; };
                   pinpox = { displayName = "Pinpox"; groups = [ "hermes" ]; };
@@ -247,6 +246,13 @@ in {
                 callbackURLs = [ "https://hermes.davhau.com/oauth2/callback" ];
                 pkce = true; # oauth2-proxy sends S256
                 allowedGroups = [ "hermes" ];
+              };
+              # Grafana at stats.davhau.com (modules/nixos/monitoring-grafana-sso.nix).
+              roles.client.machines.edi.settings.clients.grafana = {
+                name = "Grafana";
+                callbackURLs = [ "https://stats.davhau.com/login/generic_oauth" ];
+                pkce = true;
+                allowedGroups = [ "stats" ];
               };
             };
 
@@ -370,15 +376,17 @@ in {
             #   roles.client.machines.bam = {};
             # };
 
-            # monitoring = {
-            #   module.name = "monitoring";
-            #   module.input = "clan-core-monitoring";
-            #   # roles.server.machines.bam = {};
-            #   roles.server.settings = {
-            #     grafana.enable = true;
-            #   };
-            #   # roles.client.tags = ["all"];
-            # };
+            # clan-core monitoring: Alloy on every machine pushes metrics
+            # (Mimir) and journal logs (Loki) to edi over zt-eu (edi.d);
+            # Grafana at http://edi.d/grafana/. The service sets no retention,
+            # so the server role adds it plus a loopback ring fix.
+            monitoring = {
+              module.name = "monitoring";
+              module.input = "clan-core";
+              roles.client.tags.all = {};
+              roles.server.machines.edi.settings.grafana.enable = true;
+              roles.server.extraModules = [ ../../modules/nixos/monitoring-server.nix ];
+            };
           };
         };
       });
