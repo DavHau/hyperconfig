@@ -9,10 +9,11 @@
   ];
 
   # Public IPv4 lent to som (../../modules/nixos/ipv4-forward.nix): all
-  # inbound IPv4 except SSH goes through the tunnel to som.
+  # inbound IPv4 goes through the tunnel to som, 22/tcp included; sgp's own
+  # SSH on the public address is port 21.
   hyper.ipv4Forward.role = "gateway";
 
-  clan.core.networking.targetHost = "root@38.89.142.76";
+  clan.core.networking.targetHost = "root@38.89.142.76:21";
 
   # 1G of RAM: zram (common.nix) plus a disk swapfile so a nix evaluation or
   # a service spike does not hit the OOM killer.
