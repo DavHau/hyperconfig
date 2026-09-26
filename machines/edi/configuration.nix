@@ -6,6 +6,8 @@
     ../../modules/nixos/common.nix
     ../../modules/nixos/dyndns-porkbun.nix
     ../../modules/nixos/vibepn.nix
+    ../../modules/nixos/nix-gc-server.nix
+    ../../modules/nixos/monitoring-grafana-sso.nix
     ./reverse-proxy.nix
     ./nginx-file-server.nix
     ./reverse-proxy-maker.nix
