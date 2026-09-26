@@ -42,6 +42,9 @@
     enableACME = true;
     locations."/" = {
       proxyPass = "http://192.168.194.30:8123";
+      # Global recommendedProxySettings (modules/clan/oidc) adds
+      # X-Forwarded-For; this HA does not trust edi as a proxy -> 400.
+      recommendedProxySettings = false;
       proxyWebsockets = true; # needed if you need to use WebSocket
       extraConfig =
         # required when the server wants to use HTTP Authentication
@@ -54,6 +57,8 @@
     enableACME = true;
     locations."/" = {
       proxyPass = "http://[fcc0:044a:8669:8c81:6d54::1]:8123";
+      # See playa: HA rejects untrusted X-Forwarded-For with 400.
+      recommendedProxySettings = false;
       proxyWebsockets = true; # needed if you need to use WebSocket
       extraConfig =
         # required when the server wants to use HTTP Authentication
