@@ -19,7 +19,13 @@
     ../../modules/nixos/public-ipv6-token.nix
     ../../modules/nixos/linger-normal-users.nix
     ../../modules/nixos/rgb-off.nix
+    ../../modules/nixos/ipv4-forward.nix
   ];
+
+  # Public IPv4 38.89.142.76, borrowed from sgp through a WireGuard tunnel
+  # (../../modules/nixos/ipv4-forward.nix); this firewall still decides which
+  # ports answer.
+  hyper.ipv4Forward.role = "backend";
 
   # r8169 is the only NIC that matters; the initrd needs it to be reachable
   # for unlock (../../modules/nixos/zfs-remote-unlock, wired only).
