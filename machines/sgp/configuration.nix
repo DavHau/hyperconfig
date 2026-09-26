@@ -5,7 +5,12 @@
   imports = [
     ../../modules/nixos/common.nix
     ../../modules/nixos/common-tools.nix
+    ../../modules/nixos/ipv4-forward.nix
   ];
+
+  # Public IPv4 lent to som (../../modules/nixos/ipv4-forward.nix): all
+  # inbound IPv4 except SSH goes through the tunnel to som.
+  hyper.ipv4Forward.role = "gateway";
 
   clan.core.networking.targetHost = "root@38.89.142.76";
 
