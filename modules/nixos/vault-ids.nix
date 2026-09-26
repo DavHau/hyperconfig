@@ -3,10 +3,13 @@
 # uid/gid on a client IS the identity nfsd checks against bam's file modes;
 # anything not pinned identically on both sides is meaningless as an ACL.
 #
-# Two tiers:
+# Three tiers:
 #   `vault`    (gid 1101) read+write on the datasets. Members: dave (uid 1000
 #              on bam/som/vit, 1001 on amy), grmpf (amy, uid 1000 - on the
 #              wire the same principal as dave elsewhere).
+#   `vault-parquet-rw` (gid 1107) read+write on /vault/parquet only.
+#              Members: slot-asof (som; the asof container slot's share,
+#              machines/som/configuration.nix).
 #   `vault-ro` (gid 1103) read-only on /vault/parquet. Members: stefan,
 #              momentum, hsjobeki, dave-hermes, egg, pinpox, adam, j - each user's own
 #              module adds the group (users/*-vault.nix, *-hermes.nix).
@@ -29,16 +32,19 @@
 #
 #   setfacl -R -m g:vault:rwX -m d:g:vault:rwx <tree>          # any dataset
 #   setfacl -R -m g:vault-ro:rX -m d:g:vault-ro:rx <tree>      # /vault/parquet
+#   setfacl -R -m g:vault-parquet-rw:rwX -m d:g:vault-parquet-rw:rwx <tree>
 #
 # When adding readers to an existing tree, set the ACL before closing the
 # modes, or the readers lose access in between.
 #
 # Pinned ids: 1002 stefan, 1004 egg, 1005 dave-hermes, 1100 momentum,
 # 1101 vault (gid), 1102 hsjobeki, 1103 vault-ro (gid), 1104 pinpox,
-# 1105 adam, 1106 j, 1200 agent. gid 1100 stays unallocated.
+# 1105 adam, 1106 j, 1107 vault-parquet-rw (gid), 1200 agent,
+# 1201 slot-asof. gid 1100 stays unallocated.
 {
   users.groups.vault.gid = 1101;
   users.groups.vault-ro.gid = 1103;
+  users.groups.vault-parquet-rw.gid = 1107;
 
   users.users.momentum = {
     isNormalUser = true;
