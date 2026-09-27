@@ -309,6 +309,14 @@ in
       # add the host-side slot routes; keep them.
       config.networkConfig.ManageForeignRoutes = false;
     };
+    # The initrd (remote unlock) runs networkd on the uplink with DHCP+RA,
+    # and by default leaves its addresses and routes in place at switch
+    # root. Stage 2 makes the uplink a bare bridge port and, with
+    # ManageForeignRoutes off, never removes the leftovers: the initrd's RA
+    # route for the LAN /64 on the uplink then competes with the bridge's
+    # and wins, so neighbours in that /64 become unreachable (NDP goes out
+    # a bridge port). Drop the initrd's config on the uplink when it stops.
+    boot.initrd.systemd.network.networks."40-${cfg.uplink}".networkConfig.KeepConfiguration = false;
     networking.networkmanager.unmanaged = [
       "interface-name:${cfg.uplink}"
       "interface-name:${cfg.bridge}"
