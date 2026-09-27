@@ -11,7 +11,7 @@
 #              Members: slot-asof (som; the asof container slot's share,
 #              machines/som/configuration.nix).
 #   `vault-ro` (gid 1103) read-only on /vault/parquet. Members: stefan,
-#              momentum, hsjobeki, dave-hermes, egg, pinpox, adam, j - each user's own
+#              momentum, hsjobeki, dave-hermes, egg, pinpox, adam, j, willi - each user's own
 #              module adds the group (users/*-vault.nix, *-hermes.nix).
 # The client sends its own gid list, so membership is granted per host: a
 # reader reads from every wg-vault client whose config imports its module.
@@ -39,7 +39,7 @@
 #
 # Pinned ids: 1002 stefan, 1004 egg, 1005 dave-hermes, 1100 momentum,
 # 1101 vault (gid), 1102 hsjobeki, 1103 vault-ro (gid), 1104 pinpox,
-# 1105 adam, 1106 j, 1107 vault-parquet-rw (gid), 1200 agent,
+# 1105 adam, 1106 j, 1107 vault-parquet-rw (gid), 1108 willi, 1200 agent,
 # 1201 slot-asof. gid 1100 stays unallocated.
 {
   users.groups.vault.gid = 1101;
