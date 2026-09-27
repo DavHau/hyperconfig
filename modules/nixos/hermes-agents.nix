@@ -11,7 +11,7 @@
 #     OpenRouter,
 #   - the web dashboard on the shared host (./hermes-dashboard-public.nix;
 #     pocket-id account = the agent name unless `dashboard.account` says
-#     otherwise; passkey, enroll with pocket-id-enroll on edi),
+#     otherwise; passkey, enrolled through the login link hermes-onboard prints),
 #   - 10 loopback ports published at https://<port>.<dashboard host>/, five
 #     private (owner's pocket-id login) and five public
 #     (./hermes-agents-serve.nix, taught by the serve-ports skill),

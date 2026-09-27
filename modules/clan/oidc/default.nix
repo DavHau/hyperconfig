@@ -20,8 +20,10 @@
 # prefix). Every client must name at least one allowed group: pocket-id
 # treats "no groups" as "everyone".
 #
-# Enrollment: `pocket-id-enroll <username>` on the server prints a one-time
-# login link; the person registers a passkey through it.
+# Enrollment: the person registers a passkey after signing in once through
+# a one-time login link. `hermes-onboard <machine> <user>` (tools/) mints
+# one valid for a week through the admin API; `pocket-id-enroll <username>`
+# on the server prints a 1-hour one.
 { ... }:
 let
   clientModule =
