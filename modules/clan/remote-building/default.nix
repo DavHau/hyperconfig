@@ -227,6 +227,11 @@
             # the daemon building locally until the bar toggle starts this.
             systemd.services.remote-builders = {
               description = "Expose remote nix builders to the daemon (stop = build locally)";
+              # The start step copies /etc/nix/machines, so the copy goes stale
+              # when a switch changes that file (a moved key path, a new
+              # builder). Re-copy on such a switch while the toggle is on;
+              # an inactive unit is left inactive, keeping the toggle state.
+              restartTriggers = [ config.environment.etc."nix/machines".source ];
               serviceConfig = {
                 Type = "oneshot";
                 RemainAfterExit = true;
