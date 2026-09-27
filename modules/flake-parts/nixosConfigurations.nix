@@ -214,6 +214,7 @@ in {
                   pinpox = { displayName = "Pinpox"; groups = [ "hermes" ]; };
                   adam = { displayName = "Adam"; groups = [ "hermes" ]; };
                   j = { displayName = "J"; groups = [ "hermes" ]; };
+                  willi = { displayName = "Willi"; groups = [ "hermes" ]; };
                   egg = { displayName = "Egg"; groups = [ "hermes" ]; };
                   momentum = { displayName = "Momentum"; groups = [ "hermes" ]; };
                   # The coding agent's account for end-to-end login tests
