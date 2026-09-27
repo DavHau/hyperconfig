@@ -136,7 +136,7 @@
     llm-agents.inputs.flake-parts.follows = "flake-parts";
     llm-agents.inputs.systems.follows = "systems";
 
-    afk.url = "git+file:///home/grmpf/synced/projects/afk?rev=e3d373fdd4dbc36ccf8e1017c5365240b67e9a02";
+    afk.url = "git+file:///home/grmpf/synced/projects/afk?rev=79c4b4a007bec8c9b658aa74ad53a1739ecbc599";
     afk.inputs.nixpkgs.follows = "nixpkgs";
     afk.inputs.llm-agents.follows = "llm-agents";
 
@@ -161,25 +161,6 @@
 
     cctl.url = "github:allouis/cctl";
     cctl.inputs.nixpkgs.follows = "nixpkgs";
-
-    nixos-example.url = "github:DavHau/nixos-example";
-    nixos-example.inputs.nixpkgs.follows = "nixpkgs";
-    nixos-example.inputs.disko.follows = "disko";
-    nixos-example.inputs.nixos-hardware.follows = "nixos-hardware";
-    nixos-example.inputs.llm-agents.follows = "llm-agents";
-    nixos-example.inputs.sbox.follows = "sbox";
-    nixos-example.inputs.wrappers.follows = "wrappers";
-    # nixos-example's hermes.nix takes inputs.hermes-agent from OUR specialArgs
-    # (spaces' pin, see nixosConfigurations.nix); its own copy is dead weight
-    # and dragged a third nixpkgs along. aztec-packages likewise.
-    nixos-example.inputs.hermes-agent.follows = "spaces/hermes-agent";
-    nixos-example.inputs.aztec-packages.inputs.nixpkgs.follows = "nixpkgs";
-    # hermes-agent moved into the spaces flake (nixosModules.hermes); no
-    # root-level hermes-agent input anymore. nixos-example's hermes.nix
-    # still references inputs.hermes-agent via OUR specialArgs (path
-    # imports) — specialArgs aliases spaces' pin (nixosConfigurations.nix).
-    messaging-daemon.url = "github:vbuterin/messaging-daemon";
-    messaging-daemon.flake = false;
 
     nix-housing.url = "github:decentstates/nix-housing";
     nix-housing.inputs.nixpkgs.follows = "nixpkgs";
@@ -229,8 +210,6 @@
         [
           "amy"
           "bam"
-          "cat"
-          "dom"
           "cm-pi"
           "nas"
         ]
