@@ -69,7 +69,13 @@
 #             decides), v4 inbound none.
 #   lan       veth on the LAN bridge: a LAN peer like any other, unfiltered.
 # Either way inbound from the internet additionally needs an allow rule for
-# the slot's v6 address on the AIS router (`router-ais ipv6-rules add`).
+# the slot's v6 address on both routers in front of the LAN, the AIS ZTE
+# first, then the Beryl behind it:
+#   router-ais ipv6-rules add --address <v6> --name <slot>
+#   router-cm-beryl -J root@som.d ipv6-rules add --address <v6> --name <slot>
+# router-ais needs the LAN (192.168.1.1, Host header must be that IP): run
+# it on som when away, with ROUTER_AIS_PASSWORD from
+# `clan vars get amy router-ais/password`.
 #
 # Enabling this turns the uplink NIC into a port of the bridge; the bridge
 # keeps the NIC's MAC and takes over its DHCP/RA config. Point
