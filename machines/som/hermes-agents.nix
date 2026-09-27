@@ -64,11 +64,12 @@ in
       ];
     };
 
-    # willi: logs in with the admin keys until he has keys of his own.
     willi = {
       uid = 1108;
       description = "willi - hermes agent";
-      sshKeys = adminKeys;
+      sshKeys = [
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJShRmVEINmRgiXrhpVINJZGw7ZJq3HcCk8kmDM+1B3x reuss@PCBüro"
+      ];
     };
 
     # egg (fabien, github.com/allouis): controlled through a Telegram DM bot.
