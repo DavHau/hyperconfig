@@ -15,7 +15,8 @@
 #   spaces-integration-gateway socket,
 # - the host-specific always-apply rule (repo layout) and the top-level
 #   AGENTS.md,
-# - the jobs-hub extension (background-jobs widget, Ctrl+J / /bashjobs).
+# - the jobs-hub extension (background-jobs widget, Ctrl+J / /bashjobs),
+# - the herdr agent-state extension (herdr-omp-agent-state/).
 #
 # NOT deployed here, on purpose: config.yml (afk keeps it user-owned and
 # writable so runtime settings persist; defaults arrive via $OMP_DISTRO_CONFIG
@@ -46,6 +47,11 @@ in
         # scrollback). /jobs is taken by the builtin printout; source + tests
         # in modules/nixos/jobs-hub/.
         ln -sf ${./jobs-hub/jobs-hub.ts} "$config_dir/extensions/jobs-hub.ts"
+        # herdr <-> omp agent-state bridge: reports idle/working/blocked to
+        # the herdr pane it runs in; inert outside herdr (needs HERDR_ENV=1,
+        # HERDR_SOCKET_PATH, HERDR_PANE_ID). Vendored verbatim from what
+        # `herdr integration install omp` writes; see herdr-omp-agent-state/.
+        ln -sf ${common.herdrOmpExtension} "$config_dir/extensions/herdr-omp-agent-state.ts"
         # spaces MCP server: stdio bridge to the per-user
         # spaces-integration-gateway socket. See omp-common.nix for rationale.
         ln -sf ${common.mcpFile} "$config_dir/mcp.json"

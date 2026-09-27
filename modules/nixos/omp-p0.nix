@@ -10,15 +10,20 @@
 # A models.yml the user wrote is left alone; only an absent file or a link
 # into the store (ours from an earlier generation) is replaced. The default
 # model role (p0/qwen) is seeded once into config.yml, see omp-p0-link.sh.
+#
+# The same oneshot links the herdr agent-state extension (omp-common.nix)
+# into ~/.omp/agent/extensions, so bare omp reports to herdr like afk does.
 { pkgs, inputs, lib, config, ... }:
 let
   common = import ./omp-common.nix { inherit pkgs inputs lib config; };
 in
 {
-  systemd.user.services.omp-p0-models = lib.mkIf common.models-needed {
-    description = "Link the p0 models.yml into this user's bare omp profile";
+  systemd.user.services.omp-p0-models = {
+    description = "Link the p0 models.yml and herdr extension into this user's bare omp profile";
     wantedBy = [ "default.target" ];
     environment = {
+      HERDR_OMP_EXTENSION = "${common.herdrOmpExtension}";
+    } // lib.optionalAttrs common.models-needed {
       MODELS_FILE = "${common.modelsFile}";
       DEFAULT_MODEL = "p0/qwen";
     };

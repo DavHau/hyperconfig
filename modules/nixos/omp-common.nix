@@ -142,6 +142,11 @@ in rec {
       args = [ "\${XDG_RUNTIME_DIR}/spaces-integration-gateway.sock" ];
     };
   });
+  # herdr <-> omp agent-state extension, shared by afk (afk.nix) and bare omp
+  # (omp-p0.nix). Verbatim copy of what `herdr integration install omp`
+  # (herdr 0.9.1, HERDR_INTEGRATION_VERSION=10) writes; refresh it from
+  # there when herdr bumps the version. Inert outside a herdr pane.
+  herdrOmpExtension = ./herdr-omp-agent-state/herdr-omp-agent-state.ts;
   # Instructions for the TOP-LEVEL agent only. Everything relevant to
   # subagents lives in the always-apply rules symlinked into
   # $config_dir/rules/ by afk.nix: omp strips AGENTS.md from
