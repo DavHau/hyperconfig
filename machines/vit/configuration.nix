@@ -149,7 +149,7 @@
   # ~/.ssh/id_ed25519 (modules/nixos/sbox.nix), so this is the sandbox's
   # default identity. Root here, and only here: vit is the inference box the
   # agent operates (llama-swap, model fetches, freeze post-mortems); the
-  # clan-wide `admin` allowedKeys entry stays limited to dave's TPM key.
+  # clan-wide `sshd` authorizedKeys stay limited to dave's own keys.
   #
   # NOTE: sshd here reads ONLY /etc/ssh/authorized_keys.d/%u — spaces'
   # modules/nixos/default.nix mkForces services.openssh.authorizedKeysFiles

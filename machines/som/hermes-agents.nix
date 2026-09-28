@@ -5,7 +5,7 @@
   ...
 }:
 let
-  # The clan admin role fills root's list; accounts without keys of their
+  # The clan sshd instance fills root's list; accounts without keys of their
   # own reuse it.
   adminKeys = config.users.users.root.openssh.authorizedKeys.keys;
   # hermes-desktop on the dave machines dials dave-hermes over ssh with a

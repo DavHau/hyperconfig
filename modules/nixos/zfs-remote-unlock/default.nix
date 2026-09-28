@@ -49,7 +49,7 @@ in
     # the host's real ssh identity. Generated below on first activation.
     hostKeys = [ "/etc/secrets/initrd/ssh_host_ed25519_key" ];
     # authorizedKeys defaults to users.users.root.openssh.authorizedKeys.keys,
-    # which the clan admin role fills.
+    # which the clan sshd instance's authorizedKeys fill.
   };
 
   # The wired interface's 40-<iface> network (nixos-facter) already carries DHCP.
