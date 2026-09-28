@@ -48,7 +48,6 @@ in
     # root
     root = {
       openssh.authorizedKeys.keys = [
-        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDuhpzDHBPvn8nv8RH1MRomDOaXyP4GziQm7r3MZ1Syk grmpf"
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUPqwy1ToPHzd5bG8TLqp26PkzA8HUeA3p4l34El80V root@nas"
       ];
       # hashedPassword = "$6$0e8VNHlEiYMZiVMi$ouKAFUMdvrGrGeV/i7DhQgx16uu7RajCgj/aeQgm24ATlNcZPCF5lml8BoTFWzikZID2lIGaG.lVkvXXBklTK1";
@@ -76,9 +75,7 @@ in
       isNormalUser = true;
       extraGroups = [ "wheel" ];
       home = "${home}/david";
-      openssh.authorizedKeys.keys = config.users.users.root.openssh.authorizedKeys.keys ++ [
-        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDuhpzDHBPvn8nv8RH1MRomDOaXyP4GziQm7r3MZ1Syk grmpf"
-      ];
+      openssh.authorizedKeys.keys = config.users.users.root.openssh.authorizedKeys.keys;
     };
 
     manu = {
