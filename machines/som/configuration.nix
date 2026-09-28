@@ -19,7 +19,7 @@
     ../../modules/nixos/public-ipv6-token.nix
     ../../modules/nixos/linger-normal-users.nix
     ../../modules/nixos/rgb-off.nix
-    ../../modules/nixos/cooler-lcd.nix
+    ../../modules/nixos/cooler-lcd
     ../../modules/nixos/ipv4-forward.nix
     ../../modules/nixos/container-slots.nix
   ];
@@ -42,7 +42,7 @@
   hyper.rgbOff.colorfulArgb = true;
 
   # Thermalright AIO LCD (0416:5302); its port is cut 22:00-07:00
-  # (../../modules/nixos/cooler-lcd.nix).
+  # (../../modules/nixos/cooler-lcd).
   hyper.coolerLcd.usbPort = "1-0:1.0/usb1-port8";
 
   # Public hermes dashboards: https://hermes.davhau.com/ (AAAA -> the token

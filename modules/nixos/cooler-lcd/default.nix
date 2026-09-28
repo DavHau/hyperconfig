@@ -1,6 +1,7 @@
 # Show the NixOS snowflake on the LCD of a Thermalright AIO pump head
-# (USB 0416:5302 "USBDISPLAY", firmware 4.07, PM=51 Frozen Warframe), and
-# spin it while the CPU as a whole is more than half busy.
+# (USB 0416:5302 "USBDISPLAY", firmware 4.07, PM=51 Frozen Warframe),
+# spinning at a speed proportional to the CPU use of all cores together.
+# Every 20 s it shows "I <red heart emoji> Joy" for 1 s.
 #
 # Protocol as in https://github.com/NoNameOnFile/trlcd_libusb (the format
 # of https://github.com/Lexonight1/thermalright-trcc-linux, a 20-byte header
@@ -49,12 +50,10 @@ let
     '';
   };
 
-  # The arms alternate two blues, so the logo only repeats every 120
-  # degrees (shape alone: 60): 40 frames 3 degrees apart make a seamless
-  # loop. Rendered at build time: the runtime streamer needs no image
-  # libraries. One file, frames back to back, frame 0 upright.
+  # Rendered at build time (./render.py): the runtime streamer needs no
+  # image libraries.
   frames =
-    pkgs.runCommand "cooler-lcd-nixos-frames"
+    pkgs.runCommand "cooler-lcd-frames"
       {
         nativeBuildInputs = [
           pkgs.librsvg
@@ -65,82 +64,14 @@ let
         rsvg-convert -w 800 -h 800 -a \
           ${pkgs.nixos-icons}/share/icons/hicolor/scalable/apps/nix-snowflake.svg \
           -o logo.png
-        python3 - logo.png $out <<'EOF'
-        import struct, sys
-        from PIL import Image
-
-        logo = Image.open(sys.argv[1]).convert("RGBA")
-        header = bytearray(512)
-        header[0:4] = bytes([0xDA, 0xDB, 0xDC, 0xDD])
-        header[4] = 2  # version
-        header[6] = 1  # command: picture
-        header[8:12] = struct.pack("<HH", 240, 320)
-        header[12] = 2  # RGB565
-        header[22:26] = struct.pack("<I", 240 * 320 * 2)
-        header[29] = 8
-
-        with open(sys.argv[2], "wb") as out:
-            for step in range(40):
-                # Negative: Pillow turns counter-clockwise, spin clockwise.
-                turned = logo.rotate(-3 * step, Image.BICUBIC)
-                turned = turned.resize((200, 200), Image.LANCZOS)
-                canvas = Image.new("RGB", (240, 320))
-                canvas.paste(turned, (20, 60), turned)
-                rgb = canvas.tobytes()
-                out.write(header)
-                out.write(b"".join(
-                    struct.pack("<H", (r >> 3) << 11 | (g >> 2) << 5 | b >> 3)
-                    for r, g, b in zip(rgb[0::3], rgb[1::3], rgb[2::3])
-                ))
-        EOF
+        mkdir $out
+        python3 ${./render.py} logo.png \
+          ${pkgs.dejavu_fonts}/share/fonts/truetype/DejaVuSans-Bold.ttf \
+          ${pkgs.noto-fonts-color-emoji}/share/fonts/noto/NotoColorEmoji.ttf \
+          $out
       '';
 
-  # hidraw takes a leading report-ID byte per write (0: the report
-  # descriptor declares no IDs); each write is one 512-byte output report
-  # and blocks until the panel took it, which paces a frame at ~50 ms.
-  # A write error (device gone) ends the process; systemd restarts it.
-  stream = pkgs.writers.writePython3 "cooler-lcd-stream" { } ''
-    import os
-    import sys
-    import time
-
-    FRAME = 512 + 240 * 320 * 2
-
-    data = open(sys.argv[2], "rb").read()
-    frames = [
-        [b"\x00" + data[f + o:f + o + 512] for o in range(0, FRAME, 512)]
-        for f in range(0, len(data), FRAME)
-    ]
-
-
-    def cpu_times():
-        # Aggregate "cpu" line: every core. Fields 8+ (guest) are already
-        # counted in user/nice.
-        with open("/proc/stat") as f:
-            ticks = [int(x) for x in f.readline().split()[1:9]]
-        return sum(ticks) - ticks[3] - ticks[4], sum(ticks)
-
-
-    fd = os.open(sys.argv[1], os.O_WRONLY)
-    busy, total = cpu_times()
-    sampled = time.monotonic()
-    spinning = False
-    index = 0
-    while True:
-        now = time.monotonic()
-        if now - sampled >= 1:
-            b, t = cpu_times()
-            spinning = t > total and (b - busy) / (t - total) > 0.5
-            busy, total, sampled = b, t, now
-        # Stopping finishes the turn back to upright rather than freezing
-        # mid-angle.
-        if spinning or index:
-            index = (index + 1) % len(frames)
-        for report in frames[index]:
-            os.write(fd, report)
-        # Idle, the unchanged frame is only a keepalive.
-        time.sleep(0.02 if spinning or index else 0.5)
-  '';
+  stream = pkgs.writers.writePython3 "cooler-lcd-stream" { } (builtins.readFile ./stream.py);
 in
 {
   options.hyper.coolerLcd.usbPort = lib.mkOption {
