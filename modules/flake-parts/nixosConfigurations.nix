@@ -165,10 +165,7 @@ in {
             remote-building = {
               module.name = "remote-building";
               module.input = "self";
-              roles.builder.machines.som.settings.externalClients.nintendo-ds.sshKeys = [
-                "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOirp5rceowRPLnkCT2/vlTPgxtRWPeKdMIPnJ7ixJfi ds@nintendo-ds"
-                "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHfFgVZxuSVWvuNua41SaxGQxpMb6oUuCEiIF7SZpAD1 root@nintendo-ds"
-              ];
+              roles.builder.machines.som = {};
               roles.client.machines.amy.settings.barToggle = true;
             };
 

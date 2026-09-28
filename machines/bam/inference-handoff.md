@@ -483,7 +483,7 @@ AIME25 91.67 vs BF16 85.75/86.36/92.50 — within noise. The planned
 virsh list; virsh console inference        # serial console (root pw set)
 systemctl status nixvirt libvirtd
 # guest (public v6 only; from bam also: ssh root@10.42.0.2)
-ssh root@2405:9800:b901:94e3::feed:da7a   # keys: ds@nintendo-ds, root@nintendo-ds, grmpf
+ssh root@2405:9800:b901:94e3::feed:da7a   # keys: grmpf, grmpf@amy
 journalctl -u podman-vllm-qwen36-27b -f
 curl -s "http://[2405:9800:b901:94e3::feed:da7a]:30000/v1/models"
 # deploy
