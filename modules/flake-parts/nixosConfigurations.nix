@@ -197,6 +197,7 @@ in {
                   willi = { displayName = "Willi"; groups = [ "hermes" ]; };
                   egg = { displayName = "Egg"; groups = [ "hermes" ]; };
                   momentum = { displayName = "Momentum"; groups = [ "hermes" ]; };
+                  nico = { displayName = "Nico"; groups = [ "apps" ]; };
                   # The coding agent's account for end-to-end login tests
                   # (`pocket-id-enroll agent` on edi gives it a one-time
                   # session, no passkey needed). In `hermes` on purpose: it
