@@ -4,7 +4,7 @@
   Every sbox sandbox runs with amy's ~/.ssh/id_ed25519_github1 bound over
   ~/.ssh/id_ed25519 (modules/nixos/sbox.nix), making it the agents' ssh
   identity. This module gives that identity a first-class account on every
-  clan machine (wired via the `admin` instance's extraModules in
+  clan machine (wired via the `sshd` instance's server extraModules in
   modules/flake-parts/nixosConfigurations.nix):
 
     - `agent` user, key-only login, authorized for the sbox key
