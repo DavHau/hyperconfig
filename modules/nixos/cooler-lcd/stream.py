@@ -3,8 +3,9 @@
 Usage: cooler-lcd-stream HIDRAW_DEVICE FRAMES_DIR
 
 The snowflake spins at a speed proportional to the CPU use of all cores
-together, never slower than MIN_SPEED; every 20 s "I <heart> Joy" shows
-for 1 s. The panel falls back
+together, never slower than MIN_SPEED; every 20 s "I <icon> Joy" shows
+for 1 s, the icon alternating between a heart and a head louse. The
+panel falls back
 to its stock image seconds after frames stop, so an unchanged frame is
 resent as a keepalive.
 
@@ -46,7 +47,9 @@ def cpu_times():
 
 
 logo = load(sys.argv[2] + "/logo")
-[message] = load(sys.argv[2] + "/message")
+# Alternate flashes: heart, louse, heart, ...
+messages = [load(f"{sys.argv[2]}/message-{name}")[0]
+            for name in ("heart", "louse")]
 fd = os.open(sys.argv[1], os.O_WRONLY)
 busy, total = cpu_times()
 sampled = last = sent = time.monotonic()
@@ -58,10 +61,12 @@ while True:
         b, t = cpu_times()
         usage = (b - busy) / (t - total) if t > total else 0.0
         busy, total, sampled = b, t, now
-    phase = time.time() % MESSAGE_EVERY
+    now_wall = time.time()
+    phase = now_wall % MESSAGE_EVERY
     if phase < MESSAGE_FOR:
         # The spin pauses under the message and resumes where it was.
-        key, frame = "message", message
+        which = int(now_wall // MESSAGE_EVERY) % len(messages)
+        key, frame = f"message-{which}", messages[which]
         pause = MESSAGE_FOR - phase
     else:
         speed = max(MIN_SPEED, MAX_SPEED * usage)
