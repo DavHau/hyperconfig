@@ -1,16 +1,17 @@
 """Render the cooler LCD frames at build time.
 
-Usage: render.py LOGO_PNG TEXT_FONT EMOJI_FONT OUT_DIR
+Usage: render.py LOGO_PNG LOUSE_PNG TEXT_FONT EMOJI_FONT OUT_DIR
 
 OUT_DIR/logo: the arms alternate two blues, so the logo only repeats every
 120 degrees (shape alone: 60): 60 frames 2 degrees apart make a seamless
 loop, back to back, frame 0 upright.
 
-OUT_DIR/message: "I <heart>" over "Joy", at the largest font size that
-fits, composed landscape 320x240 as the panel sits, then turned 90 degrees
-clockwise onto the portrait raster (checked upright on som). Noto Color
-Emoji is a bitmap font that only renders at size 109; the heart is scaled
-to the cap height of the text.
+OUT_DIR/message-heart, OUT_DIR/message-louse: "I <icon>" over "Joy", at
+the largest font size that fits, composed landscape 320x240 as the panel
+sits, then turned 90 degrees clockwise onto the portrait raster (checked
+upright on som). The icon is a red heart emoji or a head louse drawing,
+scaled to the cap height of the text. Noto Color Emoji is a bitmap font
+that only renders at size 109.
 
 Each frame is one 512-byte header report followed by 240x320
 little-endian RGB565, the format of trlcd_libusb.
@@ -21,7 +22,7 @@ import sys
 
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFont
 
-logo_png, text_font, emoji_font, out_dir = sys.argv[1:]
+logo_png, louse_png, text_font, emoji_font, out_dir = sys.argv[1:]
 
 HEADER = bytearray(512)
 HEADER[0:4] = bytes([0xDA, 0xDB, 0xDC, 0xDD])
@@ -63,36 +64,27 @@ def render_logo():
             out.write(encode(canvas))
 
 
-def render_message():
+def render_message(name, icon):
     W, H, MARGIN = 320, 240, 6
-
-    heart = Image.new("RGBA", (160, 160))
-    ImageDraw.Draw(heart).text(
-        (0, 0),
-        "\u2764\ufe0f",
-        font=ImageFont.truetype(emoji_font, 109),
-        embedded_color=True,
-    )
-    heart = heart.crop(heart.getbbox())
 
     def layout(size):
         font = ImageFont.truetype(text_font, size)
         i_box, joy_box = font.getbbox("I"), font.getbbox("Joy")
         cap = i_box[3] - i_box[1]
-        heart_w = round(cap * heart.width / heart.height)
+        icon_w = round(cap * icon.width / icon.height)
         gap, line_gap = size // 6, size // 8
-        line1 = i_box[2] - i_box[0] + gap + heart_w
+        line1 = i_box[2] - i_box[0] + gap + icon_w
         line2 = joy_box[2] - joy_box[0]
         height = cap + line_gap + joy_box[3] - joy_box[1]
         fits = (max(line1, line2) <= W - 2 * MARGIN
                 and height <= H - 2 * MARGIN)
-        return (fits, font, i_box, joy_box, cap, heart_w, gap, line_gap,
+        return (fits, font, i_box, joy_box, cap, icon_w, gap, line_gap,
                 line1, line2, height)
 
     size = 20
     while layout(size + 1)[0]:
         size += 1
-    (_, font, i_box, joy_box, cap, heart_w, gap, line_gap,
+    (_, font, i_box, joy_box, cap, icon_w, gap, line_gap,
      line1, line2, height) = layout(size)
 
     canvas = Image.new("RGB", (W, H))
@@ -100,7 +92,7 @@ def render_message():
     top = (H - height) // 2
     x = (W - line1) // 2
     draw.text((x - i_box[0], top - i_box[1]), "I", font=font, fill="white")
-    scaled = heart.resize((heart_w, cap), Image.LANCZOS)
+    scaled = icon.resize((icon_w, cap), Image.LANCZOS)
     canvas.paste(scaled, (x + i_box[2] - i_box[0] + gap, top), scaled)
     draw.text(
         ((W - line2) // 2 - joy_box[0], top + cap + line_gap - joy_box[1]),
@@ -108,9 +100,26 @@ def render_message():
         font=font,
         fill="white",
     )
-    with open(f"{out_dir}/message", "wb") as out:
+    with open(f"{out_dir}/message-{name}", "wb") as out:
         out.write(encode(canvas.rotate(-90, expand=True)))
 
 
+def heart():
+    image = Image.new("RGBA", (160, 160))
+    ImageDraw.Draw(image).text(
+        (0, 0),
+        "\u2764\ufe0f",
+        font=ImageFont.truetype(emoji_font, 109),
+        embedded_color=True,
+    )
+    return image.crop(image.getbbox())
+
+
+def louse():
+    image = Image.open(louse_png).convert("RGBA")
+    return image.crop(image.getchannel("A").getbbox())
+
+
 render_logo()
-render_message()
+render_message("heart", heart())
+render_message("louse", louse())

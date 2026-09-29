@@ -51,7 +51,9 @@ let
   };
 
   # Rendered at build time (./render.py): the runtime streamer needs no
-  # image libraries.
+  # image libraries. ./head-louse.svg: "Pediculus humanus capitis.svg"
+  # from Wikimedia Commons, public domain (CDC / Dennis D. Juranek,
+  # vectorised by Nevit Dilmen).
   frames =
     pkgs.runCommand "cooler-lcd-frames"
       {
@@ -64,8 +66,9 @@ let
         rsvg-convert -w 800 -h 800 -a \
           ${pkgs.nixos-icons}/share/icons/hicolor/scalable/apps/nix-snowflake.svg \
           -o logo.png
+        rsvg-convert -w 1000 -h 1000 -a ${./head-louse.svg} -o louse.png
         mkdir $out
-        python3 ${./render.py} logo.png \
+        python3 ${./render.py} logo.png louse.png \
           ${pkgs.dejavu_fonts}/share/fonts/truetype/DejaVuSans-Bold.ttf \
           ${pkgs.noto-fonts-color-emoji}/share/fonts/noto/NotoColorEmoji.ttf \
           $out
