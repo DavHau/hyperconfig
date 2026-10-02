@@ -197,6 +197,7 @@ in {
                   j = { displayName = "J"; groups = [ "hermes" ]; };
                   willi = { displayName = "Willi"; groups = [ "hermes" ]; };
                   domi = { displayName = "Domi"; groups = [ "hermes" ]; };
+                  rti = { displayName = "Rti"; groups = [ "hermes" ]; };
                   egg = { displayName = "Egg"; groups = [ "hermes" ]; };
                   momentum = { displayName = "Momentum"; groups = [ "hermes" ]; };
                   nico = { displayName = "Nico"; groups = [ "apps" ]; };

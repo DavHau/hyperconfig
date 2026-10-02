@@ -79,6 +79,17 @@ in
       sshKeys = adminKeys;
     };
 
+    rti = {
+      uid = 1110;
+      description = "rti - hermes agent";
+      sshKeys = [
+        # github.com/rti.keys (fetched 2026-10-02)
+        "sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAIFT8SLyvX8PKh4Gm+hPb8XrSyXSdHnsF6uWDo8G28WUFAAAABHNzaDo= rti"
+        "sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAIO/KhqU4po6beEkEDFE7ncoLHNwkR+Or+SDXXnZJ/1djAAAABHNzaDo= rti"
+        "sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAIGqhMxHJMNbzSFv9BjPKlpNcQqumDK2q+dvGrhbkJx4gAAAABHNzaDo= rti"
+      ];
+    };
+
     # egg (fabien, github.com/allouis): controlled through a Telegram DM bot.
     egg = {
       uid = 1004;
