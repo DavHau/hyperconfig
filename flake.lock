@@ -380,6 +380,30 @@
         "type": "github"
       }
     },
+    "fast-nix-gc": {
+      "inputs": {
+        "nix-darwin": "nix-darwin_2",
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "treefmt-nix": "treefmt-nix_5"
+      },
+      "locked": {
+        "lastModified": 1786191454,
+        "narHash": "sha256-6sBEaFoA34AcvKF4bkNdrE+qCFFFZ6/QiilOPkkhk5U=",
+        "ref": "prune-stale-auto-roots",
+        "rev": "76021438764e2d412cdf74a23bd98704b8a636da",
+        "revCount": 214,
+        "type": "git",
+        "url": "file:///home/grmpf/synced/projects/fast-nix-gc"
+      },
+      "original": {
+        "owner": "DavHau",
+        "ref": "prune-stale-auto-roots",
+        "repo": "fast-nix-gc",
+        "type": "github"
+      }
+    },
     "firefox-gnome-theme": {
       "flake": false,
       "locked": {
@@ -919,7 +943,7 @@
         "systems": [
           "systems"
         ],
-        "treefmt-nix": "treefmt-nix_5"
+        "treefmt-nix": "treefmt-nix_6"
       },
       "locked": {
         "lastModified": 1790136910,
@@ -996,7 +1020,7 @@
         "nixpkgs": [
           "nixpkgs"
         ],
-        "treefmt-nix": "treefmt-nix_6"
+        "treefmt-nix": "treefmt-nix_7"
       },
       "locked": {
         "lastModified": 1772234227,
@@ -1133,6 +1157,27 @@
         "owner": "nix-darwin",
         "repo": "nix-darwin",
         "rev": "4cff07de74b50e64bdd68cd4e722ab5b6b35ee48",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-darwin",
+        "repo": "nix-darwin",
+        "type": "github"
+      }
+    },
+    "nix-darwin_2": {
+      "inputs": {
+        "nixpkgs": [
+          "fast-nix-gc",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1785389976,
+        "narHash": "sha256-0tLW8Ff5yt8AH97jw4ZpFJ0OCJ122zIlgWGDmOfU/VU=",
+        "owner": "nix-darwin",
+        "repo": "nix-darwin",
+        "rev": "15abb8c98f336cd8bd840d71059adebabe60bf04",
         "type": "github"
       },
       "original": {
@@ -1537,7 +1582,7 @@
           "stylix",
           "nixpkgs"
         ],
-        "treefmt-nix": "treefmt-nix_8"
+        "treefmt-nix": "treefmt-nix_9"
       },
       "locked": {
         "lastModified": 1748730660,
@@ -1655,6 +1700,7 @@
         "disko": "disko",
         "easytier": "easytier",
         "envfs": "envfs",
+        "fast-nix-gc": "fast-nix-gc",
         "flake-compat": "flake-compat",
         "flake-parts": "flake-parts_2",
         "home-manager": "home-manager",
@@ -1695,13 +1741,12 @@
     },
     "sbox": {
       "locked": {
-        "lastModified": 1791006517,
-        "narHash": "sha256-w4Q0NMJ9ICgbAtbiCbnV1A+97RDL75891AZRQ0VWcwY=",
-        "ref": "refs/heads/main",
-        "rev": "2fc24b5922e257168ed789f4bf160ac83ae6ce3e",
-        "revCount": 112,
+        "lastModified": 1791009644,
+        "narHash": "sha256-JU9mJhmvGAO0wQL5hUwaP+wr3yPGzk2WWqRg8AsUhWU=",
+        "rev": "0b831f06b81619e1ba0611c9100803198228c9e2",
+        "revCount": 113,
         "type": "git",
-        "url": "https://github.com/DavHau/sbox"
+        "url": "file:///home/grmpf/synced/projects/sbox"
       },
       "original": {
         "owner": "DavHau",
@@ -1738,7 +1783,7 @@
         "microvm": "microvm",
         "nixpkgs": "nixpkgs_4",
         "systems": "systems_7",
-        "treefmt-nix": "treefmt-nix_7",
+        "treefmt-nix": "treefmt-nix_8",
         "voxtype": "voxtype"
       },
       "locked": {
@@ -2146,6 +2191,27 @@
     "treefmt-nix_5": {
       "inputs": {
         "nixpkgs": [
+          "fast-nix-gc",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1785360170,
+        "narHash": "sha256-XE1lKgQ3eIO3E7zWryqcRsax+mYXod/5RHBn4YaR9YE=",
+        "owner": "numtide",
+        "repo": "treefmt-nix",
+        "rev": "d1187f8bc71fb8aab02395869ec3f5c1920f75c0",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "treefmt-nix",
+        "type": "github"
+      }
+    },
+    "treefmt-nix_6": {
+      "inputs": {
+        "nixpkgs": [
           "llm-agents",
           "nixpkgs"
         ]
@@ -2164,7 +2230,7 @@
         "type": "github"
       }
     },
-    "treefmt-nix_6": {
+    "treefmt-nix_7": {
       "inputs": {
         "nixpkgs": [
           "mics-skills",
@@ -2185,7 +2251,7 @@
         "type": "github"
       }
     },
-    "treefmt-nix_7": {
+    "treefmt-nix_8": {
       "inputs": {
         "nixpkgs": [
           "spaces",
@@ -2206,7 +2272,7 @@
         "type": "github"
       }
     },
-    "treefmt-nix_8": {
+    "treefmt-nix_9": {
       "inputs": {
         "nixpkgs": [
           "stylix",

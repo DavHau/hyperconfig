@@ -78,6 +78,46 @@
             options.mountpoint = "/home/grmpf/temp";
             mountpoint = "/home/grmpf/temp";
           };
+          # Rebuildable, high-churn state: kept out of the root dataset's
+          # auto-snapshots (inherits auto-snapshot=false from nobackup).
+          # Created by hand on the live pool (2026-10-03); disko only
+          # applies these on a fresh install.
+          "root/nobackup/sbox-state" = {
+            type = "zfs_fs";
+            options = {
+              mountpoint = "/home/grmpf/.local/state/sbox";
+              compression = "zstd-1";
+            };
+            mountpoint = "/home/grmpf/.local/state/sbox";
+          };
+          "root/nobackup/cache" = {
+            type = "zfs_fs";
+            options = {
+              mountpoint = "/home/grmpf/.cache";
+              compression = "zstd-1";
+            };
+            mountpoint = "/home/grmpf/.cache";
+          };
+          "root/nobackup/docker" = {
+            type = "zfs_fs";
+            options.mountpoint = "/home/grmpf/.local/share/docker";
+            mountpoint = "/home/grmpf/.local/share/docker";
+          };
+          "root/nobackup/steam" = {
+            type = "zfs_fs";
+            options.mountpoint = "/home/grmpf/.local/share/Steam";
+            mountpoint = "/home/grmpf/.local/share/Steam";
+          };
+          # Emergency headroom: never mounted, holds 30G back from the pool.
+          # When the pool is full: `zfs set refreservation=none zroot/reserved`.
+          "reserved" = {
+            type = "zfs_fs";
+            options = {
+              mountpoint = "none";
+              canmount = "off";
+              refreservation = "30G";
+            };
+          };
         };
       };
     };
