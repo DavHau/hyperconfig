@@ -26,6 +26,7 @@
     ../../modules/nixos/storagebox.nix
     ../../modules/nixos/fabro
     ../../modules/nixos/vault-nfs-client.nix
+    ../../modules/nixos/vault-mm-store.nix
     ../../modules/nixos/router-ais.nix
     ../../modules/nixos/router-cm-beryl.nix
     ../../modules/nixos/disk-hygiene
