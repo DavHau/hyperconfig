@@ -125,6 +125,12 @@
 
     sbox.url = "github:DavHau/sbox";
 
+    # DavHau's fork (branch prune-stale-auto-roots). Locked to the local
+    # checkout via `nix flake lock --override-input fast-nix-gc
+    # 'git+file:///home/grmpf/synced/projects/fast-nix-gc?ref=prune-stale-auto-roots'`.
+    fast-nix-gc.url = "github:DavHau/fast-nix-gc/prune-stale-auto-roots";
+    fast-nix-gc.inputs.nixpkgs.follows = "nixpkgs";
+
     # llm-agents keeps its OWN nixpkgs on purpose: its derivations then
     # hash-match what numtide's CI pushed to cache.numtide.com and substitute
     # instead of building, and upstream tracks nixpkgs faster than spaces
