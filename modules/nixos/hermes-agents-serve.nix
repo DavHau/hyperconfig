@@ -28,8 +28,9 @@
 #     them, other agents may not. Nothing opens them in the firewall.
 #
 # TLS: one wildcard cert via porkbun DNS-01 (as edi's *.maker.davhau.com).
-# DNS: `porkbun-dns set '*.<host>' AAAA <public v6>` (tools/porkbun-dns),
-# the same address as <host>.
+# DNS: `porkbun-dns set '*.<host>' AAAA <public v6>` and `... A <public v4>`
+# (tools/porkbun-dns), the same addresses as <host> (v4 is sgp's, forwarded
+# by ./ipv4-forward.nix).
 #
 # The serve-ports skill (./hermes-agents-serve-skill, rendered with this
 # host's port table) teaches the agent all of this.
