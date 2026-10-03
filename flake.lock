@@ -1695,12 +1695,13 @@
     },
     "sbox": {
       "locked": {
-        "lastModified": 1788924556,
-        "narHash": "sha256-2Li0rEkBHmAOcFkOKhScAhehaiAU9yuDbufB1ZVK8qk=",
-        "rev": "7827da62f09f8cb921da57292407c463481a095a",
-        "revCount": 111,
+        "lastModified": 1791006517,
+        "narHash": "sha256-w4Q0NMJ9ICgbAtbiCbnV1A+97RDL75891AZRQ0VWcwY=",
+        "ref": "refs/heads/main",
+        "rev": "2fc24b5922e257168ed789f4bf160ac83ae6ce3e",
+        "revCount": 112,
         "type": "git",
-        "url": "file:///home/grmpf/synced/projects/sbox"
+        "url": "https://github.com/DavHau/sbox"
       },
       "original": {
         "owner": "DavHau",
