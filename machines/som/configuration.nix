@@ -39,10 +39,10 @@
   boot.loader.systemd-boot.configurationLimit = 20;
 
   # Boot unlock without a passphrase while vit is up
-  # (../../modules/nixos/tang-server.nix); som serves vit in turn, for when
-  # vit's initrd can reach the LAN. bam stays out: its root is not
-  # encrypted, so its Tang keys would leave with it.
-  hyper.zfsRemoteUnlock.tang = {
+  # (../../modules/nixos/tang-client.nix), and som serves vit in turn. bam
+  # stays out: its root is not encrypted, so its Tang keys would leave with
+  # it.
+  hyper.tangClient = {
     servers = [ "vit" ];
     interface = "enp6s0";
   };
@@ -51,6 +51,14 @@
     interface = "br0";
     address = "fe80::7a6e:1";
     networkdUnit = "40-br0";
+  };
+
+  # `clan-unlock som`: the initrd at a fixed link-local address, through vit.
+  hyper.unlockTarget = {
+    address = "fe80::7a6e:1";
+    initrdNetwork = "40-enp6s0";
+    lanInterface = "br0";
+    via = "vit";
   };
 
   # No wifi on this desktop: it sits on the LAN cable. The AX210 stays

@@ -124,6 +124,16 @@ in
       };
     };
 
+    # OIDC discovery needs DNS for the issuer, and network-online.target
+    # promises nothing where the wait-online services are masked (som). The
+    # stock Restart=always at 100ms burnt the start limit within a second of
+    # boot and left the dashboards down; retry every 5s, indefinitely, until
+    # the issuer resolves and answers.
+    systemd.services.oauth2-proxy = {
+      serviceConfig.RestartSec = "5s";
+      unitConfig.StartLimitIntervalSec = 0;
+    };
+
     # nginx may dial the owner-gated backend ports. -I puts them before
     # the REJECT spaces appends for each port.
     systemd.services.hermes-firewall.script = lib.mkAfter (

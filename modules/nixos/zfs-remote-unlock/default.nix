@@ -1,35 +1,19 @@
 # Encrypted ZFS root, unlockable three ways, key held by clan.
 #
-#   Tang peers                     automatic, when tang.servers is set
-#   clan-unlock <machine> <host>   from any clan machine (../clan-unlock)
+#   Tang peers                     automatic, with hyper.tangClient.servers
+#   clan-unlock <machine>          from any clan machine (../clan-unlock)
 #   screen + keyboard              prompt on the console, same passphrase
 #
 # The passphrase is a clan var with deploy = false: it never lands on the
 # machine whose disk it protects. To read it: clan vars get <m> zfs-key/passphrase
 #
-# Tang: the initrd carries the passphrase encrypted to the servers' Tang keys
-# (clevis, any one server suffices) and asks them over link-local
-# (../tang-server.nix). Every server keeps its keys on its own encrypted root,
-# so a set of stolen machines cannot unlock each other; after a full power
-# cut the first one is unlocked by hand and the rest follow.
-{ config, lib, pkgs, inputs, ... }:
+# Tang (../tang-client.nix): the initrd carries the passphrase encrypted to
+# the servers' keys; ./ask-key.sh asks them before and between prompts.
+{ config, lib, pkgs, ... }:
 let
   dataset = "zroot/root";
-  tang = config.hyper.zfsRemoteUnlock.tang;
-  useTang = tang.servers != [ ];
+  tang = config.hyper.tangClient;
   jwePath = "/etc/clevis/zfs-key.jwe";
-
-  servers = map (
-    name:
-    let
-      server = inputs.self.nixosConfigurations.${name}.config;
-    in
-    {
-      # The zone pins the link-local request to the initrd's LAN NIC.
-      url = "http://[${server.hyper.tangServer.address}%25${tang.interface}]:7654";
-      adv = server.clan.core.vars.generators.tang.files."adv.jws".value;
-    }
-  ) tang.servers;
 
   askKey = pkgs.writeShellApplication {
     name = "zfs-ask-key";
@@ -37,24 +21,31 @@ let
       config.boot.zfs.package
       pkgs.systemd
     ]
-    ++ lib.optional useTang config.boot.initrd.clevis.package;
+    ++ lib.optional tang.enable config.boot.initrd.clevis.package;
     text = builtins.readFile ./ask-key.sh;
+  };
+
+  # `clan-unlock som` pipes the passphrase into this over the initrd's ssh.
+  # Loading the key ends ./ask-key.sh's loop within one prompt timeout;
+  # restarting sysroot.mount does not wait for that.
+  unlock = pkgs.writeShellApplication {
+    name = "unlock";
+    runtimeInputs = [
+      config.boot.zfs.package
+      pkgs.systemd
+    ];
+    text = ''
+      zfs load-key -L file:///dev/stdin ${dataset}
+      systemctl restart sysroot.mount
+      systemctl default || true
+    '';
   };
 in
 {
-  options.hyper.zfsRemoteUnlock.tang = {
-    servers = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [ ];
-      example = [ "vit" ];
-      description = "Machines running hyper.tangServer that may unlock this one; any one suffices.";
-    };
-    interface = lib.mkOption {
-      type = lib.types.str;
-      example = "enp6s0";
-      description = "The initrd's LAN interface, on the servers' link.";
-    };
-  };
+  imports = [
+    ../tang-client.nix
+    ../unlock-target.nix
+  ];
 
   config = lib.mkMerge [
     {
@@ -63,7 +54,13 @@ in
       # re-arming on a timeout so every route wins.
       boot.zfs.requestEncryptionCredentials = false;
 
-      boot.initrd.systemd.storePaths = [ askKey ];
+      boot.initrd.systemd.storePaths = [
+        askKey
+        unlock
+      ];
+      boot.initrd.systemd.extraBin.unlock = lib.getExe unlock;
+      hyper.unlockTarget.passphraseVar = "zfs-key/passphrase";
+
       boot.initrd.systemd.services.zfs-key-prompt = {
         description = "Unlock ${dataset}: Tang, then console passphrase prompt";
         wantedBy = [ "initrd.target" ];
@@ -73,7 +70,7 @@ in
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
-          ExecStart = "${lib.getExe askKey} ${dataset}${lib.optionalString useTang " ${jwePath}"}";
+          ExecStart = "${lib.getExe askKey} ${dataset}${lib.optionalString tang.enable " ${jwePath}"}";
         };
       };
 
@@ -128,10 +125,7 @@ in
       };
     }
 
-    (lib.mkIf useTang {
-      # The passphrase, encrypted to the servers' advertised keys. Bound
-      # offline against the advertisements in their public vars; a server
-      # rekey changes the validation hash and so regenerates this.
+    (lib.mkIf tang.enable {
       clan.core.vars.generators.zfs-tang = {
         dependencies = [ "zfs-key" ];
         # Useless without a server, yet a secret: anyone holding it who can
@@ -140,29 +134,16 @@ in
         # append-initrd-secrets finds it even on a `boot`-only switch, which
         # runs no activation (sops would only fill /run/secrets at boot).
         files."zfs-key.jwe".neededFor = "activation";
-        validation.servers = builtins.toJSON servers;
+        validation.servers = tang.validation;
         runtimeInputs = [ pkgs.clevis ];
         script = ''
-          clevis encrypt sss ${
-            lib.escapeShellArg (
-              builtins.toJSON {
-                t = 1;
-                pins.tang = map (s: {
-                  inherit (s) url;
-                  adv = "${pkgs.writeText "tang-adv.jws" s.adv}";
-                }) servers;
-              }
-            )
-          } < "$in/zfs-key/passphrase" > "$out/zfs-key.jwe"
+          clevis encrypt sss ${lib.escapeShellArg tang.clevisPolicy} \
+            < "$in/zfs-key/passphrase" > "$out/zfs-key.jwe"
         '';
       };
 
       boot.initrd.secrets.${jwePath} =
         config.clan.core.vars.generators.zfs-tang.files."zfs-key.jwe".path;
-
-      # Packs clevis, jose and curl into the initrd. No `devices`: ./ask-key.sh
-      # does the decrypting, with retries the stock one-shot hook lacks.
-      boot.initrd.clevis.enable = true;
     })
   ];
 }
