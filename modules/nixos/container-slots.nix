@@ -3,6 +3,9 @@
 # limits, isolation); what runs inside is whatever system the slot's
 # deployer last switched to. Nothing here ever rewrites a slot's system.
 #
+# Handing a slot to its deployer: `slot-onboard <machine> <slot>` (tools/)
+# prints the handoff below, filled in for that slot.
+#
 # Deploying into a slot, from the other repo (builds run on this host's
 # nix-daemon through the slot, so nothing unsigned has to be pushed; only
 # .drv files, which are content-addressed, are copied):
