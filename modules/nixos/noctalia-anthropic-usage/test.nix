@@ -1,8 +1,8 @@
 # Behavior tests for noctalia-anthropic-usage (see default.nix):
-#   - test-poller.py: state file the bar widget consumes — two accounts,
-#     Fable percents, claude-code / omp-cache / previous-state
-#     fallbacks, token refresh + write-back, credential dedupe. Stubbed
-#     agent.db + local HTTP stub, no network.
+#   - test-poller.py: state file the bar widget consumes — afk-profile
+#     accounts, weekly + Fable percents, previous-state fallback on
+#     fetch failure, credential dedupe. Stubbed agent.db + local HTTP
+#     stub, no network.
 #   - test-merge.sh: the noctalia config seed — per-file symlink
 #     materialisation, plugins.json enable, append-only widget wiring,
 #     idempotence, fresh host.
