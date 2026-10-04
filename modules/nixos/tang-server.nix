@@ -1,5 +1,5 @@
 # Tang server: lets LAN peers unlock their encrypted root at boot without a
-# passphrase (client side: ./zfs-remote-unlock, hyper.zfsRemoteUnlock.tang).
+# passphrase (client side: ./tang-client.nix).
 #
 # Tang holds one key pair and answers blinded requests; it learns nothing
 # about the clients and stores nothing per client. Its keys are clan vars,

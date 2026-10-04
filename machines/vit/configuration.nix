@@ -12,14 +12,46 @@
     ../../modules/nixos/hermes-agents-gpu-host.nix
     ../../modules/nixos/users/stefan-vault.nix
     ../../modules/nixos/tang-server.nix
+    ../../modules/nixos/luks-unlock
+    ../../modules/nixos/initrd-wifi.nix
+    ../../modules/nixos/initrd-ssh.nix
   ];
 
-  # Unlocks som at boot (../../modules/nixos/zfs-remote-unlock). vit's own
-  # root is LUKS, so these keys are at rest encrypted.
+  # vit and som unlock each other at boot (../../modules/nixos/tang-client.nix).
+  # vit's own root is LUKS, so its Tang keys are at rest encrypted.
   hyper.tangServer = {
     enable = true;
     interface = "wlo1";
     address = "fe80::7a6e:2";
+  };
+  hyper.tangClient = {
+    servers = [ "som" ];
+    interface = "wlo1";
+  };
+  hyper.luksUnlock.name = "cryptusb";
+
+  # Recovery while vit waits for its passphrase: `clan-unlock vit` (ssh into
+  # the initrd at its fixed link-local address, through som).
+  hyper.initrdSsh.enable = true;
+  hyper.unlockTarget = {
+    address = "fe80::7a6e:2";
+    initrdNetwork = "30-initrd-wifi";
+    lanInterface = "wlo1";
+    via = "som";
+  };
+
+  # Intel BE201 (8086:7740): iwlwifi with the iwlmld op-mode on this kernel.
+  hyper.initrdWifi = {
+    enable = true;
+    interface = "wlo1";
+    modules = [ "iwlwifi" "iwlmld" ];
+    unloadModules = [ "iwlmld" "iwlwifi" ];
+    # The kernel asks for the top-level name, a link into intel/iwlwifi/;
+    # the initrd copy keeps links as links, so take both.
+    firmware = [
+      "iwlwifi-bz-b0-fm-c0-101.ucode"
+      "intel/iwlwifi/iwlwifi-bz-b0-fm-c0-101.ucode"
+    ];
   };
 
   # Enable all hardware support
