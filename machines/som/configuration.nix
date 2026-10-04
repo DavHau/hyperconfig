@@ -10,6 +10,7 @@
     ../../modules/nixos/user-dave.nix
     ../../modules/nixos/amdgpu.nix
     ../../modules/nixos/zfs-remote-unlock
+    ../../modules/nixos/tang-server.nix
     ./disko.nix
     ../../modules/nixos/storagebox.nix
     ../../modules/nixos/vault-nfs-client.nix
@@ -32,6 +33,25 @@
   # r8169 is the only NIC that matters; the initrd needs it to be reachable
   # for unlock (../../modules/nixos/zfs-remote-unlock, wired only).
   boot.initrd.availableKernelModules = [ "r8169" ];
+
+  # The 1 GiB ESP holds one ~80 MiB initrd per distinct generation; with no
+  # cap ~100 entries kept 13 of them and filled it.
+  boot.loader.systemd-boot.configurationLimit = 20;
+
+  # Boot unlock without a passphrase while vit is up
+  # (../../modules/nixos/tang-server.nix); som serves vit in turn, for when
+  # vit's initrd can reach the LAN. bam stays out: its root is not
+  # encrypted, so its Tang keys would leave with it.
+  hyper.zfsRemoteUnlock.tang = {
+    servers = [ "vit" ];
+    interface = "enp6s0";
+  };
+  hyper.tangServer = {
+    enable = true;
+    interface = "br0";
+    address = "fe80::7a6e:1";
+    networkdUnit = "40-br0";
+  };
 
   # No wifi on this desktop: it sits on the LAN cable. The AX210 stays
   # unbound (no wlan0, no supplicant, no initrd PSK); nixos-facter's

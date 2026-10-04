@@ -11,7 +11,16 @@
     ../../modules/nixos/vault-nfs-client.nix
     ../../modules/nixos/hermes-agents-gpu-host.nix
     ../../modules/nixos/users/stefan-vault.nix
+    ../../modules/nixos/tang-server.nix
   ];
+
+  # Unlocks som at boot (../../modules/nixos/zfs-remote-unlock). vit's own
+  # root is LUKS, so these keys are at rest encrypted.
+  hyper.tangServer = {
+    enable = true;
+    interface = "wlo1";
+    address = "fe80::7a6e:2";
+  };
 
   # Enable all hardware support
   hardware.enableAllHardware = true;
