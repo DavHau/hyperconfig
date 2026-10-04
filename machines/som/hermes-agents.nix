@@ -90,6 +90,13 @@ in
       ];
     };
 
+    # chris: logs in with the admin keys until he has keys of his own.
+    chris = {
+      uid = 1111;
+      description = "chris - hermes agent";
+      sshKeys = adminKeys;
+    };
+
     # egg (fabien, github.com/allouis): controlled through a Telegram DM bot.
     egg = {
       uid = 1004;
