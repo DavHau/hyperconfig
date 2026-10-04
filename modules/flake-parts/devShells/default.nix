@@ -38,6 +38,7 @@
           self'.packages.router-ais
           self'.packages.router-cm-beryl
           self'.packages.hermes-onboard
+          self'.packages.slot-onboard
           self'.packages.porkbun-dns
         ];
       };
