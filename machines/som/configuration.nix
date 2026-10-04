@@ -81,20 +81,20 @@
   # Container slots for other repos to deploy into
   # (../../modules/nixos/container-slots.nix). enp6s0 is a port of br0,
   # which keeps its MAC and carries som's own DHCP/SLAAC addresses. Add a
-  # slot as `slots.<name> = { id; mode; deployKeys; }`.
+  # slot as `slots.<name> = { id; mode; }`.
   hyper.containerSlots = {
     enable = true;
     uplink = "enp6s0";
     uplinkMac = "a4:0c:66:1b:29:f1";
+    # root's key in the bootstrap system every slot starts with.
+    deployKeys = [
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM7ptVA/R16UvtWJD3VfJUWdEL2nzonoFRz2Na6lg+UU agent@amy"
+    ];
 
     # v6 2405:9800:b901:94e3::5107:1, v4 from the LAN's DHCP.
     slots.asof = {
       id = 1;
       mode = "lan";
-      deployKeys = [
-        "ecdsa-sha2-nistp384 AAAAE2VjZHNhLXNoYTItbmlzdHAzODQAAAAIbmlzdHAzODQAAABhBMAWEy2KMRae6D0kreSie2gA7s3g8x3QVNtdotxY4MDVO2dim6kc1OlGovByt06XGa/H1kMwIlc+RhfuJ/eRioGhrJ13SrDeJegC0T1iyIIZY67WMNSj5vZ0bJOmIQvm1A== grmpf@amy"
-        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM7ptVA/R16UvtWJD3VfJUWdEL2nzonoFRz2Na6lg+UU agent@amy"
-      ];
       # Writes land on bam as slot-asof:vault-parquet-rw, which bam's ACLs
       # admit on /vault/parquet only (../../modules/nixos/vault-ids.nix).
       shares."/vault/parquet" = {
@@ -107,10 +107,6 @@
     slots.mm = {
       id = 2;
       mode = "lan";
-      deployKeys = [
-        "ecdsa-sha2-nistp384 AAAAE2VjZHNhLXNoYTItbmlzdHAzODQAAAAIbmlzdHAzODQAAABhBMAWEy2KMRae6D0kreSie2gA7s3g8x3QVNtdotxY4MDVO2dim6kc1OlGovByt06XGa/H1kMwIlc+RhfuJ/eRioGhrJ13SrDeJegC0T1iyIIZY67WMNSj5vZ0bJOmIQvm1A== grmpf@amy"
-        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM7ptVA/R16UvtWJD3VfJUWdEL2nzonoFRz2Na6lg+UU agent@amy"
-      ];
       # Writes land on bam as slot-mm:vault-parquet-rw, as for asof.
       shares."/vault/parquet" = {
         source = "/vault/parquet";
