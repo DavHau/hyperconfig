@@ -1,6 +1,7 @@
 {lib, ... }: {
   allowUnfreePredicate = pkg: builtins.elem (lib.getName pkg) [
     "claude-code"
+    "cloudflare-warp"
     "steam"
     "steam-original"
     "steam-runtime"

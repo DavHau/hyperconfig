@@ -31,6 +31,7 @@
     ../../modules/nixos/router-cm-beryl.nix
     ../../modules/nixos/disk-hygiene
     ../../modules/nixos/rust-build-cache.nix
+    ../../modules/nixos/cloudflare-warp
     ./disko.nix
   ];
 
