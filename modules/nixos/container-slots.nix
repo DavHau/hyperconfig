@@ -32,6 +32,13 @@
 #     the slot's profile if it has none yet. After that the profile belongs
 #     to the deployer.
 #
+# Evaluation cost: this host evaluates no NixOS system per slot. All slots
+# share one bootstrap system; a slot's `deployKeys` reach it at runtime as
+# the nspawn credential slot.bootstrap-keys (passed on every start, read only
+# by the bootstrap system), and nspawn sets the hostname to the slot name.
+# The containers module's per-container `config` stays undefined, so its
+# eval-config is never forced.
+#
 # Isolation: every slot runs in its own user namespace, at a fixed host uid
 # base (uidBase: 0x60000000 + id * 0x10000; container uid n is host uid
 # base + n), so its root is an unprivileged uid here and an untrusted user of
@@ -122,24 +129,42 @@ let
     nameserver 149.112.112.112
   '';
 
+  # The one bootstrap system every slot is seeded with. Nothing slot-specific
+  # goes in here (see "Evaluation cost" above): hostName "" keeps the one
+  # nspawn sets, and root's keys come from the slot.bootstrap-keys credential,
+  # written to /run so a deployed system never inherits them.
   bootstrap =
-    name: slot:
     (pkgs.nixos {
       boot.isNspawnContainer = true;
-      networking.hostName = name;
+      networking.hostName = "";
       services.openssh.enable = true;
-      users.users.root.openssh.authorizedKeys.keys = slot.deployKeys;
+      services.openssh.authorizedKeysFiles = [ "/run/slot-bootstrap-keys" ];
+      # tmpfiles' `f^` cannot do this: systemd-tmpfiles-setup imports only
+      # its own credential names.
+      systemd.services.slot-bootstrap-keys = {
+        wantedBy = [ "sshd.service" ];
+        before = [ "sshd.service" ];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          LoadCredential = "slot.bootstrap-keys";
+        };
+        script = ''install -m 0600 "$CREDENTIALS_DIRECTORY/slot.bootstrap-keys" /run/slot-bootstrap-keys'';
+      };
       system.stateVersion = config.system.stateVersion;
     }).toplevel;
 
+  bootstrapKeys =
+    name: slot: pkgs.writeText "container-slot-${name}-keys" (lib.concatLines slot.deployKeys);
+
   seed =
-    name: slot:
+    name:
     pkgs.writeShellScript "container-slot-seed-${name}" ''
       mkdir -p ${nixStateStub}/{db,daemon-socket,profiles,gcroots}
       if [ ! -e ${profileDir name}/system ]; then
         mkdir -p ${profileDir name}
         ${config.nix.package}/bin/nix-env -p ${profileDir name}/system \
-          --set ${bootstrap name slot}
+          --set ${bootstrap}
       fi
     '';
 
@@ -199,7 +224,7 @@ let
       };
       deployKeys = mkOption {
         type = types.listOf types.str;
-        description = "SSH keys for root in the bootstrap system. Used only to seed a slot without a system; deployed guests own their keys.";
+        description = "SSH keys for root in the bootstrap system. Used only while a slot runs the bootstrap system; deployed guests own their keys.";
       };
       memoryMax = mkOption {
         type = types.nullOr types.str;
@@ -338,19 +363,17 @@ in
           # implied by "pick", not by a numeric base: without it the root
           # tree stays host-root-owned, i.e. nobody's inside the slot
           "--private-users-ownership=auto"
+          "--load-credential=slot.bootstrap-keys:${bootstrapKeys name slot}"
         ];
         bindMounts = lib.mapAttrs (path: _: {
           hostPath = shareMount name path;
           isReadOnly = false;
         }) slot.shares;
-        # mkForce + an empty `config`: the containers module's own
-        # assertions read `containers.<n>.config.nix.*` unconditionally, so a
-        # path-only container fails to evaluate without one. The forced
-        # path wins, so this stub is never built.
-        config = { };
-        # Resolved inside the container, where <profileDir> is bind-mounted
-        # on /nix/var/nix/profiles: always the slot's current generation.
-        path = lib.mkForce "/nix/var/nix/profiles/system";
+        # No `config`: defining it would make the containers module evaluate
+        # a whole NixOS system per slot. Resolved inside the container,
+        # where <profileDir> is bind-mounted on /nix/var/nix/profiles: always
+        # the slot's current generation.
+        path = "/nix/var/nix/profiles/system";
       }
       // (
         if slot.mode == "isolated" then
@@ -376,7 +399,7 @@ in
           serviceConfig = {
             ExecStartPre = [
               "+${slotPrep name slot}"
-              (seed name slot)
+              (seed name)
             ];
             # The start script copies the host's /etc/resolv.conf into the
             # slot; in this unit's mount namespace that is the public one.
