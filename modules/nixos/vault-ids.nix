@@ -8,8 +8,8 @@
 #              on bam/som/vit, 1001 on amy), grmpf (amy, uid 1000 - on the
 #              wire the same principal as dave elsewhere).
 #   `vault-parquet-rw` (gid 1107) read+write on /vault/parquet only.
-#              Members: slot-asof (som; the asof container slot's share,
-#              machines/som/configuration.nix).
+#              Members: slot-asof, slot-mm (som; the asof and mm container
+#              slots' shares, machines/som/configuration.nix).
 #   `vault-ro` (gid 1103) read-only on /vault/parquet. Members: stefan,
 #              momentum, hsjobeki, dave-hermes, egg, pinpox, adam, j, willi, domi, rti, chris - each user's own
 #              module adds the group (users/*-vault.nix, *-hermes.nix).
@@ -40,7 +40,7 @@
 # Pinned ids: 1002 stefan, 1004 egg, 1005 dave-hermes, 1100 momentum,
 # 1101 vault (gid), 1102 hsjobeki, 1103 vault-ro (gid), 1104 pinpox,
 # 1105 adam, 1106 j, 1107 vault-parquet-rw (gid), 1108 willi, 1109 domi, 1110 rti, 1111 chris, 1200 agent,
-# 1201 slot-asof. gid 1100 stays unallocated.
+# 1201 slot-asof, 1202 slot-mm. gid 1100 stays unallocated.
 {
   users.groups.vault.gid = 1101;
   users.groups.vault-ro.gid = 1103;
