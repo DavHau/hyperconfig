@@ -21,6 +21,7 @@
     ../../modules/nixos/fw-fanctrl.nix
     ../../modules/nixos/amd-powersave-limits.nix
     ../../modules/nixos/powersave-panel-refresh.nix
+    ../../modules/nixos/chores-on-ac.nix
     ../../modules/nixos/hermes/site.nix
     ../../modules/nixos/hermes-claude-auth.nix
     ../../modules/nixos/spaces-kiwix.nix

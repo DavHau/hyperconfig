@@ -29,7 +29,8 @@
     connect-timeout = lib.mkForce 2;
   };
   nix.nrBuildUsers = 100;
-  nix.optimise.dates = [ "*:30" ];
+  # Hourly re-hashed the whole store (minutes of CPU, GBs of reads) each run.
+  nix.optimise.dates = [ "daily" ];
   # nix.optimise.automatic = true;
   # nix.gc.automatic = true;
   nix.gc.dates = "hourly";
