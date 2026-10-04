@@ -1,10 +1,12 @@
-// Anthropic Fable Usage — bar widget.
+// Anthropic Weekly Usage — bar widget.
 //
-// One thin horizontal gauge per Anthropic account, stacked vertically:
-// the filled fraction is the weekly Fable allowance already used.
-//   < 80% used → Color.mPrimary
-//   ≥ 80% used → Color.mError   (about to hit the cap)
-//   stale data → dimmed fill    (poller could not reach the API)
+// One thin horizontal gauge per Anthropic account, stacked vertically.
+// Each gauge overlays two fills on the same track:
+//   weekly usage, all models → Color.mPrimary
+//   weekly Fable usage       → Color.mTertiary
+// The wider fill is drawn underneath so both stay visible. A fill at
+// ≥ 80% turns Color.mError (about to hit the cap); stale data (poller
+// could not reach the API) dims both fills.
 // Hovering shows account emails, exact percentages and reset times.
 pragma ComponentBehavior: Bound
 import QtQuick
@@ -41,12 +43,20 @@ Item {
   implicitHeight: capsuleHeight
   visible: hasAccounts
 
+  function pct(p) {
+    return (p === null || p === undefined) ? "?" : Math.round(p) + "%";
+  }
+
+  function when(iso) {
+    return iso ? " (resets " + new Date(iso).toLocaleString(Qt.locale(), "ddd hh:mm") + ")" : "";
+  }
+
   function tooltipText() {
     return root.accounts.map(a => {
-      const pct = (a.percent === null || a.percent === undefined) ? "?" : Math.round(a.percent) + "%";
-      const when = a.resetsAt ? ", resets " + new Date(a.resetsAt).toLocaleString(Qt.locale(), "ddd hh:mm") : "";
-      const stale = a.stale ? " (stale)" : "";
-      return a.email + ": Fable " + pct + " used" + when + stale;
+      const stale = a.stale ? " — stale" : "";
+      return a.email + stale
+        + "\n  Weekly: " + pct(a.weekly) + when(a.weeklyResetsAt)
+        + "\n  Fable: " + pct(a.fable) + when(a.fableResetsAt);
     }).join("\n");
   }
 
@@ -62,28 +72,48 @@ Item {
         id: track
         required property var modelData
 
-        readonly property real used: {
-          const p = modelData.percent;
+        function fraction(p) {
           return (p === null || p === undefined) ? 0 : Math.min(1, Math.max(0, p / 100));
         }
-        readonly property color fillColor: (modelData.percent !== null && modelData.percent >= 80) ? Color.mError : Color.mPrimary
+        function fillColor(p, base) {
+          return (p !== null && p !== undefined && p >= 80) ? Color.mError : base;
+        }
+
+        readonly property real weeklyUsed: fraction(modelData.weekly)
+        readonly property real fableUsed: fraction(modelData.fable)
 
         Layout.preferredWidth: root.gaugeWidth
         Layout.preferredHeight: root.gaugeThickness
         radius: height / 2
         color: Color.mSurfaceVariant
 
-        Rectangle {
-          anchors.left: parent.left
-          anchors.verticalCenter: parent.verticalCenter
-          width: Math.round(track.used * track.width)
-          height: track.height
-          radius: track.radius
-          color: track.fillColor
-          opacity: track.modelData.stale ? 0.4 : 1.0
+        // index 0 = weekly, 1 = Fable. The wider fill sits at z 0,
+        // beneath the narrower one, so both stay visible.
+        Repeater {
+          model: 2
 
-          Behavior on width {
-            NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
+          delegate: Rectangle {
+            id: fill
+            required property int index
+
+            readonly property bool isWeekly: index === 0
+            readonly property real used: isWeekly ? track.weeklyUsed : track.fableUsed
+            readonly property real otherUsed: isWeekly ? track.fableUsed : track.weeklyUsed
+
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            width: Math.round(fill.used * track.width)
+            height: track.height
+            radius: track.radius
+            color: fill.isWeekly
+              ? track.fillColor(track.modelData.weekly, Color.mPrimary)
+              : track.fillColor(track.modelData.fable, Color.mTertiary)
+            opacity: track.modelData.stale ? 0.4 : 1.0
+            z: fill.used > fill.otherUsed ? 0 : 1
+
+            Behavior on width {
+              NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
+            }
           }
         }
       }

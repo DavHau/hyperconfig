@@ -1,9 +1,10 @@
-// Anthropic Fable Usage — plugin "service" instance.
+// Anthropic Weekly Usage — plugin "service" instance.
 //
 // Reads the state file the anthropic-usage-poll user timer publishes
 // (~/.local/state/anthropic-usage.json) and exposes it to the bar
 // widget. One entry per Anthropic account:
-//   { email, percent, resetsAt, stale }   percent ∈ 0..100 | null
+//   { email, weekly, weeklyResetsAt, fable, fableResetsAt, stale }
+//   weekly / fable ∈ 0..100 | null
 // The file is watched so the bars move right after each poll.
 pragma ComponentBehavior: Bound
 import QtQuick

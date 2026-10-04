@@ -1,18 +1,17 @@
-# Two mini bars in the noctalia bar showing how much of the weekly
-# "Fable" allowance each logged-in Anthropic account has used.
+# Two mini bars in the noctalia bar, one per logged-in Anthropic account,
+# each overlaying the weekly all-model usage and the weekly Fable usage.
 #
 # Two parts:
 #   1. anthropic-usage-poll — a user timer (5 min) running poller.py:
-#      reads every Anthropic OAuth login from omp's agent.db (READ-ONLY,
-#      never refreshes tokens — a refresh rotates the refresh token and
-#      would corrupt omp's copy), asks the OAuth usage endpoint for the
-#      weekly Fable utilization and publishes
-#      ~/.local/state/anthropic-usage.json. On fetch failure it falls
-#      back, in order: Claude Code's own login (~/.claude/
-#      .credentials.json — identity checked via the profile endpoint, an
-#      expired grant refreshed and written back in place so the claude
-#      CLI keeps working), omp's cached usage report, then the last
-#      published value, marked stale.
+#      reads the Anthropic OAuth logins of omp's `afk` profile
+#      (~/.omp/profiles/afk/agent/agent.db, READ-ONLY, never refreshes
+#      tokens — a refresh rotates the refresh token and would corrupt
+#      omp's copy), asks the OAuth usage endpoint for both weekly
+#      utilizations and publishes ~/.local/state/anthropic-usage.json.
+#      On fetch failure the account keeps its last published values,
+#      marked stale. No other source is read: other profiles, omp's
+#      usage cache and Claude Code's login hold older data and made the
+#      bars jump.
 #   2. an `anthropic-usage` noctalia plugin (plugin/) rendering one thin
 #      gauge per account. merge.sh seeds it as an extra noctalia-shell
 #      ExecStartPre AFTER the spaces bundle's noctalia-config-merge:
@@ -46,7 +45,7 @@ let
 in
 {
   systemd.user.services.anthropic-usage-poll = {
-    description = "Publish per-account Anthropic Fable usage for the noctalia bar";
+    description = "Publish per-account Anthropic weekly usage for the noctalia bar";
     serviceConfig = {
       Type = "oneshot";
       ExecStart = "${poller}/bin/anthropic-usage-poll";
@@ -54,7 +53,7 @@ in
   };
 
   systemd.user.timers.anthropic-usage-poll = {
-    description = "Poll Anthropic Fable usage every 5 minutes";
+    description = "Poll Anthropic weekly usage every 5 minutes";
     wantedBy = [ "timers.target" ];
     timerConfig = {
       OnActiveSec = "10s";
