@@ -36,7 +36,7 @@ if !cs.enable || s == null then { exists = false; } else {
   exists = true;
   inherit (s) id mode memoryMax cpuQuota;
   inherit (cs) ipv6Prefix;
-  keys = map comment s.deployKeys;
+  keys = map comment cs.deployKeys;
   shares = builtins.attrNames s.shares;
 }
 EOF
