@@ -12,16 +12,16 @@
         "wrappers": "wrappers"
       },
       "locked": {
-        "lastModified": 1790843733,
-        "narHash": "sha256-cqcXLImuZTjVRJtoNNkCkdFYNV2nVl50oUabs06Xobo=",
+        "lastModified": 1791102987,
+        "narHash": "sha256-KyG/UfumW5k0M3ZzclJZIGGntqGgPItmniDjVKTBgPU=",
         "ref": "master",
-        "rev": "4b3f02e1a1650dd74d108e9cd4740d92bff7d891",
-        "revCount": 45,
+        "rev": "f55e98fae5a1e2a96e2f2b4edbc129cca7e7aa8d",
+        "revCount": 47,
         "type": "git",
         "url": "file:///home/grmpf/synced/projects/afk"
       },
       "original": {
-        "rev": "4b3f02e1a1650dd74d108e9cd4740d92bff7d891",
+        "rev": "f55e98fae5a1e2a96e2f2b4edbc129cca7e7aa8d",
         "type": "git",
         "url": "file:///home/grmpf/synced/projects/afk"
       }
