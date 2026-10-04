@@ -11,17 +11,17 @@
 # that trade-off when the user has explicitly opted into more thermal
 # headroom by selecting `performance`.
 #
-# A small watcher service polls `powerprofilesctl` (D-Bus) every few
-# seconds and toggles `fw-fanctrl.service` accordingly. Polling is used
-# instead of D-Bus signal subscription for robustness — the worst-case
-# latency between profile switch and fan-curve change is bounded by the
-# poll interval, which is fine for thermal control.
+# A small watcher service polls the active profile over D-Bus (`busctl`,
+# not the Python `powerprofilesctl`, to keep the 3 s poll cheap) and
+# toggles `fw-fanctrl.service` accordingly. Polling is used instead of
+# D-Bus signal subscription for robustness — the worst-case latency
+# between profile switch and fan-curve change is bounded by the poll
+# interval, which is fine for thermal control.
 let
   watcher = pkgs.writeShellScript "fw-fanctrl-profile-watcher" ''
     set -u
     PATH=${lib.makeBinPath [
       pkgs.systemd
-      pkgs.power-profiles-daemon
       pkgs.coreutils
     ]}
 
@@ -40,7 +40,12 @@ let
 
     last=""
     while true; do
-      current=$(powerprofilesctl get 2>/dev/null || echo "")
+      # Output: s "performance"
+      current=$(busctl get-property org.freedesktop.UPower.PowerProfiles \
+        /org/freedesktop/UPower/PowerProfiles \
+        org.freedesktop.UPower.PowerProfiles ActiveProfile 2>/dev/null || echo "")
+      current=''${current#s \"}
+      current=''${current%\"}
       if [ -n "$current" ] && [ "$current" != "$last" ]; then
         apply "$current"
         last="$current"
@@ -80,7 +85,9 @@ in
     description = "Gate fw-fanctrl on power-profiles-daemon `performance` profile";
     after = [ "power-profiles-daemon.service" ];
     wants = [ "power-profiles-daemon.service" ];
-    wantedBy = [ "multi-user.target" ];
+    # Not multi-user.target: PPD >= 0.30 is ordered After=multi-user.target,
+    # so that would be an ordering cycle and systemd drops this job at boot.
+    wantedBy = [ "graphical.target" ];
     serviceConfig = {
       Type = "simple";
       Restart = "always";
