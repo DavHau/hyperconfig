@@ -102,12 +102,33 @@
         user = "slot-asof";
       };
     };
+
+    # The mm project. v6 2405:9800:b901:94e3::5107:2, v4 from the LAN's DHCP.
+    slots.mm = {
+      id = 2;
+      mode = "lan";
+      deployKeys = [
+        "ecdsa-sha2-nistp384 AAAAE2VjZHNhLXNoYTItbmlzdHAzODQAAAAIbmlzdHAzODQAAABhBMAWEy2KMRae6D0kreSie2gA7s3g8x3QVNtdotxY4MDVO2dim6kc1OlGovByt06XGa/H1kMwIlc+RhfuJ/eRioGhrJ13SrDeJegC0T1iyIIZY67WMNSj5vZ0bJOmIQvm1A== grmpf@amy"
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM7ptVA/R16UvtWJD3VfJUWdEL2nzonoFRz2Na6lg+UU agent@amy"
+      ];
+      # Writes land on bam as slot-mm:vault-parquet-rw, as for asof.
+      shares."/vault/parquet" = {
+        source = "/vault/parquet";
+        user = "slot-mm";
+      };
+    };
   };
   users.users.slot-asof = {
     isSystemUser = true;
     uid = 1201;
     group = "vault-parquet-rw";
     description = "asof container slot's identity on /vault/parquet";
+  };
+  users.users.slot-mm = {
+    isSystemUser = true;
+    uid = 1202;
+    group = "vault-parquet-rw";
+    description = "mm container slot's identity on /vault/parquet";
   };
 
   # The spaces desktop profile defaults llama-swap on, which registers a
