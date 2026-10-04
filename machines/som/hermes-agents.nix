@@ -90,11 +90,12 @@ in
       ];
     };
 
-    # chris: logs in with the admin keys until he has keys of his own.
     chris = {
       uid = 1111;
       description = "chris - hermes agent";
-      sshKeys = adminKeys;
+      sshKeys = [
+        "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCyDZ+BWILWGSvZ2ArfmNy50tTuBvFw22eyGFUnmuSCvadHrSPsN67q3iVQ66E5OWqOg4luY4Noq+HkMI0/AG+Y89Fp/2U1B6LETVxV8c70gZXEltiPFhx/BcW737pGMUgHwf22On2Dh9rCZpzPjyMYqF7SJNaoUFEnKntPR97gJhzrGTNggE/Td3piHDcze7WFrFfdlbmMy8COIk2aZ0C7+Wy1D1DE06z54yIZIaelBWJrujeqxP09yDiRlSNEZgNVu/AyzsGoQFwUP9nhjG7PEhvQrWAmlQDxPJRIahLxrrBEl0QOnnAup1gf9OUuxb39WDzN6ejJy3GkcwiAfhfr chris"
+      ];
     };
 
     # egg (fabien, github.com/allouis): controlled through a Telegram DM bot.
