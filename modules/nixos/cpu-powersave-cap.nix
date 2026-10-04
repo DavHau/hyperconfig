@@ -22,11 +22,24 @@
 # and the cap never lifts. Boost is PPD's job; this module only ever moves
 # `scaling_max_freq`, which never blocks PPD.
 #
-# Watcher pattern mirrors ./fw-fanctrl.nix: poll `powerprofilesctl get` and
-# react on change. On `power-saver` -> cap; on anything else -> lift the cap
-# back to each core's hardware `cpuinfo_max_freq`. By the time we observe a
+# Watcher pattern mirrors ./fw-fanctrl.nix: poll the active PPD profile and
+# react. On `power-saver` -> cap; on anything else -> lift the cap back to
+# each core's hardware `cpuinfo_max_freq`. By the time we observe a
 # non-power-saver profile, PPD has already re-enabled boost, so
 # `cpuinfo_max_freq` reads the full boost ceiling and the lift is complete.
+#
+# While in power-saver the cap is re-asserted whenever cpu0 drifts off it:
+# ./amd-pstate-resume-fix.nix reinitializes the driver and restarts PPD on
+# every resume, which resets `scaling_max_freq` without changing the profile.
+#
+# The profile is read with `busctl` rather than `powerprofilesctl`: the
+# latter is a Python script, and spawning an interpreter every 3 s is itself
+# a measurable idle power cost.
+#
+# Ordering: PPD >= 0.30 ships `After=multi-user.target` and is
+# `WantedBy=graphical.target`. A unit ordered after PPD but wanted by
+# multi-user.target is an ordering cycle; systemd drops the job at boot and
+# the cap silently never applies. Hence `wantedBy = graphical.target`.
 let
   # Frequency cap applied on `power-saver`, in kHz. Valid range on amy is
   # ~605000 (cpuinfo_min) .. 2000000 (nominal cpuinfo_max with boost off).
@@ -49,18 +62,27 @@ let
   watcher = pkgs.writeShellScript "cpu-powersave-cap-watcher" ''
     set -u
     PATH=${lib.makeBinPath [
-      pkgs.power-profiles-daemon
+      pkgs.systemd
       pkgs.coreutils
     ]}
 
     last=""
     while true; do
-      current=$(powerprofilesctl get 2>/dev/null || echo "")
-      if [ -n "$current" ] && [ "$current" != "$last" ]; then
-        case "$current" in
-          power-saver) ${set_max} cap ;;
-          *)           ${set_max} restore ;;
-        esac
+      # Output: s "power-saver"
+      current=$(busctl get-property org.freedesktop.UPower.PowerProfiles \
+        /org/freedesktop/UPower/PowerProfiles \
+        org.freedesktop.UPower.PowerProfiles ActiveProfile 2>/dev/null || echo "")
+      current=''${current#s \"}
+      current=''${current%\"}
+      if [ -n "$current" ]; then
+        if [ "$current" = power-saver ]; then
+          max=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq 2>/dev/null || echo "")
+          if [ "$current" != "$last" ] || [ "$max" != ${toString capKHz} ]; then
+            ${set_max} cap
+          fi
+        elif [ "$current" != "$last" ]; then
+          ${set_max} restore
+        fi
         last="$current"
       fi
       sleep 3
@@ -72,7 +94,7 @@ in
     description = "Cap CPU scaling_max_freq while power-saver profile is active";
     after = [ "power-profiles-daemon.service" ];
     wants = [ "power-profiles-daemon.service" ];
-    wantedBy = [ "multi-user.target" ];
+    wantedBy = [ "graphical.target" ];
     serviceConfig = {
       Type = "simple";
       Restart = "always";
