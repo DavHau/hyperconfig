@@ -96,6 +96,22 @@
   # local.
   users.users.grmpf.extraGroups = [ "vault" ];
 
+  # amy roams: away from home bam is unreachable, and the shared client's
+  # `hard` mount (vault-nfs-client.nix) then parks every caller (df, the
+  # noctalia bar) in D state for good. softerr fails calls with ETIMEDOUT
+  # instead; accepted cost: a write that times out may be lost or partially
+  # applied on bam. TCP backs off linearly by timeo per retry, so defaults
+  # (timeo=600, retrans=2) would still block ~6 min; timeo=50, retrans=1
+  # fails after 5 s + 10 s. mount-timeout caps the automount attempt itself
+  # (systemd default 90 s, during which the triggering process blocks).
+  # The list merges with the module's options.
+  fileSystems."/vault".options = [
+    "softerr"
+    "timeo=50"
+    "retrans=1"
+    "x-systemd.mount-timeout=10s"
+  ];
+
   # required by zfs
   networking.hostId = "5eb1bf28";
 
