@@ -5,11 +5,17 @@ import os
 import shlex
 import subprocess
 from dataclasses import dataclass
+from importlib.resources import files
 from pathlib import Path
 
 PROTOS = ("all", "tcp", "udp", "tcpudp")
 PORT_PROTOS = ("tcp", "udp", "tcpudp")
 FIREWALL_RELOAD = "/etc/init.d/firewall reload"
+LAN6_SCRIPT_SRC = "lan6-fallback.sh"
+LAN6_HOOK_SRC = "lan6-fallback.hotplug"
+LAN6_SCRIPT = "/usr/sbin/lan6-fallback"
+LAN6_HOOK = "/etc/hotplug.d/iface/99-lan6-fallback"
+LAN6_STATE = "/etc/lan6-fallback.prefix"
 
 
 class RouterError(Exception):
@@ -45,7 +51,7 @@ class Router:
         self.jump = jump
         self.log = log
 
-    def run(self, command: str, timeout: float = 60) -> str:
+    def run(self, command: str, timeout: float = 60, input: str | None = None) -> str:
         kh = known_hosts_path()
         kh.parent.mkdir(parents=True, exist_ok=True)
         argv = [
@@ -66,7 +72,7 @@ class Router:
         self.log(f"ssh {self.host}: {command}")
         env = dict(os.environ, SSHPASS=self.password)
         try:
-            proc = subprocess.run(argv, capture_output=True, text=True, env=env, timeout=timeout)
+            proc = subprocess.run(argv, capture_output=True, text=True, env=env, timeout=timeout, input=input)
         except FileNotFoundError as e:
             raise RouterError(f"{e.filename} not found on PATH") from None
         except subprocess.TimeoutExpired:
@@ -182,6 +188,45 @@ class Router:
             f"{FIREWALL_RELOAD} >/dev/null 2>&1 || exit 5"
         )
         self.run(script, timeout=120)
+
+    # --- lan6 fallback ------------------------------------------------------
+
+    def install_lan6_fallback(self, prefix: str, overwrite: bool) -> None:
+        """Install the lan6-fallback script + hotplug hook, keep them over sysupgrade, run once.
+
+        `prefix` is announced until wan6 has been seen up with a /64; it overwrites the recorded
+        prefix only with `overwrite`, otherwise it is just the seed when none is recorded yet."""
+        pkg = files(__package__)
+        for name, dest in ((LAN6_SCRIPT_SRC, LAN6_SCRIPT), (LAN6_HOOK_SRC, LAN6_HOOK)):
+            # dot-prefixed temp name: hotplug-call's `*` glob never runs a half-written hook
+            d, base = dest.rsplit("/", 1)
+            tmp = f"{d}/.{base}.new"
+            self.run(f"cat > {tmp} && chmod 755 {tmp} && mv {tmp} {dest}", input=pkg.joinpath(name).read_text())
+        keep = " ".join(shlex.quote(p) for p in (LAN6_SCRIPT, LAN6_HOOK, LAN6_STATE))
+        seed = f"echo {shlex.quote(prefix)} > {LAN6_STATE}"
+        if not overwrite:
+            seed = f"[ -s {LAN6_STATE} ] || {seed}"
+        self.run(
+            f"for p in {keep}; do grep -qxF \"$p\" /etc/sysupgrade.conf || echo \"$p\" >> /etc/sysupgrade.conf; done; "
+            f"{seed}; {LAN6_SCRIPT}",
+            timeout=120,
+        )
+
+    def lan6_status(self) -> dict:
+        out = self.run(
+            f'echo "recorded=$(cat {LAN6_STATE} 2>/dev/null)"; '
+            'echo "active=$(uci -q get network.lan.ip6prefix)"; '
+            'echo "ra=$(uci -q get dhcp.lan.ra)"; '
+            f'[ -x {LAN6_SCRIPT} ] && [ -f {LAN6_HOOK} ] && echo installed=yes || echo installed=no'
+        )
+        kv = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+        recorded, active, ra, installed = (kv.get(k, "") for k in ("recorded", "active", "ra", "installed"))
+        return {
+            "installed": installed.strip() == "yes",
+            "recorded_prefix": recorded.strip() or None,
+            "mode": "fallback" if active.strip() else (ra.strip() or "unset"),
+            "announced_prefix": active.strip() or None,
+        }
 
 
 def _as_list(v) -> list[str]:

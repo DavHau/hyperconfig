@@ -1,4 +1,4 @@
-"""router-cm-beryl: manage IPv6 inbound-allow rules on the GL.iNet Beryl from the command line."""
+"""router-cm-beryl: manage IPv6 rules and the LAN IPv6 fallback on the GL.iNet Beryl from the command line."""
 
 import argparse
 import ipaddress
@@ -11,6 +11,7 @@ from .client import PORT_PROTOS, PROTOS, Router, RouterError, Rule
 
 DEFAULT_HOST = "192.168.8.1"
 PROTECTED_ADDRESS = ipaddress.IPv6Address("2405:9800:b901:94e3::feed:da7a")
+LAN_PREFIX = ipaddress.IPv6Network(f"{PROTECTED_ADDRESS}/64", strict=False)
 CLAN_VAR = ["clan", "vars", "get", "amy", "router-cm-beryl/password"]
 
 
@@ -100,7 +101,7 @@ def find_rule(rules: list[Rule], key: str) -> Rule:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="router-cm-beryl", description="Manage the GL.iNet Beryl (GL-MT3000) firewall over ssh.")
+    p = argparse.ArgumentParser(prog="router-cm-beryl", description="Manage the GL.iNet Beryl (GL-MT3000) over ssh.")
     p.add_argument("--host", default=DEFAULT_HOST, help=f"router address (default {DEFAULT_HOST})")
     p.add_argument("-J", "--jump", metavar="USER@HOST", help="ssh jump host, e.g. root@bam.d (default none)")
     p.add_argument("--json", action="store_true", help="machine-readable output")
@@ -122,6 +123,16 @@ def build_parser() -> argparse.ArgumentParser:
     rm = rsub.add_parser("delete", help="delete a rule by section id or name")
     rm.add_argument("rule", help="section id (cfg1234ab) or name from `list`")
     rm.add_argument("--i-know", action="store_true", help=f"allow deleting a rule for {PROTECTED_ADDRESS}")
+
+    lan6 = sub.add_parser("lan6-fallback", help="announce the public /64 on the LAN while no uplink carries IPv6")
+    lsub = lan6.add_subparsers(dest="rcmd", required=True)
+    inst = lsub.add_parser("install", help="install/update the script + hotplug hook and apply it now")
+    inst.add_argument(
+        "--prefix",
+        type=ipaddress.IPv6Network,
+        help=f"overwrite the recorded /64 (default: keep it; seed {LAN_PREFIX} if none is recorded)",
+    )
+    lsub.add_parser("status", help="show recorded prefix and current mode (relay or fallback)")
     return p
 
 
@@ -154,6 +165,20 @@ def run(args: argparse.Namespace) -> int:
             ["name", "networks", "input", "output", "forward"],
             [[z["name"], ",".join(z["network"]) or "-", z["input"], z["output"], z["forward"]] for z in info["zones"]],
         )
+        return 0
+
+    if args.cmd == "lan6-fallback":
+        if args.rcmd == "install":
+            if args.prefix is not None and args.prefix.prefixlen != 64:
+                raise RouterError("--prefix must be a /64")
+            router.install_lan6_fallback(str(args.prefix or LAN_PREFIX), overwrite=args.prefix is not None)
+        st = router.lan6_status()
+        if args.json:
+            print(json.dumps(st))
+        else:
+            print(f"installed: {'yes' if st['installed'] else 'no'}")
+            print(f"recorded prefix: {st['recorded_prefix'] or '-'}")
+            print(f"mode: {st['mode']}" + (f" (announcing {st['announced_prefix']})" if st["announced_prefix"] else ""))
         return 0
 
     if args.rcmd == "list":

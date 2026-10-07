@@ -68,6 +68,15 @@ REJECT is the TCP RST seen from the internet for unlisted addresses.
 `Allow-ICMPv6-Forward` (`dest='*'`) already lets echo-request/reply through,
 which is why ping works without any extra rule.
 
+Backup uplinks (observed 2026-10-07): `tethering` (`eth2`, iPhone USB,
+`172.20.10.2/28`, metric 30) and `wwan` (repeater, metric 20) each have a
+`*6` dhcpv6 alias with its own `dhcp.<iface>6` relay master. The iPhone
+answers neither RS nor DHCPv6 SOLICIT on `eth2`, so `tethering6` stays
+`pending` and the LAN relay goes empty. `lan6-fallback` (README) then switches
+`dhcp.lan` to `ra=server` with `network.lan.ip6prefix` set to the last
+`wan6` prefix. `/etc/init.d/network reload` recreates `br-lan` (new
+ifindex). IPv4 and existing ssh sessions survived it.
+
 Stock rules with `src=wan` (what `ipv6-rules list` shows besides ours):
 `wan_drop_leaked_dns` (disabled), `Allow-DHCPv6`, `Allow-MLD`,
 `Allow-ICMPv6-Input`, `Allow-ICMPv6-Forward`, `Allow-IPSec-ESP`,
