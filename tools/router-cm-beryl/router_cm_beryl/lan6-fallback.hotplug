@@ -1,0 +1,6 @@
+#!/bin/sh
+# /etc/hotplug.d/iface/99-lan6-fallback — see /usr/sbin/lan6-fallback.
+case "$ACTION" in ifup|ifdown|ifupdate) ;; *) exit 0 ;; esac
+case "$INTERFACE" in wan|wan6|wwan|wwan6|tethering|tethering6) ;; *) exit 0 ;; esac
+# Detached: the script reloads netifd, which must not wait on its own hotplug call.
+( /usr/sbin/lan6-fallback </dev/null >/dev/null 2>&1 & )

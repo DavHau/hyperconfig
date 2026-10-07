@@ -3,14 +3,17 @@
 CLI for the GL.iNet Beryl AX (GL-MT3000, OpenWrt with fw3) that sits between
 the AIS ZTE (`192.168.1.1`, managed by `tools/router-ais`) and the home LAN.
 It manages the IPv6 *wan -> lan* allow rules in `/etc/config/firewall` over
-ssh + `uci`. Built as `packages.router-cm-beryl` from
-`modules/flake-parts/router-cm-beryl.nix` and included in the default devshell.
+ssh + `uci`, and installs the LAN IPv6 fallback (below). Built as
+`packages.router-cm-beryl` from `modules/flake-parts/router-cm-beryl.nix` and
+included in the default devshell.
 
 ```
 router-cm-beryl [--host 192.168.8.1] [-J USER@HOST] [--json] [-v] info
 router-cm-beryl ipv6-rules list
 router-cm-beryl ipv6-rules add --address <ipv6> [--proto all|tcp|udp|tcpudp] [--port N|N-M] [--name NAME]
 router-cm-beryl ipv6-rules delete <section|name> [--i-know]
+router-cm-beryl lan6-fallback install [--prefix <ipv6>/64]
+router-cm-beryl lan6-fallback status
 ```
 
 The Beryl LAN (`192.168.8.0/24`) is usually not reachable from a laptop on the
@@ -65,6 +68,35 @@ demo) unless `--i-know` is given.
 `--json` prints machine-readable output; `-v` logs each ssh command to
 stderr. Exit status is non-zero on any failure.
 
+## LAN IPv6 fallback
+
+The LAN gets IPv6 by relaying from the AIS uplink (`wan6`). The backup
+uplinks (iPhone USB tethering `eth2`, wifi repeater `wwan`) deliver no IPv6:
+no RA and no DHCPv6 reply. Without a fallback the relay has nothing to pass
+on, and every host loses its `2405:9800:b901:94e3::/64` address, including
+`::feed:da7a`.
+
+`lan6-fallback install` puts `lan6-fallback.sh` on the router as
+`/usr/sbin/lan6-fallback`, plus a hotplug hook
+`/etc/hotplug.d/iface/99-lan6-fallback`. Both are listed in
+`/etc/sysupgrade.conf`. The hook runs the script on every
+`ifup`/`ifdown`/`ifupdate` of wan/wan6/wwan/wwan6/tethering/tethering6:
+
+* An uplink (`wan6`, `wwan6`, `tethering6`) is up with a global /64:
+  relay mode (stock config). The prefix seen on `wan6` is recorded in
+  `/etc/lan6-fallback.prefix`.
+* Otherwise: `network.lan.ip6prefix=<recorded prefix>` and
+  `dhcp.lan.ra=server`, `dhcpv6=disabled`, `ndp=disabled`, `ra_flags=none`.
+  The router takes `<prefix>::1` on `br-lan` and announces the prefix
+  with router lifetime 0. Hosts form the same SLAAC/token addresses as
+  usual and reach each other on them (`::feed:da7a` included, through bam's
+  NDP proxy), but get no IPv6 default route: nothing is routed off the LAN,
+  so IPv6 internet fails fast and IPv4 takes over.
+
+`install` seeds `2405:9800:b901:94e3::/64` only if no prefix is recorded;
+`--prefix` overwrites the recorded one. `status` shows the mode
+(`relay` or `fallback`) and the recorded prefix.
+
 ## Credentials and host key
 
 User is `root` over ssh (dropbear, password auth). The password comes from
@@ -80,8 +112,9 @@ router reflash.
 
 ## Limitations
 
-* Only `firewall.rule` sections are covered; zones, forwardings, redirects,
-  network, wifi, DHCP and the IPv6 relay are deliberately out of scope.
+* Only `firewall.rule` sections and the lan6 fallback are covered; zones,
+  forwardings, redirects, wifi and the rest of DHCP are deliberately out of
+  scope.
 * `add` always writes IPv6, wan -> lan, destination-only ACCEPT rules with a
   single port or port range. Editing existing rules is not supported: delete
   and re-add.

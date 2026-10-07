@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "router-cm-beryl"
 version = "0.1.0"
-description = "Manage IPv6 inbound-allow firewall rules on the GL.iNet Beryl (GL-MT3000) over ssh + uci"
+description = "Manage IPv6 inbound-allow firewall rules and the LAN IPv6 fallback on the GL.iNet Beryl (GL-MT3000) over ssh + uci"
 requires-python = ">=3.11"
 dependencies = []
 
@@ -14,3 +14,6 @@ router-cm-beryl = "router_cm_beryl.cli:main"
 
 [tool.setuptools]
 packages = ["router_cm_beryl"]
+
+[tool.setuptools.package-data]
+router_cm_beryl = ["lan6-fallback.sh", "lan6-fallback.hotplug"]
