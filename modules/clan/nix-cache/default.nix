@@ -66,17 +66,6 @@
             default = 37515;
             description = "Loopback port of the local ncro.";
           };
-          bypass = lib.mkOption {
-            type = lib.types.listOf lib.types.str;
-            # Both send zstd-encoded narinfos, which ncro 2.2.2 cannot decode
-            # (reqwest built without compression): their hits would fail in
-            # ncro, so nix asks them directly.
-            default = [
-              "https://cache.clan.lol"
-              "https://cache.geninf.io"
-            ];
-            description = "Public caches nix queries directly, not through ncro.";
-          };
         };
       };
 
@@ -117,7 +106,7 @@
             # "https://cache.nixos.org/?priority=40" -> "https://cache.nixos.org"
             bareUrl = url: lib.removeSuffix "/" (lib.head (lib.splitString "?" url));
             local = "http://127.0.0.1:${toString settings.port}";
-            publicCaches = lib.subtractLists ([ local ] ++ settings.bypass) (
+            publicCaches = lib.remove local (
               lib.unique (map bareUrl config.nix.settings.substituters)
             );
           in
