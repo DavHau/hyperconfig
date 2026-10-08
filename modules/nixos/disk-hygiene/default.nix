@@ -2,8 +2,9 @@
   Keep the disk from filling up:
   - fast-nix-gc: daily store GC (generations and stale gcroots/auto entries
     older than 14 days). Replaces nix.gc, which ./nix-gc.nix leaves off.
-  - cargo-build-gc: daily per-user deletion of cargo build dirs untouched
-    for 14 days (see ../rust-build-cache.nix).
+  - cargo-build-gc: hourly per-user deletion of cargo build dirs whose
+    workspace is gone (finished omp worktrees) or that are untouched for
+    14 days (see ../rust-build-cache.nix).
   - zpool-capacity-alert: hourly desktop notification while any imported pool
     is at or above 80% capacity (ZFS slows down past that point).
   sbox session state is pruned by sbox's own sbox-gc timer (default-on in
@@ -24,6 +25,7 @@ let
     runtimeInputs = [
       pkgs.coreutils
       pkgs.findutils
+      pkgs.util-linux
     ];
     text = builtins.readFile ./cargo-build-gc.sh;
   };
@@ -58,7 +60,7 @@ in
   };
 
   systemd.user.services.cargo-build-gc = {
-    description = "Delete cargo build dirs untouched for 14 days";
+    description = "Delete dead cargo build dirs (workspace gone or untouched for 14 days)";
     environment.CARGO_BUILD_GC_DAYS = "14";
     serviceConfig = {
       Type = "oneshot";
@@ -66,7 +68,7 @@ in
       Nice = 19;
       IOSchedulingClass = "idle";
     };
-    startAt = "daily";
+    startAt = "hourly";
   };
   systemd.user.timers.cargo-build-gc.timerConfig.Persistent = true;
 
