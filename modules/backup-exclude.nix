@@ -25,6 +25,8 @@
   "/home/*/bigfiles"
   "/home/*/VirtualBox VMs"
   "/home/*/.local/share/clan/"
+  # sbox session scratch (omp worktree clones; see nixos/sbox-omp-worktrees.nix)
+  "/home/*/.local/share/sbox/scratch"
 
   # filter out nix dev-shell builds
   "/home/**/*.o"

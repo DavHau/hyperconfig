@@ -6,6 +6,7 @@
 }: {
   imports = [
     inputs.sbox.nixosModules.default
+    ./sbox-omp-worktrees.nix
   ];
   programs.direnv.sandbox.enable = true;
   programs.sbox = {

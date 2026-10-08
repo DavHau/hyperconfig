@@ -5,10 +5,14 @@
     across sessions and omp worktrees; incrementally-built workspace crates
     and linked crates (bin, proc-macro, cdylib) are never cached by sccache.
   - build.build-dir moves target/'s intermediate artifacts (deps/,
-    incremental/, build scripts) to ~/.cache/cargo-build/<workspace hash>
-    (inside sbox: ~/.cargo/build-dir/<workspace hash>, persisted per project);
-    ./target keeps only final artifacts, so worktree copies stay small.
-    Stale build dirs are deleted by cargo-build-gc (./disk-hygiene).
+    incremental/, build scripts) to ~/.cache/cargo-build<workspace path>
+    (inside sbox: ~/.cargo/build-dir<workspace path>, persisted per
+    project); ./target keeps only final artifacts, so worktree copies stay
+    small. Keyed by the readable workspace path ({workspace-root}), not
+    {workspace-path-hash}, so cargo-build-gc (./disk-hygiene) can tell when
+    a build dir's workspace is gone — every omp task worktree is a new
+    workspace path with its own multi-GB build dir — and deletes it within
+    the hour; build dirs untouched for 14 days go too.
 
   Trust boundary: one cache per sbox project. Inside sbox the cache dirs
   are `persist` paths, backed per project under
@@ -30,10 +34,10 @@ in
   environment.systemPackages = [ pkgs.sccache ];
 
   # /etc/set-environment exports these in double quotes: $HOME and
-  # $XDG_RUNTIME_DIR expand per user; {workspace-path-hash} is a cargo
-  # path template and stays literal.
+  # $XDG_RUNTIME_DIR expand per user; {workspace-root} is a cargo path
+  # template and stays literal.
   environment.variables = common // {
-    CARGO_BUILD_BUILD_DIR = "$HOME/.cache/cargo-build/{workspace-path-hash}";
+    CARGO_BUILD_BUILD_DIR = "$HOME/.cache/cargo-build{workspace-root}";
     SCCACHE_SERVER_UDS = "$XDG_RUNTIME_DIR/sccache.sock";
   };
 
@@ -51,7 +55,7 @@ in
     # above. The socket goes to the session's private /tmp: one server per
     # session, all sessions of a project sharing the persisted disk cache.
     environment = common // {
-      CARGO_BUILD_BUILD_DIR = "{cargo-cache-home}/build-dir/{workspace-path-hash}";
+      CARGO_BUILD_BUILD_DIR = "{cargo-cache-home}/build-dir{workspace-root}";
       SCCACHE_SERVER_UDS = "/tmp/sccache.sock";
     };
   };
