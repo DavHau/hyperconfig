@@ -351,11 +351,9 @@ in {
             #   roles.server.machines.bam = {
             #     settings.caches = [
             #       "https://cache.nixos.org"
-            #       "https://cache.clan.lol"
             #     ];
             #     settings.publicKeys = [
             #       "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
-            #       "cache.clan.lol-1:3KztgSAB5R1M+Dz7vzkBGzXdodizbgLXGXKXlcQLA28="
             #     ];
             #   };
             #   roles.client.machines.amy = {};
