@@ -1,5 +1,9 @@
 { config, pkgs, lib, ... }:
 {
+  imports = [ ./houses.nix ];
+
+  housing.users.dave.houses.dev = { };
+
   home-manager.users.dave = {
     home.stateVersion = "25.11";
     programs.rbw.enable = true;
@@ -8,7 +12,6 @@
       ../home-manager/htop
       ../home-manager/firefox.nix
       ../home-manager/fish-ai.nix
-      ../home-manager/houses.nix
     ];
   };
 

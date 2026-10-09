@@ -1211,25 +1211,23 @@
     "nix-housing": {
       "inputs": {
         "flake-utils": "flake-utils_2",
-        "home-manager": [
-          "home-manager"
-        ],
         "nixpkgs": [
           "nixpkgs"
         ]
       },
       "locked": {
-        "lastModified": 1784262564,
-        "narHash": "sha256-Yr6bi7b3tWC+kaaBWIyjy5S+mIWmCAFE4jJSS9ozZcw=",
-        "owner": "decentstates",
-        "repo": "nix-housing",
-        "rev": "ab3729b8677ccdb6fb097dfff4426aff220b06ab",
-        "type": "github"
+        "lastModified": 1790228385,
+        "narHash": "sha256-1Jq26FIDJ0Goij26BiObNw0PJ2p+9XgZvF+seKOFgpU=",
+        "ref": "latest",
+        "rev": "706235bed075a72701c4101b1709f675c941f901",
+        "revCount": 127,
+        "type": "git",
+        "url": "https://codeberg.org/decentstates/nix-housing"
       },
       "original": {
-        "owner": "decentstates",
-        "repo": "nix-housing",
-        "type": "github"
+        "ref": "latest",
+        "type": "git",
+        "url": "https://codeberg.org/decentstates/nix-housing"
       }
     },
     "nix-lazy": {
