@@ -35,6 +35,8 @@
     ../../modules/nixos/rust-build-cache.nix
     ../../modules/nixos/cloudflare-warp
     ../../modules/nixos/houses.nix
+    # nix-housing needs Landlock ABI 9 (Linux >= 7.1); 6.18 LTS only has ABI 7.
+    ../../modules/nixos/kernel-latest-zfs.nix
     ./disko.nix
   ];
 
