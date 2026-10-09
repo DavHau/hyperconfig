@@ -1,9 +1,5 @@
 { config, pkgs, lib, ... }:
 {
-  imports = [ ./houses.nix ];
-
-  housing.users.dave.houses.dev = { };
-
   home-manager.users.dave = {
     home.stateVersion = "25.11";
     programs.rbw.enable = true;

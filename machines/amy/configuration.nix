@@ -34,13 +34,11 @@
     ../../modules/nixos/disk-hygiene
     ../../modules/nixos/rust-build-cache.nix
     ../../modules/nixos/cloudflare-warp
-    ../../modules/nixos/houses.nix
+    ../../modules/nixos/houses-grmpf.nix
     # nix-housing needs Landlock ABI 9 (Linux >= 7.1); 6.18 LTS only has ABI 7.
     ../../modules/nixos/kernel-latest-zfs.nix
     ./disko.nix
   ];
-
-  housing.users.grmpf.houses.dev = { };
 
   # 32" 4K desk monitor: open new niri columns at a third of the screen
   # (laptop panel keeps the global 1/2 default). Merged into the
