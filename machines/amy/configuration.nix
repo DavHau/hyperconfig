@@ -34,12 +34,11 @@
     ../../modules/nixos/disk-hygiene
     ../../modules/nixos/rust-build-cache.nix
     ../../modules/nixos/cloudflare-warp
+    ../../modules/nixos/houses.nix
     ./disko.nix
   ];
 
-  home-manager.users.grmpf.imports = [
-    ../../modules/home-manager/houses.nix
-  ];
+  housing.users.grmpf.houses.dev = { };
 
   # 32" 4K desk monitor: open new niri columns at a third of the screen
   # (laptop panel keeps the global 1/2 default). Merged into the

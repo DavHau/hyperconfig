@@ -168,9 +168,8 @@
     cctl.url = "github:allouis/cctl";
     cctl.inputs.nixpkgs.follows = "nixpkgs";
 
-    nix-housing.url = "github:decentstates/nix-housing";
+    nix-housing.url = "git+https://codeberg.org/decentstates/nix-housing?ref=latest";
     nix-housing.inputs.nixpkgs.follows = "nixpkgs";
-    nix-housing.inputs.home-manager.follows = "home-manager";
 
 
   };
