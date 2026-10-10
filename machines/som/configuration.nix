@@ -121,6 +121,13 @@
         user = "slot-mm";
       };
     };
+
+    # Agents working on asof; root takes the agent@amy key above.
+    # v6 2405:9800:b901:94e3::5107:3, v4 from the LAN's DHCP.
+    slots.asof-agents = {
+      id = 3;
+      mode = "lan";
+    };
   };
   users.users.slot-asof = {
     isSystemUser = true;
