@@ -157,6 +157,10 @@ in
     };
   };
 
+  # Only the native agents above. spaces would otherwise give every normal
+  # user (dave, agent, hsjobeki, nixremote, ...) a hermes microVM.
+  services.hermes-microvm.provisionNormalUsers = false;
+
   # Host-wide (merged into every agent's config.yaml): one shared session per
   # group chat. By default hermes keys a group session per sender, so
   # momentum's room members would talk to separate agents and a /model
