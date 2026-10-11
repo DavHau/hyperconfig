@@ -5,6 +5,10 @@
 # Mod+T: open the terminal in the focused window's working directory
 # (niri-terminal-cwd, installed by ./niri-terminal-cwd.nix; falls back to
 # $HOME when the cwd is outside $HOME).
+# Mod+P: all screens off. The Framework's Fn+F9 "display" key emits
+# Super+P, so that key powers the outputs down (DPMS) and any next input,
+# including the same key, wakes them. A USB-C monitor only drops to
+# standby, so it keeps powering the laptop (measured on amy).
 #
 # niri's config is owned by the spaces flake, which writes a read-only
 # /etc/niri/config.kdl and points NIRI_CONFIG at it (which disables niri's
@@ -38,6 +42,7 @@
         Mod+Shift+Ctrl+K     hotkey-overlay-title="Move Workspace to Monitor Up"    { move-workspace-to-monitor-up; }
         Mod+Shift+Ctrl+L     hotkey-overlay-title="Move Workspace to Monitor Right" { move-workspace-to-monitor-right; }
         Mod+T hotkey-overlay-title="Terminal (in focused window's cwd)" { spawn "niri-terminal-cwd"; }
+        Mod+P hotkey-overlay-title="Screens Off (Fn+F9)" { power-off-monitors; }
     }
   '';
 
