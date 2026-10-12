@@ -40,6 +40,8 @@ in
     ./pi-agent.nix
     # herdr wrapped with the community herdr-jj plugin (jj workspaces).
     ./herdr-jj.nix
+    # Bar button muting herdr's agent-finished/needs-attention sounds.
+    ./noctalia-herdr-sound
     ./afk.nix
     # Same p0 models.yml for spaces' bare omp.
     ./omp-p0.nix
