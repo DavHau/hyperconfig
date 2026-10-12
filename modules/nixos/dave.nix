@@ -70,6 +70,7 @@ in
     ./alacritty.nix
     ./udiskie.nix
     ./bitwarden.nix
+    ./thunderbird.nix
     ./short-videos
     # ./envfs.nix
     # ./nix-heuristic-gc.nix
