@@ -173,9 +173,11 @@ let
       # PATH and LD_LIBRARY_PATH do not reach that shell. Export them
       # again for the owner's login shells only. The uid is
       # runtime-allocated, so the guard compares it at shell start.
+      # The bare hermes package stays out: an ssh login must reach the
+      # `hermes` shim, which sets HERMES_HOME.
       loginInit = ''
         if [ "$(${pkgs.coreutils}/bin/id -u)" = "$(${pkgs.coreutils}/bin/id -u ${user} 2>/dev/null)" ]; then
-          export PATH="${venv.venv}/bin:$PATH"
+          export PATH="${lib.makeBinPath (lib.remove ac.hermesPackage rt.path)}:$PATH"
           export LD_LIBRARY_PATH="${pythonVenv.wheelLibraryPath}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
         fi
       '';

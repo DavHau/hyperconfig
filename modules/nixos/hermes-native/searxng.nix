@@ -30,6 +30,8 @@ in
         server = {
           bind_address = "127.0.0.1";
           inherit port;
+          # Loopback-only; a limiter would need Valkey.
+          limiter = false;
         };
         # hermes speaks only format=json. Stock SearXNG answers 403 for
         # a format that is not listed here.
@@ -37,7 +39,46 @@ in
           "html"
           "json"
         ];
+        # Merged by name into the stock engine list. hermes queries the
+        # general category; arxiv, github and stackoverflow answer in
+        # their own (science, it) or by bang (!arx, !gh, !st). A failing
+        # engine is suspended by SearXNG itself, so keyless scrapers that
+        # sometimes hit a CAPTCHA or a 429 stay in the list. No result
+        # cache: the instance is shared, and a cache would let one agent
+        # learn another's queries.
+        engines =
+          map
+            (name: {
+              inherit name;
+              disabled = false;
+            })
+            [
+              "google"
+              "bing"
+              "qwant"
+              "yahoo"
+              "duckduckgo"
+              "brave"
+              "arxiv"
+              "github"
+              "stackoverflow"
+            ]
+          # Stock-inactive engines are not even loaded.
+          ++ map
+            (name: {
+              inherit name;
+              disabled = false;
+              inactive = false;
+            })
+            [
+              "startpage"
+              "mojeek"
+            ];
       };
+      # Bot detection reads limiter.toml even with the limiter off, and
+      # warns when it is missing. The file only has to exist (the module
+      # writes none for empty settings), so it restates one default.
+      limiterSettings.botdetection.ipv4_prefix = 32;
     };
 
     # Env and settings stay operator-overridable.

@@ -20,6 +20,7 @@ ps: with ps; [
   torch
   transformers
   pypdf
+  pymupdf
   openpyxl
   python-docx
   # nixpkgs `arxiv` currently fails its runtime-deps check. The agent can
@@ -27,6 +28,8 @@ ps: with ps; [
   wikipedia
   requests
   httpx
+  # A Chrome TLS fingerprint for fetches that plain requests gets blocked on.
+  curl-cffi
   aiohttp
   beautifulsoup4
   lxml

@@ -125,6 +125,14 @@ in
       # nothing.
       mcp_discovery_timeout = lib.mkDefault 30;
       mcp_single_query_discovery_timeout = lib.mkDefault 30;
+
+      # No approval gate. Cron runs and subagents have nobody to answer
+      # it: a flagged command ended BLOCKED or parked as pending_approval.
+      # Every command gate (tools/approval.py: check_all_command_guards,
+      # check_execute_code_guard, _run_approval_gate) returns approved for
+      # `off` before any prompt, LLM check or queue; the hardline floor
+      # (rm -rf /, mkfs, reboot, ...) still refuses.
+      approvals.mode = lib.mkDefault "off";
     };
 
     assertions = [
