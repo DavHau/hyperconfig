@@ -12,14 +12,15 @@
 # `hermes` group, and only accounts named in users.<user>.account reach a
 # backend at all.
 #
-# The backends stay exactly as spaces' native.nix runs them: loopback bind,
-# which hermes treats as "trusted operator" (no login gate, a static
-# session token injected into the SPA). That is safe here because nothing
-# reaches the port without oauth2-proxy's cookie, and spaces' owner-only
-# iptables rule (hermes/firewall.nix) still rejects every other local uid;
-# nginx gets its own RETURN rule ahead of it. No path prefix, so none of
-# the upstream X-Forwarded-Prefix gaps apply. The root-held forward at
-# users.<user>.dashboardPort and hermes-desktop keep working unchanged.
+# The backends stay exactly as ./hermes-native/native.nix runs them:
+# loopback bind, which hermes treats as "trusted operator" (no login gate,
+# a static session token injected into the SPA). That is safe here because
+# nothing reaches the port without oauth2-proxy's cookie, and the
+# owner-only iptables rule (./hermes-native/firewall.nix) still rejects
+# every other local uid; nginx gets its own RETURN rule ahead of it. No
+# path prefix, so none of the upstream X-Forwarded-Prefix gaps apply. The
+# root-held forward at users.<user>.dashboardPort and hermes-desktop keep
+# working unchanged.
 #
 # Secrets (clan vars, root-owned, LoadCredential): the `hermes` client
 # secret is the shared oidc var the oidc service declares; the cookie
@@ -72,8 +73,8 @@ in
   config = lib.mkIf (cfg.users != { }) {
     assertions =
       lib.mapAttrsToList (user: _: {
-        assertion = config.services.hermes-microvm.users.${user}.native or false;
-        message = "hyper.hermesDashboard.users.${user}: only a native hermes user has a host dashboard unit to publish.";
+        assertion = config.services.hermes-native.enable && config.services.hermes-native.enabledUsers ? ${user};
+        message = "hyper.hermesDashboard.users.${user}: only a native hermes user (services.hermes-native.users) has a host dashboard unit to publish.";
       }) cfg.users
       ++ [
         {
@@ -135,7 +136,7 @@ in
     };
 
     # nginx may dial the owner-gated backend ports. -I puts them before
-    # the REJECT spaces appends for each port.
+    # the REJECT ./hermes-native/firewall.nix appends for each port.
     systemd.services.hermes-firewall.script = lib.mkAfter (
       lib.concatMapStrings (user: ''
         iptables -w -I hermes-microvm 1 -p tcp --dport ${toString (portOf user)} -m owner --uid-owner nginx -j RETURN

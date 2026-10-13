@@ -30,19 +30,17 @@
 #   - hermes-dashboard.service  (web dashboard backend)
 #   - /run/current-system/sw/bin/hermes  (what the host `hermes` shim execs
 #     over vsock ssh), shadowed by a hiPrio wrapper.
-# Native user (spaces hermes/native.nix, host units as the owner):
+# Native user (./hermes-native/native.nix, host units as the owner):
 #   - hermes-agent-<user>.service, hermes-dashboard-<user>.service: unit
 #     environment. (Not the .env file: agent-config.nix strips PYTHONPATH
 #     from it before every start, on purpose.)
-#   - the host `hermes` shim (spaces hermes/cli.nix) execs the sealed
+#   - the host `hermes` shim (./hermes-native/cli.nix) execs the sealed
 #     package directly. It is not addressable from here (recursion through
-#     environment.systemPackages), and users.users.<u>.packages recurses
-#     too (services.hermes-microvm.users defaults from users.users). So a
-#     wrapper that exports PYTHONPATH and execs the shim by its runtime
-#     path is put on PATH through environment.profiles: a plain entry
-#     precedes /run/current-system/sw (mkAfter in programs/environment.nix).
-#     Only bin/hermes lives there, and for a VM user it is inert (ssh does
-#     not forward PYTHONPATH).
+#     environment.systemPackages), and users.users.<u>.packages would tie
+#     the account to the agent list. So a wrapper that exports PYTHONPATH
+#     and execs the shim by its runtime path is put on PATH through
+#     environment.profiles: a plain entry precedes /run/current-system/sw
+#     (mkAfter in programs/environment.nix). Only bin/hermes lives there.
 #
 # The Claude Code CLI is on the agent's PATH (extraPackages feeds both the
 # guest and the native runtime): the patch signs headers with
@@ -71,7 +69,8 @@
 }:
 let
   claude-code = inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.claude-code;
-  cfg = config.services.hermes-microvm;
+  vmCfg = config.services.hermes-microvm;
+  nativeCfg = config.services.hermes-native;
 
   site = pkgs.runCommand "hermes-claude-auth-site" { } ''
     mkdir -p $out
@@ -108,35 +107,40 @@ let
       environment.etc."hermes-claude-auth".source = site;
     };
 
-  # Native: same PYTHONPATH ahead of the spaces shim. The shim keeps the
-  # caller's PYTHONPATH (it only exports the runtime's own keys), and the
+  # Native: same PYTHONPATH ahead of the hermes-native shim. The shim keeps
+  # the caller's PYTHONPATH (it only exports the runtime's own keys), and the
   # sealed package's wrapper passes it through as in the guest.
   hookedShim = pkgs.writeShellScriptBin "hermes" ''
     export PYTHONPATH=${site}''${PYTHONPATH:+:$PYTHONPATH}
     exec /run/current-system/sw/bin/hermes "$@"
   '';
-  # Static top-level keys only (see native.nix): a config-dependent list
-  # at the config root would recurse through cfg.nativeUsers.
-  forEachNative = f: lib.mkMerge (lib.mapAttrsToList f cfg.nativeUsers);
-  anyNative = cfg.nativeUsers != { };
+  # Static top-level keys only (see ./hermes-native/native.nix): a
+  # config-dependent list at the config root would recurse through
+  # enabledUsers.
+  forEachNative = f: lib.mkMerge (lib.mapAttrsToList f nativeCfg.enabledUsers);
+  anyNative = nativeCfg.enabledUsers != { };
 in
 {
-  config = lib.mkIf cfg.enable {
-    services.hermes-microvm.extraPackages = [ claude-code ];
-    # VM name = hlib.vmName in the spaces hermes module ("hermes-<user>").
-    # VM users only: a native user runs host units, and a microvm.vms
-    # entry for it would declare a guest nobody builds.
-    microvm.vms = lib.mapAttrs' (
-      user: _: lib.nameValuePair "hermes-${user}" { config = guestModule; }
-    ) cfg.vmUsers;
+  imports = [ ./hermes-native ];
 
-    systemd.services = forEachNative (user: _: {
-      "hermes-agent-${user}".environment.PYTHONPATH = "${site}";
-      "hermes-dashboard-${user}".environment.PYTHONPATH = "${site}";
-    });
-    environment.profiles = lib.mkIf anyNative [ "${hookedShim}" ];
-    # For the owner's OAuth login on the host (HOME=~/hermes claude).
-    environment.systemPackages = lib.mkIf anyNative [ claude-code ];
-    environment.etc."hermes-claude-auth" = lib.mkIf anyNative { source = site; };
-  };
+  config = lib.mkMerge [
+    (lib.mkIf vmCfg.enable {
+      services.hermes-microvm.extraPackages = [ claude-code ];
+      # VM name = hlib.vmName in the spaces hermes module ("hermes-<user>").
+      microvm.vms = lib.mapAttrs' (
+        user: _: lib.nameValuePair "hermes-${user}" { config = guestModule; }
+      ) vmCfg.vmUsers;
+    })
+    (lib.mkIf nativeCfg.enable {
+      services.hermes-native.extraPackages = [ claude-code ];
+      systemd.services = forEachNative (user: _: {
+        "hermes-agent-${user}".environment.PYTHONPATH = "${site}";
+        "hermes-dashboard-${user}".environment.PYTHONPATH = "${site}";
+      });
+      environment.profiles = lib.mkIf anyNative [ "${hookedShim}" ];
+      # For the owner's OAuth login on the host (HOME=~/hermes claude).
+      environment.systemPackages = lib.mkIf anyNative [ claude-code ];
+      environment.etc."hermes-claude-auth" = lib.mkIf anyNative { source = site; };
+    })
+  ];
 }

@@ -1,0 +1,49 @@
+Inbound SimpleX images and documents never reached the agent.
+
+An attachment's newChatItems event arrives BEFORE the file downloads,
+so chatItem.file.fileSource.filePath is absent. The adapter deferred
+only audio at that point; every other kind fell through:
+
+1. The chat item was delivered immediately, without the file (the
+   media_urls block at the bottom of _handle_chat_item is inside
+   `if file_path:`).
+2. Nothing parked the item in _pending_file_transfers, so when the
+   download did complete (rcvFileDescrReady -> /freceive ->
+   rcvFileComplete), the completion handler found no pending entry and
+   dropped the file for good.
+
+Observed live: a picture sent from the phone produced a text-only
+message on the agent's side and nothing else.
+
+The rcvFileComplete path is generic already - it re-injects filePath
+and re-handles the item - so the fix is only to widen the defer guard
+from audio to any not-yet-downloaded file that has a fileId. A missing
+fileId cannot be addressed by /freceive and still falls through.
+
+Same tradeoff audio already accepted: if /freceive fails (expired
+transfer), the deferred item is never delivered. The double /freceive
+that rcvFileDescrReady may also send is harmless - the daemon answers
+the second one with an error, and the send is fire-and-forget.
+
+Still present in upstream v2026.9.14: the guard reads
+`not file_path and _is_audio_ext(ext)`.
+
+--- a/platforms/simplex/adapter.py
++++ b/platforms/simplex/adapter.py
+@@ -368,10 +368,12 @@
+             ext = Path(file_path).suffix.lower() if file_path else ""
+             if not ext and file_info.get("fileName", ""):
+                 ext = Path(file_info["fileName"]).suffix.lower()
+-            # Voice notes typically arrive before the file finishes downloading; defer until
+-            # rcvFileComplete. /freceive gets no corrId reply, so awaiting one would block the loop.
+-            if not file_path and _is_audio_ext(ext) and file_id is not None:
+-                logger.info("SimpleX: voice file %d not yet received, accepting transfer", file_id)
++            # Attachments arrive before the file finishes downloading; defer until
++            # rcvFileComplete. Delivering now would strip the file, and the completion
++            # handler only re-delivers items parked here. /freceive gets no corrId
++            # reply, so awaiting one would block the loop.
++            if not file_path and file_id is not None:
++                logger.info("SimpleX: file %d not yet received, accepting transfer", file_id)
+                 self._pending_file_transfers[file_id] = chat_item
+                 await self._send_fire_and_forget(f"/freceive {file_id}")
+                 return

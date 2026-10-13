@@ -1,0 +1,73 @@
+hermes v2026.9.14 (0.21.3): a native user whose config.yaml pins
+`model.provider: p0` (a bare `providers.p0` name) parks every dashboard
+and TUI session on "Setup Required" while `hermes chat -q` works.
+
+Symptom chain: setup.status -> free_tier_bootstrap.run_bootstrap ->
+resolve_provider("auto") -> _config_model_provider. That rung accepts
+`custom`, `custom:<name>`, registry ids and a loopback base_url, and
+returns None for a bare named entry, so resolve_provider falls through
+to AuthError(no_provider_configured) and the bootstrap records
+provider_configured=False. The runtime resolver
+(runtime_provider_custom._get_named_custom_provider) accepts the bare
+name, which is why chat works.
+
+Fix: when nothing else matched, ask has_named_custom_provider(provider)
+and report "custom", the same answer `custom:<name>` gets. The regression
+test adds both spellings to upstream's own #108383 suite; only the bare
+one failed before this change.
+
+spaces seeds the bare name (modules/nixos/hermes/options.nix,
+services.hermes-microvm.initialModel), and so does every config that
+was seeded before this patch, so the fix belongs in hermes, not in the
+seed.
+
+ hermes_cli/auth.py                                 |  7 +++++++
+ .../test_resolve_provider_custom_endpoint.py       | 14 ++++++++++++++
+ 2 files changed, 21 insertions(+)
+
+diff --git a/hermes_cli/auth.py b/hermes_cli/auth.py
+index d4c15bb..4640568 100644
+--- a/hermes_cli/auth.py
++++ b/hermes_cli/auth.py
+@@ -1377,6 +1377,13 @@ def _config_model_provider() -> Tuple[Any, Optional[str]]:
+             return model_cfg, "custom"
+         if provider in PROVIDER_REGISTRY:
+             return model_cfg, provider
++        # A bare ``providers:`` / ``custom_providers:`` name (``provider: p0``) is the same intent
++        # as ``custom:p0``: the runtime rung (_get_named_custom_provider) accepts both spellings,
++        # so this rung must too, or the boot inventory parks a working config on Setup Required.
++        if provider:
++            from hermes_cli.runtime_provider import has_named_custom_provider
++            if has_named_custom_provider(provider):
++                return model_cfg, "custom"
+         # No provider pin but a base_url the bare-custom runtime rung would honour (a loopback
+         # llama.cpp/vLLM/ollama server) — same explicit intent, spelled by URL.
+         base_url = str(model_cfg.get("base_url") or "").strip() if isinstance(model_cfg, dict) else ""
+diff --git a/tests/hermes_cli/test_resolve_provider_custom_endpoint.py b/tests/hermes_cli/test_resolve_provider_custom_endpoint.py
+index 1e6b279..2eff3fb 100644
+--- a/tests/hermes_cli/test_resolve_provider_custom_endpoint.py
++++ b/tests/hermes_cli/test_resolve_provider_custom_endpoint.py
+@@ -44,6 +44,20 @@ def isolated_home(tmp_path, monkeypatch):
+             "model:\n  default: qwen3\n  base_url: http://localhost:8080/v1\n",
+             id="loopback-base-url-only",
+         ),
++        pytest.param(
++            "model:\n  default: some-model\n  provider: custom:p0\n"
++            "  base_url: https://api.p0.example/v1\n"
++            "providers:\n  p0:\n    base_url: https://api.p0.example/v1\n"
++            "    key_env: P0_API_KEY\n    default_model: some-model\n",
++            id="named-provider-slug",
++        ),
++        pytest.param(
++            "model:\n  default: some-model\n  provider: p0\n"
++            "  base_url: https://api.p0.example/v1\n"
++            "providers:\n  p0:\n    base_url: https://api.p0.example/v1\n"
++            "    key_env: P0_API_KEY\n    default_model: some-model\n",
++            id="named-provider-bare",
++        ),
+     ],
+ )
+ def test_configured_custom_endpoint_resolves_as_a_provider(isolated_home, model_block):
+-- 
+2.55.0
+

@@ -73,14 +73,16 @@ expr=$(cat <<EOF
 c:
 let
   u = c.users.users.$user or null;
-  h = c.services.hermes-microvm.users.$user or null;
+  hn = c.services.hermes-native.users.$user or null;
+  hv = c.services.hermes-microvm.users.$user or null;
+  h = if hn != null then hn else hv;
   d = c.hyper.hermesDashboard.users.$user or null;
   comment = k: let p = builtins.filter builtins.isString (builtins.split " " k);
     in if builtins.length p > 2 then builtins.elemAt p 2 else "(no comment)";
 in
 {
   exists = u != null && h != null && h.enable;
-  native = h != null && h.native;
+  native = hn != null;
   keys = if u == null then [ ] else map comment u.openssh.authorizedKeys.keys;
   publicHost = if d == null then null else c.hyper.hermesDashboard.host;
   dashboard = if d == null then null else "https://\${c.hyper.hermesDashboard.host}/";

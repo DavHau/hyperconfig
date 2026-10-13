@@ -157,9 +157,13 @@ in
     };
   };
 
-  # Only the native agents above. spaces would otherwise give every normal
-  # user (dave, agent, hsjobeki, nixremote, ...) a hermes microVM.
-  services.hermes-microvm.provisionNormalUsers = false;
+  # Only the native agents above, on the local module (hermes-native, with
+  # its loopback SearXNG). spaces' microVM module and its slirp-facing
+  # SearXNG stay off: spaces would otherwise give every normal user (dave,
+  # agent, hsjobeki, nixremote, ...) a hermes microVM.
+  services.hermes-native.enable = true;
+  services.hermes-microvm.enable = false;
+  services.spaces-searxng.enable = false;
 
   # Host-wide (merged into every agent's config.yaml): one shared session per
   # group chat. By default hermes keys a group session per sender, so
@@ -168,7 +172,7 @@ in
   # adapter reads its own copy and the gateway drops routed events whose key
   # disagrees. The other agents are DM bots or dashboard/SSH only, so the
   # flags change nothing for them.
-  services.hermes-microvm.settings = {
+  services.hermes-native.settings = {
     group_sessions_per_user = false;
     gateway.platforms.telegram.extra.group_sessions_per_user = false;
   };
