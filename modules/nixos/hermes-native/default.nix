@@ -1,35 +1,27 @@
-# Native Hermes agents (NousResearch hermes-agent): per user, the gateway
-# and web dashboard run on the host as that user's own account, with no
-# microVM (`services.hermes-native`). Owned here so the runtime can change
-# without a spaces bump; vendored from the native path of spaces 6d744780
-# modules/nixos/hermes/. spaces' `services.hermes-microvm` keeps the
-# microVM agents and the desktop client.
+# Hermes agents (NousResearch hermes-agent) running natively on the host
+# (`services.hermes-native`): per user, the gateway and the web dashboard
+# run as that user's own account.
 #
 # Per-agent separation, every piece of which must survive a change here:
-#   - state in /var/lib/hermes-microvm/<user>/state-vault/state, 0700 the
-#     owner, inside a root 0711 vault (sockets.nix),
+#   - state in /var/lib/hermes/<user>/state, 0700 the owner, inside a root
+#     0711 directory (agents.nix),
 #   - secrets as systemd credentials of hermes-agent-<user>, rewritten
-#     into the owner's 0600 .env; never in the store (native.nix),
+#     into the owner's 0600 .env; never in the store (agent-config.nix),
 #   - a per-agent managed config dir (HERMES_MANAGED_DIR) pinning exactly
-#     the Nix keys (native.nix),
-#   - root-held public ports bridged per connection to the owner's
-#     backend by an owner-uid-checking forward (sockets.nix),
-#   - owner-only iptables gates on every public and backend port
+#     the Nix keys (agents.nix),
+#   - a root-held dashboard port bridged per connection to the owner's
+#     backend by an owner-uid-checking forward (forwards.nix),
+#   - owner-only iptables gates on the dashboard and backend ports
 #     (firewall.nix).
 #
-# INVARIANT: one state vault has one runner. A user runs either here or
-# in a spaces microVM, never both (asserted per host; units guard at
-# start).
-#
 # `inputs` are this flake's (specialArgs): hermes-agent for the package,
-# spaces for agent-skills and simplex-chat.
+# spaces for the agent skills.
 {
   imports = [
     ./options.nix
-    ./native.nix
-    ./sockets.nix
+    ./agents.nix
+    ./forwards.nix
     ./firewall.nix
-    ./cli.nix
-    ../hermes-searxng.nix
+    ./searxng.nix
   ];
 }

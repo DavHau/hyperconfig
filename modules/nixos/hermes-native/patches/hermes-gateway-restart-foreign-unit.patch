@@ -2,7 +2,7 @@ hermes v2026.9.14 (0.21.3): `hermes gateway restart` (the dashboard's
 "Restart gateway") breaks a gateway that a systemd unit of another name
 supervises, and `hermes gateway stop` does the same.
 
-Symptom: spaces runs the gateway as hermes-agent-<user>.service. The
+Symptom: the gateway runs as hermes-agent-<user>.service. The
 command looks only for hermes-gateway* units (get_service_name,
 _SERVICE_BASE), finds none, SIGTERMs the gateway and runs a new one in
 the calling process, which is the dashboard's service. The real unit
@@ -36,7 +36,7 @@ index 0c87242..461a16d 100644
 +def _supervising_systemd_unit(pid: int) -> tuple[str, bool] | None:
 +    """``(unit, system_scope)`` when a systemd service runs ``pid`` as its main process, else None.
 +
-+    Any unit name counts. A distribution module names its own unit (the spaces NixOS module runs
++    Any unit name counts. A distribution module names its own unit (a NixOS module may run
 +    ``hermes-agent-<user>.service``), and ``get_service_name()`` knows only ``hermes-gateway*``.
 +    The cgroup names the candidate unit, and the unit's MainPID must be ``pid``. A gateway started
 +    inside another service (the dashboard's ``gateway restart`` child) shares that service's cgroup

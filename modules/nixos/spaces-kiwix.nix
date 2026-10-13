@@ -8,11 +8,10 @@
 # them, and an empty directory makes the tools answer "no archives" rather
 # than fail the build.
 #
-# Side effect worth knowing: `services.spaces-integrations.enable` is the
-# default source for hermes' per-user `spacesGateway.enable` (spaces
-# hermes/options.nix for a VM agent, ./hermes-native/options.nix for a
-# native one), so turning integrations on here is what hands the gateway
-# socket to the agent.
+# Side effect worth knowing: `services.spaces-integrations.enable` hands the
+# gateway socket to the hermes agents (the per-user `spacesGateway.enable`
+# default of spaces hermes/options.nix for a VM agent; every agent of
+# ./hermes-native when integrations are on).
 { ... }:
 {
   services.spaces-integrations.enable = true;

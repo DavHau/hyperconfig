@@ -7,7 +7,7 @@
 # static-token auth. The SSH connection kind needs no token: the app runs
 # `hermes serve --isolated` as dave-hermes over ssh, tunnels the ephemeral
 # port and adopts the token the remote mints. On som the command lands in
-# spaces' host `hermes` shim, whose native arm exports the account's real
+# the `hermes` shim of ./hermes-native, which exports the account's real
 # HERMES_HOME, so it serves the same state (sessions, memories) the gateway
 # and dashboard use. One `hermes serve` per open connection.
 #

@@ -6,7 +6,7 @@
 #     ./vault-ids.nix),
 #   - hermes runs NATIVE on the host (./hermes-native, services.hermes-native:
 #     units hermes-agent-<name> / hermes-dashboard-<name> as that account,
-#     state under /var/lib/hermes-microvm/<name>/state-vault), brain p0's
+#     state under /var/lib/hermes/<name>/state), brain p0's
 #     Qwen (the seed-once initialModel in ./hermes-common.nix), no
 #     OpenRouter,
 #   - the web dashboard on the shared host (./hermes-dashboard-public.nix;
@@ -20,11 +20,16 @@
 #     connection kind runs its remote probe and `hermes serve` as POSIX sh
 #     one-liners (`help="$(...)"`) in the login shell, which fish rejects.
 #
-# uid: native mode binds the dashboard backend at 20000 + uid and nginx
-# needs that port as a constant, so every agent's uid must be pinned. Set it
-# here, or in the module that owns a shared identity (users/stefan-vault.nix,
-# ./vault-ids.nix for momentum); the assertion below catches a missing pin.
-# The id ladder lives in ./vault-ids.nix.
+# uid: the serve ports (./hermes-agents-serve.nix) derive from the uid and
+# nginx needs them as constants, and the GPU host reuses the uid, so every
+# agent's uid must be pinned. Set it here, or in the module that owns a
+# shared identity (users/stefan-vault.nix, ./vault-ids.nix for momentum);
+# the assertion below catches a missing pin. The id ladder lives in
+# ./vault-ids.nix.
+#
+# linger: the agent units reach the owner's session bus and the spaces
+# gateway socket under /run/user/<uid>, which exist from boot only while
+# the account lingers.
 #
 # Anything agent-specific that hermes-common.nix knows (telegram, extra
 # .env entries) goes into `hermes`, which merges into
@@ -119,7 +124,7 @@ in
   config = {
     assertions = lib.mapAttrsToList (name: _: {
       assertion = config.users.users.${name}.uid != null;
-      message = "hyper.hermesAgents.${name}: pin the uid (the dashboard port is 20000 + uid).";
+      message = "hyper.hermesAgents.${name}: pin the uid (the serve ports derive from it).";
     }) cfg;
 
     users.users = lib.mapAttrs (
@@ -128,6 +133,7 @@ in
         isNormalUser = true;
         extraGroups = [ "vault-ro" ];
         shell = pkgs.bash;
+        linger = true;
         openssh.authorizedKeys.keys = a.sshKeys;
       }
       // lib.optionalAttrs (a.uid != null) { inherit (a) uid; }
