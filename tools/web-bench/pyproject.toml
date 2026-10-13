@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "web-bench"
+version = "0.1.0"
+description = "Rate-limited anti-bot benchmark of web fetch setups for the hermes agents"
+requires-python = ">=3.11"
+dependencies = ["requests", "curl_cffi", "playwright"]
+
+[project.scripts]
+web-bench = "web_bench.cli:main"
+
+[tool.setuptools]
+packages = ["web_bench"]
