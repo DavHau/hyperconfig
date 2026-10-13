@@ -154,6 +154,10 @@ rec {
         # The nix-built interpreter loads pip-installed manylinux extension
         # modules. Their NEEDED libs resolve through LD_LIBRARY_PATH.
         LD_LIBRARY_PATH = pythonVenv.wheelLibraryPath;
+        # execute_code runs its scripts with the VIRTUAL_ENV python, else
+        # with hermes' own sealed interpreter, which lacks the venv's
+        # libraries (tools/code_execution_env.py, _resolve_child_python).
+        VIRTUAL_ENV = "${stateDir}/.venv";
       };
       # venv root first, so python and pip resolve to the writable
       # interpreter. systemd appends /bin to every `path` entry, so this

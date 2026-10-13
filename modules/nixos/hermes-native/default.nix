@@ -23,5 +23,7 @@
     ./forwards.nix
     ./firewall.nix
     ./searxng.nix
+    ./web-extract.nix
+    ./browser.nix
   ];
 }

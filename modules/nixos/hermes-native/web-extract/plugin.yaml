@@ -1,0 +1,6 @@
+name: web-local-extract
+version: 1.0.0
+description: "web_extract on this host: Chrome-impersonating fetch (curl_cffi), main-content extraction (trafilatura), PDF text (pymupdf). No API key, no third party."
+kind: backend
+provides_web_providers:
+  - local-extract
