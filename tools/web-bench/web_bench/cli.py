@@ -2,8 +2,10 @@
 
 Safeguards enforced here (not configurable below these limits):
 - one sweep per setup, one attempt per (setup, target), never a retry;
-- strictly sequential loads with a random 5-30 s pause between them,
+- strictly sequential loads with a random 2-8 s pause between them,
   optionally stretched over --spread-hours;
+- each host is hit at most once per setup round, rounds share one order,
+  so hits on a host are a whole round apart (checked: >= MIN_HOST_GAP_S);
 - public GET pages only, with a hard exclusion list checked at plan time and
   on every main-frame navigation;
 - a global budget of main-frame requests per run;
@@ -31,8 +33,9 @@ from .report import read_records, summary
 from .setups import MAX_HOPS, SETUPS, BrowserSetup, NavDenied
 from .targets import SMOKE_URL, Target, excluded, split_targets
 
-MIN_DELAY_S = 5.0
-MAX_DELAY_S = 30.0
+MIN_DELAY_S = 2.0
+MAX_DELAY_S = 8.0
+MIN_HOST_GAP_S = 300.0  # planned time between two hits on one target
 HARD_MAX_BUDGET = 1000  # main-frame requests per run, whatever --budget says
 DYNAMIC_UID_RANGE = range(61184, 65520)  # systemd DynamicUser= allocation range
 STATE_ROOT = Path("/var/lib/web-bench")  # StateDirectory=web-bench
@@ -61,10 +64,12 @@ def _est_load_s(setup: str, settle_s: float) -> float:
 def make_plan(setup_names: list[str], seed: int, spread_hours: float | None,
               targets: list[Target]) -> list[Load]:
     rng = random.Random(seed)
+    # One shuffled order for every setup round: a target's hits then sit a
+    # full round apart instead of possibly back to back at a round boundary.
+    order = list(targets)
+    rng.shuffle(order)
     loads: list[Load] = []
     for s in setup_names:
-        order = list(targets)
-        rng.shuffle(order)
         for t in order:
             loads.append(Load(len(loads), s, t.name, t.url, t.source, t.settle_s, 0.0))
     gaps = [rng.uniform(MIN_DELAY_S, MAX_DELAY_S) for _ in loads[1:]]
@@ -74,7 +79,19 @@ def make_plan(setup_names: list[str], seed: int, spread_hours: float | None,
         gaps = [g * scale for g in gaps]
     for load, gap in zip(loads[1:], gaps):
         load.delay_before_s = round(gap, 1)
+    _check_host_gaps(loads)
     return loads
+
+
+def _check_host_gaps(loads: list[Load]) -> None:
+    t, last = 0.0, {}
+    for l in loads:
+        t += l.delay_before_s
+        if l.url in last and t - last[l.url] < MIN_HOST_GAP_S:
+            raise SystemExit(f"plan hits {l.url} twice within {t - last[l.url]:.0f}s "
+                             f"(< {MIN_HOST_GAP_S:.0f}s); too few targets for this many setups")
+        last[l.url] = t
+        t += _est_load_s(l.setup, l.settle_s)
 
 
 def eta_s(loads: list[Load]) -> float:

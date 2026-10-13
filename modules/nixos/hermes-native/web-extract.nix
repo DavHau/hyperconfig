@@ -32,6 +32,10 @@ in
       # an operator's entries.
       plugins.enabled = [ "web-local-extract" ];
       web.extract_backend = lib.mkDefault "local-extract";
+      # On failure hermes would retry through free third-party services
+      # (Exa, Parallel, Firecrawl), sending the agent's URLs and queries
+      # off-host. SearXNG and the local extractor cover both paths.
+      web.keyless_rescue = lib.mkDefault false;
     };
 
     # Hermes discovers user plugins only under $HERMES_HOME/plugins. The
