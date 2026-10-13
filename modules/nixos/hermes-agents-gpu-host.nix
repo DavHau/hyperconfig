@@ -29,7 +29,7 @@ let
       cudaSupport = true;
     };
   };
-  pythonVenv = import "${inputs.spaces}/modules/nixos/hermes/python-venv.nix" { inherit lib pkgs; };
+  pythonVenv = import ./hermes-native/python-venv.nix { inherit lib pkgs; };
   venvOf =
     name:
     pythonVenv.mkUnit {
@@ -38,7 +38,9 @@ let
       group = "users";
       stateDir = "/home/${name}";
       python = pkgsCuda.python3;
-      packages = config.services.hermes-microvm.pythonPackages;
+      # The agents' python set on som (services.hermes-native), built
+      # against CUDA here.
+      packages = host.services.hermes-native.pythonPackages;
     };
 in
 {

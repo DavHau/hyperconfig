@@ -1,0 +1,248 @@
+hermes v2026.9.14 (0.21.3): `hermes gateway restart` (the dashboard's
+"Restart gateway") breaks a gateway that a systemd unit of another name
+supervises, and `hermes gateway stop` does the same.
+
+Symptom: spaces runs the gateway as hermes-agent-<user>.service. The
+command looks only for hermes-gateway* units (get_service_name,
+_SERVICE_BASE), finds none, SIGTERMs the gateway and runs a new one in
+the calling process, which is the dashboard's service. The real unit
+relaunches its gateway, and that start fails on every attempt with
+"Gateway already running (PID ...)".
+
+Fix: before the unit-less path, ask whether a systemd service runs the
+gateway PID as its main process. The PID's cgroup names the candidate
+unit, whatever its name; the unit's MainPID must equal the PID. A
+gateway that a previous restart spawned inside the dashboard shares the
+dashboard's cgroup and INVOCATION_ID but is not its main process, so it
+does not count. For such a unit, both verbs send SIGUSR1 (the existing
+drain path: finish turns, drain, exit 75,
+GATEWAY_SERVICE_RESTART_EXIT_CODE), wait for the exit and for the unit's
+new main process, and spawn nothing. `stop` says that the unit
+relaunches the gateway, names the systemctl command that stops it, and
+exits 1. `--all` refuses. A hermes-gateway* unit that `hermes gateway
+install` wrote keeps the upstream path.
+
+The regression test fails before this change: restart SIGKILLs the
+gateway, and stop never exits non-zero.
+
+diff --git a/hermes_cli/gateway.py b/hermes_cli/gateway.py
+index 0c87242..461a16d 100644
+--- a/hermes_cli/gateway.py
++++ b/hermes_cli/gateway.py
+@@ -1826,6 +1826,89 @@ def stop_profile_gateway() -> bool:
+     return True
+ 
+ 
++def _supervising_systemd_unit(pid: int) -> tuple[str, bool] | None:
++    """``(unit, system_scope)`` when a systemd service runs ``pid`` as its main process, else None.
++
++    Any unit name counts. A distribution module names its own unit (the spaces NixOS module runs
++    ``hermes-agent-<user>.service``), and ``get_service_name()`` knows only ``hermes-gateway*``.
++    The cgroup names the candidate unit, and the unit's MainPID must be ``pid``. A gateway started
++    inside another service (the dashboard's ``gateway restart`` child) shares that service's cgroup
++    and INVOCATION_ID, but systemd never relaunches it.
++    """
++    from hermes_cli.main_dashboard import _extract_scope_from_cgroup, _pid_unified_cgroup_entries
++
++    for cgroup in _pid_unified_cgroup_entries(pid):
++        unit = cgroup.rsplit("/", 1)[-1]
++        if not unit.endswith(".service"):
++            continue
++        system = _extract_scope_from_cgroup(cgroup) != "user"
++        if _unit_main_pid(unit, system) == pid:
++            return unit, system
++    return None
++
++
++def _unit_main_pid(unit: str, system: bool) -> int | None:
++    try:
++        result = _run_systemctl(
++            ["show", unit, "--no-pager", "--property", "MainPID", "--value"],
++            system=system, timeout=10, **_CAPTURE_TEXT,
++        )
++    except (RuntimeError, subprocess.TimeoutExpired, OSError):
++        return None
++    return _positive_pid(result.stdout.strip()) if result.returncode == 0 else None
++
++
++def _hand_to_supervising_unit(verb: str, *, all_profiles: bool = False) -> bool:
++    """Restart this profile's gateway through the systemd unit that supervises it; False when none does.
++
++    A unit that ``hermes gateway install`` wrote keeps the normal path. Any other unit owns the
++    gateway's lifecycle, and SIGUSR1 is the one safe action: the gateway drains, exits 75, and the
++    unit's restart policy relaunches it. A SIGTERM plus a gateway spawned here raced the unit: the
++    unit then failed on every start with "Gateway already running". So neither ``restart`` nor
++    ``stop`` spawns a gateway here, and ``stop`` cannot stop one that the unit relaunches.
++    """
++    # The PID file first, then a process scan: a gateway that is still starting has no PID file yet.
++    supervised = ((pid, _supervising_systemd_unit(pid)) for pid in find_gateway_pids())
++    pid, supervisor = next(((p, s) for p, s in supervised if s is not None), (None, None))
++    if supervisor is None:
++        return False
++    unit, system = supervisor
++    if _systemd_unit_installed() and unit == f"{get_service_name()}.service":
++        return False
++
++    stop_hint = f"{'sudo ' if system else ''}systemctl {'' if system else '--user '}stop {unit}"
++    if all_profiles:
++        print_error(f"{unit} supervises this profile's gateway (PID {pid}); --all would start a second one.")
++        print(f"  Restart it without --all, or stop it with: {stop_hint}")
++        sys.exit(1)
++    if verb == "stop":
++        print(f"⚠ {unit} supervises this gateway (PID {pid}) and relaunches it after every exit.")
++        print(f"  To stop it: {stop_hint}")
++        print("  Restarting it instead.")
++
++    wait_budget = _get_restart_exit_wait_budget()
++    print(f"⏳ Draining gateway PID {pid} for {unit} (up to {wait_budget:.0f}s)...")
++    if not _graceful_restart_via_sigusr1(pid, wait_budget):
++        print(f"⚠ Gateway PID {pid} still runs after {wait_budget:.0f}s. {unit} relaunches it once it exits.")
++        sys.exit(1)
++    deadline = time.monotonic() + 60.0
++    replacement = None
++    while replacement is None and time.monotonic() < deadline:
++        replacement = _unit_main_pid(unit, system)
++        if replacement == pid:
++            replacement = None
++        if replacement is None:
++            time.sleep(0.5)
++    if replacement is None:
++        print(f"⚠ Gateway PID {pid} exited, but {unit} has no new main process after 60s.")
++        print(f"  Check: systemctl {'' if system else '--user '}status {unit}")
++        sys.exit(1)
++    print(f"✓ {unit} relaunched the gateway (PID {replacement})")
++    if verb == "stop":
++        sys.exit(1)
++    return True
++
++
+ def is_linux() -> bool:
+     return sys.platform.startswith("linux")
+ 
+@@ -6207,6 +6290,9 @@ def _cmd_stop(args):
+         return
+     if not stop_all and _dispatch_via_service_manager_if_s6("stop"):
+         return
++    # A unit of another name (a distribution module) relaunches its gateway after any exit.
++    if _hand_to_supervising_unit("stop", all_profiles=stop_all):
++        return
+ 
+     service_available = _stop_installed_service(system)
+     if stop_all:
+@@ -6250,6 +6336,9 @@ def _cmd_restart(args):
+         return
+     if not restart_all and _dispatch_via_service_manager_if_s6("restart"):
+         return
++    # A unit of another name (a distribution module) owns the relaunch; never spawn beside it.
++    if _hand_to_supervising_unit("restart", all_profiles=restart_all):
++        return
+     if restart_all:
+         _restart_all(system)
+         return
+diff --git a/tests/hermes_cli/test_gateway_foreign_systemd_unit.py b/tests/hermes_cli/test_gateway_foreign_systemd_unit.py
+new file mode 100644
+index 0000000..604454f
+--- /dev/null
++++ b/tests/hermes_cli/test_gateway_foreign_systemd_unit.py
+@@ -0,0 +1,101 @@
++"""``hermes gateway restart``/``stop`` against a gateway that a systemd unit of another name supervises.
++
++A NixOS module runs the gateway as ``hermes-agent-<user>.service``. ``get_service_name()`` only knows
++``hermes-gateway*``, so the command found no installed unit, SIGTERMed the gateway and ran a new one
++inside the dashboard's own service. The real unit then failed on every start with "Gateway already
++running (PID …)". The unit owns the relaunch: the command must SIGUSR1 its main process and spawn nothing.
++"""
++import signal
++import subprocess
++from types import SimpleNamespace
++
++import pytest
++
++GATEWAY_PID = 4242
++REPLACEMENT_PID = 4343
++UNIT = "hermes-agent-dave.service"
++
++
++def _systemctl_answer(main_pid: int):
++    def _run(args, *, system=False, **kwargs):
++        assert system is True, "a /system.slice cgroup names a system unit"
++        assert args[:2] == ["show", UNIT], args
++        return subprocess.CompletedProcess(args, 0, stdout=f"{main_pid}\n", stderr="")
++
++    return _run
++
++
++@pytest.fixture
++def supervised_gateway(monkeypatch):
++    """A running gateway that is the main process of ``UNIT``; records every signal and spawn."""
++    from gateway import status
++    from hermes_cli import gateway as gw
++    from hermes_cli import main_dashboard
++
++    sent = []
++    monkeypatch.setattr(gw, "_refuse_from_inside_gateway", lambda *a, **k: None)
++    monkeypatch.setattr(gw, "_dispatch_via_service_manager_if_s6", lambda *a, **k: False)
++    monkeypatch.setattr(gw, "_guard_named_profile_under_multiplexer", lambda **k: None)
++    monkeypatch.setattr(gw, "named_profile_served_by_running_multiplexer", lambda: False)
++    monkeypatch.setattr(gw, "find_gateway_pids", lambda *a, **k: [GATEWAY_PID])
++    monkeypatch.setattr(gw, "_installed_service_kind_for", lambda windows: None)
++    monkeypatch.setattr(gw, "_get_restart_exit_wait_budget", lambda: 5.0)
++    monkeypatch.setattr(status, "get_running_pid", lambda *a, **k: GATEWAY_PID if not sent else None)
++    monkeypatch.setattr(status, "_pid_exists", lambda pid: not sent)
++    monkeypatch.setattr(gw.os, "kill", lambda pid, sig: sent.append((pid, sig)))
++    monkeypatch.setattr(
++        main_dashboard, "_pid_unified_cgroup_entries", lambda pid: iter([f"/system.slice/{UNIT}"])
++    )
++    main_pids = iter([GATEWAY_PID, REPLACEMENT_PID])
++    monkeypatch.setattr(
++        gw,
++        "_run_systemctl",
++        lambda args, **k: _systemctl_answer(next(main_pids, REPLACEMENT_PID))(args, **k),
++    )
++    spawned = []
++    monkeypatch.setattr(gw, "run_gateway", lambda **k: spawned.append(k))
++    monkeypatch.setattr(gw, "stop_profile_gateway", lambda: spawned.append("sigterm") or True)
++    monkeypatch.setattr(gw, "_service_call", lambda *a, **k: spawned.append(a))
++    return SimpleNamespace(sent=sent, spawned=spawned)
++
++
++@pytest.mark.linux_only
++def test_restart_hands_a_supervised_gateway_to_its_unit(supervised_gateway):
++    from hermes_cli import gateway as gw
++
++    gw._cmd_restart(SimpleNamespace(system=False, all=False, force=False))
++
++    assert supervised_gateway.sent == [(GATEWAY_PID, signal.SIGUSR1)]
++    assert supervised_gateway.spawned == []
++
++
++@pytest.mark.linux_only
++def test_stop_never_kills_or_spawns_beside_a_supervising_unit(supervised_gateway):
++    from hermes_cli import gateway as gw
++
++    with pytest.raises(SystemExit) as exc:
++        gw._cmd_stop(SimpleNamespace(system=False, all=False))
++
++    # The unit relaunches the gateway after any exit, so the stop cannot complete. It drains and
++    # restarts instead and says so with a non-zero exit.
++    assert exc.value.code == 1
++    assert supervised_gateway.sent == [(GATEWAY_PID, signal.SIGUSR1)]
++    assert supervised_gateway.spawned == []
++
++
++@pytest.mark.linux_only
++def test_a_gateway_that_only_shares_a_units_cgroup_is_not_supervised(monkeypatch):
++    """A gateway spawned inside the dashboard's service shares its cgroup and INVOCATION_ID, but
++    systemd does not relaunch it: it is not the unit's main process."""
++    from hermes_cli import gateway as gw
++    from hermes_cli import main_dashboard
++
++    monkeypatch.setattr(
++        main_dashboard, "_pid_unified_cgroup_entries", lambda pid: iter([f"/system.slice/{UNIT}"])
++    )
++    monkeypatch.setattr(gw, "_run_systemctl", _systemctl_answer(main_pid=1111))
++
++    assert gw._supervising_systemd_unit(GATEWAY_PID) is None
++
++    monkeypatch.setattr(gw, "_run_systemctl", _systemctl_answer(main_pid=GATEWAY_PID))
++    assert gw._supervising_systemd_unit(GATEWAY_PID) == (UNIT, True)

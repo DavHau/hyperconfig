@@ -1,0 +1,48 @@
+Inbound SimpleX attachments reached the gateway as unreadable paths.
+
+simplex-chat reports fileSource.filePath RELATIVE to its --files-folder
+(observed against 7.0.0: a received image arrives as "test-image_3.jpg").
+The adapter forwarded that string as media_urls; the gateway then resolved
+it against its own working directory and dropped the attachment:
+
+    WARNING gateway.run: Native image attachment: skipped 1 unreadable
+    path(s): ['test-image_3.jpg']
+
+The agent answered "I don't see any image in this message".
+
+The daemon does not tell its websocket clients where --files-folder is,
+so the deployment must: the adapter reads SIMPLEX_FILES_FOLDER (set by
+the hermes guest module next to SIMPLEX_WS_URL) and resolves relative
+paths against it. Absolute paths and unset env pass through unchanged.
+
+--- a/platforms/simplex/adapter.py
++++ b/platforms/simplex/adapter.py
+@@ -67,6 +67,19 @@
+     return ext.lower() in _AUDIO_EXTS
+ 
+ 
++def _resolve_file_path(file_path: str) -> str:
++    """Resolve the daemon's relative filePath against SIMPLEX_FILES_FOLDER.
++
++    simplex-chat reports received files relative to its --files-folder;
++    the gateway needs a path readable from ITS working directory.
++    """
++    if file_path and not os.path.isabs(file_path):
++        base = os.environ.get("SIMPLEX_FILES_FOLDER", "")
++        if base:
++            return str(Path(base) / file_path)
++    return file_path
++
++
+ def _mime_for_ext(ext: str) -> str:
+     if _is_image_ext(ext):
+         return f"image/{ext.lstrip('.')}"
+@@ -364,6 +377,8 @@
+         if file_info and isinstance(file_info, dict):
+             file_source = file_info.get("fileSource", {}) or {}
+             file_path = file_source.get("filePath") if isinstance(file_source, dict) else None
++            if file_path:
++                file_path = _resolve_file_path(file_path)
+             file_id = file_info.get("fileId")
+             ext = Path(file_path).suffix.lower() if file_path else ""
+             if not ext and file_info.get("fileName", ""):

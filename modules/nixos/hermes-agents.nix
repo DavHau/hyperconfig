@@ -4,7 +4,7 @@
 # The shared shape, per agent:
 #   - a normal login account <name>, reader on /vault/parquet (`vault-ro`,
 #     ./vault-ids.nix),
-#   - hermes runs NATIVE on the host (spaces modules/nixos/hermes/native.nix:
+#   - hermes runs NATIVE on the host (./hermes-native, services.hermes-native:
 #     units hermes-agent-<name> / hermes-dashboard-<name> as that account,
 #     state under /var/lib/hermes-microvm/<name>/state-vault), brain p0's
 #     Qwen (the seed-once initialModel in ./hermes-common.nix), no
@@ -200,7 +200,7 @@ in
     # Every harness, not only hermes: spaces links it into each user's
     # skill roots (pi, omp, claude-code) and hermes reads it as a root.
     spaces.agentHarnesses.skills = lib.mkIf (gpuHost != null) [ gpuSkill ];
-    services.hermes-microvm.settings.skills.external_dirs = lib.mkIf (gpuHost != null) [
+    services.hermes-native.settings.skills.external_dirs = lib.mkIf (gpuHost != null) [
       "${gpuSkill}/share/skills"
     ];
   };

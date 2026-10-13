@@ -9,9 +9,10 @@
 # than fail the build.
 #
 # Side effect worth knowing: `services.spaces-integrations.enable` is the
-# default source for hermes' per-user `spacesGateway.enable`
-# (hermes/options.nix), so turning integrations on here is what bridges the
-# gateway socket into the hermes VM.
+# default source for hermes' per-user `spacesGateway.enable` (spaces
+# hermes/options.nix for a VM agent, ./hermes-native/options.nix for a
+# native one), so turning integrations on here is what hands the gateway
+# socket to the agent.
 { ... }:
 {
   services.spaces-integrations.enable = true;

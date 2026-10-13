@@ -1,27 +1,30 @@
-# Site-wide Hermes wiring shared by every machine that runs agents on the
-# spaces hermes module (inputs.spaces.nixosModules.hermes, pulled in by the
-# spaces desktop profile via dave.nix): the p0 inference provider, the
-# default brain, and per-user secret plumbing declared once as
-# `hyper.hermes.users.<name>` instead of hand-written secretEnv +
-# clan generator + restartUnits triples in every machine file.
+# Site-wide Hermes wiring shared by every machine that runs agents, native
+# (./hermes-native, `services.hermes-native`) or in a microVM (spaces'
+# hermes module, `services.hermes-microvm`, pulled in by the spaces desktop
+# profile via dave.nix): the p0 inference provider, the default brain, and
+# per-user secret plumbing declared once as `hyper.hermes.users.<name>`
+# instead of hand-written secretEnv + clan generator + restartUnits triples
+# in every machine file.
 #
 # Per user this derives:
 #   - a clan vars generator (`telegram.generator`, hidden persisted prompts)
 #     when telegram is on; `clan vars generate <machine> --generator <name>`
 #     fills it,
-#   - services.hermes-microvm.users.<name> with `native` and a secretEnv of
+#   - services.hermes-native.users.<name> (native) or
+#     services.hermes-microvm.users.<name> (VM) with a secretEnv of
 #     P0_API_KEY (always: providers.p0 below names it), the telegram
 #     files mapped through `telegram.env`, and OPENROUTER_API_KEY only when
-#     `openrouter` is on (an explicit secretEnv drops the spaces default),
+#     `openrouter` is on (an explicit secretEnv drops the module default),
 #   - restartUnits on every generator the user consumes, aimed at the
 #     runner: hermes-agent-<name>.service (native) or microvm@hermes-<name>
 #     (VM).
 #
-# Host-global (one value per machine, the spaces module has no per-user
-# settings): providers.p0 and the seed-once initialModel. initialModel is
-# mkOverride 900 so a site can seed another brain with a plain definition.
-# Seeding is safe on a host with existing agents: modelSeedScript writes
-# only when config.yaml has no `model` key.
+# Host-global (one value per machine, neither module has per-user
+# settings): providers.p0 and the seed-once initialModel, defined on both
+# modules (each only acts when enabled). initialModel is mkOverride 900 so
+# a site can seed another brain with a plain definition. Seeding is safe
+# on a host with existing agents: modelSeedScript writes only when
+# config.yaml has no `model` key.
 #
 # Telegram authorization (hermes gateway/authz_mixin.py): TELEGRAM_ALLOWED_USERS
 # is the per-sender allowlist (DMs and groups, numeric ids from
@@ -37,8 +40,77 @@ let
 
   runnerUnit = name: u: if u.native then "hermes-agent-${name}.service" else "microvm@hermes-${name}.service";
   telegramUsers = lib.filterAttrs (_: u: u.telegram.enable) cfg.users;
+
+  host = {
+    settings.providers.p0 = {
+      base_url = "https://inference.p0.contact/v1";
+      # Env var NAME, never the token: resolved by the agent from the
+      # credential-seeded .env (hermes_cli/runtime_provider.py).
+      key_env = "P0_API_KEY";
+      default_model = "qwen";
+      # Qwen only reasons when the chat template is told to; hermes spelling
+      # of omp's compat.thinkingFormat: qwen-chat-template (omp-common.nix).
+      extra_body.chat_template_kwargs.enable_thinking = true;
+    };
+    # Anthropic prompt-cache tier (agent/agent_init.py reads
+    # prompt_caching.cache_ttl; "5m" | "1h", clamped back to 5m per
+    # destination by prompt_caching.effective_cache_ttl, so non-Anthropic
+    # routes are unaffected). Sessions here pause for more than five
+    # minutes between turns, which is where the 1h tier's 2x write
+    # premium beats re-warming the whole context; under the Claude
+    # subscription (hermes-claude-auth.nix) it is flat-rate anyway.
+    settings.prompt_caching.cache_ttl = "1h";
+    # Session titles come from p0's Qwen regardless of the chat model.
+    # hermes 0.20.2 title_generator.py passes extra_body.response_format
+    # through auxiliary_client into the native Anthropic request body,
+    # which api.anthropic.com rejects (400 "response_format: Extra inputs
+    # are not permitted"), so on a Claude session every turn logged a
+    # failed title. Named ``providers`` entries resolve here through
+    # _get_named_custom_provider (key_env -> P0_API_KEY from the .env).
+    settings.auxiliary.title_generation = {
+      provider = "p0";
+      model = "qwen";
+    };
+    # Above the modules' own mkDefault (llama-swap g9v3:3b on a desktop),
+    # below a plain site definition.
+    #
+    # `custom:p0`, not `p0`: hermes 0.21.3 resolves both to the same
+    # providers.p0 entry at runtime (runtime_provider source
+    # custom_provider:p0), but the boot inventory (hermes_cli/
+    # free_tier_bootstrap -> auth.resolve_provider("auto") ->
+    # _config_model_provider) only recognises `custom`, `custom:<name>`,
+    # registry ids and loopback base_urls as "configured". With a bare
+    # `p0` every dashboard TUI session parked on "Setup Required" while
+    # the chat itself worked. Already-seeded states were edited in place
+    # (2026-09-22); the seed only writes once.
+    initialModel = lib.mkOverride 900 {
+      provider = "custom:p0";
+      base_url = "https://inference.p0.contact/v1";
+      default = "qwen";
+    };
+  };
+
+  usersOf =
+    users:
+    lib.mapAttrs (name: u: {
+      inherit (u) environment;
+      secretEnv =
+        {
+          P0_API_KEY = inference.files.token.path;
+        }
+        // lib.optionalAttrs u.openrouter {
+          OPENROUTER_API_KEY = openrouter.files.apikey.path;
+        }
+        // lib.optionalAttrs u.telegram.enable (
+          lib.mapAttrs (
+            _: prompt: config.clan.core.vars.generators.${u.telegram.generator}.files.${prompt}.path
+          ) u.telegram.env
+        );
+    }) users;
 in
 {
+  imports = [ ./hermes-native ];
+
   options.hyper.hermes.users = lib.mkOption {
     default = { };
     description = "Hermes agents on this machine with their secret wiring.";
@@ -50,7 +122,7 @@ in
             native = lib.mkOption {
               type = lib.types.bool;
               default = false;
-              description = "Run on the host (services.hermes-microvm.users.<name>.native) instead of a microVM.";
+              description = "Run on the host (services.hermes-native.users.<name>) instead of a microVM (services.hermes-microvm.users.<name>).";
             };
             openrouter = lib.mkOption {
               type = lib.types.bool;
@@ -60,7 +132,7 @@ in
             environment = lib.mkOption {
               type = lib.types.attrsOf lib.types.str;
               default = { };
-              description = "Non-secret .env entries (services.hermes-microvm.users.<name>.environment).";
+              description = "Non-secret .env entries (services.hermes-{native,microvm}.users.<name>.environment).";
             };
             telegram = {
               enable = lib.mkEnableOption "a Telegram bot for this agent";
@@ -136,69 +208,11 @@ in
       }) telegramUsers
     );
 
-    services.hermes-microvm = {
-      settings.providers.p0 = {
-        base_url = "https://inference.p0.contact/v1";
-        # Env var NAME, never the token: resolved by the agent from the
-        # credential-seeded .env (hermes_cli/runtime_provider.py).
-        key_env = "P0_API_KEY";
-        default_model = "qwen";
-        # Qwen only reasons when the chat template is told to; hermes spelling
-        # of omp's compat.thinkingFormat: qwen-chat-template (omp-common.nix).
-        extra_body.chat_template_kwargs.enable_thinking = true;
-      };
-      # Anthropic prompt-cache tier (agent/agent_init.py reads
-      # prompt_caching.cache_ttl; "5m" | "1h", clamped back to 5m per
-      # destination by prompt_caching.effective_cache_ttl, so non-Anthropic
-      # routes are unaffected). Sessions here pause for more than five
-      # minutes between turns, which is where the 1h tier's 2x write
-      # premium beats re-warming the whole context; under the Claude
-      # subscription (hermes-claude-auth.nix) it is flat-rate anyway.
-      settings.prompt_caching.cache_ttl = "1h";
-      # Session titles come from p0's Qwen regardless of the chat model.
-      # hermes 0.20.2 title_generator.py passes extra_body.response_format
-      # through auxiliary_client into the native Anthropic request body,
-      # which api.anthropic.com rejects (400 "response_format: Extra inputs
-      # are not permitted"), so on a Claude session every turn logged a
-      # failed title. Named ``providers`` entries resolve here through
-      # _get_named_custom_provider (key_env -> P0_API_KEY from the .env).
-      settings.auxiliary.title_generation = {
-        provider = "p0";
-        model = "qwen";
-      };
-      # Above the spaces module's own mkDefault (llama-swap g9v3:3b on a
-      # desktop), below a plain site definition.
-      #
-      # `custom:p0`, not `p0`: hermes 0.21.3 resolves both to the same
-      # providers.p0 entry at runtime (runtime_provider source
-      # custom_provider:p0), but the boot inventory (hermes_cli/
-      # free_tier_bootstrap -> auth.resolve_provider("auto") ->
-      # _config_model_provider) only recognises `custom`, `custom:<name>`,
-      # registry ids and loopback base_urls as "configured". With a bare
-      # `p0` every dashboard TUI session parked on "Setup Required" while
-      # the chat itself worked. Already-seeded states were edited in place
-      # (2026-09-22); the seed only writes once.
-      initialModel = lib.mkOverride 900 {
-        provider = "custom:p0";
-        base_url = "https://inference.p0.contact/v1";
-        default = "qwen";
-      };
-
-      users = lib.mapAttrs (name: u: {
-        inherit (u) native environment;
-        secretEnv =
-          {
-            P0_API_KEY = inference.files.token.path;
-          }
-          // lib.optionalAttrs u.openrouter {
-            OPENROUTER_API_KEY = openrouter.files.apikey.path;
-          }
-          // lib.optionalAttrs u.telegram.enable (
-            lib.mapAttrs (
-              _: prompt: config.clan.core.vars.generators.${u.telegram.generator}.files.${prompt}.path
-            ) u.telegram.env
-          );
-      }) cfg.users;
+    services.hermes-native = host // {
+      users = usersOf (lib.filterAttrs (_: u: u.native) cfg.users);
+    };
+    services.hermes-microvm = host // {
+      users = usersOf (lib.filterAttrs (_: u: !u.native) cfg.users);
     };
   };
 }

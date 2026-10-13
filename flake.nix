@@ -165,6 +165,15 @@
 
     spaces.url = "git+https://git.geninf.io/spaces/spaces-os";
 
+    # hermes-agent for the native agents (modules/nixos/hermes-native) and
+    # anything built from its source. Same tag as spaces' own pin, which
+    # still builds amy's microVM guest; bump the two together unless a
+    # native-only change needs otherwise. The hermes package builds against
+    # this nixpkgs (agent-config.nix), so it must follow ours.
+    hermes-agent.url = "github:NousResearch/hermes-agent/v2026.9.14";
+    hermes-agent.inputs.nixpkgs.follows = "nixpkgs";
+    hermes-agent.inputs.home-manager.follows = "home-manager";
+
     cctl.url = "github:allouis/cctl";
     cctl.inputs.nixpkgs.follows = "nixpkgs";
 

@@ -23,9 +23,10 @@
 #   - proxy_cookie_domain pins any Set-Cookie Domain to the serving
 #     subdomain, so an agent cannot plant cookies on the dashboard host
 #     through headers (document.cookie still can; residual),
-#   - the ports are owner-only on loopback (iptables, same chain spaces
-#     uses for the dashboard ports): the owner, nginx and root may dial
-#     them, other agents may not. Nothing opens them in the firewall.
+#   - the ports are owner-only on loopback (iptables, the same
+#     hermes-microvm chain ./hermes-native/firewall.nix gates the dashboard
+#     ports in): the owner, nginx and root may dial them, other agents may
+#     not. Nothing opens them in the firewall.
 #
 # TLS: one wildcard cert via porkbun DNS-01 (as edi's *.maker.davhau.com).
 # DNS: `porkbun-dns set '*.<host>' AAAA <public v6>` and `... A <public v4>`
@@ -107,9 +108,10 @@ in
       message = "hyper.hermesAgents.${name}: uid must be in 1000..1276 so its serve ports (${toString servePortBase} + (uid - 1000) * 10) stay below the ephemeral range.";
     }) agents;
 
-    services.hermes-microvm.settings.skills.external_dirs = [ "${skill}/share/skills" ];
+    services.hermes-native.settings.skills.external_dirs = [ "${skill}/share/skills" ];
 
-    # Loopback owner gate, after spaces' rules (they never name these ports).
+    # Loopback owner gate, after the module's own rules (they never name
+    # these ports).
     systemd.services.hermes-firewall.script = lib.mkAfter (
       lib.concatMapStrings (
         name:
