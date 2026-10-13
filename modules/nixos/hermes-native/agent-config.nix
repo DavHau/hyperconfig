@@ -218,11 +218,8 @@ rec {
     ${pkgs.gnused}/bin/sed -i -E \
       '/^(export[[:space:]]+)?(PYTHONPATH|PYTHONHOME|PYTHONSTARTUP|NIX_PYTHONPATH)=/d' \
       "$env_file"
-    # TRANSITION (2026-10-13): also strip the block under its old marker
-    # name. Remove the hermes-microvm line once som has switched.
     ${pkgs.gnused}/bin/sed -i \
-      -e '/^# BEGIN hermes-microvm credentials$/,/^# END hermes-microvm credentials$/d' \
-      -e '/^# BEGIN hermes-native credentials$/,/^# END hermes-native credentials$/d' \
+      '/^# BEGIN hermes-native credentials$/,/^# END hermes-native credentials$/d' \
       "$env_file"
     if [ -n "''${CREDENTIALS_DIRECTORY:-}" ]; then
       {

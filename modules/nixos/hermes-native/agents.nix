@@ -143,11 +143,8 @@ let
         # block. Keys the user or the agent added stay.
         env_file=${hermesHome}/.env
         touch "$env_file"
-        # TRANSITION (2026-10-13): also strip the block under its old
-        # marker name. Remove the hermes-microvm line once som has switched.
         ${pkgs.gnused}/bin/sed -i \
-          -e '/^# BEGIN hermes-microvm environment$/,/^# END hermes-microvm environment$/d' \
-          -e '/^# BEGIN hermes-native environment$/,/^# END hermes-native environment$/d' \
+          '/^# BEGIN hermes-native environment$/,/^# END hermes-native environment$/d' \
           "$env_file"
         ${dropManagedKeys}
         {

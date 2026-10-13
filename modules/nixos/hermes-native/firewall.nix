@@ -59,13 +59,6 @@ in
         RemainAfterExit = true;
       };
       script = ''
-        # TRANSITION (2026-10-13): drop the chain under its old name and
-        # its OUTPUT jumps. Remove these four lines once som has switched.
-        iptables -w -D OUTPUT -o lo -p tcp -m conntrack --ctstate NEW -j hermes-microvm 2>/dev/null || true
-        iptables -w -D OUTPUT -o lo -p udp -m conntrack --ctstate NEW -j hermes-microvm 2>/dev/null || true
-        iptables -w -F hermes-microvm 2>/dev/null || true
-        iptables -w -X hermes-microvm 2>/dev/null || true
-
         iptables -w -N ${chain} 2>/dev/null || true
         iptables -w -F ${chain}
         ${firewallRules}
