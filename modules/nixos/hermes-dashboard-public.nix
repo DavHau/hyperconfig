@@ -1,8 +1,9 @@
 # Public web dashboards for native hermes agents, one shared vhost:
 # https://<host>/ (AAAA -> this host's stable public v6,
 # networking.publicIPv6Token) -> nginx -> oauth2-proxy (auth_request against
-# the clan's pocket-id, modules/clan/oidc) -> the dashboard backend that
-# belongs to the signed-in account, on 127.0.0.1:20000+uid.
+# the clan's pocket-id, modules/clan/oidc) -> the root-held dashboard port of
+# the signed-in account's agent (./hermes-native/forwards.nix), which
+# bridges to that agent's backend after checking the backend's owner.
 #
 # Everyone uses the same URL; the account decides which hermes answers.
 # nginx maps the authenticated preferred_username (oauth2-proxy's
@@ -12,15 +13,17 @@
 # `hermes` group, and only accounts named in users.<user>.account reach a
 # backend at all.
 #
-# The backends stay exactly as ./hermes-native/native.nix runs them:
-# loopback bind, which hermes treats as "trusted operator" (no login gate,
-# a static session token injected into the SPA). That is safe here because
-# nothing reaches the port without oauth2-proxy's cookie, and the
-# owner-only iptables rule (./hermes-native/firewall.nix) still rejects
-# every other local uid; nginx gets its own RETURN rule ahead of it. No
-# path prefix, so none of the upstream X-Forwarded-Prefix gaps apply. The
-# root-held forward at users.<user>.dashboardPort and hermes-desktop keep
-# working unchanged.
+# This login is the only one. The backends stay exactly as
+# ./hermes-native/agents.nix runs them: loopback bind, which hermes treats as
+# "trusted operator" (no login gate of its own, a per-start session token
+# injected into the SPA). That is safe here because nothing reaches the
+# port without oauth2-proxy's cookie, and the owner-only iptables rules
+# (./hermes-native/firewall.nix) still reject every other local uid; nginx
+# gets its own RETURN rule on the root-held port, never on the backend. A
+# backend another agent squatted while its owner's dashboard was down is
+# refused by the forward, so a signed-in request never reaches the wrong
+# agent. No path prefix, so none of the upstream X-Forwarded-Prefix gaps
+# apply.
 #
 # Secrets (clan vars, root-owned, LoadCredential): the `hermes` client
 # secret is the shared oidc var the oidc service declares; the cookie
@@ -33,11 +36,12 @@
 }:
 let
   cfg = config.hyper.hermesDashboard;
-  portOf = user: 20000 + config.users.users.${user}.uid;
+  hlib = import ./hermes-native/lib.nix { inherit lib; };
+  portOf = hlib.dashboardPortFor;
   client = config.hyper.oidc.clients.${cfg.oidcClient};
-  # Nothing listens here on purpose: nginx answers 403 for accounts
-  # without a dashboard from its own server block on this port.
-  forbiddenPort = 20000 - 1;
+  # nginx answers 403 for accounts without a dashboard from its own server
+  # block on this port, just below the backend window.
+  forbiddenPort = hlib.dashboardBackendBase - 1;
 in
 {
   options.hyper.hermesDashboard = {
@@ -73,7 +77,7 @@ in
   config = lib.mkIf (cfg.users != { }) {
     assertions =
       lib.mapAttrsToList (user: _: {
-        assertion = config.services.hermes-native.enable && config.services.hermes-native.enabledUsers ? ${user};
+        assertion = config.services.hermes-native.enable && config.services.hermes-native.users ? ${user};
         message = "hyper.hermesDashboard.users.${user}: only a native hermes user (services.hermes-native.users) has a host dashboard unit to publish.";
       }) cfg.users
       ++ [
@@ -135,11 +139,12 @@ in
       unitConfig.StartLimitIntervalSec = 0;
     };
 
-    # nginx may dial the owner-gated backend ports. -I puts them before
-    # the REJECT ./hermes-native/firewall.nix appends for each port.
+    # nginx may dial the owner-gated root-held dashboard ports. -I puts
+    # them before the REJECT ./hermes-native/firewall.nix appends for each
+    # port.
     systemd.services.hermes-firewall.script = lib.mkAfter (
       lib.concatMapStrings (user: ''
-        iptables -w -I hermes-microvm 1 -p tcp --dport ${toString (portOf user)} -m owner --uid-owner nginx -j RETURN
+        iptables -w -I ${hlib.chain} 1 -p tcp --dport ${toString (portOf user)} -m owner --uid-owner nginx -j RETURN
       '') (lib.attrNames cfg.users)
     );
 

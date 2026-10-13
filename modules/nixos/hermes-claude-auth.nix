@@ -30,11 +30,11 @@
 #   - hermes-dashboard.service  (web dashboard backend)
 #   - /run/current-system/sw/bin/hermes  (what the host `hermes` shim execs
 #     over vsock ssh), shadowed by a hiPrio wrapper.
-# Native user (./hermes-native/native.nix, host units as the owner):
+# Native user (./hermes-native/agents.nix, host units as the owner):
 #   - hermes-agent-<user>.service, hermes-dashboard-<user>.service: unit
 #     environment. (Not the .env file: agent-config.nix strips PYTHONPATH
 #     from it before every start, on purpose.)
-#   - the host `hermes` shim (./hermes-native/cli.nix) execs the sealed
+#   - the host `hermes` shim (./hermes-native/agents.nix) execs the sealed
 #     package directly. It is not addressable from here (recursion through
 #     environment.systemPackages), and users.users.<u>.packages would tie
 #     the account to the agent list. So a wrapper that exports PYTHONPATH
@@ -51,10 +51,10 @@
 # agent's PATH puts extraPackages ahead of /run/current-system/sw, so a
 # stale pin here beats a fresh system profile. Bump llm-agents when it
 # hits again. The OAuth login (`claude` -> /login) must write
-# ~/.claude/.credentials.json into the AGENT's HOME, the exchange dir:
-# inside the guest that is just $HOME; a native owner runs
-# `HOME=~/hermes claude` on the host (claude-code is in systemPackages
-# for that). Hermes itself already knows Claude Code credentials:
+# ~/.claude/.credentials.json into the AGENT's HOME: inside the guest that
+# is just $HOME; a native agent's HOME is the account home, so the owner
+# runs plain `claude` on the host (claude-code is in systemPackages for
+# that). Hermes itself already knows Claude Code credentials:
 # once anthropic is the configured provider, agent/credential_pool.py
 # seeds a `claude_code` entry into $HERMES_HOME/auth.json from that file.
 # The patch adds what hermes lacks on the wire (billing-header signature,
@@ -114,11 +114,11 @@ let
     export PYTHONPATH=${site}''${PYTHONPATH:+:$PYTHONPATH}
     exec /run/current-system/sw/bin/hermes "$@"
   '';
-  # Static top-level keys only (see ./hermes-native/native.nix): a
+  # Static top-level keys only (see ./hermes-native/agents.nix): a
   # config-dependent list at the config root would recurse through
-  # enabledUsers.
-  forEachNative = f: lib.mkMerge (lib.mapAttrsToList f nativeCfg.enabledUsers);
-  anyNative = nativeCfg.enabledUsers != { };
+  # nativeCfg.users.
+  forEachNative = f: lib.mkMerge (lib.mapAttrsToList f nativeCfg.users);
+  anyNative = nativeCfg.users != { };
 in
 {
   imports = [ ./hermes-native ];
@@ -138,7 +138,7 @@ in
         "hermes-dashboard-${user}".environment.PYTHONPATH = "${site}";
       });
       environment.profiles = lib.mkIf anyNative [ "${hookedShim}" ];
-      # For the owner's OAuth login on the host (HOME=~/hermes claude).
+      # For the owner's OAuth login on the host (plain `claude`).
       environment.systemPackages = lib.mkIf anyNative [ claude-code ];
       environment.etc."hermes-claude-auth" = lib.mkIf anyNative { source = site; };
     })

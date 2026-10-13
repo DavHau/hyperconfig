@@ -5,7 +5,7 @@
 //
 // The threat: the backend port belongs to whoever binds it first. When the
 // owner's daemon is down, any other local user may bind it and receive the
-// owner's traffic (the desktop token, or forged inbound chat). netfilter
+// owner's traffic (the signed-in user's dashboard session). netfilter
 // can gate connect(2) by uid but never bind(2). So the bridge connects,
 // then reads /proc/net/tcp and checks that the socket which ACCEPTED this
 // connection belongs to the owner's uid. Only then does it forward a

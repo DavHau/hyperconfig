@@ -23,10 +23,10 @@
 #   - proxy_cookie_domain pins any Set-Cookie Domain to the serving
 #     subdomain, so an agent cannot plant cookies on the dashboard host
 #     through headers (document.cookie still can; residual),
-#   - the ports are owner-only on loopback (iptables, the same
-#     hermes-microvm chain ./hermes-native/firewall.nix gates the dashboard
-#     ports in): the owner, nginx and root may dial them, other agents may
-#     not. Nothing opens them in the firewall.
+#   - the ports are owner-only on loopback (iptables, the same chain
+#     ./hermes-native/firewall.nix gates the dashboard ports in): the owner,
+#     nginx and root may dial them, other agents may not. Nothing opens
+#     them in the firewall.
 #
 # TLS: one wildcard cert via porkbun DNS-01 (as edi's *.maker.davhau.com).
 # DNS: `porkbun-dns set '*.<host>' AAAA <public v6>` and `... A <public v4>`
@@ -45,6 +45,7 @@
 let
   agents = config.hyper.hermesAgents;
   dashboard = config.hyper.hermesDashboard;
+  inherit (import ./hermes-native/lib.nix { inherit lib; }) chain;
   host = dashboard.host;
   certName = "hermes-serve";
 
@@ -63,7 +64,7 @@ let
   accountOf = name: dashboard.users.${name}.account;
 
   # Nothing of the agents listens here; nginx answers 403 from its own
-  # server block (hermes-dashboard-public.nix owns 20000 - 1).
+  # server block (hermes-dashboard-public.nix has its own such port).
   forbiddenPort = servePortBase - 1;
   oauth2 = config.services.oauth2-proxy.httpAddress;
 
@@ -119,10 +120,10 @@ in
           ports = "${toString (portsOf name).from}:${toString (portsOf name).to}";
         in
         ''
-          iptables -w -A hermes-microvm -p tcp --dport ${ports} -m owner --uid-owner ${name} -j RETURN
-          iptables -w -A hermes-microvm -p tcp --dport ${ports} -m owner --uid-owner nginx -j RETURN
-          iptables -w -A hermes-microvm -p tcp --dport ${ports} -m owner --uid-owner 0 -j RETURN
-          iptables -w -A hermes-microvm -p tcp --dport ${ports} -j REJECT --reject-with tcp-reset
+          iptables -w -A ${chain} -p tcp --dport ${ports} -m owner --uid-owner ${name} -j RETURN
+          iptables -w -A ${chain} -p tcp --dport ${ports} -m owner --uid-owner nginx -j RETURN
+          iptables -w -A ${chain} -p tcp --dport ${ports} -m owner --uid-owner 0 -j RETURN
+          iptables -w -A ${chain} -p tcp --dport ${ports} -j REJECT --reject-with tcp-reset
         ''
       ) (lib.attrNames agents)
     );

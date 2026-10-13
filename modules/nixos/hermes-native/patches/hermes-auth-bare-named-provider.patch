@@ -16,9 +16,8 @@ and report "custom", the same answer `custom:<name>` gets. The regression
 test adds both spellings to upstream's own #108383 suite; only the bare
 one failed before this change.
 
-spaces seeds the bare name (modules/nixos/hermes/options.nix,
-services.hermes-microvm.initialModel), and so does every config that
-was seeded before this patch, so the fix belongs in hermes, not in the
+Configs seeded with the bare name, or switched to it at runtime, keep
+it (pinpox and willi on som), so the fix belongs in hermes, not in the
 seed.
 
  hermes_cli/auth.py                                 |  7 +++++++

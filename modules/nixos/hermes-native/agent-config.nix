@@ -1,20 +1,17 @@
-# What a native agent runs with: the patched hermes package, config.yaml
-# settings, .env entries, PATH and skill set. native.nix (units) and
-# cli.nix (`hermes` shim) both read this, so an interactive session sees
-# what the gateway sees. Vendored from spaces 6d744780
-# modules/nixos/hermes/agent-config.nix (native subset).
+# What an agent runs with: the patched hermes package, config.yaml
+# settings, PATH and skill set. agents.nix applies it to the units and to
+# the `hermes` shim, so an interactive session sees what the gateway sees.
 {
   lib,
   pkgs,
   inputs,
   hlib,
   cfg,
-  hostName,
 }:
 let
   system = pkgs.stdenv.hostPlatform.system;
 
-  # Every bundled skill spaces ships, in one root (spaces
+  # Every bundled skill of the spaces flake, in one root (spaces
   # packages/agent-skills). A host-scoped skill stays out of this root;
   # the host that wants it adds its own root through
   # cfg.settings.skills.external_dirs, the union below.
@@ -29,8 +26,6 @@ let
   skillsRoot = "${agentSkills}/share/skills";
 in
 rec {
-  inherit agentSkills;
-
   # The agent runs these skill CLIs by bare name. They come from the skill
   # packages, so the list cannot drift from skills/<name>/SKILL.md.
   skillCliPackages = agentSkills.skillPackages;
@@ -115,11 +110,11 @@ rec {
           overlayArgs: lib.composeExtensions (workspace.mkPyprojectOverlay overlayArgs) patchHermesWheel;
       };
   };
+
   hermesUpstream =
     (import "${inputs.hermes-agent}/nix/packages.nix" {
-      # rev = null: no HERMES_REVISION, like spaces' build, so the wrapper
-      # does not change with our flake's revision. Upstream reads
-      # `inputs.self.rev or null`.
+      # rev = null: no HERMES_REVISION, so the wrapper does not change with
+      # this flake's revision. Upstream reads `inputs.self.rev or null`.
       inputs = hermesInputs // {
         self = { };
         uv2nix = uv2nixPatched;
@@ -131,58 +126,27 @@ rec {
         inputs'.npm-lockfile-fix.packages.default = hermesInputs.npm-lockfile-fix.packages.${system}.default;
       };
 
-  hermesPackage = hermesUpstream.packages.default.overrideAttrs (old: {
-    # Patch the bundled simplex plugin in place (evidence in the patch
-    # headers). In place, not via extraPlugins: that installs a second
-    # adapter beside the bundled one, and the two fight over the platform
-    # name. The bundled path is a read-only store symlink; replace it with
-    # a writable copy first.
-    postInstall = (old.postInstall or "") + ''
-      plugins=$out/share/hermes-agent/plugins
-      bundled=$(readlink -f "$plugins")
-      rm "$plugins"
-      cp -r --no-preserve=mode,ownership "$bundled" "$plugins"
-      patch -p1 -d "$plugins" < ${./patches/hermes-simplex-accept-by-id.patch}
-      patch -p1 -d "$plugins" < ${./patches/hermes-simplex-defer-inbound-files.patch}
-      patch -p1 -d "$plugins" < ${./patches/hermes-simplex-relative-file-paths.patch}
-    '';
-  });
+  hermesPackage = hermesUpstream.packages.default;
 
-  simplexPackage = inputs.spaces.packages.${system}.simplex-chat;
-
-  # SIMPLEX_WS_URL alone enables the plugin; `environment` entries win.
-  # `port` is the root-held public port the agent dials.
-  # SIMPLEX_FILES_FOLDER mirrors the simplex daemon's stateDir: the daemon
-  # reports received files relative to its --files-folder, and the adapter
-  # resolves them against this base (evidence in
-  # ./patches/hermes-simplex-relative-file-paths.patch).
-  simplexEnv =
-    { stateDir, port }:
-    lib.optionalAttrs cfg.simplex.enable {
-      SIMPLEX_WS_URL = "ws://127.0.0.1:${toString port}";
-      SIMPLEX_FILES_FOLDER = "${stateDir}/simplex/files";
-    };
-
-  # What an agent process runs with. The units in native.nix and the
-  # `hermes` shim in cli.nix both apply it. `home` is the account's home
-  # (users.users.<user>.home); this file has no `config`.
-  nativeRuntime =
+  # What an agent process runs with, for the units and the `hermes` shim.
+  # `home` is the account's home (users.users.<user>.home); this file has
+  # no `config`.
+  runtime =
     user: home:
     let
       pythonVenv = import ./python-venv.nix { inherit lib pkgs; };
-      stateDir = hlib.stateVaultState user;
-      repos = configReposOf user;
+      stateDir = hlib.stateDir user;
     in
     {
       inherit stateDir;
       env = {
-        # The account home, not the exchange dir: hermes-desktop's SSH
-        # connection writes its session token under the SSH login home,
-        # and `hermes serve` accepts it only under Path.home().
+        # The account home: hermes-desktop's SSH connection writes its
+        # session token under the SSH login home, and `hermes serve`
+        # accepts it only under Path.home().
         HOME = home;
         HERMES_HOME = "${stateDir}/.hermes";
         # No HERMES_MANAGED: it locks every setting (hermes_cli/config.py,
-        # is_managed). native.nix locks only the Nix keys, through
+        # is_managed). agents.nix locks only the Nix keys, through
         # HERMES_MANAGED_DIR.
 
         # Skills read this to tell a sandboxed agent from a native one.
@@ -193,8 +157,7 @@ rec {
       };
       # venv root first, so python and pip resolve to the writable
       # interpreter. systemd appends /bin to every `path` entry, so this
-      # is the venv ROOT, not its bin dir. Callers append
-      # config.nix.package when the user has config repos.
+      # is the venv ROOT, not its bin dir.
       path = [
         "${stateDir}/.venv"
         hermesPackage
@@ -204,36 +167,6 @@ rec {
       ]
       ++ basePackages
       ++ cfg.extraPackages;
-      hasConfigRepos = repos.dirs != [ ];
-    };
-
-  # The config repos this user's agent edits (options.nix, configReposFor):
-  # the explicit nixosConfigDir grant plus every apply repo inside this
-  # user's home.
-  configReposOf =
-    user:
-    cfg.configRepos.${user} or {
-      dirs = [ ];
-      apply = { };
-      primary = null;
-    };
-
-  # The agent edits the repo in place and asks the host to check and
-  # apply it through the spaces gateway (spaces packages/integration-nixos).
-  # NIXOS_CONFIG_HOSTNAME names the `<repo>/<machine>` target of this host.
-  configRepoEnv =
-    user:
-    let
-      repos = configReposOf user;
-    in
-    lib.optionalAttrs (repos.dirs != [ ]) {
-      NIXOS_CONFIG_DIR = repos.primary;
-      NIXOS_CONFIG_HOSTNAME = hostName;
-    }
-    // lib.optionalAttrs (repos.apply != { }) {
-      # repo name -> directory, for every repo this agent may also check
-      # and apply. spaces skills/nixos-config/SKILL.md reads it.
-      NIXOS_CONFIG_REPOS = builtins.toJSON repos.apply;
     };
 
   # Seed-once model. This writes to config.yaml only when no model is
@@ -270,34 +203,35 @@ rec {
     '';
 
   # Strip interpreter-hijacking keys from the writable .env. The gateway
-  # imports .env into its process env. Every subprocess inherits it. A
+  # imports .env into its process env, and every subprocess inherits it. A
   # persisted PYTHONPATH shadows the venv with the gateway's sealed cp312
-  # venv. That causes wrong-ABI imports. A sudo-wielding agent can re-add
-  # these keys. So drop them before every start.
+  # venv, which causes wrong-ABI imports. The agent can write these keys,
+  # so drop them before every start.
   #
-  # Then rewrite the credential-managed secret block. hermes loads .env
-  # with override=True. That beats the process env. CLI sessions read
-  # .env directly. So credentials must land here. Strip-then-append keeps
-  # rotated or removed keys from going stale. The markers keep spaces'
-  # names, so a block written under the spaces module is replaced, not
-  # duplicated.
+  # Then rewrite the credential block. hermes loads .env with
+  # override=True, which beats the process env, and CLI sessions read .env
+  # directly, so credentials must land here. Strip-then-append keeps
+  # rotated or removed keys from going stale.
   envRewriteScript = stateDir: ''
     env_file=${stateDir}/.hermes/.env
     touch "$env_file"
     ${pkgs.gnused}/bin/sed -i -E \
       '/^(export[[:space:]]+)?(PYTHONPATH|PYTHONHOME|PYTHONSTARTUP|NIX_PYTHONPATH)=/d' \
       "$env_file"
+    # TRANSITION (2026-10-13): also strip the block under its old marker
+    # name. Remove the hermes-microvm line once som has switched.
     ${pkgs.gnused}/bin/sed -i \
-      '/^# BEGIN hermes-microvm credentials$/,/^# END hermes-microvm credentials$/d' \
+      -e '/^# BEGIN hermes-microvm credentials$/,/^# END hermes-microvm credentials$/d' \
+      -e '/^# BEGIN hermes-native credentials$/,/^# END hermes-native credentials$/d' \
       "$env_file"
     if [ -n "''${CREDENTIALS_DIRECTORY:-}" ]; then
       {
-        echo "# BEGIN hermes-microvm credentials"
+        echo "# BEGIN hermes-native credentials"
         for f in "$CREDENTIALS_DIRECTORY"/*; do
           [ -f "$f" ] || continue
           printf '%s=%s\n' "$(basename "$f")" "$(cat "$f")"
         done
-        echo "# END hermes-microvm credentials"
+        echo "# END hermes-native credentials"
       } >> "$env_file"
     fi
   '';

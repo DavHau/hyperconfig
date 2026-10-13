@@ -81,7 +81,7 @@ let
     in if builtins.length p > 2 then builtins.elemAt p 2 else "(no comment)";
 in
 {
-  exists = u != null && h != null && h.enable;
+  exists = u != null && h != null && (h.enable or true);
   native = hn != null;
   keys = if u == null then [ ] else map comment u.openssh.authorizedKeys.keys;
   publicHost = if d == null then null else c.hyper.hermesDashboard.host;

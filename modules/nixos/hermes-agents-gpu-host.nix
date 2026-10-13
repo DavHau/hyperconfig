@@ -38,9 +38,8 @@ let
       group = "users";
       stateDir = "/home/${name}";
       python = pkgsCuda.python3;
-      # The agents' python set on som (services.hermes-native), built
-      # against CUDA here.
-      packages = host.services.hermes-native.pythonPackages;
+      # The agents' python set on som, built against CUDA here.
+      packages = import ./hermes-native/python-packages.nix;
     };
 in
 {

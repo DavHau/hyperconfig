@@ -14,7 +14,7 @@
 #     services.hermes-microvm.users.<name> (VM) with a secretEnv of
 #     P0_API_KEY (always: providers.p0 below names it), the telegram
 #     files mapped through `telegram.env`, and OPENROUTER_API_KEY only when
-#     `openrouter` is on (an explicit secretEnv drops the module default),
+#     `openrouter` is on (an explicit secretEnv drops spaces' VM default),
 #   - restartUnits on every generator the user consumes, aimed at the
 #     runner: hermes-agent-<name>.service (native) or microvm@hermes-<name>
 #     (VM).
@@ -71,8 +71,8 @@ let
       provider = "p0";
       model = "qwen";
     };
-    # Above the modules' own mkDefault (llama-swap g9v3:3b on a desktop),
-    # below a plain site definition.
+    # Above spaces' VM mkDefault (llama-swap g9v3:3b on a desktop), below a
+    # plain site definition.
     #
     # `custom:p0`, not `p0`: hermes 0.21.3 resolves both to the same
     # providers.p0 entry at runtime (runtime_provider source
