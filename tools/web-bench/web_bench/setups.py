@@ -5,11 +5,9 @@ every call (fresh HTTP session, or a fresh browser with a new temporary
 profile that is deleted afterwards), so cookies and challenge clearances
 never carry over between targets.
 
-To add a browser engine (e.g. Camoufox), add one `BrowserSetup` to `SETUPS`
-whose `launch_options` returns the Playwright `launch_persistent_context`
-keyword arguments for that engine (Camoufox: `engine="firefox"` plus
-`camoufox.utils.launch_options(executable_path=..., headless=...)`), and add
-the engine to the package's Python environment in default.nix.
+To add a browser engine, add one `BrowserSetup` to `SETUPS` whose
+`launch_options` returns the Playwright `launch_persistent_context` keyword
+arguments for that engine, and add the engine to default.nix.
 """
 from __future__ import annotations
 
@@ -219,15 +217,38 @@ def _chromium(headless: bool) -> Callable[[], dict]:
     return options
 
 
+def _camoufox(headless: bool) -> Callable[[], dict]:
+    """Camoufox launch options; every call draws a fresh fpgen identity."""
+    def options() -> dict:
+        from camoufox import DefaultAddons
+        from camoufox.utils import STOCK_MEDIA_DEFAULTS, launch_options, spoofs_window_dimensions
+        opts = launch_options(
+            executable_path=os.environ["WEB_BENCH_CAMOUFOX"], headless=headless,
+            os="linux", locale="en-US", humanize=True,  # Linux persona: coherent with the host's TLS/fonts/X
+            exclude_addons=[DefaultAddons.UBO],  # it would be fetched from addons.mozilla.org per launch
+        )
+        # What camoufox.sync_api.NewBrowser adds for a persistent context:
+        # Playwright's default viewport deadlocks Juggler on a spoofed window,
+        # and its default media emulation overrides the host's answers.
+        if spoofs_window_dimensions(opts):
+            opts["no_viewport"] = True
+        return {**STOCK_MEDIA_DEFAULTS, **opts}
+    return options
+
+
 # Default sweep order: least bot-like first, so a reputation hit caused by an
 # obvious bot client cannot bias the setups that follow it on the same domain.
 SETUPS: dict[str, HttpSetup | BrowserSetup] = {
     s.name: s
     for s in [
+        BrowserSetup("camoufox-headful", "Camoufox (anti-detect Firefox), Linux persona, headful under Xvfb",
+                     "firefox", _camoufox(False), needs_display=True),
         BrowserSetup("chromium-headful", "nixpkgs Chromium, headful under Xvfb, via Playwright",
                      "chromium", _chromium(False), needs_display=True),
         HttpSetup("curl_cffi", "curl_cffi Session, impersonate=chrome (TLS/HTTP2 like Chrome)",
                   _cffi_session, _cffi_version),
+        BrowserSetup("camoufox-headless", "Camoufox (anti-detect Firefox), Linux persona, headless",
+                     "firefox", _camoufox(True)),
         BrowserSetup("chromium-headless", "nixpkgs Chromium, headless, via Playwright (~ hermes agent-browser)",
                      "chromium", _chromium(True)),
         HttpSetup("requests", "python requests, default headers (~ agents' raw curl/urllib)",
