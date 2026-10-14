@@ -1,5 +1,15 @@
 # AM5 desktop, iGPU only. Hardware detail lives in ./facter.json.
-{ inputs, ... }:
+{
+  config,
+  inputs,
+  lib,
+  ...
+}:
+let
+  # Mullvad egress rollout (../../modules/nixos/mullvad-egress): 1 = only
+  # the benchmark user, 2 = also every hermes agent and SearXNG.
+  mullvadStage = 1;
+in
 {
   imports = [
     inputs.nixos-hardware.nixosModules.common-cpu-amd
@@ -23,6 +33,8 @@
     ../../modules/nixos/cooler-lcd
     ../../modules/nixos/ipv4-forward.nix
     ../../modules/nixos/container-slots.nix
+    ../../modules/nixos/mullvad-egress
+    ../../modules/nixos/web-bench-mullvad.nix
   ];
 
   # Public IPv4 38.89.142.76, borrowed from sgp through a WireGuard tunnel
@@ -147,6 +159,20 @@
   # hermes settings, and omp picks it as the first-run default. som's iGPU
   # is not a brain; p0 is (hermes-common.nix). Off, as on vit.
   services.llama-swap.enable = false;
+
+  # These users reach the internet only through Mullvad in Singapore.
+  hyper.mullvadEgress = {
+    users = [
+      "web-bench-mullvad"
+    ]
+    ++ lib.optionals (mullvadStage >= 2) ([ "searx" ] ++ lib.attrNames config.hyper.hermesAgents);
+    # The LAN's public /64: on-link, and inference.p0.contact lives on it
+    # (../../modules/nixos/virtualisation.nix). p0 is our own authenticated
+    # API on the LAN, so it stays direct: no detour, no exit-IP concerns.
+    directPrefixes = [ "2405:9800:b901:94e3::/64" ];
+  };
+  # searx's uid as allocated on som, pinned so the uid rules can name it.
+  users.users.searx.uid = lib.mkIf (mullvadStage >= 2) 986;
 
   system.stateVersion = "25.11";
 }
