@@ -1,0 +1,19 @@
+Requests without an own curl_cffi target impersonate "chrome", but
+gen_useragent() only makes Firefox UAs (DuckDuckGo, Wikidata SPARQL, image
+proxy, autocomplete). Those paired a Firefox UA with Chrome's TLS/HTTP2
+fingerprint and Chrome's sec-ch-ua headers; impersonate Firefox for them.
+
+--- a/searx/network/network.py
++++ b/searx/network/network.py
+@@ -273,6 +273,11 @@
+         was_disconnected = False
+         do_raise_for_httperror = Network.extract_do_raise_for_httperror(kwargs)
+         kwargs_clients = Network.extract_kwargs_clients(kwargs)
++        # gen_useragent() only makes Firefox UAs: keep the TLS and HTTP/2
++        # fingerprint (and the absence of sec-ch-ua) coherent with them.
++        user_agent = (kwargs.get("headers") or {}).get("User-Agent", "")
++        if "impersonate" not in kwargs_clients and "Firefox/" in user_agent:
++            kwargs_clients["impersonate"] = "firefox"
+         while retries >= 0:  # pragma: no cover
+             client = await self.get_client(**kwargs_clients)
+             try:
