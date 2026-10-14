@@ -15,6 +15,7 @@ the agent can pick the next step instead of retrying.
 import asyncio
 import ipaddress
 import json
+import random
 import socket
 import sys
 import threading
@@ -38,7 +39,8 @@ RENDER_ON = ("blocked", "js_required")
 # Seconds. The whole URL stays inside BUDGET (the plugin kills the
 # worker a little later); the browser gets at most RENDER_MAX of it, and
 # is not tried with less than RENDER_MIN left. A challenge interstitial
-# gets up to CHALLENGE_WAIT to reload into the page.
+# gets up to CHALLENGE_WAIT to reload into the page (its Turnstile box,
+# if it draws one, is ticked).
 BUDGET = 100
 RENDER_MAX = 75
 RENDER_MIN = 20
@@ -353,6 +355,38 @@ async def pipe(source, sink):
         sink.close()
 
 
+# Cloudflare's managed challenge can ask for a click on its Turnstile box. It
+# sits in a cross-origin frame attached inside a closed shadow root, out of
+# reach of selectors; the frame tree still lists the frame, and its host
+# element's box says where the checkbox is (16 px margin plus half the
+# 24 px box from the frame's left edge, vertically centred).
+TURNSTILE_HOST = "challenges.cloudflare.com"
+TURNSTILE_MAX_CLICKS = 3
+TURNSTILE_CLICK_GAP = 8  # seconds; the widget answers a click within a few
+
+
+def turnstile_box(page):
+    for frame in page.frames:
+        if TURNSTILE_HOST not in (frame.url or ""):
+            continue
+        try:
+            box = frame.frame_element().bounding_box()
+        except Exception:  # noqa: BLE001 - frame detached mid-look
+            continue
+        if box and box["width"] >= 150 and box["height"] >= 40:
+            return box
+    return None
+
+
+def click_turnstile(page, box):
+    page.mouse.move(box["x"] + 28 + random.uniform(-5, 5),
+                    box["y"] + box["height"] / 2 + random.uniform(-5, 5))  # humanize draws the path
+    time.sleep(random.uniform(0.15, 0.45))
+    page.mouse.down()
+    time.sleep(random.uniform(0.06, 0.16))
+    page.mouse.up()
+
+
 def render(url, deadline):
     """Load the page in a headless Camoufox with a fresh profile (in the
     worker's temp dir, gone afterwards), every connection through a
@@ -368,6 +402,9 @@ def render(url, deadline):
     guard, statuses, documents = GuardProxy(), [], set()
     options = launch_options(
         executable_path=CAMOUFOX, headless=True, os="linux", locale="en-US", humanize=True,
+        # A mouse click reaches Turnstile's cross-origin frame only with
+        # Firefox's COOP handling off.
+        disable_coop=True, i_know_what_im_doing=True,
         # The default uBlock would be downloaded from addons.mozilla.org.
         exclude_addons=[DefaultAddons.UBO], pin_cpu_cores=False,
         # WebRTC's UDP would reach private addresses past the proxy.
@@ -408,11 +445,19 @@ def render(url, deadline):
                     raise refusal()
                 raise
             # Challenge interstitials reload into the real page, or the block
-            # page, by themselves.
+            # page, by themselves, or once their Turnstile box is ticked.
             challenge_by = min(deadline, time.monotonic() + CHALLENGE_WAIT)
             html = read_page(page)
+            clicks, last_click = 0, 0.0
             while challenge_in(html[:200_000].lower()) and challenge_by - time.monotonic() > 1:
                 time.sleep(1)
+                if clicks < TURNSTILE_MAX_CLICKS and time.monotonic() - last_click > TURNSTILE_CLICK_GAP \
+                        and turnstile_box(page):
+                    time.sleep(random.uniform(0.8, 2.0))  # a person reads the box first
+                    box = turnstile_box(page)
+                    if box:
+                        click_turnstile(page, box)
+                        clicks, last_click = clicks + 1, time.monotonic()
                 html = read_page(page)
             try:
                 page.wait_for_load_state("networkidle", timeout=min(NETWORKIDLE * 1000, left_ms()))

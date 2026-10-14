@@ -33,7 +33,9 @@ let
   };
   camofox = pkgs.callPackage ../../../pkgs/camofox-browser { };
 
-  # Seconds a navigation waits for a self-clearing challenge
+  # Seconds a navigation waits for a challenge interstitial to clear,
+  # ticking Cloudflare's Turnstile box when it draws one; non-zero also
+  # launches Camoufox with disable_coop so that click reaches the frame
   # (pkgs/camofox-browser/challenge-wait.patch).
   challengeWait = 30;
   # A navigation route's budget is NAVIGATE_TIMEOUT_MS + the challenge

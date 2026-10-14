@@ -32,7 +32,8 @@ _BLOCK_MARKERS = [
 _GATE_MARKERS = [
     ("cloudflare-challenge", r"just a moment\.\.\.|cf_chl_opt|"
                              r"enable javascript and cookies to continue|checking your browser", False),
-    ("cloudflare-challenge", r"cdn-cgi/challenge-platform", True),
+    # Not scripts/jsd/: Cloudflare's JavaScript Detections beacon, injected into ordinary pages.
+    ("cloudflare-challenge", r"cdn-cgi/challenge-platform/(?!scripts/jsd/)", True),
     ("turnstile", r"challenges\.cloudflare\.com/turnstile", True),
     ("datadome", r"captcha-delivery\.com", False),
     ("perimeterx", r"px-captcha|press (&amp;|&) hold", False),

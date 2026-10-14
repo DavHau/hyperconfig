@@ -27,7 +27,17 @@
  }
  
  const userConcurrency = new Map();
-@@ -2077,7 +2080,47 @@
+@@ -1173,6 +1176,9 @@
+         headless: useVirtualDisplay ? false : !useDesktopWindow,
+         os: hostOS,
+         humanize: true,
++        // A mouse click reaches Turnstile's cross-origin frame only with
++        // Firefox's COOP handling off (challenge-wait clicks the box).
++        disable_coop: CHALLENGE_WAIT_MS > 0,
+         enable_cache: true,
+         proxy: launchProxy,
+         geoip: !!launchProxy,
+@@ -2077,7 +2083,87 @@
    if (!contentType.startsWith('image/')) {
      await page.waitForLoadState('domcontentloaded', { timeout });
    }
@@ -48,8 +58,37 @@
 +  }).catch(() => null);
 +}
 +
-+// Waits while the page is a challenge interstitial, up to CHALLENGE_WAIT_MS.
-+// Returns the response of the document it reloaded into, or null.
++// Cloudflare's managed challenge can ask for a click on its Turnstile box.
++// The box is in a cross-origin frame attached inside a closed shadow root,
++// out of reach of any selector; the frame tree still lists the frame, and
++// its host element's box says where on screen the checkbox is (16 px margin
++// plus half the 24 px box from the frame's left edge, vertically centred).
++const TURNSTILE_HOST = 'challenges.cloudflare.com';
++const TURNSTILE_MAX_CLICKS = 3;
++const TURNSTILE_CLICK_GAP_MS = 8000;
++
++async function turnstileBox(page) {
++  for (const frame of page.frames()) {
++    if (!frame.url().includes(TURNSTILE_HOST)) continue;
++    const box = await frame.frameElement().then((el) => el.boundingBox()).catch(() => null);
++    if (box && box.width >= 150 && box.height >= 40) return box;
++  }
++  return null;
++}
++
++async function clickTurnstile(page, box) {
++  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
++  const jitter = () => (Math.random() - 0.5) * 10;
++  await page.mouse.move(box.x + 28 + jitter(), box.y + box.height / 2 + jitter());
++  await sleep(150 + Math.random() * 300);
++  await page.mouse.down();
++  await sleep(60 + Math.random() * 100);
++  await page.mouse.up();
++}
++
++// Waits while the page is a challenge interstitial, up to CHALLENGE_WAIT_MS,
++// ticking a Turnstile checkbox when one is drawn. Returns the response of
++// the document it reloaded into, or null.
 +async function waitForChallengeClear(page) {
 +  if (CHALLENGE_WAIT_MS <= 0 || !(await isChallengePage(page))) return null;
 +  const started = Date.now();
@@ -60,10 +99,21 @@
 +  };
 +  page.on('response', onResponse);
 +  let cleared = false;
++  let clicks = 0;
++  let lastClick = 0;
 +  try {
 +    while (!cleared && Date.now() < deadline && !page.isClosed()) {
 +      await new Promise((resolve) => setTimeout(resolve, 1000));
 +      cleared = (await isChallengePage(page)) === false;
++      if (cleared || clicks >= TURNSTILE_MAX_CLICKS || Date.now() - lastClick < TURNSTILE_CLICK_GAP_MS) continue;
++      if (!(await turnstileBox(page))) continue;
++      // A person reads the box before ticking it.
++      await new Promise((resolve) => setTimeout(resolve, 800 + Math.random() * 1200));
++      const box = await turnstileBox(page);
++      if (!box) continue;
++      await clickTurnstile(page, box).catch(() => {});
++      clicks += 1;
++      lastClick = Date.now();
 +    }
 +    if (cleared) {
 +      await page.waitForLoadState('domcontentloaded', { timeout: Math.max(1000, deadline - Date.now()) }).catch(() => {});
@@ -71,7 +121,7 @@
 +  } finally {
 +    page.off('response', onResponse);
 +  }
-+  log('info', 'challenge wait', { cleared, waitedMs: Date.now() - started, url: page.isClosed() ? null : page.url() });
++  log('info', 'challenge wait', { cleared, turnstileClicks: clicks, waitedMs: Date.now() - started, url: page.isClosed() ? null : page.url() });
 +  return latest;
  }
  

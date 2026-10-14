@@ -8,27 +8,31 @@ never carry over between targets.
 To add a browser engine, add one `BrowserSetup` to `SETUPS` whose
 `launch_options` returns the Playwright `launch_persistent_context` keyword
 arguments for that engine, and add the engine to default.nix. A setup with
-`solve` gets one solver attempt on a load that classifies as gated.
+`solve` gets one solver attempt on a load that classifies as gated; given a
+capture directory, that load also leaves screenshots and frame dumps there.
 """
 from __future__ import annotations
 
 import os
+import random
 import re
 import shutil
 import subprocess
 import tempfile
+from pathlib import Path
 import time
 from dataclasses import dataclass, field
 from html import unescape
 from typing import Callable, Iterator
 from contextlib import contextmanager
 
-from . import classify
+from . import classify, turnstile
 
 NAV_TIMEOUT_S = 45
 NETWORKIDLE_S = 10
 MAX_HOPS = 10  # main-frame navigations (redirects, challenge reloads) per load
 SOLVE_BUDGET_S = 120  # CaptchaKraken's own deadline per solve
+TURNSTILE_BUDGET_S = 60  # wait, tick, wait for the reload; the widget answers within seconds
 SOLVE_MAX_LOOPS = 6  # solver rounds per solve (one model request each, more on dynamic grids)
 
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
@@ -138,8 +142,8 @@ class BrowserSetup:
     engine: str  # Playwright browser type: chromium | firefox
     launch_options: Callable[[], dict]
     needs_display: bool = False
-    # Run on a gated load's page; returns the outcome recorded as `solver`.
-    solve: Callable[[object], dict] | None = None
+    # Run on a gated load's page with a Capture (or None); returns the outcome recorded as `solver`.
+    solve: Callable[[object, object], dict] | None = None
     solve_budget_s: float = 0.0
 
     @contextmanager
@@ -155,7 +159,7 @@ class BrowserSetup:
     def engine_version(self) -> str:
         return self._version
 
-    def load(self, url: str, guard: Guard, settle_s: float) -> Observation:
+    def load(self, url: str, guard: Guard, settle_s: float, capture_dir: Path | None = None) -> Observation:
         obs = Observation()
         profile = tempfile.mkdtemp(prefix=f"web-bench-{self.name}-")
         ctx = None
@@ -190,7 +194,8 @@ class BrowserSetup:
             page.goto(url, wait_until="domcontentloaded")
             _settle_and_read(page, obs, settle_s)
             if self.solve and classify.verdict(obs.status, obs.title, obs.body, obs.error)[0] == "gated":
-                obs.solver = self.solve(page)
+                capture = turnstile.capturer(page, capture_dir, "solve") if capture_dir else None
+                obs.solver = self.solve(page, capture)
                 _settle_and_read(page, obs, settle_s)
             obs.final_url = page.url
         except Exception as e:  # noqa: BLE001 - every failure is a result
@@ -227,8 +232,10 @@ def _read_page(page) -> tuple[str, str]:
     return "", ""
 
 
-def _captchakraken_solve(page) -> dict:
+def _captchakraken_solve(page, capture=None) -> dict:
     """One CaptchaKraken PageSolver run against the self-hosted model (VLLM_BASE_URL, see default.nix)."""
+    if capture:
+        capture("before")
     from captchakraken import CaptchaSolver, PageSolver
     from captchakraken.config import base_url
     from captchakraken.page_solver import PageSolverConfig
@@ -243,6 +250,38 @@ def _captchakraken_solve(page) -> dict:
         out["error"] = f"{type(e).__name__}: {(str(e).splitlines() or [''])[0][:300]}"
     out["rounds"] = len(model.planner.token_usage)
     out["duration_ms"] = int((time.monotonic() - t0) * 1000)
+    if capture:
+        capture("after")
+    return out
+
+
+# A captcha page whose form posts the token (Radware's validate.perfdrive.com
+# with hCaptcha): a solved widget changes nothing until the form is submitted.
+_CAPTCHA_FORM_SUBMIT = ("form:has([name='h-captcha-response'], [name='g-recaptcha-response']) "
+                        ":is(input[type=submit], button[type=submit])")
+
+
+def _turnstile_then_captchakraken(page, capture=None) -> dict:
+    """Cloudflare's checkbox by its frame box (turnstile.py); any other vendor's widget by
+    CaptchaKraken, then the form around it submitted."""
+    if turnstile.is_interstitial(page) or turnstile.challenge_frames(page):
+        out = turnstile.solve(page, TURNSTILE_BUDGET_S, capture)
+        out["via"] = "turnstile"
+        return out
+    out = _captchakraken_solve(page, capture)
+    out["via"] = "captchakraken"
+    if out["solved"]:
+        try:
+            submit = page.locator(_CAPTCHA_FORM_SUBMIT).first
+            if submit.is_visible():
+                time.sleep(random.uniform(0.5, 1.5))
+                with page.expect_navigation(wait_until="domcontentloaded", timeout=NAV_TIMEOUT_S * 1000):
+                    submit.click()  # Camoufox humanize draws the cursor path
+                out["submitted"] = True
+                if capture:
+                    capture("submitted")
+        except Exception as e:  # noqa: BLE001 - no form, no navigation: the record says so
+            out["submit_error"] = f"{type(e).__name__}: {(str(e).splitlines() or [''])[0][:200]}"
     return out
 
 
@@ -252,7 +291,7 @@ def _chromium(headless: bool) -> Callable[[], dict]:
     return options
 
 
-def _camoufox(headless: bool) -> Callable[[], dict]:
+def _camoufox(headless: bool, disable_coop: bool = False) -> Callable[[], dict]:
     """Camoufox launch options; every call draws a fresh fpgen identity."""
     def options() -> dict:
         from camoufox import DefaultAddons
@@ -261,6 +300,9 @@ def _camoufox(headless: bool) -> Callable[[], dict]:
             executable_path=os.environ["WEB_BENCH_CAMOUFOX"], headless=headless,
             os="linux", locale="en-US", humanize=True,  # Linux persona: coherent with the host's TLS/fonts/X
             exclude_addons=[DefaultAddons.UBO],  # it would be fetched from addons.mozilla.org per launch
+            # Lets a mouse click reach Turnstile's cross-origin frame (Firefox pref
+            # browser.tabs.remote.useCrossOriginOpenerPolicy=false); camoufox warns about it as a leak.
+            disable_coop=disable_coop, i_know_what_im_doing=disable_coop or None,
         )
         # What camoufox.sync_api.NewBrowser adds for a persistent context:
         # Playwright's default viewport deadlocks Juggler on a spoofed window,
@@ -293,5 +335,14 @@ SETUPS: dict[str, HttpSetup | BrowserSetup] = {
                      "camoufox-headful, plus one CaptchaKraken solve (self-hosted model on vit) when gated",
                      "firefox", _camoufox(False), needs_display=True,
                      solve=_captchakraken_solve, solve_budget_s=SOLVE_BUDGET_S),
+        BrowserSetup("camoufox-turnstile",
+                     "camoufox-headful with disable_coop; when gated, ticks Cloudflare's checkbox by its frame box, "
+                     "other vendors' widgets go to CaptchaKraken",
+                     "firefox", _camoufox(False, disable_coop=True), needs_display=True,
+                     solve=_turnstile_then_captchakraken, solve_budget_s=SOLVE_BUDGET_S),
+        BrowserSetup("camoufox-headless-turnstile",
+                     "camoufox-turnstile, headless (~ the agents' camofox-browser and web_extract retry)",
+                     "firefox", _camoufox(True, disable_coop=True),
+                     solve=_turnstile_then_captchakraken, solve_budget_s=SOLVE_BUDGET_S),
     ]
 }
