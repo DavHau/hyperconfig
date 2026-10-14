@@ -1,4 +1,8 @@
-{ python3Packages, lib, chromium, xvfb-run }:
+{ python3Packages, lib, callPackage, chromium, xvfb-run }:
+let
+  camoufox-browser = callPackage ./camoufox/browser.nix { };
+  camoufox = python3Packages.callPackage ./camoufox/python.nix { };
+in
 python3Packages.buildPythonApplication {
   pname = "web-bench";
   version = "0.1.0";
@@ -10,12 +14,14 @@ python3Packages.buildPythonApplication {
     requests
     curl-cffi
     playwright
+    camoufox
   ];
 
-  # Browsers come from nixpkgs, never from a Playwright download.
+  # Browsers come from Nix, never from a Playwright/Camoufox download.
   # WEB_BENCH_BIN lets `launch` hand systemd-run this exact store path.
   makeWrapperArgs = [
     "--set WEB_BENCH_CHROMIUM ${lib.getExe chromium}"
+    "--set WEB_BENCH_CAMOUFOX ${camoufox-browser}/lib/camoufox/camoufox"
     "--set WEB_BENCH_BIN ${placeholder "out"}/bin/web-bench"
     "--set PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD 1"
     "--prefix PATH : ${lib.makeBinPath [ xvfb-run ]}"

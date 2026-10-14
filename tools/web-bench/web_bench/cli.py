@@ -120,8 +120,20 @@ def _resolve_setups(names: list[str] | None) -> list[str]:
     return names
 
 
-def cmd_plan(args) -> int:
+def _resolve_targets(names: list[str] | None) -> tuple[list[Target], list[tuple[Target, str]]]:
+    """Planned targets, optionally narrowed to `names`; excluded targets stay unreachable."""
     targets, dropped = split_targets()
+    if names:
+        known = [t.name for t in targets]
+        bad = [n for n in names if n not in known]
+        if bad or len(set(names)) != len(names):
+            sys.exit(f"targets must be distinct planned target names, unknown or excluded: {bad}")
+        targets = [t for t in targets if t.name in names]
+    return targets, dropped
+
+
+def cmd_plan(args) -> int:
+    targets, dropped = _resolve_targets(args.targets)
     names = _resolve_setups(args.setups)
     loads = make_plan(names, args.seed, args.spread_hours, targets)
     budget = _budget(args, loads)
@@ -199,7 +211,7 @@ def cmd_run(args) -> int:
     if os.geteuid() not in DYNAMIC_UID_RANGE:
         sys.exit(f"`run` executes only as a systemd DynamicUser (uid {DYNAMIC_UID_RANGE.start}-"
                  f"{DYNAMIC_UID_RANGE.stop - 1}); start it with `web-bench launch run`")
-    targets, _ = split_targets()
+    targets, _ = _resolve_targets(args.targets)
     loads = make_plan(_resolve_setups(args.setups), args.seed, args.spread_hours, targets)
     budget = _budget(args, loads)
     out_dir = Path(args.out)
@@ -312,7 +324,7 @@ def cmd_launch(args, rest: list[str]) -> int:
         if sub.seed is None:
             sub.seed = random.SystemRandom().randrange(2**31)
             rest = [*rest, "--seed", str(sub.seed)]
-        targets, _ = split_targets()
+        targets, _ = _resolve_targets(sub.targets)
         loads = make_plan(_resolve_setups(sub.setups), sub.seed, sub.spread_hours, targets)
         _budget(sub, loads)
         max_s = int(eta_s(loads) * 1.5) + 3600
@@ -343,6 +355,8 @@ def build_parser() -> argparse.ArgumentParser:
     def sweep_opts(p):
         p.add_argument("--setups", nargs="+", metavar="SETUP",
                        help="setups in sweep order (default: all, see `plan`)")
+        p.add_argument("--targets", type=lambda s: [n for n in s.split(",") if n], metavar="NAME,...",
+                       help="only these targets (comma-separated names, see `plan`; default: all)")
         p.add_argument("--seed", type=int, default=None, help="plan seed (order and delays)")
         p.add_argument("--spread-hours", type=float, default=None,
                        help="stretch the pauses so the sweep spans this many hours")
