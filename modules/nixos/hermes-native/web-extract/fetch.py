@@ -4,15 +4,21 @@ Usage: fetch.py URL [markdown|text]
 
 Output: {"url", "title", "content"} or {"url", "error", "kind", "status"}.
 The fetch impersonates Chrome's TLS/HTTP2 fingerprint (curl_cffi);
-trafilatura keeps the main content of HTML, pymupdf reads PDFs. Errors
-say why a page failed (blocked, rate limited, needs JavaScript, missing,
-network), so the agent can pick the next step instead of retrying.
+trafilatura keeps the main content of HTML, pymupdf reads PDFs. A page
+that comes back blocked or JavaScript-only is loaded once more in a
+headful Chromium on the agent's own X display ($DISPLAY), and the
+rendered DOM goes through the same extraction. Errors say why a page
+failed (blocked, rate limited, needs JavaScript, missing, network), so
+the agent can pick the next step instead of retrying.
 """
 
 import ipaddress
 import json
+import os
 import socket
 import sys
+import tempfile
+import time
 from urllib.parse import urljoin, urlsplit
 
 from curl_cffi import requests
@@ -25,6 +31,19 @@ MAX_BYTES = 25 * 1024 * 1024
 # Below this much extracted text a page is a shell: a challenge
 # interstitial or a JavaScript app.
 THIN_TEXT = 300
+
+CHROMIUM = "@chromium@"
+# Plain-fetch failures that a real browser may get past.
+RENDER_ON = ("blocked", "js_required")
+# Seconds. The whole URL stays inside BUDGET (the plugin kills the
+# worker a little later); the browser gets at most RENDER_MAX of it, and
+# is not tried with less than RENDER_MIN left.
+BUDGET = 100
+RENDER_MAX = 60
+RENDER_MIN = 20
+NETWORKIDLE = 10
+SETTLE = 6
+CHALLENGE_WAIT = 15
 
 # Markers of an anti-bot interstitial, matched in the lowercased head of
 # the body. Normal pages carry some vendor scripts too (Cloudflare injects
@@ -237,7 +256,7 @@ TEXT_TYPES = ("application/json", "application/xml", "application/rss+xml", "app
               "application/javascript", "application/x-yaml", "application/ld+json")
 
 
-def run(url, fmt):
+def plain(url, fmt):
     final_url, status, headers, body = fetch(url)
     head = body[:200_000].decode("utf-8", errors="replace").lower()
     if status >= 400:
@@ -251,9 +270,117 @@ def run(url, fmt):
         title, content = "", decode(body, headers)
     else:
         raise Failure("unsupported", f"Unsupported content type {ctype or 'unknown'}; download it with the terminal (curl -o) and process it there.", status)
+    return final_url, title, content
+
+
+def read_page(page):
+    from playwright.sync_api import Error as PlaywrightError
+
+    for _ in range(2):
+        try:
+            return page.content()
+        except PlaywrightError:  # the page navigated while being read
+            time.sleep(2)
+    return ""
+
+
+def render(url, deadline):
+    """Load the page in a headful Chromium on the agent's X display, with a
+    fresh profile that is gone afterwards. Every request of the page's
+    target, each redirect hop included, passes check_public before it is
+    sent (cross-site iframes run in targets of their own, unguarded).
+    Returns (final_url, status, html)."""
+    from playwright.sync_api import Error as PlaywrightError, sync_playwright
+
+    def left_ms():
+        return max(1, int((deadline - time.monotonic()) * 1000))
+
+    public, refused, statuses = set(), [], []
+    with tempfile.TemporaryDirectory(prefix="profile-") as profile, sync_playwright() as pw:
+        ctx = pw.chromium.launch_persistent_context(
+            profile, executable_path=CHROMIUM, headless=False, timeout=left_ms())
+        try:
+            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            cdp = ctx.new_cdp_session(page)
+
+            # Fetch pauses each request, redirect hops too, before it is sent;
+            # Playwright's own routing never sees the hops.
+            def paused(event):
+                target = event["request"]["url"]
+                host = urlsplit(target).hostname
+                try:
+                    if host not in public:
+                        check_public(target)
+                        public.add(host)
+                except Failure as exc:
+                    if event.get("resourceType") == "Document":
+                        refused.append(exc)
+                    method, params = "Fetch.failRequest", {"requestId": event["requestId"], "errorReason": "BlockedByClient"}
+                else:
+                    method, params = "Fetch.continueRequest", {"requestId": event["requestId"]}
+                try:
+                    cdp.send(method, params)
+                except PlaywrightError:  # the page is closing
+                    pass
+
+            def response(resp):
+                if resp.request.is_navigation_request() and resp.frame == page.main_frame:
+                    statuses.append(resp.status)
+
+            cdp.on("Fetch.requestPaused", paused)
+            cdp.send("Fetch.enable", {"patterns": [{"urlPattern": "*", "requestStage": "Request"}]})
+            page.on("response", response)
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=left_ms())
+            except PlaywrightError:
+                if refused:
+                    raise refused[0]
+                raise
+            try:
+                page.wait_for_load_state("networkidle", timeout=min(NETWORKIDLE * 1000, left_ms()))
+            except PlaywrightError:  # beacons keep some pages busy forever
+                pass
+            time.sleep(max(0, min(SETTLE, deadline - time.monotonic())))
+            html = read_page(page)
+            # Challenge interstitials reload into the real page, or the block
+            # page, by themselves.
+            settle_by = min(deadline, time.monotonic() + CHALLENGE_WAIT)
+            while challenge_in(html[:200_000].lower()) and settle_by - time.monotonic() > 3:
+                time.sleep(3)
+                html = read_page(page)
+            return page.url, statuses[-1] if statuses else 200, html
+        finally:
+            ctx.close()
+
+
+def rendered(url, fmt, deadline):
+    final_url, status, html = render(url, deadline)
+    if status >= 400:
+        raise status_failure(status, {}, html[:200_000].lower())
+    title, content = extract_html(html.encode("utf-8"), final_url, fmt, status, {})
+    return final_url, title, content
+
+
+def run(url, fmt):
+    started = time.monotonic()
+    via = "fetch"
+    try:
+        final_url, title, content = plain(url, fmt)
+    except Failure as first:
+        left = BUDGET - (time.monotonic() - started)
+        if first.kind not in RENDER_ON or not os.environ.get("DISPLAY") or left < RENDER_MIN:
+            raise
+        try:
+            final_url, title, content = rendered(url, fmt, time.monotonic() + min(left, RENDER_MAX))
+            via = "browser"
+        except Failure as second:
+            raise Failure(first.kind, f"Both attempts failed. Plain fetch: {first} Headful browser: {second}", first.status)
+        except Exception as exc:  # Playwright: launch, navigation, timeouts
+            reason = f"{type(exc).__name__}: {(str(exc).splitlines() or [''])[0][:300]}"
+            raise Failure(first.kind, f"Both attempts failed. Plain fetch: {first} Headful browser: {reason}", first.status)
     if final_url != url:
         content = f"(Redirected to {final_url})\n\n{content}"
-    return {"url": url, "title": title, "content": content}
+    return {"url": url, "title": title, "content": content, "via": via}
 
 
 def main():

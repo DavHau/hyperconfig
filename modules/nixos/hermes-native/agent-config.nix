@@ -158,6 +158,10 @@ rec {
         # with hermes' own sealed interpreter, which lacks the venv's
         # libraries (tools/code_execution_env.py, _resolve_child_python).
         VIRTUAL_ENV = "${stateDir}/.venv";
+        # The agent's own X display (display.nix); browser.nix runs its
+        # browsers headful on it.
+        DISPLAY = "${hlib.x11Dir user}/sock/X0";
+        XAUTHORITY = "${hlib.x11Dir user}/Xauthority";
       };
       # venv root first, so python and pip resolve to the writable
       # interpreter. systemd appends /bin to every `path` entry, so this
