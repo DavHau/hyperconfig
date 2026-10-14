@@ -10,7 +10,8 @@ Safeguards enforced here (not configurable below these limits):
   on every main-frame navigation;
 - a global budget of main-frame requests per run;
 - a solver setup gets at most one bounded solve per gated load; its
-  navigations pass the same guard, hop limit and budget;
+  navigations pass the same guard, hop limit and budget; each solve leaves
+  screenshots, light-DOM HTML and a frame-tree dump under captures/;
 - `run` only executes as a systemd DynamicUser (throwaway uid) or, for
   `launch --egress mullvad`, the dedicated web-bench-mullvad system user
   whose traffic can only leave through the Mullvad tunnel; never root and
@@ -309,7 +310,9 @@ def cmd_child(args) -> int:
 
             started = datetime.now(timezone.utc)
             t0 = time.monotonic()
-            obs = s.load(load.url, guard, load.settle_s)
+            capture = {"capture_dir": Path(args.out).parent / "captures" / f"{load.seq:03d}-{load.setup}-{load.target}"} \
+                if getattr(setup, "solve", None) else {}
+            obs = s.load(load.url, guard, load.settle_s, **capture)
             load_ms = int((time.monotonic() - t0) * 1000)
             v, marker = classify.verdict(obs.status, obs.title, obs.body, obs.error)
             rec = {
