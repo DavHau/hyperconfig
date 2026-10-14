@@ -7,6 +7,8 @@ rec {
   stateRoot = "/var/lib/hermes";
   baseDir = user: "${stateRoot}/${user}";
   stateDir = user: "${baseDir user}/state";
+  # The agent's X display (display.nix): socket and cookie, owner-only.
+  x11Dir = user: "${stateDir user}/x11";
 
   # The agent's directory in the owner's home, and its working directory.
   hermesDir = user: "/home/${user}/hermes";

@@ -1,5 +1,5 @@
-# Hermes' local browser on the agents: nixpkgs Chromium, headless, as the
-# agent's own uid.
+# Hermes' local browser on the agents: nixpkgs Chromium, headful on the
+# agent's own X display (display.nix), as the agent's own uid.
 {
   config,
   lib,
@@ -20,6 +20,14 @@ in
       # neither found by that check nor runnable on NixOS. agent-browser
       # launches what the variable names.
       environment.AGENT_BROWSER_EXECUTABLE_PATH = lib.mkDefault "${pkgs.chromium}/bin/chromium";
+
+      # Headless Chromium says HeadlessChrome in its UA and fails most bot
+      # walls that a window passes. This adds --headed to every local
+      # agent-browser call (tools/browser_tool_session.py), which drops
+      # --headless=new. browser_exec drives that same Chromium over CDP
+      # (tools/browser_use_cli.py, _resolve_managed_chromium_cdp). Headed
+      # sessions outlive a turn until the inactivity reaper closes them.
+      settings.browser.headed = lib.mkDefault true;
 
       # Real-profile mode copies a desktop Chromium profile, found
       # through xdg-settings. No agent account has either, so the mode

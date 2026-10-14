@@ -2,7 +2,9 @@
 # (./web-extract) that fetches and extracts on this host, without a key
 # or a third-party service. It runs inside each agent's own process
 # tree, as the agent's uid; the extraction libraries live in their own
-# interpreter, outside the sealed hermes venv.
+# interpreter, outside the sealed hermes venv. A page that the plain
+# fetch finds blocked or JavaScript-only is rendered once more in a
+# headful Chromium on the agent's own X display (display.nix).
 {
   config,
   lib,
@@ -17,12 +19,14 @@ let
     ps.curl-cffi
     ps.trafilatura
     ps.pymupdf
+    ps.playwright
   ]);
 
   plugin = pkgs.runCommand "hermes-web-local-extract" { } ''
     cp -r ${./web-extract} $out
     chmod -R u+w $out
     substituteInPlace $out/__init__.py --replace-fail '@python@' '${python}/bin/python3'
+    substituteInPlace $out/fetch.py --replace-fail '@chromium@' '${pkgs.chromium}/bin/chromium'
   '';
 in
 {

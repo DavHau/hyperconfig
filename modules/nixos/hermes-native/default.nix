@@ -12,7 +12,9 @@
 #   - a root-held dashboard port bridged per connection to the owner's
 #     backend by an owner-uid-checking forward (forwards.nix),
 #   - owner-only iptables gates on the dashboard and backend ports
-#     (firewall.nix).
+#     (firewall.nix),
+#   - a per-agent X display whose only socket and cookie sit in the
+#     owner's 0700 dir (display.nix).
 #
 # `inputs` are this flake's (specialArgs): hermes-agent for the package,
 # spaces for the agent skills.
@@ -25,5 +27,6 @@
     ./searxng.nix
     ./web-extract.nix
     ./browser.nix
+    ./display.nix
   ];
 }
