@@ -9,6 +9,8 @@ Safeguards enforced here (not configurable below these limits):
 - public GET pages only, with a hard exclusion list checked at plan time and
   on every main-frame navigation;
 - a global budget of main-frame requests per run;
+- a solver setup gets at most one bounded solve per gated load; its
+  navigations pass the same guard, hop limit and budget;
 - `run` only executes as a systemd DynamicUser (throwaway uid), never root
   and never an agent uid; `launch` starts it that way.
 """
@@ -95,7 +97,10 @@ def _check_host_gaps(loads: list[Load]) -> None:
 
 
 def eta_s(loads: list[Load]) -> float:
-    return sum(l.delay_before_s + _est_load_s(l.setup, l.settle_s) for l in loads)
+    """Counts a solver setup's full solve budget on every load (it sizes the hard stop);
+    the host-gap check does not, so a solve never counts towards a gap."""
+    return sum(l.delay_before_s + _est_load_s(l.setup, l.settle_s) + getattr(SETUPS[l.setup], "solve_budget_s", 0.0)
+               for l in loads)
 
 
 def _fmt_dur(s: float) -> str:
@@ -296,6 +301,8 @@ def cmd_child(args) -> int:
             }
             if load.source == "smoke":
                 rec["fingerprint"] = _fingerprint(obs.body)
+            if obs.solver is not None:
+                rec["solver"] = obs.solver
             out.write(json.dumps(rec) + "\n")
             out.flush()
             print(f"{load.seq:4d} {load.setup:18s} {v:7s} {obs.status!s:4s} {load_ms:6d}ms {load.url}",
@@ -336,6 +343,8 @@ def cmd_launch(args, rest: list[str]) -> int:
         "MemoryMax=4G", "Nice=10", f"RuntimeMaxSec={max_s}",
         "Environment=HOME=/tmp", "Environment=TMPDIR=/tmp", "WorkingDirectory=/tmp",
     ]
+    if os.environ.get("VLLM_BASE_URL"):  # CaptchaKraken endpoint override; the unit gets no caller env
+        props.append(f"Environment=VLLM_BASE_URL={os.environ['VLLM_BASE_URL']}")
     cmd = ["systemd-run", f"--unit={UNIT}", "--collect", "--no-ask-password"]
     for p in props:
         cmd += ["-p", p]

@@ -7,7 +7,8 @@ never carry over between targets.
 
 To add a browser engine, add one `BrowserSetup` to `SETUPS` whose
 `launch_options` returns the Playwright `launch_persistent_context` keyword
-arguments for that engine, and add the engine to default.nix.
+arguments for that engine, and add the engine to default.nix. A setup with
+`solve` gets one solver attempt on a load that classifies as gated.
 """
 from __future__ import annotations
 
@@ -22,9 +23,13 @@ from html import unescape
 from typing import Callable, Iterator
 from contextlib import contextmanager
 
+from . import classify
+
 NAV_TIMEOUT_S = 45
 NETWORKIDLE_S = 10
 MAX_HOPS = 10  # main-frame navigations (redirects, challenge reloads) per load
+SOLVE_BUDGET_S = 120  # CaptchaKraken's own deadline per solve
+SOLVE_MAX_LOOPS = 6  # solver rounds per solve (one model request each, more on dynamic grids)
 
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
 
@@ -46,6 +51,7 @@ class Observation:
     title: str = ""
     body: str = ""
     error: str | None = None
+    solver: dict | None = None
 
 
 def _title(body: str) -> str:
@@ -132,6 +138,9 @@ class BrowserSetup:
     engine: str  # Playwright browser type: chromium | firefox
     launch_options: Callable[[], dict]
     needs_display: bool = False
+    # Run on a gated load's page; returns the outcome recorded as `solver`.
+    solve: Callable[[object], dict] | None = None
+    solve_budget_s: float = 0.0
 
     @contextmanager
     def open(self) -> Iterator["BrowserSetup"]:
@@ -179,15 +188,10 @@ class BrowserSetup:
             page.route("**/*", route)
             page.on("response", on_response)
             page.goto(url, wait_until="domcontentloaded")
-            try:
-                page.wait_for_load_state("networkidle", timeout=NETWORKIDLE_S * 1000)
-            except Exception:  # noqa: BLE001 - beacons keep some pages busy forever
-                pass
-            time.sleep(settle_s)
-            obs.title, obs.body = _read_page(page)
-            if obs.body and len(obs.body) < 5000 and re.search(r"cf_chl_opt|perfdrive|_incapsula_", obs.body, re.I):
-                time.sleep(3)  # interstitial shims reload into the real page or the block page
-                obs.title, obs.body = _read_page(page)
+            _settle_and_read(page, obs, settle_s)
+            if self.solve and classify.verdict(obs.status, obs.title, obs.body, obs.error)[0] == "gated":
+                obs.solver = self.solve(page)
+                _settle_and_read(page, obs, settle_s)
             obs.final_url = page.url
         except Exception as e:  # noqa: BLE001 - every failure is a result
             if not obs.error:
@@ -202,6 +206,18 @@ class BrowserSetup:
         return obs
 
 
+def _settle_and_read(page, obs: Observation, settle_s: float) -> None:
+    try:
+        page.wait_for_load_state("networkidle", timeout=NETWORKIDLE_S * 1000)
+    except Exception:  # noqa: BLE001 - beacons keep some pages busy forever
+        pass
+    time.sleep(settle_s)
+    obs.title, obs.body = _read_page(page)
+    if obs.body and len(obs.body) < 5000 and re.search(r"cf_chl_opt|perfdrive|_incapsula_", obs.body, re.I):
+        time.sleep(3)  # interstitial shims reload into the real page or the block page
+        obs.title, obs.body = _read_page(page)
+
+
 def _read_page(page) -> tuple[str, str]:
     for _ in range(2):
         try:
@@ -209,6 +225,25 @@ def _read_page(page) -> tuple[str, str]:
         except Exception:  # noqa: BLE001 - page navigated while reading
             time.sleep(2)
     return "", ""
+
+
+def _captchakraken_solve(page) -> dict:
+    """One CaptchaKraken PageSolver run against the self-hosted model (VLLM_BASE_URL, see default.nix)."""
+    from captchakraken import CaptchaSolver, PageSolver
+    from captchakraken.config import base_url
+    from captchakraken.page_solver import PageSolverConfig
+    model = CaptchaSolver()
+    solver = PageSolver(PageSolverConfig(overall_solve_timeout_ms=SOLVE_BUDGET_S * 1000,
+                                         max_solve_loops=SOLVE_MAX_LOOPS), solver=model)
+    out: dict = {"attempted": True, "solved": False, "rounds": 0, "endpoint": base_url(), "error": None}
+    t0 = time.monotonic()
+    try:
+        out["solved"] = bool(solver.solve(page).is_solved)
+    except Exception as e:  # noqa: BLE001 - no widget, timeout, vendor refusal, endpoint down: all outcomes
+        out["error"] = f"{type(e).__name__}: {(str(e).splitlines() or [''])[0][:300]}"
+    out["rounds"] = len(model.planner.token_usage)
+    out["duration_ms"] = int((time.monotonic() - t0) * 1000)
+    return out
 
 
 def _chromium(headless: bool) -> Callable[[], dict]:
@@ -238,6 +273,7 @@ def _camoufox(headless: bool) -> Callable[[], dict]:
 
 # Default sweep order: least bot-like first, so a reputation hit caused by an
 # obvious bot client cannot bias the setups that follow it on the same domain.
+# The solver runs last: its clicks on a challenge must not bias any other setup.
 SETUPS: dict[str, HttpSetup | BrowserSetup] = {
     s.name: s
     for s in [
@@ -253,5 +289,9 @@ SETUPS: dict[str, HttpSetup | BrowserSetup] = {
                      "chromium", _chromium(True)),
         HttpSetup("requests", "python requests, default headers (~ agents' raw curl/urllib)",
                   _requests_session, _requests_version),
+        BrowserSetup("camoufox-captchakraken",
+                     "camoufox-headful, plus one CaptchaKraken solve (self-hosted model on vit) when gated",
+                     "firefox", _camoufox(False), needs_display=True,
+                     solve=_captchakraken_solve, solve_budget_s=SOLVE_BUDGET_S),
     ]
 }
