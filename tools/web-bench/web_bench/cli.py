@@ -11,14 +11,17 @@ Safeguards enforced here (not configurable below these limits):
 - a global budget of main-frame requests per run;
 - a solver setup gets at most one bounded solve per gated load; its
   navigations pass the same guard, hop limit and budget;
-- `run` only executes as a systemd DynamicUser (throwaway uid), never root
-  and never an agent uid; `launch` starts it that way.
+- `run` only executes as a systemd DynamicUser (throwaway uid) or, for
+  `launch --egress mullvad`, the dedicated web-bench-mullvad system user
+  whose traffic can only leave through the Mullvad tunnel; never root and
+  never an agent uid. `launch` starts it that way.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import pwd
 import random
 import re
 import shutil
@@ -40,8 +43,11 @@ MAX_DELAY_S = 8.0
 MIN_HOST_GAP_S = 300.0  # planned time between two hits on one target
 HARD_MAX_BUDGET = 1000  # main-frame requests per run, whatever --budget says
 DYNAMIC_UID_RANGE = range(61184, 65520)  # systemd DynamicUser= allocation range
-STATE_ROOT = Path("/var/lib/web-bench")  # StateDirectory=web-bench
 UNIT = "web-bench"  # fixed unit name: systemd refuses a second concurrent run
+# --egress mullvad: a fixed user (modules/nixos/web-bench-mullvad.nix) that
+# modules/nixos/mullvad-egress routes only through this interface.
+MULLVAD_USER = "web-bench-mullvad"
+MULLVAD_IFACE = "wg-mullvad"
 
 # Rough per-load wall time for ETAs (launch + load + network idle + settle).
 _EST_HTTP_S = 3.0
@@ -211,11 +217,27 @@ def _write_plan(out_dir: Path, args, loads: list[Load], budget: int) -> None:
     }, indent=1))
 
 
+def _mullvad_uid() -> int | None:
+    try:
+        return pwd.getpwnam(MULLVAD_USER).pw_uid
+    except KeyError:
+        return None
+
+
+def _check_tunnel(uid: int) -> None:
+    """Refuse unless both address families of `uid` route into the tunnel."""
+    for probe in ("1.1.1.1", "2606:4700:4700::1111"):
+        r = subprocess.run(["ip", "route", "get", probe, "uid", str(uid)], capture_output=True, text=True)
+        if f" dev {MULLVAD_IFACE} " not in f" {r.stdout} ":
+            sys.exit(f"uid {uid} does not route {probe} through {MULLVAD_IFACE}: {(r.stdout or r.stderr).strip()}")
+
+
 def cmd_run(args) -> int:
     _refuse_root()
-    if os.geteuid() not in DYNAMIC_UID_RANGE:
+    uid = os.geteuid()
+    if uid not in DYNAMIC_UID_RANGE and uid != _mullvad_uid():
         sys.exit(f"`run` executes only as a systemd DynamicUser (uid {DYNAMIC_UID_RANGE.start}-"
-                 f"{DYNAMIC_UID_RANGE.stop - 1}); start it with `web-bench launch run`")
+                 f"{DYNAMIC_UID_RANGE.stop - 1}) or {MULLVAD_USER}; start it with `web-bench launch run`")
     targets, _ = _resolve_targets(args.targets)
     loads = make_plan(_resolve_setups(args.setups), args.seed, args.spread_hours, targets)
     budget = _budget(args, loads)
@@ -318,9 +340,9 @@ def cmd_summarize(args) -> int:
 
 
 def cmd_launch(args, rest: list[str]) -> int:
-    """Start `run`/`smoke` as a transient systemd service with a throwaway DynamicUser."""
+    """Start `run`/`smoke` as a transient systemd service: a throwaway DynamicUser, or the tunnel-only user."""
     if os.geteuid() != 0:
-        sys.exit("launch needs root to start a system unit (the bench itself runs as a DynamicUser)")
+        sys.exit("launch needs root to start a system unit (the bench itself runs unprivileged)")
     self_bin = os.environ.get("WEB_BENCH_BIN")
     if not self_bin or not self_bin.startswith("/nix/store/"):
         sys.exit("WEB_BENCH_BIN is not set to the packaged web-bench binary")
@@ -336,8 +358,20 @@ def cmd_launch(args, rest: list[str]) -> int:
         _budget(sub, loads)
         max_s = int(eta_s(loads) * 1.5) + 3600
         print(f"{len(loads)} loads, estimated {_fmt_dur(eta_s(loads))}, hard stop after {_fmt_dur(max_s)}")
-    props = [
-        "DynamicUser=yes", f"StateDirectory={UNIT}", "PrivateTmp=yes", "ProtectSystem=strict",
+    if args.egress == "mullvad":
+        uid = _mullvad_uid()
+        if uid is None:
+            sys.exit(f"no {MULLVAD_USER} user on this host")
+        _check_tunnel(uid)
+        state = f"{UNIT}-mullvad"  # apart from the DynamicUser runs' state
+        identity = [f"User={MULLVAD_USER}", f"Group={MULLVAD_USER}", f"StateDirectory={state}"]
+        results = Path("/var/lib") / state / run_id
+    else:
+        state = UNIT
+        identity = ["DynamicUser=yes", f"StateDirectory={state}"]
+        results = Path("/var/lib/private") / state / run_id
+    props = identity + [
+        "PrivateTmp=yes", "ProtectSystem=strict",
         "ProtectHome=yes", "NoNewPrivileges=yes", "RestrictSUIDSGID=yes", "ProtectKernelTunables=yes",
         "ProtectKernelModules=yes", "ProtectControlGroups=yes", "LockPersonality=yes",
         "MemoryMax=4G", "Nice=10", f"RuntimeMaxSec={max_s}",
@@ -348,11 +382,11 @@ def cmd_launch(args, rest: list[str]) -> int:
     cmd = ["systemd-run", f"--unit={UNIT}", "--collect", "--no-ask-password"]
     for p in props:
         cmd += ["-p", p]
-    cmd += [self_bin, args.what, "--out", str(STATE_ROOT / run_id), *rest]
+    cmd += [self_bin, args.what, "--out", f"/var/lib/{state}/{run_id}", *rest]
     print(" ".join(cmd))
     rc = subprocess.run(cmd).returncode
     if rc == 0:
-        print(f"follow: journalctl -fu {UNIT}\nresults: /var/lib/private/{UNIT}/{run_id}/")
+        print(f"follow: journalctl -fu {UNIT}\nresults: {results}/")
     return rc
 
 
@@ -374,7 +408,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("plan", help="dry run: list planned loads, delays and exclusions (no network)")
     sweep_opts(p)
-    p = sub.add_parser("run", help="one sweep (DynamicUser only; use `launch run`)")
+    p = sub.add_parser("run", help="one sweep (launched units only; use `launch run`)")
     sweep_opts(p)
     p.add_argument("--out", required=True, help="new results directory")
     p = sub.add_parser("smoke", help=f"one load of {SMOKE_URL} per setup")
@@ -382,8 +416,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", default=None, help="new results directory (default: under $TMPDIR)")
     p = sub.add_parser("summarize", help="summary tables for a results directory")
     p.add_argument("dir")
-    p = sub.add_parser("launch", help="as root: start `run`/`smoke` under a systemd DynamicUser")
+    p = sub.add_parser("launch", help="as root: start `run`/`smoke` under a systemd DynamicUser (or the --egress user)")
     p.add_argument("what", choices=["run", "smoke"])
+    p.add_argument("--egress", choices=["direct", "mullvad"], default="direct",
+                   help=f"mullvad: run as {MULLVAD_USER}, whose traffic leaves only via {MULLVAD_IFACE}")
     p = sub.add_parser("_child")
     p.add_argument("--plan", required=True)
     p.add_argument("--setup", required=True)
