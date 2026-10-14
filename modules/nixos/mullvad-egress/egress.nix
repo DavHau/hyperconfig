@@ -50,6 +50,17 @@ let
   ]
   ++ ipv6Prefixes;
 
+  # WireGuard's encrypted packets still carry the sending socket's uid, so
+  # the kill switch must let them reach the relays over the uplink.
+  relayEndpoints = map (
+    r:
+    let
+      m = builtins.match "([0-9.]+):([0-9]+)" r.endpoint;
+    in
+    assert lib.assertMsg (m != null) "hyper.mullvadEgress.relays: ${r.endpoint} is not IPv4 host:port";
+    "${lib.elemAt m 0} . ${lib.elemAt m 1}"
+  ) cfg.relays;
+
   first = lib.head cfg.relays;
   registered = cfg.addresses != [ ];
 
@@ -118,6 +129,7 @@ in
 
             chain tunneled {
               oifname { "lo", "${iface}" } accept
+              ip daddr . udp dport { ${lib.concatStringsSep ", " relayEndpoints} } accept
               ip daddr { ${lib.concatStringsSep ", " direct4} } accept
               ip6 daddr { ${lib.concatStringsSep ", " direct6} } accept
               reject with icmpx no-route

@@ -25,6 +25,8 @@ pkgs.testers.runNixOSTest {
         "10.64.0.1/32"
         "fc00:bbbb:bbbb:bb01::1/128"
         "203.0.113.10/32"
+        # Relay endpoint outside every direct prefix, like a real relay.
+        "192.0.2.2/32"
         "198.51.100.10/32"
         "2001:db8:ff::10/128"
       ];
@@ -85,11 +87,11 @@ pkgs.testers.runNixOSTest {
         privateKeyFile = "${clientKey}";
         relays = [
           {
-            endpoint = "192.168.1.2:51821";
+            endpoint = "192.0.2.2:51821";
             publicKey = deadPub;
           }
           {
-            endpoint = "192.168.1.2:51820";
+            endpoint = "192.0.2.2:51820";
             publicKey = relayPub;
           }
         ];
