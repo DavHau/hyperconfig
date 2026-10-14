@@ -3,6 +3,7 @@
 {
   config,
   lib,
+  pkgs,
   ...
 }:
 let
@@ -21,6 +22,18 @@ in
 
     services.searx = {
       enable = true;
+      # Patches, so the build fails once upstream changes the code they touch.
+      package = pkgs.searxng.overrideAttrs (old: {
+        patches = (old.patches or [ ]) ++ [
+          # Upstream fix of 2026-10-07: an entity without a description
+          # crashed the whole wikidata answer.
+          ./patches/searxng-wikidata-no-description.patch
+          # Firefox UAs (gen_useragent) get Firefox's TLS/HTTP2 fingerprint
+          # instead of the default Chrome one. Not a global switch: Yahoo
+          # answers 500 to curl_cffi's firefox147 target.
+          ./patches/searxng-firefox-ua-fingerprint.patch
+        ];
+      });
       # The key rides the SEARXNG_SECRET env var, never the settings:
       # the rendered settings.yml lands in the world-readable store.
       environmentFile = envFile;
