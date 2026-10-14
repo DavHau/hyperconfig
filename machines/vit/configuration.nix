@@ -10,6 +10,7 @@
     ../../modules/nixos/storagebox.nix
     ../../modules/nixos/vault-nfs-client.nix
     ../../modules/nixos/hermes-agents-gpu-host.nix
+    ../../modules/nixos/captchakraken-server.nix
     ../../modules/nixos/users/stefan-vault.nix
     ../../modules/nixos/tang-server.nix
     ../../modules/nixos/luks-unlock
