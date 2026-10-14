@@ -1,0 +1,176 @@
+# The agents' browser: per agent a camofox-browser server driving a
+# headless Camoufox (anti-detect Firefox over Juggler, no CDP), behind
+# hermes' built-in browser_* tools (its Camofox backend,
+# tools/browser_camofox.py). With Camofox selected, hermes drops the
+# CDP-only browser_exec tool (tools/browser_use_cli.py,
+# is_browser_use_cli_mode).
+#
+# Per agent, as the agent's uid:
+#   - the server binds 127.0.0.1:<camofoxBackendBase + uid>; the agent
+#     dials its root-held port (lib.nix), bridged per connection by the
+#     owner-checking forward (forwards.nix), which also starts the server
+#     on first use; both ports are owner-only (firewall.nix),
+#   - every route but /health needs the agent's access key, generated
+#     once into a 0600 file in the agent's 0700 state dir,
+#   - the profile store (cookies and storage of hermes' stable per-agent
+#     userId, so a cleared Cloudflare or Akamai check carries over) lives
+#     next to it.
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
+let
+  cfg = config.services.hermes-native;
+  hlib = import ./lib.nix { inherit lib; };
+
+  # The build camofox-browser 1.18.1 tests against
+  # (lib/camoufox-download.js); camoufox-js rejects newer ones.
+  camoufox = pkgs.callPackage ../../../pkgs/camoufox/browser.nix {
+    version = "152.0.4-beta.30";
+    hash = "sha256-VyDUW4lM4XcFQ94CTG8Q1RSzi+Vg+i3DIms9hYbK9nI=";
+  };
+  camofox = pkgs.callPackage ../../../pkgs/camofox-browser { };
+
+  # Seconds a navigation waits for a self-clearing challenge
+  # (pkgs/camofox-browser/challenge-wait.patch).
+  challengeWait = 30;
+  # A navigation route's budget is NAVIGATE_TIMEOUT_MS + the challenge
+  # wait + 5 s (patch); hermes gives a navigate 60 s
+  # (browser_camofox.py, _navigate_tab).
+  navigateTimeout = 20;
+
+  keyFile = user: "${hlib.camofoxDir user}/access-key";
+
+  # Both the server and the agent run this before they read the key, in
+  # either order: the first link wins, the loser's copy is dropped.
+  ensureKey =
+    user:
+    pkgs.writeShellScript "hermes-camofox-key" ''
+      set -eu
+      umask 0077
+      key=${keyFile user}
+      [ -s "$key" ] && exit 0
+      ${pkgs.coreutils}/bin/mkdir -p ${hlib.camofoxDir user}
+      ${pkgs.coreutils}/bin/od -An -N32 -tx1 /dev/urandom | ${pkgs.coreutils}/bin/tr -d ' \n' > "$key.$$"
+      ${pkgs.coreutils}/bin/ln "$key.$$" "$key" 2>/dev/null || true
+      ${pkgs.coreutils}/bin/rm -f "$key.$$"
+    '';
+
+  serve =
+    user:
+    pkgs.writeShellScript "hermes-camofox" ''
+      set -eu
+      CAMOFOX_ACCESS_KEY=$(${pkgs.coreutils}/bin/cat ${keyFile user})
+      CAMOFOX_PORT=$((${toString hlib.camofoxBackendBase} + $(${pkgs.coreutils}/bin/id -u)))
+      export CAMOFOX_ACCESS_KEY CAMOFOX_PORT
+      exec ${lib.getExe camofox}
+    '';
+
+  # The unit counts as started once the server listens, so the first
+  # forwarded connection does not race the bind.
+  awaitListen = pkgs.writeShellScript "hermes-camofox-ready" ''
+    port=$((${toString hlib.camofoxBackendBase} + $(${pkgs.coreutils}/bin/id -u)))
+    for _ in $(${pkgs.coreutils}/bin/seq 100); do
+      (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null && exit 0
+      ${pkgs.coreutils}/bin/sleep 0.2
+    done
+    exit 1
+  '';
+
+  forEachUser = f: lib.mkMerge (lib.mapAttrsToList (user: _: f user) cfg.users);
+in
+{
+  config = lib.mkIf cfg.enable {
+    services.hermes-native.settings.browser = {
+      cloud_provider = lib.mkDefault "camofox";
+      # A stable per-agent userId: Camofox keeps that profile's cookies.
+      camofox.managed_persistence = lib.mkDefault true;
+      # Tab creation, which carries the first navigation, may take its
+      # route budget (60 s with the challenge wait) before it answers.
+      command_timeout = lib.mkDefault 65;
+    };
+
+    systemd.services = forEachUser (
+      user:
+      let
+        dir = hlib.camofoxDir user;
+      in
+      {
+        "hermes-camofox-${user}" = {
+          description = "Camofox browser server of hermes agent ${user}";
+          after = [ "network-online.target" ];
+          wants = [ "network-online.target" ];
+          unitConfig.RequiresMountsFor = [ (hlib.stateDir user) ];
+          environment = {
+            HOME = dir;
+            NODE_ENV = "production";
+            CAMOFOX_BIND_HOST = "127.0.0.1";
+            CAMOUFOX_EXECUTABLE = "${camoufox}/lib/camoufox/camoufox";
+            # Otherwise uBlock is downloaded at every browser launch.
+            CAMOFOX_DISABLE_DEFAULT_ADDONS = "1";
+            CAMOFOX_PROFILE_DIR = "${dir}/profiles";
+            CAMOFOX_CHALLENGE_WAIT_MS = toString (challengeWait * 1000);
+            NAVIGATE_TIMEOUT_MS = toString (navigateTimeout * 1000);
+            # One agent: its persistent userId, plus the odd ephemeral one.
+            MAX_SESSIONS = "2";
+            MAX_TABS_PER_SESSION = "4";
+            MAX_TABS_GLOBAL = "6";
+            # Firefox closes after 5 idle minutes; the server stays.
+            BROWSER_IDLE_TIMEOUT_MS = "300000";
+            BROWSER_RSS_RESTART_THRESHOLD_MB = "1200";
+          };
+          serviceConfig = {
+            User = user;
+            Group = "users";
+            UMask = "0077";
+            ExecStartPre = ensureKey user;
+            ExecStart = serve user;
+            ExecStartPost = awaitListen;
+            # SIGTERM to the server only: it saves the profile's cookies
+            # from the live browser, then closes it. Signalled together,
+            # Firefox would be gone before the save.
+            KillMode = "mixed";
+            Restart = "on-failure";
+            RestartSec = 5;
+            MemoryMax = "1536M";
+            TasksMax = 1024;
+            CPUQuota = "200%";
+            # Xvfb is not on the unit PATH, so camofox runs Camoufox headless.
+            PrivateTmp = true;
+            ProtectSystem = "strict";
+            ProtectHome = true;
+            ReadWritePaths = [ dir ];
+            NoNewPrivileges = true;
+          };
+        };
+
+        # Started by the first connection to the agent's root-held port.
+        "hermes-camofox-fwd-${user}@" = {
+          wants = [ "hermes-camofox-${user}.service" ];
+          after = [ "hermes-camofox-${user}.service" ];
+        };
+
+        # The key rides the agent's .env (CAMOFOX_API_KEY is what hermes
+        # sends as its Bearer token); the managed .env is world-readable.
+        "hermes-agent-${user}".preStart = lib.mkAfter ''
+          ${ensureKey user}
+          env_file=${hlib.stateDir user}/.hermes/.env
+          ${pkgs.gnused}/bin/sed -i \
+            '/^# BEGIN hermes-native camofox$/,/^# END hermes-native camofox$/d' "$env_file"
+          {
+            echo "# BEGIN hermes-native camofox"
+            echo "CAMOFOX_URL=http://127.0.0.1:${toString (hlib.camofoxPortFor user)}"
+            echo "CAMOFOX_API_KEY=$(${pkgs.coreutils}/bin/cat ${keyFile user})"
+            echo "# END hermes-native camofox"
+          } >> "$env_file"
+        '';
+      }
+    );
+
+    systemd.tmpfiles.rules = lib.mapAttrsToList (
+      user: _: "d ${hlib.camofoxDir user} 0700 ${user} users - -"
+    ) cfg.users;
+  };
+}

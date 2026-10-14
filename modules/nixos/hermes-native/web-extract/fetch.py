@@ -6,20 +6,20 @@ Output: {"url", "title", "content"} or {"url", "error", "kind", "status"}.
 The fetch impersonates Chrome's TLS/HTTP2 fingerprint (curl_cffi);
 trafilatura keeps the main content of HTML, pymupdf reads PDFs. A page
 that comes back blocked or JavaScript-only is loaded once more in a
-headful Chromium on the agent's own X display ($DISPLAY), and the
+headless Camoufox (anti-detect Firefox) behind a guard proxy, and the
 rendered DOM goes through the same extraction. Errors say why a page
 failed (blocked, rate limited, needs JavaScript, missing, network), so
 the agent can pick the next step instead of retrying.
 """
 
+import asyncio
 import ipaddress
 import json
-import os
 import socket
 import sys
-import tempfile
+import threading
 import time
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from curl_cffi import requests
 from curl_cffi.requests.exceptions import RequestException
@@ -32,18 +32,19 @@ MAX_BYTES = 25 * 1024 * 1024
 # interstitial or a JavaScript app.
 THIN_TEXT = 300
 
-CHROMIUM = "@chromium@"
+CAMOUFOX = "@camoufox@"
 # Plain-fetch failures that a real browser may get past.
 RENDER_ON = ("blocked", "js_required")
 # Seconds. The whole URL stays inside BUDGET (the plugin kills the
 # worker a little later); the browser gets at most RENDER_MAX of it, and
-# is not tried with less than RENDER_MIN left.
+# is not tried with less than RENDER_MIN left. A challenge interstitial
+# gets up to CHALLENGE_WAIT to reload into the page.
 BUDGET = 100
-RENDER_MAX = 60
+RENDER_MAX = 75
 RENDER_MIN = 20
+CHALLENGE_WAIT = 30
 NETWORKIDLE = 10
 SETTLE = 6
-CHALLENGE_WAIT = 15
 
 # Markers of an anti-bot interstitial, matched in the lowercased head of
 # the body. Normal pages carry some vendor scripts too (Cloudflare injects
@@ -105,19 +106,25 @@ def challenge_in(head):
     return any(m in head for markers in CHALLENGE_MARKERS.values() for m in markers)
 
 
-def check_public(url):
-    """Refuse hosts that resolve to private, loopback or link-local addresses."""
-    parts = urlsplit(url)
-    if parts.scheme not in ("http", "https") or not parts.hostname:
-        raise Failure("invalid_url", f"Not an http(s) URL: {url}")
+def public_addr(host, port):
+    """The address to dial for host, refusing hosts that resolve to private,
+    loopback or link-local addresses."""
     try:
-        infos = socket.getaddrinfo(parts.hostname, parts.port or (443 if parts.scheme == "https" else 80))
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except socket.gaierror:
-        raise Failure("network", f"DNS lookup failed for {parts.hostname}: the host does not exist or DNS is down. Check the URL; do not guess hostnames.")
+        raise Failure("network", f"DNS lookup failed for {host}: the host does not exist or DNS is down. Check the URL; do not guess hostnames.")
     for info in infos:
         addr = ipaddress.ip_address(info[4][0].split("%", 1)[0])
         if not addr.is_global:
-            raise Failure("private_address", f"Blocked: {parts.hostname} resolves to a private or internal address ({addr}).")
+            raise Failure("private_address", f"Blocked: {host} resolves to a private or internal address ({addr}).")
+    return infos[0][4][0]
+
+
+def check_public(url):
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise Failure("invalid_url", f"Not an http(s) URL: {url}")
+    public_addr(parts.hostname, parts.port or (443 if parts.scheme == "https" else 80))
 
 
 def network_failure(url, exc):
@@ -284,73 +291,140 @@ def read_page(page):
     return ""
 
 
+class GuardProxy:
+    """HTTP proxy on loopback that every connection of the browser goes
+    through: navigations and their redirect hops, frames, workers,
+    fetches, WebSockets (Playwright's routing in Firefox sees neither
+    redirect hops nor WebSockets). It resolves each host itself, refuses
+    non-public ones and dials the address it checked, so a second DNS
+    answer cannot swap it. Refusals are kept per host."""
+
+    def __init__(self):
+        self.refused = {}
+        self.loop = asyncio.new_event_loop()
+        server = self.loop.run_until_complete(asyncio.start_server(self.handle, "127.0.0.1", 0))
+        self.server = f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+        threading.Thread(target=self.loop.run_forever, daemon=True).start()
+
+    async def handle(self, reader, writer):
+        try:
+            head = await reader.readuntil(b"\r\n\r\n")
+            request_line, _, headers = head.partition(b"\r\n")
+            method, target, version = request_line.decode("latin-1").split(" ", 2)
+            # CONNECT names host:port; plain HTTP comes as an absolute URI.
+            parts = urlsplit(("//" if method == "CONNECT" else "") + target)
+            if not parts.hostname or (method != "CONNECT" and parts.scheme != "http"):
+                raise ValueError(target)
+            host, port = parts.hostname, parts.port or 80
+        except (ValueError, asyncio.IncompleteReadError, asyncio.LimitOverrunError):
+            writer.close()
+            return
+        try:
+            addr = await self.loop.run_in_executor(None, public_addr, host, port)
+            upstream_reader, upstream = await asyncio.open_connection(addr, port)
+        except (Failure, OSError) as exc:
+            if isinstance(exc, Failure):
+                self.refused.setdefault(host, exc)
+            status = b"403 Forbidden" if isinstance(exc, Failure) else b"502 Bad Gateway"
+            writer.write(b"HTTP/1.1 " + status + b"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            writer.close()
+            return
+        if method == "CONNECT":
+            writer.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
+        else:
+            # One request per connection, so a reused client connection
+            # never carries a request for another host to this one.
+            kept = [h for h in headers.split(b"\r\n") if h and h.split(b":", 1)[0].strip().lower()
+                    not in (b"connection", b"proxy-connection", b"keep-alive")]
+            path = urlunsplit(("", "", parts.path or "/", parts.query, ""))
+            upstream.write(b"\r\n".join([f"{method} {path} {version}".encode("latin-1"), *kept,
+                                         b"Connection: close", b"", b""]))
+        await asyncio.gather(pipe(reader, upstream), pipe(upstream_reader, writer))
+
+
+async def pipe(source, sink):
+    try:
+        while data := await source.read(65536):
+            sink.write(data)
+            await sink.drain()
+    except OSError:
+        pass
+    finally:
+        sink.close()
+
+
 def render(url, deadline):
-    """Load the page in a headful Chromium on the agent's X display, with a
-    fresh profile that is gone afterwards. Every request of the page's
-    target, each redirect hop included, passes check_public before it is
-    sent (cross-site iframes run in targets of their own, unguarded).
-    Returns (final_url, status, html)."""
+    """Load the page in a headless Camoufox with a fresh profile (in the
+    worker's temp dir, gone afterwards), every connection through a
+    GuardProxy. Returns (final_url, status, html)."""
+    from camoufox import DefaultAddons
+    from camoufox.sync_api import NewBrowser
+    from camoufox.utils import launch_options
     from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
     def left_ms():
         return max(1, int((deadline - time.monotonic()) * 1000))
 
-    public, refused, statuses = set(), [], []
-    with tempfile.TemporaryDirectory(prefix="profile-") as profile, sync_playwright() as pw:
-        ctx = pw.chromium.launch_persistent_context(
-            profile, executable_path=CHROMIUM, headless=False, timeout=left_ms())
+    guard, statuses, documents = GuardProxy(), [], set()
+    options = launch_options(
+        executable_path=CAMOUFOX, headless=True, os="linux", locale="en-US", humanize=True,
+        # The default uBlock would be downloaded from addons.mozilla.org.
+        exclude_addons=[DefaultAddons.UBO], pin_cpu_cores=False,
+        # WebRTC's UDP would reach private addresses past the proxy.
+        block_webrtc=True,
+        firefox_user_prefs={
+            # Firefox sends loopback past any proxy unless told otherwise.
+            "network.proxy.allow_hijacking_localhost": True,
+            "network.proxy.no_proxies_on": "",
+            # QUIC does not go through an HTTP proxy.
+            "network.http.http3.enable": False,
+        },
+    )
+    # Playwright's own proxy option; camoufox's would also look up the exit IP.
+    options["proxy"] = {"server": guard.server}
+    options["timeout"] = left_ms()
+    with sync_playwright() as pw:
+        browser = NewBrowser(pw, from_options=options)
         try:
-            page = ctx.pages[0] if ctx.pages else ctx.new_page()
-            cdp = ctx.new_cdp_session(page)
+            page = browser.new_page()
 
-            # Fetch pauses each request, redirect hops too, before it is sent;
-            # Playwright's own routing never sees the hops.
-            def paused(event):
-                target = event["request"]["url"]
-                host = urlsplit(target).hostname
-                try:
-                    if host not in public:
-                        check_public(target)
-                        public.add(host)
-                except Failure as exc:
-                    if event.get("resourceType") == "Document":
-                        refused.append(exc)
-                    method, params = "Fetch.failRequest", {"requestId": event["requestId"], "errorReason": "BlockedByClient"}
-                else:
-                    method, params = "Fetch.continueRequest", {"requestId": event["requestId"]}
-                try:
-                    cdp.send(method, params)
-                except PlaywrightError:  # the page is closing
-                    pass
+            def request(req):
+                if req.is_navigation_request() and req.frame == page.main_frame:
+                    documents.add(urlsplit(req.url).hostname)
 
             def response(resp):
                 if resp.request.is_navigation_request() and resp.frame == page.main_frame:
                     statuses.append(resp.status)
 
-            cdp.on("Fetch.requestPaused", paused)
-            cdp.send("Fetch.enable", {"patterns": [{"urlPattern": "*", "requestStage": "Request"}]})
+            def refusal():
+                return next((guard.refused[h] for h in documents if h in guard.refused), None)
+
+            page.on("request", request)
             page.on("response", response)
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=left_ms())
             except PlaywrightError:
-                if refused:
-                    raise refused[0]
+                if refusal():
+                    raise refusal()
                 raise
+            # Challenge interstitials reload into the real page, or the block
+            # page, by themselves.
+            challenge_by = min(deadline, time.monotonic() + CHALLENGE_WAIT)
+            html = read_page(page)
+            while challenge_in(html[:200_000].lower()) and challenge_by - time.monotonic() > 1:
+                time.sleep(1)
+                html = read_page(page)
             try:
                 page.wait_for_load_state("networkidle", timeout=min(NETWORKIDLE * 1000, left_ms()))
             except PlaywrightError:  # beacons keep some pages busy forever
                 pass
             time.sleep(max(0, min(SETTLE, deadline - time.monotonic())))
             html = read_page(page)
-            # Challenge interstitials reload into the real page, or the block
-            # page, by themselves.
-            settle_by = min(deadline, time.monotonic() + CHALLENGE_WAIT)
-            while challenge_in(html[:200_000].lower()) and settle_by - time.monotonic() > 3:
-                time.sleep(3)
-                html = read_page(page)
+            if refusal():
+                raise refusal()
             return page.url, statuses[-1] if statuses else 200, html
         finally:
-            ctx.close()
+            browser.close()
 
 
 def rendered(url, fmt, deadline):
@@ -368,16 +442,16 @@ def run(url, fmt):
         final_url, title, content = plain(url, fmt)
     except Failure as first:
         left = BUDGET - (time.monotonic() - started)
-        if first.kind not in RENDER_ON or not os.environ.get("DISPLAY") or left < RENDER_MIN:
+        if first.kind not in RENDER_ON or left < RENDER_MIN:
             raise
         try:
             final_url, title, content = rendered(url, fmt, time.monotonic() + min(left, RENDER_MAX))
             via = "browser"
         except Failure as second:
-            raise Failure(first.kind, f"Both attempts failed. Plain fetch: {first} Headful browser: {second}", first.status)
+            raise Failure(first.kind, f"Both attempts failed. Plain fetch: {first} Browser: {second}", first.status)
         except Exception as exc:  # Playwright: launch, navigation, timeouts
             reason = f"{type(exc).__name__}: {(str(exc).splitlines() or [''])[0][:300]}"
-            raise Failure(first.kind, f"Both attempts failed. Plain fetch: {first} Headful browser: {reason}", first.status)
+            raise Failure(first.kind, f"Both attempts failed. Plain fetch: {first} Browser: {reason}", first.status)
     if final_url != url:
         content = f"(Redirected to {final_url})\n\n{content}"
     return {"url": url, "title": title, "content": content, "via": via}

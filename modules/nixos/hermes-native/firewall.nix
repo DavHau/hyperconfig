@@ -1,7 +1,8 @@
-# Owner-only loopback gates for every agent port: the root-held dashboard
-# port and the owner-bound backend answer the owner and root only; any
-# other uid (another agent included) gets a reset. Consumers append gates
-# for their own ports to the same chain (hlib.chain).
+# Owner-only loopback gates for every agent port: each root-held port
+# (hlib.forwards: dashboard, Camofox) and its owner-bound backend answer
+# the owner and root only; any other uid (another agent included) gets a
+# reset. Consumers append gates for their own ports to the same chain
+# (hlib.chain).
 {
   config,
   lib,
@@ -18,14 +19,19 @@ let
     iptables -w -A ${chain} -p tcp --dport ${toString port} -m owner --uid-owner 0 -j RETURN
     iptables -w -A ${chain} -p tcp --dport ${toString port} -j REJECT --reject-with tcp-reset
   '';
-  # The backend port is base + uid; the uid resolves when the script
-  # runs, and iptables takes the number then.
+  # A backend port is base + uid; the uid resolves when the script runs,
+  # and iptables takes the number then.
   firewallRules = lib.concatStrings (
-    lib.mapAttrsToList (
-      user: _:
-      ownerOnlyRules (hlib.dashboardPortFor user) user
-      + ownerOnlyRules "$((${toString hlib.dashboardBackendBase} + $(id -u ${user})))" user
-    ) cfg.users
+    lib.concatLists (
+      lib.mapAttrsToList (
+        user: _:
+        lib.mapAttrsToList (
+          _: fwd:
+          ownerOnlyRules (fwd.portFor user) user
+          + ownerOnlyRules "$((${toString fwd.backendBase} + $(id -u ${user})))" user
+        ) hlib.forwards
+      ) cfg.users
+    )
   );
 in
 {

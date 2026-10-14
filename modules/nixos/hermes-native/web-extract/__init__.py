@@ -1,12 +1,12 @@
 """web_extract backend `local-extract`: fetch and extract on this host.
 
 Each URL runs fetch.py in its own child process under a separate Nix
-interpreter (curl_cffi, trafilatura, pymupdf, playwright). Those libraries
+interpreter (curl_cffi, trafilatura, pymupdf, camoufox). Those libraries
 stay out of the sealed hermes venv, and a hang or crash costs one page,
 not the agent. The child gets no secrets: its environment is built from
-scratch, plus the agent's X display for the browser retry. It runs in its
-own process group and temp dir, so a timeout takes its browser down and
-the browser profile with it.
+scratch, with HOME and TMPDIR in its own temp dir. It runs in its own
+process group, so a timeout takes its browser down, and the temp dir,
+browser profile included, goes with it.
 """
 
 from __future__ import annotations
@@ -46,8 +46,7 @@ async def _stop(proc: asyncio.subprocess.Process) -> None:
 async def _extract_one(url: str, fmt: str) -> Dict[str, Any]:
     tmp = tempfile.mkdtemp(prefix="local-extract-")
     try:
-        env = {"HOME": os.environ.get("HOME", "/"), "LANG": "C.UTF-8", "PATH": "/nonexistent", "TMPDIR": tmp}
-        env.update({k: os.environ[k] for k in ("DISPLAY", "XAUTHORITY") if k in os.environ})
+        env = {"HOME": tmp, "LANG": "C.UTF-8", "PATH": "/nonexistent", "TMPDIR": tmp}
         proc = await asyncio.create_subprocess_exec(
             PYTHON, SCRIPT, url, fmt,
             stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
