@@ -31,6 +31,12 @@ let
     '';
   };
 
+  # merge.sh symlinks every file in here into noctalia's plugin dir.
+  pluginSrc = lib.fileset.toSource {
+    root = ./plugin;
+    fileset = lib.fileset.fileFilter (f: f.hasExt "qml" || f.name == "manifest.json") ./plugin;
+  };
+
   mergeConfig = pkgs.writeShellApplication {
     name = "noctalia-anthropic-usage-merge";
     runtimeInputs = [
@@ -38,7 +44,7 @@ let
       pkgs.coreutils
     ];
     text = ''
-      export ANTHROPIC_USAGE_PLUGIN_SRC=${./plugin}
+      export ANTHROPIC_USAGE_PLUGIN_SRC=${pluginSrc}
       ${builtins.readFile ./merge.sh}
     '';
   };

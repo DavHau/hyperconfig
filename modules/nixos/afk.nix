@@ -24,6 +24,12 @@
 # deploying them here would be an overwrite race).
 let
   common = import ./omp-common.nix { inherit pkgs inputs lib config; };
+  skill =
+    dir:
+    lib.fileset.toSource {
+      root = dir;
+      fileset = dir + "/SKILL.md";
+    };
 in
 {
   environment.systemPackages = [
@@ -40,8 +46,8 @@ in
         ln -sf ${./default-rules.md} "$config_dir/rules/default-rules.md"
         # Personal skills (see modules/nixos/skills/): symlinked per-skill so
         # user-created skills next to them survive.
-        ln -sfn ${./skills/external-scripts} "$config_dir/skills/external-scripts"
-        ln -sfn ${./skills/project-init} "$config_dir/skills/project-init"
+        ln -sfn ${skill ./skills/external-scripts} "$config_dir/skills/external-scripts"
+        ln -sfn ${skill ./skills/project-init} "$config_dir/skills/project-init"
         # jobs-hub extension: background-bash-jobs widget + Ctrl+J / /bashjobs
         # overlay; Enter prints a job's log into the chat transcript (native
         # scrollback). /jobs is taken by the builtin printout; source + tests

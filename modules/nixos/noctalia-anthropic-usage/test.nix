@@ -29,7 +29,17 @@ pkgs.runCommand "noctalia-anthropic-usage-test"
       pkgs.bash
       pkgs.qt6.qtdeclarative
     ];
-    src = ./.;
+    # Only the files the test reads; unrelated edits here don't re-run it.
+    src = pkgs.lib.fileset.toSource {
+      root = ./.;
+      fileset = pkgs.lib.fileset.unions [
+        ./poller.py
+        ./test-poller.py
+        ./merge.sh
+        ./test-merge.sh
+        (pkgs.lib.fileset.fileFilter (f: f.hasExt "qml" || f.name == "manifest.json") ./plugin)
+      ];
+    };
     qsImports = noctaliaImports;
     qsModules = qmllint.quickshellShim;
     qtModules = "${pkgs.qt6.qtdeclarative}/lib/qt-6/qml";
