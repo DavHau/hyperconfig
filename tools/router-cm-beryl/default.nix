@@ -3,7 +3,16 @@ pkgs.python3Packages.buildPythonApplication {
   pname = "router-cm-beryl";
   version = "0.1.0";
   pyproject = true;
-  src = ./.;
+  # Only what setuptools packages (incl. package-data); no docs, no __pycache__.
+  src = pkgs.lib.fileset.toSource {
+    root = ./.;
+    fileset = pkgs.lib.fileset.unions [
+      ./pyproject.toml
+      (pkgs.lib.fileset.fileFilter (
+        f: f.hasExt "py" || pkgs.lib.hasPrefix "lan6-fallback." f.name
+      ) ./router_cm_beryl)
+    ];
+  };
 
   build-system = [ pkgs.python3Packages.setuptools ];
 

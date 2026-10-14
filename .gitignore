@@ -5,3 +5,4 @@ result*
 .venv-*
 *.iso
 *.tar.gz
+__pycache__/

@@ -58,7 +58,10 @@ let
   gpuHost = config.hyper.hermesAgentsGpuHost;
   gpuSkill = inputs.spaces.lib.mkAgentSkill pkgs {
     name = "gpu-host";
-    src = ./hermes-agents-gpu-skill;
+    src = lib.fileset.toSource {
+      root = ./hermes-agents-gpu-skill;
+      fileset = ./hermes-agents-gpu-skill/SKILL.md;
+    };
   };
 in
 {
