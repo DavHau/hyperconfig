@@ -1,0 +1,78 @@
+--- a/server.js
++++ b/server.js
+@@ -506,6 +506,9 @@
+ const PAGE_CLOSE_TIMEOUT_MS = 5000;
+ const PAGE_FORCE_CLOSE_TIMEOUT_MS = 1000;
+ const NAVIGATE_TIMEOUT_MS = CONFIG.navigateTimeoutMs;
++// A navigation that lands on a self-clearing anti-bot interstitial waits up
++// to this long for it to reload into the page; 0 returns the interstitial.
++const CHALLENGE_WAIT_MS = parseInt(process.env.CAMOFOX_CHALLENGE_WAIT_MS, 10) || 0;
+ const BUILDREFS_TIMEOUT_MS = CONFIG.buildrefsTimeoutMs;
+ const NATIVE_MEM_RESTART_THRESHOLD_MB = CONFIG.nativeMemRestartThresholdMb;
+ let _nativeMemBaseline = null; // RSS - heapUsed at first idle measurement
+@@ -605,14 +608,14 @@
+ }
+ 
+ function navigationRequestTimeoutMs() {
+-  return Math.max(requestTimeoutMs(), NAVIGATE_TIMEOUT_MS + 5000);
++  return Math.max(requestTimeoutMs(), NAVIGATE_TIMEOUT_MS + CHALLENGE_WAIT_MS + 5000);
+ }
+ 
+ // A tab creation can make one bounded new-page attempt, rebuild the browser
+ // session, then make one more. Keep the route deadline outside that recovery
+ // budget so a healthy replacement session can return its tab.
+ function tabCreateRequestTimeoutMs() {
+-  return Math.max(requestTimeoutMs(), (NEW_PAGE_TIMEOUT_MS * 2) + 5000);
++  return Math.max(requestTimeoutMs(), (NEW_PAGE_TIMEOUT_MS * 2) + 5000) + CHALLENGE_WAIT_MS;
+ }
+ 
+ const userConcurrency = new Map();
+@@ -2077,7 +2080,47 @@
+   if (!contentType.startsWith('image/')) {
+     await page.waitForLoadState('domcontentloaded', { timeout });
+   }
+-  return response;
++  return (await waitForChallengeClear(page)) || response;
++}
++
++// Cloudflare's "Just a moment" and similar non-interactive checks run a
++// script, set a clearance cookie and reload into the real page. Camoufox
++// evaluates in an isolated world, so page globals (_cf_chl_opt) are read
++// from the script text. null when the document cannot be read
++// (mid-navigation).
++async function isChallengePage(page) {
++  return page.evaluate(() => {
++    const title = (document.title || '').toLowerCase();
++    return /^(just a moment|checking your browser|one moment, please|vercel security checkpoint)/.test(title)
++      || [...document.scripts].some((s) => s.textContent.includes('_cf_chl_opt'));
++  }).catch(() => null);
++}
++
++// Waits while the page is a challenge interstitial, up to CHALLENGE_WAIT_MS.
++// Returns the response of the document it reloaded into, or null.
++async function waitForChallengeClear(page) {
++  if (CHALLENGE_WAIT_MS <= 0 || !(await isChallengePage(page))) return null;
++  const started = Date.now();
++  const deadline = started + CHALLENGE_WAIT_MS;
++  let latest = null;
++  const onResponse = (resp) => {
++    if (resp.request().isNavigationRequest() && resp.frame() === page.mainFrame()) latest = resp;
++  };
++  page.on('response', onResponse);
++  let cleared = false;
++  try {
++    while (!cleared && Date.now() < deadline && !page.isClosed()) {
++      await new Promise((resolve) => setTimeout(resolve, 1000));
++      cleared = (await isChallengePage(page)) === false;
++    }
++    if (cleared) {
++      await page.waitForLoadState('domcontentloaded', { timeout: Math.max(1000, deadline - Date.now()) }).catch(() => {});
++    }
++  } finally {
++    page.off('response', onResponse);
++  }
++  log('info', 'challenge wait', { cleared, waitedMs: Date.now() - started, url: page.isClosed() ? null : page.url() });
++  return latest;
+ }
+ 
+ 

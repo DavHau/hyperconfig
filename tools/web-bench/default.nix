@@ -1,14 +1,22 @@
 { python3Packages, lib, callPackage, chromium, xvfb-run }:
 let
-  camoufox-browser = callPackage ./camoufox/browser.nix { };
-  camoufox = python3Packages.callPackage ./camoufox/python.nix { };
+  camoufox-browser = callPackage ../../pkgs/camoufox/browser.nix { };
+  camoufox = python3Packages.callPackage ../../pkgs/camoufox/python.nix { };
   captchakraken = python3Packages.callPackage ./captchakraken/python.nix { };
 in
 python3Packages.buildPythonApplication {
   pname = "web-bench";
   version = "0.1.0";
   pyproject = true;
-  src = ./.;
+  # The Python package only: edits to the .nix files, __pycache__ or
+  # result links leave it unchanged.
+  src = lib.fileset.toSource {
+    root = ./.;
+    fileset = lib.fileset.unions [
+      ./pyproject.toml
+      (lib.fileset.fileFilter (f: f.hasExt "py") ./web_bench)
+    ];
+  };
 
   build-system = [ python3Packages.setuptools ];
   dependencies = with python3Packages; [

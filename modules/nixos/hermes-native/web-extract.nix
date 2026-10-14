@@ -4,7 +4,7 @@
 # tree, as the agent's uid; the extraction libraries live in their own
 # interpreter, outside the sealed hermes venv. A page that the plain
 # fetch finds blocked or JavaScript-only is rendered once more in a
-# headful Chromium on the agent's own X display (display.nix).
+# headless Camoufox, the build the camoufox library pins.
 {
   config,
   lib,
@@ -15,18 +15,28 @@ let
   cfg = config.services.hermes-native;
   hlib = import ./lib.nix { inherit lib; };
 
+  camoufox = pkgs.callPackage ../../../pkgs/camoufox/browser.nix { };
   python = pkgs.python3.withPackages (ps: [
     ps.curl-cffi
     ps.trafilatura
     ps.pymupdf
-    ps.playwright
+    (ps.callPackage ../../../pkgs/camoufox/python.nix { })
   ]);
 
+  # Only the plugin's own files, so stray files (__pycache__) never change it.
+  src = lib.fileset.toSource {
+    root = ./web-extract;
+    fileset = lib.fileset.unions [
+      ./web-extract/plugin.yaml
+      ./web-extract/__init__.py
+      ./web-extract/fetch.py
+    ];
+  };
   plugin = pkgs.runCommand "hermes-web-local-extract" { } ''
-    cp -r ${./web-extract} $out
+    cp -r ${src} $out
     chmod -R u+w $out
     substituteInPlace $out/__init__.py --replace-fail '@python@' '${python}/bin/python3'
-    substituteInPlace $out/fetch.py --replace-fail '@chromium@' '${pkgs.chromium}/bin/chromium'
+    substituteInPlace $out/fetch.py --replace-fail '@camoufox@' '${camoufox}/lib/camoufox/camoufox'
   '';
 in
 {

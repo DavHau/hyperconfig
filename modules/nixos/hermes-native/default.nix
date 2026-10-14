@@ -9,12 +9,13 @@
 #     into the owner's 0600 .env; never in the store (agent-config.nix),
 #   - a per-agent managed config dir (HERMES_MANAGED_DIR) pinning exactly
 #     the Nix keys (agents.nix),
-#   - a root-held dashboard port bridged per connection to the owner's
-#     backend by an owner-uid-checking forward (forwards.nix),
-#   - owner-only iptables gates on the dashboard and backend ports
+#   - root-held dashboard and browser-server ports, bridged per
+#     connection to the owner's backends by an owner-uid-checking forward
+#     (forwards.nix),
+#   - owner-only iptables gates on those ports and their backends
 #     (firewall.nix),
-#   - a per-agent X display whose only socket and cookie sit in the
-#     owner's 0700 dir (display.nix).
+#   - a per-agent Camofox browser server as the owner, its access key and
+#     profile store in the owner's 0700 state dir (camofox.nix).
 #
 # `inputs` are this flake's (specialArgs): hermes-agent for the package,
 # spaces for the agent skills.
@@ -26,7 +27,6 @@
     ./firewall.nix
     ./searxng.nix
     ./web-extract.nix
-    ./browser.nix
-    ./display.nix
+    ./camofox.nix
   ];
 }

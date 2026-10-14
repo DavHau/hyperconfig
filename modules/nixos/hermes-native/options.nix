@@ -147,24 +147,30 @@ in
       }
     ]
     ++ lib.concatLists (
-      lib.mapAttrsToList (user: _: [
-        {
-          assertion = config.users.users ? ${user};
-          message = "services.hermes-native.users.${user}: no users.users.${user} account to run the agent as.";
-        }
-        {
-          assertion =
-            lib.count (u: hlib.dashboardPortFor u == hlib.dashboardPortFor user) (lib.attrNames cfg.users) == 1;
-          message = "services.hermes-native: the dashboard port of ${user} (${toString (hlib.dashboardPortFor user)}) collides with another agent's in its 1000-port window; widen the window in lib.nix.";
-        }
-        {
-          # The forward lands on the dashboard's loopback bind, which
-          # serves anyone who reaches it. A non-loopback listener would
-          # publish an unauthenticated agent dashboard.
-          assertion = lib.all isLoopback config.systemd.sockets."hermes-dashboard-fwd-${user}".listenStreams;
-          message = "services.hermes-native: socket hermes-dashboard-fwd-${user} must listen on 127.0.0.1 only.";
-        }
-      ]) cfg.users
+      lib.mapAttrsToList (
+        user: _:
+        [
+          {
+            assertion = config.users.users ? ${user};
+            message = "services.hermes-native.users.${user}: no users.users.${user} account to run the agent as.";
+          }
+        ]
+        ++ lib.concatLists (
+          lib.mapAttrsToList (name: fwd: [
+            {
+              assertion = lib.count (u: fwd.portFor u == fwd.portFor user) (lib.attrNames cfg.users) == 1;
+              message = "services.hermes-native: the ${name} port of ${user} (${toString (fwd.portFor user)}) collides with another agent's in its 1000-port window; widen the window in lib.nix.";
+            }
+            {
+              # The forward lands on the backend's loopback bind. A
+              # non-loopback listener would publish the agent's dashboard
+              # or browser to the network.
+              assertion = lib.all isLoopback config.systemd.sockets."hermes-${name}-fwd-${user}".listenStreams;
+              message = "services.hermes-native: socket hermes-${name}-fwd-${user} must listen on 127.0.0.1 only.";
+            }
+          ]) hlib.forwards
+        )
+      ) cfg.users
     );
   };
 }

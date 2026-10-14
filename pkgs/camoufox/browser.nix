@@ -1,7 +1,10 @@
-# Camoufox (anti-detect Firefox) from its official release zip, so the
-# Python library never downloads a browser. Layout is kept flat in one
-# directory: the library reads fontconfig/, fonts/, properties.json and
-# version.json beside the executable it is given.
+# Camoufox (anti-detect Firefox) from its official release zip, so no
+# library (camoufox Python, camofox-browser) downloads a browser. Layout is
+# kept flat in one directory: the libraries read fontconfig/, fonts/,
+# properties.json and version.json beside the executable they are given.
+#
+# The default is the build camoufox 0.5.8 pins (browser-pin.json);
+# consumers pinned to another build override version and hash.
 {
   lib,
   stdenv,
@@ -17,14 +20,20 @@
   libva,
   libxtst,
   pciutils,
+  version ? "156.0.1-beta.36",
+  hash ? "sha256-cmN4he5nyTRmrTd4McZHGS+PCPtcb9knneEyC0ndK1M=",
 }:
+let
+  # "156.0.1-beta.36" -> 156.0.1, beta.36
+  parts = lib.splitString "-" version;
+in
 stdenv.mkDerivation (finalAttrs: {
   pname = "camoufox";
-  version = "156.0.1-beta.36"; # the build camoufox 0.5.8 pins (browser-pin.json)
+  inherit version;
 
   src = fetchurl {
     url = "https://github.com/daijro/camoufox/releases/download/v${finalAttrs.version}/camoufox-${finalAttrs.version}-lin.x86_64.zip";
-    hash = "sha256-cmN4he5nyTRmrTd4McZHGS+PCPtcb9knneEyC0ndK1M=";
+    inherit hash;
   };
   # bsdtar, not unzip: font file names in the zip are UTF-8 without the flag.
   unpackPhase = ''
@@ -59,9 +68,11 @@ stdenv.mkDerivation (finalAttrs: {
     runHook preInstall
     mkdir -p $out/lib/camoufox
     cp -r . $out/lib/camoufox
-    # What `camoufox fetch` records; the library checks it against Playwright.
+    # What `camoufox fetch` records; the libraries check it against their
+    # supported range. camoufox-js reads `release` and downloads a browser
+    # when it finds none; the Python library reads either key.
     cat > $out/lib/camoufox/version.json <<EOF
-    {"version": "156.0.1", "build": "beta.36", "interface": 1}
+    {"version": "${lib.elemAt parts 0}", "build": "${lib.elemAt parts 1}", "release": "${lib.elemAt parts 1}", "interface": 1}
     EOF
     runHook postInstall
   '';
