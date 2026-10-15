@@ -6,8 +6,8 @@ Safeguards enforced here (not configurable below these limits):
   optionally stretched over --spread-hours;
 - each host is hit at most once per setup round, rounds share one order,
   so hits on a host are a whole round apart (checked: >= MIN_HOST_GAP_S);
-- public GET pages only, with a hard exclusion list checked at plan time and
-  on every main-frame navigation;
+- public GET pages only, with a hard exclusion list (built in plus the
+  targets file's) checked at plan time and on every main-frame navigation;
 - a global budget of main-frame requests per run;
 - a solver setup gets at most one bounded solve per gated load; its
   navigations pass the same guard, hop limit and budget; each solve leaves
@@ -37,7 +37,8 @@ from pathlib import Path
 from . import classify
 from .report import read_records, summary
 from .setups import MAX_HOPS, SETUPS, BrowserSetup, NavDenied
-from .targets import SMOKE_URL, Target, excluded, split_targets
+from . import targets as targets_mod
+from .targets import SMOKE_SOURCE, Target, TargetSet, TargetsError, excluded
 
 MIN_DELAY_S = 2.0
 MAX_DELAY_S = 8.0
@@ -132,9 +133,28 @@ def _resolve_setups(names: list[str] | None) -> list[str]:
     return names
 
 
-def _resolve_targets(names: list[str] | None) -> tuple[list[Target], list[tuple[Target, str]]]:
+def _targets_path(arg: str | None) -> Path:
+    """--targets-file, else $WEB_BENCH_TARGETS, else the `targets` credential `launch` hands its unit."""
+    path = arg or os.environ.get("WEB_BENCH_TARGETS")
+    if not path and os.environ.get("CREDENTIALS_DIRECTORY"):
+        cred = Path(os.environ["CREDENTIALS_DIRECTORY"]) / "targets"
+        path = str(cred) if cred.exists() else None
+    if not path:
+        sys.exit("no targets file: pass --targets-file PATH or set WEB_BENCH_TARGETS "
+                 "(the site list is kept out of git; format in web_bench/targets.py)")
+    return Path(path)
+
+
+def _load_targets(arg: str | None) -> TargetSet:
+    try:
+        return targets_mod.load(_targets_path(arg))
+    except TargetsError as err:
+        sys.exit(f"bad targets file: {err}")
+
+
+def _resolve_targets(ts: TargetSet, names: list[str] | None) -> tuple[list[Target], list[tuple[Target, str]]]:
     """Planned targets, optionally narrowed to `names`; excluded targets stay unreachable."""
-    targets, dropped = split_targets()
+    targets, dropped = ts.split()
     if names:
         known = [t.name for t in targets]
         bad = [n for n in names if n not in known]
@@ -145,14 +165,14 @@ def _resolve_targets(names: list[str] | None) -> tuple[list[Target], list[tuple[
 
 
 def cmd_plan(args) -> int:
-    targets, dropped = _resolve_targets(args.targets)
+    targets, dropped = _resolve_targets(_load_targets(args.targets_file), args.targets)
     names = _resolve_setups(args.setups)
     loads = make_plan(names, args.seed, args.spread_hours, targets)
     budget = _budget(args, loads)
     print(f"seed {args.seed}; setups (in order): {', '.join(names)}")
+    sources = {s: sum(t.source == s for t in targets) for s in dict.fromkeys(t.source for t in targets)}
     print(f"targets: {len(targets)} planned "
-          f"({sum(t.source == 'paterson' for t in targets)} paterson, "
-          f"{sum(t.source == 'audit' for t in targets)} audit), {len(dropped)} excluded")
+          f"({', '.join(f'{n} {s}' for s, n in sources.items())}), {len(dropped)} excluded")
     print(f"loads: {len(loads)} (one per setup x target); request budget {budget}"
           f" (hard max {HARD_MAX_BUDGET})")
     delays = [l.delay_before_s for l in loads[1:]]
@@ -211,9 +231,11 @@ def _records(path: Path) -> list[dict]:
     return read_records(path) if path.exists() else []
 
 
-def _write_plan(out_dir: Path, args, loads: list[Load], budget: int) -> None:
+def _write_plan(out_dir: Path, args, loads: list[Load], budget: int, ts: TargetSet) -> None:
+    # The children guard every navigation with the same exclusions.
     (out_dir / "plan.json").write_text(json.dumps({
         "seed": args.seed, "spread_hours": args.spread_hours, "budget": budget,
+        "exclude": [list(e) for e in ts.exclude],
         "loads": [asdict(l) for l in loads],
     }, indent=1))
 
@@ -239,12 +261,13 @@ def cmd_run(args) -> int:
     if uid not in DYNAMIC_UID_RANGE and uid != _mullvad_uid():
         sys.exit(f"`run` executes only as a systemd DynamicUser (uid {DYNAMIC_UID_RANGE.start}-"
                  f"{DYNAMIC_UID_RANGE.stop - 1}) or {MULLVAD_USER}; start it with `web-bench launch run`")
-    targets, _ = _resolve_targets(args.targets)
+    ts = _load_targets(args.targets_file)
+    targets, _ = _resolve_targets(ts, args.targets)
     loads = make_plan(_resolve_setups(args.setups), args.seed, args.spread_hours, targets)
     budget = _budget(args, loads)
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=False)  # never resume or repeat a sweep
-    _write_plan(out_dir, args, loads, budget)
+    _write_plan(out_dir, args, loads, budget, ts)
     records = _execute(loads, out_dir, budget)
     text = summary(records, planned=len(loads))
     (out_dir / "summary.md").write_text(text)
@@ -268,13 +291,14 @@ def _fingerprint(body: str) -> dict:
 def cmd_smoke(args) -> int:
     _refuse_root()
     names = _resolve_setups(args.setups)
-    target = Target("smoke", SMOKE_URL, "smoke", settle_s=2)
+    ts = _load_targets(args.targets_file)
+    target = Target("smoke", ts.smoke_url, SMOKE_SOURCE, settle_s=2)
     loads = [Load(i, n, target.name, target.url, target.source, target.settle_s,
                   MIN_DELAY_S if i else 0.0) for i, n in enumerate(names)]
     out_dir = Path(args.out) if args.out else Path(os.environ.get("TMPDIR", "/tmp")) / f"web-bench-smoke-{os.getpid()}"
     out_dir.mkdir(parents=True, exist_ok=False)
     args.seed, args.spread_hours = None, None
-    _write_plan(out_dir, args, loads, len(loads) * 2)
+    _write_plan(out_dir, args, loads, len(loads) * 2, ts)
     records = _execute(loads, out_dir, len(loads) * 2)
     for r in records:
         print(json.dumps({k: r[k] for k in ("setup", "engine", "status", "verdict", "load_ms", "error")}))
@@ -286,6 +310,7 @@ def cmd_smoke(args) -> int:
 def cmd_child(args) -> int:
     plan = json.loads(Path(args.plan).read_text())
     loads = [Load(**l) for l in plan["loads"] if l["setup"] == args.setup]
+    extra = [tuple(e) for e in plan["exclude"]]
     setup = SETUPS[args.setup]
     left = args.budget_left
     with setup.open() as s, open(args.out, "a") as out:
@@ -298,7 +323,7 @@ def cmd_child(args) -> int:
 
             def guard(url: str) -> None:
                 nonlocal hops, left
-                why = excluded(url)
+                why = excluded(url, extra)
                 if why:
                     raise NavDenied(f"{url}: {why}")
                 if hops >= MAX_HOPS:
@@ -324,7 +349,7 @@ def cmd_child(args) -> int:
                 "title": obs.title[:200], "body_len": len(obs.body), "nav_requests": hops,
                 "error": obs.error,
             }
-            if load.source == "smoke":
+            if load.source == SMOKE_SOURCE:
                 rec["fingerprint"] = _fingerprint(obs.body)
             if obs.solver is not None:
                 rec["solver"] = obs.solver
@@ -350,13 +375,18 @@ def cmd_launch(args, rest: list[str]) -> int:
     if not self_bin or not self_bin.startswith("/nix/store/"):
         sys.exit("WEB_BENCH_BIN is not set to the packaged web-bench binary")
     run_id = datetime.now(timezone.utc).strftime(f"{args.what}-%Y%m%dT%H%M%SZ")
+    # Handed to the unit as a credential: its user cannot read the caller's files.
+    targets_file = _targets_path(args.targets_file).resolve()
+    if not re.fullmatch(r"[\w./+@-]+", str(targets_file)):
+        sys.exit(f"targets file path {targets_file} has characters systemd would reinterpret")
+    ts = _load_targets(str(targets_file))
     max_s = 3600
     if args.what == "run":
         sub = build_parser().parse_args(["run", "--out", "-", *rest])
         if sub.seed is None:
             sub.seed = random.SystemRandom().randrange(2**31)
             rest = [*rest, "--seed", str(sub.seed)]
-        targets, _ = _resolve_targets(sub.targets)
+        targets, _ = _resolve_targets(ts, sub.targets)
         loads = make_plan(_resolve_setups(sub.setups), sub.seed, sub.spread_hours, targets)
         _budget(sub, loads)
         max_s = int(eta_s(loads) * 1.5) + 3600
@@ -379,6 +409,7 @@ def cmd_launch(args, rest: list[str]) -> int:
         "ProtectKernelModules=yes", "ProtectControlGroups=yes", "LockPersonality=yes",
         "MemoryMax=4G", "Nice=10", f"RuntimeMaxSec={max_s}",
         "Environment=HOME=/tmp", "Environment=TMPDIR=/tmp", "WorkingDirectory=/tmp",
+        f"LoadCredential=targets:{targets_file}",
     ]
     if os.environ.get("VLLM_BASE_URL"):  # CaptchaKraken endpoint override; the unit gets no caller env
         props.append(f"Environment=VLLM_BASE_URL={os.environ['VLLM_BASE_URL']}")
@@ -398,7 +429,12 @@ def build_parser() -> argparse.ArgumentParser:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
+    def targets_file_opt(p):
+        p.add_argument("--targets-file", default=None, metavar="PATH",
+                       help="targets file (JSON, kept out of git; default: $WEB_BENCH_TARGETS)")
+
     def sweep_opts(p):
+        targets_file_opt(p)
         p.add_argument("--setups", nargs="+", metavar="SETUP",
                        help="setups in sweep order (default: all, see `plan`)")
         p.add_argument("--targets", type=lambda s: [n for n in s.split(",") if n], metavar="NAME,...",
@@ -414,13 +450,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("run", help="one sweep (launched units only; use `launch run`)")
     sweep_opts(p)
     p.add_argument("--out", required=True, help="new results directory")
-    p = sub.add_parser("smoke", help=f"one load of {SMOKE_URL} per setup")
+    p = sub.add_parser("smoke", help="one load of the targets file's smoke_url per setup")
+    targets_file_opt(p)
     p.add_argument("--setups", nargs="+", metavar="SETUP")
     p.add_argument("--out", default=None, help="new results directory (default: under $TMPDIR)")
     p = sub.add_parser("summarize", help="summary tables for a results directory")
     p.add_argument("dir")
     p = sub.add_parser("launch", help="as root: start `run`/`smoke` under a systemd DynamicUser (or the --egress user)")
     p.add_argument("what", choices=["run", "smoke"])
+    targets_file_opt(p)
     p.add_argument("--egress", choices=["direct", "mullvad"], default="direct",
                    help=f"mullvad: run as {MULLVAD_USER}, whose traffic leaves only via {MULLVAD_IFACE}")
     p = sub.add_parser("_child")

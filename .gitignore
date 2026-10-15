@@ -6,3 +6,5 @@ result*
 *.iso
 *.tar.gz
 __pycache__/
+# Machine-local notes/data (e.g. web-bench test set and results)
+*.local.*
