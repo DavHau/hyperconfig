@@ -12,6 +12,14 @@ rec {
   hermesDir = user: "/home/${user}/hermes";
   workspace = user: "${hermesDir user}/workspace";
 
+  # The long-running system units that run as the agent's uid
+  # (agents.nix, camofox.nix).
+  agentUnits = user: [
+    "hermes-agent-${user}"
+    "hermes-dashboard-${user}"
+    "hermes-camofox-${user}"
+  ];
+
   # iptables chain of the owner-only loopback gates (firewall.nix).
   # Consumers append their own gates to it.
   chain = "hermes-native";

@@ -1,13 +1,17 @@
-# Mullvad egress for hyper.mullvadEgress.users (mechanism in ./egress.nix),
-# exiting in Singapore. The device is registered by ./register.sh, which
-# fills the vars below; until then the listed users simply have no internet.
+# Mullvad egress for hyper.mullvadEgress.users (mechanism in ./egress.nix,
+# their DNS in ./dns.nix), exiting in Singapore. The device is registered by
+# ./register.sh, which fills the vars below; until then the listed users
+# simply have no internet.
 { config, lib, ... }:
 let
   vars = config.clan.core.vars.generators.mullvad-egress;
   device = builtins.fromJSON vars.files.device.value;
 in
 {
-  imports = [ ./egress.nix ];
+  imports = [
+    ./egress.nix
+    ./dns.nix
+  ];
 
   # Not generated: a key is only useful once Mullvad knows it, so
   # register.sh creates, registers and stores it in one go.
