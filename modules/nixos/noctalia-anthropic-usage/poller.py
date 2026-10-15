@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """Publish per-account Anthropic weekly usage for the noctalia bar.
 
-Single source of truth: the logins of omp's `afk` profile
-(~/.omp/profiles/afk/agent/agent.db), opened READ-ONLY — an OAuth
-refresh rotates the refresh token and would corrupt omp's copy. For each
-account the poller asks the OAuth usage endpoint for two weekly
+Credentials come from every omp agent.db under $OMP_HOME (the shared
+~/.omp/agent/agent.db plus ~/.omp/profiles/*/agent/agent.db), opened
+READ-ONLY — an OAuth refresh rotates the refresh token and would corrupt
+omp's copy. omp moves where it keeps logins between releases and
+profiles, so no single database is trusted: per account email the token
+with the latest expiry wins. The numbers themselves always come live
+from the OAuth usage endpoint, so the choice of token cannot make the
+bars jump.
+
+For each account the poller asks the usage endpoint for two weekly
 utilizations and atomically writes a small state file the noctalia
 `anthropic-usage` plugin watches:
 
@@ -12,23 +18,24 @@ utilizations and atomically writes a small state file the noctalia
       "accounts": [ { "email",
                       "weekly", "weeklyResetsAt",   # all models
                       "fable",  "fableResetsAt",    # Fable-scoped
+                      "fetchedAt",                  # epoch ms of last success
                       "stale" } ] }
 
 Percents are 0..100 or null. Accounts are sorted by email so the bars
 keep a stable order.
 
-When a fetch fails (expired token while omp is idle, rate limit,
-outage) the account keeps its last published values, marked stale.
-Nothing else is consulted: other omp profiles, omp's usage cache and
-Claude Code's login all carry older data for the same accounts, and
-mixing them in made the bars jump between values.
+An account without an unexpired token anywhere (omp idle for hours,
+subscription paused) is not queried at all — an expired token only earns
+401/429s — and, like a failed fetch (rate limit, outage), keeps its last
+published values, marked stale.
 
 Environment:
-    OMP_AGENT_DB              agent.db path (default ~/.omp/profiles/afk/agent/agent.db)
+    OMP_HOME                  omp state root (default ~/.omp)
     ANTHROPIC_USAGE_STATE     state file path (default $XDG_STATE_HOME/anthropic-usage.json)
     ANTHROPIC_USAGE_URL       usage endpoint  (default https://api.anthropic.com/api/oauth/usage)
 """
 
+import glob
 import json
 import os
 import sqlite3
@@ -37,14 +44,16 @@ import time
 import urllib.request
 
 DEFAULT_URL = "https://api.anthropic.com/api/oauth/usage"
-EMPTY = {"weekly": None, "weeklyResetsAt": None, "fable": None, "fableResetsAt": None}
+EMPTY = {"weekly": None, "weeklyResetsAt": None, "fable": None, "fableResetsAt": None,
+         "fetchedAt": None}
+# A token this close to expiry may die mid-request; treat it as expired.
+EXPIRY_MARGIN_MS = 60_000
 
 
-def db_path():
-    return os.environ.get(
-        "OMP_AGENT_DB",
-        os.path.expanduser("~/.omp/profiles/afk/agent/agent.db"),
-    )
+def agent_dbs():
+    root = os.environ.get("OMP_HOME", os.path.expanduser("~/.omp"))
+    return [os.path.join(root, "agent", "agent.db"),
+            *sorted(glob.glob(os.path.join(root, "profiles", "*", "agent", "agent.db")))]
 
 
 def state_path():
@@ -55,33 +64,46 @@ def state_path():
     return os.environ.get("ANTHROPIC_USAGE_STATE", default)
 
 
-def load_accounts(path):
-    """Live credential per account email.
-
-    auth_credentials keeps every historical login row; the newest
-    (updated_at-ascending, last wins) is the live one.
-    """
-    if not os.path.exists(path):
-        return {}
-    db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+def read_creds(path):
+    """Anthropic OAuth credential dicts stored in one agent.db."""
+    try:
+        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return []
     try:
         rows = db.execute(
             "SELECT data FROM auth_credentials"
             " WHERE provider = 'anthropic' AND credential_type = 'oauth'"
-            " ORDER BY updated_at"
         ).fetchall()
+    except sqlite3.Error as err:  # missing file/table, locked, ...
+        print(f"anthropic-usage: {path}: {err}", file=sys.stderr)
+        return []
     finally:
         db.close()
-    creds = {}
+    creds = []
     for (data,) in rows:
         try:
             cred = json.loads(data)
         except ValueError:
             continue
-        email = cred.get("email")
-        if email and cred.get("access"):
-            creds[email] = cred
+        if isinstance(cred, dict) and cred.get("email") and cred.get("access"):
+            creds.append(cred)
     return creds
+
+
+def load_accounts(paths):
+    """Best credential per account email across all agent.dbs: the one
+    expiring last. Every email ever logged in is listed, even when all
+    its tokens are expired."""
+    best = {}
+    for path in paths:
+        if not os.path.exists(path):
+            continue
+        for cred in read_creds(path):
+            email = cred["email"]
+            if email not in best or cred.get("expires", 0) > best[email].get("expires", 0):
+                best[email] = cred
+    return best
 
 
 def weekly_usage(usage):
@@ -127,23 +149,29 @@ def main():
     url = os.environ.get("ANTHROPIC_USAGE_URL", DEFAULT_URL)
     target = state_path()
     previous = load_previous_accounts(target)
-    creds = load_accounts(db_path())
+    creds = load_accounts(agent_dbs())
+    now_ms = int(time.time() * 1000)
 
     accounts = []
     for email in sorted(creds):
-        try:
-            entry = weekly_usage(api_get(url, creds[email]["access"]))
-            stale = False
-        except Exception as err:  # HTTP error, timeout, bad JSON, ...
-            print(f"anthropic-usage: {email}: fetch failed: {err}", file=sys.stderr)
+        cred = creds[email]
+        entry = None
+        if cred.get("expires", 0) <= now_ms + EXPIRY_MARGIN_MS:
+            print(f"anthropic-usage: {email}: no unexpired token, skipping", file=sys.stderr)
+        else:
+            try:
+                entry = {**weekly_usage(api_get(url, cred["access"])), "fetchedAt": now_ms}
+            except Exception as err:  # HTTP error, timeout, bad JSON, ...
+                print(f"anthropic-usage: {email}: fetch failed: {err}", file=sys.stderr)
+        stale = entry is None
+        if stale:
             prev = previous.get(email) or {}
             entry = {k: prev.get(k) for k in EMPTY}
-            stale = True
         accounts.append({"email": email, **entry, "stale": stale})
 
     state = {
         "version": 2,
-        "updatedAt": int(time.time() * 1000),
+        "updatedAt": now_ms,
         "accounts": accounts,
     }
     os.makedirs(os.path.dirname(target), exist_ok=True)

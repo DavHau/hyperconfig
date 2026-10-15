@@ -3,15 +3,16 @@
 #
 # Two parts:
 #   1. anthropic-usage-poll — a user timer (5 min) running poller.py:
-#      reads the Anthropic OAuth logins of omp's `afk` profile
-#      (~/.omp/profiles/afk/agent/agent.db, READ-ONLY, never refreshes
-#      tokens — a refresh rotates the refresh token and would corrupt
-#      omp's copy), asks the OAuth usage endpoint for both weekly
+#      collects the Anthropic OAuth logins from every omp agent.db
+#      (~/.omp/agent/agent.db + ~/.omp/profiles/*/agent/agent.db,
+#      READ-ONLY, never refreshes tokens — a refresh rotates the refresh
+#      token and would corrupt omp's copy), takes the latest-expiring
+#      token per account, asks the OAuth usage endpoint for both weekly
 #      utilizations and publishes ~/.local/state/anthropic-usage.json.
-#      On fetch failure the account keeps its last published values,
-#      marked stale. No other source is read: other profiles, omp's
-#      usage cache and Claude Code's login hold older data and made the
-#      bars jump.
+#      omp moves its login store between releases (≥18.6 keeps it in the
+#      shared agent.db), so no single profile is trusted. Accounts with
+#      no unexpired token are not queried; they, like failed fetches,
+#      keep their last published values, marked stale.
 #   2. an `anthropic-usage` noctalia plugin (plugin/) rendering one thin
 #      gauge per account. merge.sh seeds it as an extra noctalia-shell
 #      ExecStartPre AFTER the spaces bundle's noctalia-config-merge:

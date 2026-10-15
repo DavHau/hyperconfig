@@ -4,7 +4,6 @@
   ];
 
   # services
-  services.dunst.enable = true;
   systemd.user.targets.tray = {
     Unit = {
       Description = "Home Manager System Tray";

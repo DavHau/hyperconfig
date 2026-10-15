@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Behavior tests for the anthropic-usage poller.
 
-The poller's contract: read the Anthropic logins of omp's `afk` profile
-agent.db (read-only), ask the Anthropic OAuth usage endpoint for each
-account's weekly all-model and weekly Fable utilization, and publish one
-small JSON state file the noctalia bar widget renders.
+The poller's contract: collect the Anthropic logins from every omp
+agent.db under $OMP_HOME (read-only), pick the latest-expiring token per
+account, ask the Anthropic OAuth usage endpoint for each account's weekly
+all-model and weekly Fable utilization, and publish one small JSON state
+file the noctalia bar widget renders.
 
-Everything is stubbed locally: a fake agent.db with omp's real schema and
+Everything is stubbed locally: fake agent.dbs with omp's real schema and
 an in-process HTTP server mapping bearer tokens to usage responses. No
 network, no omp.
 """
@@ -49,9 +50,12 @@ def usage_response(weekly, fable, resets_at="2026-07-15T15:59:59+00:00",
 class StubApi(BaseHTTPRequestHandler):
     # access token -> usage dict | int status
     responses = {}
+    # tokens seen, in request order
+    requests = []
 
     def do_GET(self):
         token = self.headers.get("Authorization", "").removeprefix("Bearer ")
+        self.requests.append(token)
         resp = self.responses.get(token, 401)
         status, payload = (resp, {"error": "unauthorized"}) if isinstance(resp, int) else (200, resp)
         body = json.dumps(payload).encode()
@@ -64,8 +68,10 @@ class StubApi(BaseHTTPRequestHandler):
         pass
 
 
-def make_db(path, creds):
-    """Fake omp agent.db: the auth_credentials table, real schema."""
+def make_db(omp_home, rel, creds):
+    """Fake omp agent.db at $OMP_HOME/<rel>: auth_credentials, real schema."""
+    path = os.path.join(omp_home, rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     db = sqlite3.connect(path)
     db.execute(
         """CREATE TABLE auth_credentials (
@@ -88,12 +94,12 @@ def make_db(path, creds):
     db.close()
 
 
-def cred(email, token, updated_at=100):
+def cred(email, token, updated_at=100, expires_in_ms=3_600_000):
     return {
         "data": {
             "access": token,
             "refresh": "rt-" + token,
-            "expires": NOW_MS + 3_600_000,
+            "expires": NOW_MS + expires_in_ms,
             "accountId": "acct-" + email,
             "email": email,
         },
@@ -102,9 +108,13 @@ def cred(email, token, updated_at=100):
     }
 
 
-def run_poller(db_path, state_path, url):
+SHARED = "agent/agent.db"
+AFK = "profiles/afk/agent/agent.db"
+
+
+def run_poller(omp_home, state_path, url):
     env = dict(os.environ)
-    env.update(OMP_AGENT_DB=db_path, ANTHROPIC_USAGE_STATE=state_path, ANTHROPIC_USAGE_URL=url)
+    env.update(OMP_HOME=omp_home, ANTHROPIC_USAGE_STATE=state_path, ANTHROPIC_USAGE_URL=url)
     proc = subprocess.run(
         [sys.executable, POLLER], env=env, capture_output=True, text=True, timeout=60
     )
@@ -125,9 +135,9 @@ def check(name, cond, detail=""):
 def test_happy_path_two_accounts(tmp, url):
     """Both tokens valid: both accounts, sorted by email, with weekly and
     Fable percents + reset times taken from their own limit entries."""
-    db = os.path.join(tmp, "agent.db")
+    db = os.path.join(tmp, "omp")
     state = os.path.join(tmp, "state.json")
-    make_db(db, [cred("bob@example.com", "tok-bob"), cred("alice@example.com", "tok-alice")])
+    make_db(db, SHARED, [cred("bob@example.com", "tok-bob"), cred("alice@example.com", "tok-alice")])
     StubApi.responses = {
         "tok-alice": usage_response(42, 11, resets_at="2026-07-15T16:00:00+00:00",
                                     fable_resets_at="2026-07-15T15:59:59+00:00"),
@@ -152,9 +162,9 @@ def test_happy_path_two_accounts(tmp, url):
 def test_failure_keeps_previous_values(tmp, url):
     """A failed fetch keeps that account's last published values, marked
     stale — it never blanks the bar or substitutes another source."""
-    db = os.path.join(tmp, "agent.db")
+    db = os.path.join(tmp, "omp")
     state = os.path.join(tmp, "state.json")
-    make_db(db, [cred("alice@example.com", "tok-alice"), cred("bob@example.com", "tok-bob")])
+    make_db(db, SHARED, [cred("alice@example.com", "tok-alice"), cred("bob@example.com", "tok-bob")])
     StubApi.responses = {"tok-alice": usage_response(42, 11), "tok-bob": usage_response(72, 63)}
     run_poller(db, state, url)
 
@@ -165,6 +175,7 @@ def test_failure_keeps_previous_values(tmp, url):
     bob = accounts["bob@example.com"]
     check("bob keeps previous", (bob["weekly"], bob["fable"]) == (72, 63), f"got {bob!r}")
     check("bob stale", bob["stale"] is True, f"got {bob!r}")
+    check("bob keeps fetch time", bob["fetchedAt"] is not None, f"got {bob!r}")
     alice = accounts["alice@example.com"]
     check("alice updated", (alice["weekly"], alice["fable"], alice["stale"]) == (43, 12, False),
           f"got {alice!r}")
@@ -172,9 +183,9 @@ def test_failure_keeps_previous_values(tmp, url):
 
 def test_failure_without_history_is_null(tmp, url):
     """First run fails: the account is listed with null percents, stale."""
-    db = os.path.join(tmp, "agent.db")
+    db = os.path.join(tmp, "omp")
     state = os.path.join(tmp, "state.json")
-    make_db(db, [cred("bob@example.com", "tok-bob")])
+    make_db(db, SHARED, [cred("bob@example.com", "tok-bob")])
     StubApi.responses = {}
 
     bob = run_poller(db, state, url)["accounts"][0]
@@ -182,24 +193,47 @@ def test_failure_without_history_is_null(tmp, url):
     check("stale", bob["stale"] is True, f"got {bob!r}")
 
 
-def test_newest_credential_per_email_wins(tmp, url):
-    """agent.db keeps every historical login row; only the newest token counts."""
-    db = os.path.join(tmp, "agent.db")
+def test_latest_expiring_token_across_dbs_wins(tmp, url):
+    """omp keeps logins in several agent.dbs (shared store, per-profile
+    stores, historical rows). A profile's expired copy must not shadow the
+    live token in another database — the regression that froze the bar."""
+    db = os.path.join(tmp, "omp")
     state = os.path.join(tmp, "state.json")
-    make_db(db, [
-        cred("alice@example.com", "tok-alice-old", updated_at=100),
-        cred("alice@example.com", "tok-alice-new", updated_at=200),
+    make_db(db, AFK, [cred("alice@example.com", "tok-alice-afk", updated_at=300,
+                           expires_in_ms=-3_600_000)])
+    make_db(db, SHARED, [
+        cred("alice@example.com", "tok-alice-live", updated_at=200),
+        cred("alice@example.com", "tok-alice-older", updated_at=100, expires_in_ms=600_000),
     ])
     StubApi.responses = {
-        "tok-alice-old": usage_response(99, 99),
-        "tok-alice-new": usage_response(42, 11),
+        "tok-alice-afk": 429,
+        "tok-alice-older": usage_response(99, 99),
+        "tok-alice-live": usage_response(42, 11),
     }
 
     got = run_poller(db, state, url)
 
     check("one account after dedupe", len(got["accounts"]) == 1, f"got {got['accounts']!r}")
     alice = got["accounts"][0]
-    check("newest token used", alice["fable"] == 11 and alice["stale"] is False, f"got {alice!r}")
+    check("live token used", (alice["weekly"], alice["stale"]) == (42, False), f"got {alice!r}")
+
+
+def test_expired_account_not_queried(tmp, url):
+    """An account whose every token is expired is still listed with its
+    last values, stale, but the endpoint is never called for it."""
+    db = os.path.join(tmp, "omp")
+    state = os.path.join(tmp, "state.json")
+    make_db(db, SHARED, [cred("bob@example.com", "tok-bob")])
+    StubApi.responses = {"tok-bob": usage_response(72, 63)}
+    run_poller(db, state, url)
+
+    os.remove(os.path.join(db, SHARED))
+    make_db(db, SHARED, [cred("bob@example.com", "tok-bob-dead", expires_in_ms=-1)])
+    StubApi.requests.clear()
+    bob = run_poller(db, state, url)["accounts"][0]
+
+    check("no request for expired token", StubApi.requests == [], f"got {StubApi.requests!r}")
+    check("keeps values, stale", (bob["weekly"], bob["stale"]) == (72, True), f"got {bob!r}")
 
 
 def main():
@@ -211,10 +245,12 @@ def main():
         test_happy_path_two_accounts,
         test_failure_keeps_previous_values,
         test_failure_without_history_is_null,
-        test_newest_credential_per_email_wins,
+        test_latest_expiring_token_across_dbs_wins,
+        test_expired_account_not_queried,
     ]
     for t in tests:
         StubApi.responses = {}
+        StubApi.requests = []
         with tempfile.TemporaryDirectory() as tmp:
             t(tmp, url)
     print(f"PASS: {len(tests)} poller behavior test(s)")
