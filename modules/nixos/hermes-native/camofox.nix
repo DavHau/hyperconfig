@@ -1,5 +1,5 @@
 # The agents' browser: per agent a camofox-browser server driving a
-# headless Camoufox (anti-detect Firefox over Juggler, no CDP), behind
+# headful Camoufox (anti-detect Firefox over Juggler, no CDP), behind
 # hermes' built-in browser_* tools (its Camofox backend,
 # tools/browser_camofox.py). With Camofox selected, hermes drops the
 # CDP-only browser_exec tool (tools/browser_use_cli.py,
@@ -14,7 +14,11 @@
 #     once into a 0600 file in the agent's 0700 state dir,
 #   - the profile store (cookies and storage of hermes' stable per-agent
 #     userId, so a cleared Cloudflare or Akamai check carries over) lives
-#     next to it.
+#     next to it,
+#   - Camoufox draws on an Xvfb that camofox-browser starts with the
+#     browser and kills with it (5 idle minutes), so the display costs
+#     memory only while the agent browses. Its socket lives only in the
+#     unit's private /tmp; the abstract socket is off (pkgs/camofox-browser).
 {
   config,
   lib,
@@ -123,6 +127,11 @@ in
             BROWSER_IDLE_TIMEOUT_MS = "300000";
             BROWSER_RSS_RESTART_THRESHOLD_MB = "1200";
           };
+          # Xvfb for the headful browser; camoufox-js finds it with `which`.
+          path = [
+            pkgs.xvfb
+            pkgs.which
+          ];
           serviceConfig = {
             User = user;
             Group = "users";
@@ -139,7 +148,7 @@ in
             MemoryMax = "1536M";
             TasksMax = 1024;
             CPUQuota = "200%";
-            # Xvfb is not on the unit PATH, so camofox runs Camoufox headless.
+            # Holds the Xvfb socket: other uids cannot reach the display.
             PrivateTmp = true;
             ProtectSystem = "strict";
             ProtectHome = true;

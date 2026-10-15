@@ -25,6 +25,10 @@ buildNpmPackage (finalAttrs: {
   # Crash reports go to a public relay unless opted out: off unless opted
   # in. The YouTube plugin shells out to a downloaded yt-dlp.
   #
+  # Xvfb runs with -ac; its abstract socket would let any local uid onto
+  # the display, so only the filesystem socket (in the caller's /tmp)
+  # stays. Orphan cleanup matches Xvfb wherever it is installed.
+  #
   # The lockfile disagrees with `overrides` on the dev tree (jest's glob),
   # so npm ci would ask the registry; nothing here needs the dev tree, so
   # it and the overrides go.
@@ -34,6 +38,11 @@ buildNpmPackage (finalAttrs: {
       "process.env.CAMOFOX_CRASH_REPORT_ENABLED === 'true'"
     substituteInPlace camofox.config.json --replace-fail \
       '"youtube": { "enabled": true }' '"youtube": { "enabled": false }'
+    substituteInPlace server.js --replace-fail \
+      "const args = super.xvfb_args;" \
+      "const args = [...super.xvfb_args, '-nolisten', 'local'];"
+    substituteInPlace lib/process-ownership.js --replace-fail \
+      '\/usr\/bin\/Xvfb\b' '\/bin\/Xvfb\b'
     ${lib.getExe nodejs} -e '
       const fs = require("fs");
       const p = JSON.parse(fs.readFileSync("package.json"));
