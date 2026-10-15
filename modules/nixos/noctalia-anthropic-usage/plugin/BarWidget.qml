@@ -5,9 +5,10 @@
 //   weekly usage, all models → Color.mPrimary
 //   weekly Fable usage       → Color.mTertiary
 // The wider fill is drawn underneath so both stay visible. A fill at
-// ≥ 80% turns Color.mError (about to hit the cap); stale data (poller
-// could not reach the API) dims both fills.
-// Hovering shows account emails, exact percentages and reset times.
+// ≥ 80% turns Color.mError (about to hit the cap); stale data (no valid
+// token or fetch failed) dims both fills.
+// Hovering shows account emails, exact percentages, reset times and,
+// for stale accounts, when the shown values were last fetched.
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
@@ -53,7 +54,8 @@ Item {
 
   function tooltipText() {
     return root.accounts.map(a => {
-      const stale = a.stale ? " — stale" : "";
+      const fetched = a.fetchedAt ? new Date(a.fetchedAt).toLocaleString(Qt.locale(), "ddd hh:mm") : "never";
+      const stale = a.stale ? " — stale, fetched " + fetched : "";
       return a.email + stale
         + "\n  Weekly: " + pct(a.weekly) + when(a.weeklyResetsAt)
         + "\n  Fable: " + pct(a.fable) + when(a.fableResetsAt);

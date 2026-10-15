@@ -3,8 +3,8 @@
 // Reads the state file the anthropic-usage-poll user timer publishes
 // (~/.local/state/anthropic-usage.json) and exposes it to the bar
 // widget. One entry per Anthropic account:
-//   { email, weekly, weeklyResetsAt, fable, fableResetsAt, stale }
-//   weekly / fable ∈ 0..100 | null
+//   { email, weekly, weeklyResetsAt, fable, fableResetsAt, fetchedAt, stale }
+//   weekly / fable ∈ 0..100 | null; fetchedAt: epoch ms of last success | null
 // The file is watched so the bars move right after each poll.
 pragma ComponentBehavior: Bound
 import QtQuick
