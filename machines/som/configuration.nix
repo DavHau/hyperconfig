@@ -8,7 +8,9 @@
 let
   # Mullvad egress rollout (../../modules/nixos/mullvad-egress): 1 = only
   # the benchmark user, 2 = also every hermes agent and SearXNG.
-  mullvadStage = 1;
+  mullvadStage = 2;
+  agents = lib.attrNames config.hyper.hermesAgents;
+  hermesLib = import ../../modules/nixos/hermes-native/lib.nix { inherit lib; };
 in
 {
   imports = [
@@ -160,12 +162,16 @@ in
   # is not a brain; p0 is (hermes-common.nix). Off, as on vit.
   services.llama-swap.enable = false;
 
-  # These users reach the internet only through Mullvad in Singapore.
+  # These users reach the internet only through Mullvad in Singapore, and
+  # these units of theirs also resolve through it.
   hyper.mullvadEgress = {
     users = [
       "web-bench-mullvad"
     ]
-    ++ lib.optionals (mullvadStage >= 2) ([ "searx" ] ++ lib.attrNames config.hyper.hermesAgents);
+    ++ lib.optionals (mullvadStage >= 2) ([ "searx" ] ++ agents);
+    dns.services = lib.optionals (mullvadStage >= 2) (
+      [ "searx" ] ++ lib.concatMap hermesLib.agentUnits agents
+    );
     # The LAN's public /64: on-link, and inference.p0.contact lives on it
     # (../../modules/nixos/virtualisation.nix). p0 is our own authenticated
     # API on the LAN, so it stays direct: no detour, no exit-IP concerns.
