@@ -199,6 +199,10 @@ in rec {
     2. Make the formatting/fix changes.
     3. `jj squash` to fold changes into the parent (the target commit).
 
+    ## Bugs in dependencies
+
+    When a bug is in third-party software, first check its newer releases, issues and PRs for a report or fix of it, and prefer adopting that (version bump, upstream patch) over writing a patch yourself.
+
     ## Parallel work with subagents
 
     For independent sub-tasks touching disjoint files, or when the user asks
