@@ -7,6 +7,7 @@
     # ./nix-caches.nix
     ./all-hardware.nix
     ./timedated-ntp.nix
+    ./fast-nix-gc.nix
   ];
   users.mutableUsers = false;
 

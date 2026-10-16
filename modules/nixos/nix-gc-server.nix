@@ -1,13 +1,7 @@
-# Automatic store GC for small-disk servers (no local development, deployed
-# from elsewhere): daily GC of generations older than a week, plus nix's
-# free-space triggered GC during builds/copies.
+# Store settings for small-disk servers (no local development, deployed
+# from elsewhere): store optimisation plus nix's free-space triggered GC
+# during builds/copies. Scheduled GC: ./fast-nix-gc.nix (via ./common.nix).
 {
-  nix.gc = {
-    automatic = true;
-    dates = "daily";
-    randomizedDelaySec = "1h";
-    options = "--delete-older-than 7d";
-  };
   nix.optimise.automatic = true;
   nix.settings = {
     min-free = 2 * 1024 * 1024 * 1024;

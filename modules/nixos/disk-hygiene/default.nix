@@ -1,7 +1,6 @@
 /*
-  Keep the disk from filling up:
-  - fast-nix-gc: daily store GC (generations and stale gcroots/auto entries
-    older than 14 days). Replaces nix.gc, which ./nix-gc.nix leaves off.
+  Keep the disk from filling up (store GC itself: ../fast-nix-gc.nix, via
+  ../common.nix):
   - cargo-build-gc: hourly per-user deletion of cargo build dirs whose
     workspace is gone (finished omp worktrees) or that are untouched for
     14 days (see ../rust-build-cache.nix).
@@ -11,7 +10,6 @@
   the sbox module, 7 days).
 */
 {
-  inputs,
   config,
   lib,
   pkgs,
@@ -47,18 +45,6 @@ let
   };
 in
 {
-  imports = [ inputs.fast-nix-gc.nixosModules.default ];
-
-  services.fast-nix-gc = {
-    enable = true;
-    automatic = true;
-    dates = "daily";
-    randomizedDelaySec = "1h";
-    deleteOlderThan = "14d";
-    # Keep paths fetched for builds of the last day.
-    keepRecent = "1d";
-  };
-
   systemd.user.services.cargo-build-gc = {
     description = "Delete dead cargo build dirs (workspace gone or untouched for 14 days)";
     environment.CARGO_BUILD_GC_DAYS = "14";

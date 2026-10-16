@@ -31,9 +31,5 @@
   nix.nrBuildUsers = 100;
   # Hourly re-hashed the whole store (minutes of CPU, GBs of reads) each run.
   nix.optimise.dates = [ "daily" ];
-  # nix.optimise.automatic = true;
-  # nix.gc.automatic = true;
-  nix.gc.dates = "hourly";
-  nix.gc.options = ''--delete-older-than 14d --max-freed "$((30 * 1024**3 - 1024 * $(df -P -k /nix/store | tail -n 1 | ${pkgs.gawk}/bin/awk '{ print $4 }')))"'';
   nix.distributedBuilds = true;
 }

@@ -69,6 +69,15 @@ let
       ["$jj_change", "$jj_status"],
     ]
   '';
+
+  # Agent resume after a server restart is off: it re-launches agent panes
+  # as bare `<agent> --resume=…`, which drops wrappers like afk (distro
+  # config, rules, sbox). Pinned on every launch; the rest of config.toml
+  # stays user-owned.
+  pinConfig = pkgs.writers.writePython3Bin "herdr-pin-config" {
+    libraries = [ pkgs.python3Packages.tomlkit ];
+    flakeIgnore = [ "E501" ];
+  } (builtins.readFile ./herdr-pin-config.py);
 in
 {
   environment.systemPackages = [
@@ -81,6 +90,7 @@ in
           cp ${seedConfig} "$HOME/.config/herdr/config.toml"
           chmod u+w "$HOME/.config/herdr/config.toml"
         fi
+        ${pinConfig}/bin/herdr-pin-config
         # Idempotent: link replaces any previous registry entry for the same
         # plugin id, so a store-path change after a rebuild re-registers.
         ${herdr}/bin/herdr plugin link ${herdr-jj-plugin} >/dev/null || true
