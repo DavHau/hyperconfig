@@ -88,6 +88,7 @@ rec {
     ./patches/hermes-auth-bare-named-provider.patch
     ./patches/hermes-gateway-restart-foreign-unit.patch
     ./patches/hermes-camofox-browser-downloads.patch
+    ./patches/hermes-camofox-solve-captcha.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {

@@ -166,6 +166,11 @@ in
   # SearXNG stay off: spaces would otherwise give every normal user (dave,
   # agent, hsjobeki, nixremote, ...) a hermes microVM.
   services.hermes-native.enable = true;
+  # browser_solve_captcha's model: CaptchaKraken on vit
+  # (../../modules/nixos/captchakraken-server.nix, which admits som's
+  # yggdrasil address). The agents' uids leave through Mullvad, whose kill
+  # switch passes yggdrasil (200::/7).
+  services.hermes-native.captchaSolver.baseUrl = "http://vit.d:8096/v1";
   services.hermes-microvm.enable = false;
   services.spaces-searxng.enable = false;
 

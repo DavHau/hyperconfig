@@ -1,0 +1,23 @@
+Plugins get the core's tab helpers, so a plugin route on an existing tab
+(plugins/captcha, ./captcha-plugin) checks the caller's userId, serializes
+with the core's own actions on that tab, and closes the tab when it overruns,
+the way the core routes do.
+
+diff --git a/server.js b/server.js
+index 81dab76..292c27e 100644
+--- a/server.js
++++ b/server.js
+@@ -7299,6 +7299,13 @@ const pluginCtx = {
+   destroySession,
+   closeSession,
+   withUserLimit,
++  // What a route on an existing tab needs (plugins/captcha): find the
++  // caller's tab, hold its lock, and close it when an operation overruns.
++  findTab,
++  withTabLock,
++  destroyTimedOutTab,
++  tabNotFoundResponse,
++  handleRouteError,
+   safePageClose,
+   createLeasedPage,
+   closeLeasedPage,

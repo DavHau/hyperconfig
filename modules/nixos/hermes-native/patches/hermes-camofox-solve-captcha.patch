@@ -1,0 +1,253 @@
+hermes v2026.9.14 (0.21.3): with the Camofox backend the agent has no way
+through an image CAPTCHA (reCAPTCHA grid, hCaptcha, GeeTest, ...).
+
+Symptom: a page gated by a captcha challenge stops the agent. browser_vision
+can describe the grid, but the agent's clicks by ref cannot reach the tiles
+inside the challenge's cross-origin frame, and its model is no captcha reader.
+
+Upstream: neither hermes-agent (main 848fc0ad) nor camofox-browser (v1.18.1)
+has a captcha solver hook; camofox-browser's plugin system can carry one.
+hyperconfig's camofox-browser has it (pkgs/camofox-browser/captcha-plugin:
+POST /tabs/<id>/solve-captcha, CaptchaKraken on the tab's live page against a
+self-hosted model).
+
+Fix: one tool, browser_solve_captcha, offered only in Camofox mode and not
+routed to an extension controller. It asks the server to solve the captcha on
+the session's own tab and returns status (solved, no_captcha, failed with the
+solver's reason), vendor, rounds and seconds, plus what to do next. It waits
+180 s: the server ends a solve after 120 s by closing the tab, after up to
+35 s of waiting for the tab's lock. A closed tab (404/410) is forgotten so the
+next browser_navigate opens a new one; a server without the route says so.
+
+The new test fails before this change: tools.browser_camofox has no
+camofox_solve_captcha.
+
+diff --git a/tests/tools/test_browser_camofox_solve_captcha.py b/tests/tools/test_browser_camofox_solve_captcha.py
+new file mode 100644
+index 0000000..3d53ae0
+--- /dev/null
++++ b/tests/tools/test_browser_camofox_solve_captcha.py
+@@ -0,0 +1,95 @@
++"""browser_solve_captcha on the Camofox backend: the outcome the server reports, and its refusals.
++
++A fake _post answers POST /tabs/<id>/solve-captcha the way camofox-browser's captcha plugin does.
++"""
++
++import json
++
++import pytest
++import requests
++
++import tools.browser_camofox as bc
++
++
++def _http_error(status, body=None, text="<html>Cannot POST</html>"):
++    resp = requests.Response()
++    resp.status_code = status
++    resp._content = (json.dumps(body) if body is not None else text).encode()
++    return requests.HTTPError(f"{status} error", response=resp)
++
++
++@pytest.fixture
++def camofox(monkeypatch):
++    calls = []
++    answers = []
++
++    def post(path, body, timeout=None):
++        calls.append((path, body, timeout))
++        answer = answers.pop(0)
++        if isinstance(answer, Exception):
++            raise answer
++        return answer
++
++    monkeypatch.setattr(bc, "_post", post)
++    monkeypatch.setattr(bc, "_camofox_private_page_block", lambda *a: None)
++    with bc._sessions_lock:
++        bc._sessions.clear()
++        bc._sessions["a"] = {"user_id": "user-a", "tab_id": "tab-a", "session_key": "task_a",
++                             "managed": False, "adopt_existing_tab": False}
++        bc._sessions["b"] = {"user_id": "user-b", "tab_id": None, "session_key": "task_b",
++                             "managed": False, "adopt_existing_tab": False}
++    yield calls, answers
++    with bc._sessions_lock:
++        bc._sessions.clear()
++
++
++def _call(task):
++    return json.loads(bc.camofox_solve_captcha(task_id=task))
++
++
++def test_reports_a_solve(camofox):
++    calls, answers = camofox
++    answers.append({"ok": True, "status": "solved", "vendor": "recaptcha", "rounds": 3,
++                    "durationMs": 41234, "url": "https://example.com/form"})
++    out = _call("a")
++    assert calls == [("/tabs/tab-a/solve-captcha", {"userId": "user-a"}, bc._CAPTCHA_SOLVE_TIMEOUT_SECONDS)]
++    assert out["success"] is True
++    assert (out["status"], out["vendor"], out["rounds"], out["seconds"]) == ("solved", "recaptcha", 3, 41.2)
++    assert "Submit" in out["next"]
++
++
++@pytest.mark.parametrize("status", ["no_captcha", "failed"])
++def test_reports_no_captcha_and_failure_with_reason(camofox, status):
++    _, answers = camofox
++    answers.append({"ok": True, "status": status, "vendor": None, "rounds": 0, "durationMs": 10500,
++                    "reason": "why", "url": "https://example.com/"})
++    out = _call("a")
++    assert out["success"] is False
++    assert (out["status"], out["reason"]) == (status, "why")
++    assert out["next"] == bc._CAPTCHA_NEXT[status]
++
++
++def test_needs_a_tab(camofox):
++    calls, _ = camofox
++    assert "browser_navigate" in _call("b")["error"]
++    assert calls == []
++
++
++def test_server_without_the_plugin(camofox):
++    _, answers = camofox
++    answers.append(_http_error(404))
++    assert "no captcha solver" in _call("a")["error"]
++
++
++def test_tab_closed_by_timeout_is_forgotten(camofox):
++    _, answers = camofox
++    answers.append(_http_error(410, {"error": "Tab tab-a not found"}))
++    out = _call("a")
++    assert "browser_navigate" in out["error"]
++    assert bc._sessions["a"]["tab_id"] is None
++
++
++def test_unconfigured_server(camofox):
++    _, answers = camofox
++    answers.append(_http_error(503, {"error": "No captcha model is configured"}))
++    assert "No captcha model is configured" in _call("a")["error"]
+diff --git a/tools/browser_camofox.py b/tools/browser_camofox.py
+index 6d323a4..20f2b08 100644
+--- a/tools/browser_camofox.py
++++ b/tools/browser_camofox.py
+@@ -779,3 +779,55 @@ def camofox_downloads(save: Optional[str] = None, path: Optional[str] = None, ov
+         return tool_error(f"Camofox downloads request failed: {e}", success=False)
+     except Exception as e:
+         return tool_error(str(e), success=False)
++
++
++# ---- CAPTCHA ----
++# A camofox-browser with the captcha plugin (POST /tabs/<id>/solve-captcha) runs a captcha solver
++# (CaptchaKraken: a vision model reads each challenge, the browser clicks or drags the answer) on
++# the tab's live page, holding the tab meanwhile. The server ends a solve after 120 s by closing the
++# tab, and may first wait up to 35 s for the tab's lock, so the client waits longer than both.
++_CAPTCHA_SOLVE_TIMEOUT_SECONDS = 180
++
++_CAPTCHA_NEXT = {
++    "solved": "The captcha accepted the answer. Submit the page's form now if it has one.",
++    "no_captcha": ("No captcha widget is on the page. An invisible reCAPTCHA needs no solve: click the "
++                   "page's button, and call browser_solve_captcha again only if a challenge then appears."),
++    "failed": "Call browser_solve_captcha once more; if it fails again, report the captcha as the blocker.",
++}
++
++
++def _error_detail(resp: Optional[requests.Response]) -> Optional[str]:
++    """The server's JSON ``error``, or None when the answer is not camofox JSON (e.g. Express's
++    HTML 404 for a route this server does not have)."""
++    try:
++        data = resp.json() if resp is not None else None
++    except ValueError:
++        return None
++    return str(data.get("error") or data) if isinstance(data, dict) else None
++
++
++def camofox_solve_captcha(task_id: Optional[str] = None) -> str:
++    """Solve the captcha on the task's current page in the browser and report the outcome."""
++    def body(session):
++        try:
++            data = _post(_tab_path(session, "solve-captcha"), {"userId": session["user_id"]},
++                         timeout=_CAPTCHA_SOLVE_TIMEOUT_SECONDS)
++        except requests.HTTPError as e:
++            status = e.response.status_code if e.response is not None else None
++            detail = _error_detail(e.response)
++            if status == 404 and detail is None:
++                return tool_error("This Camofox browser server has no captcha solver.", success=False)
++            if status in (404, 410):
++                session["tab_id"] = None
++                return tool_error(f"The browser tab is gone ({detail}); the solve may have run out of time. "
++                                  "Call browser_navigate to open the page again.", success=False)
++            return tool_error(f"Captcha solve request failed ({status}): {detail or e}", success=False)
++        outcome = data.get("status") or "failed"
++        result: Dict[str, Any] = {"success": outcome == "solved", "status": outcome, "vendor": data.get("vendor"),
++                                  "rounds": data.get("rounds"),
++                                  "seconds": round((data.get("durationMs") or 0) / 1000, 1), "url": data.get("url")}
++        if data.get("reason"):
++            result["reason"] = data["reason"]
++        result["next"] = _CAPTCHA_NEXT.get(outcome, _CAPTCHA_NEXT["failed"])
++        return json.dumps(result, ensure_ascii=False)
++    return _with_tab(task_id, "solve a captcha", body)
+diff --git a/tools/browser_tool.py b/tools/browser_tool.py
+index 5ffc506..6a9d42b 100644
+--- a/tools/browser_tool.py
++++ b/tools/browser_tool.py
+@@ -597,6 +597,13 @@ BROWSER_TOOL_SCHEMAS = [
+             "required": []
+         }
+     },
++    {
++        "name": "browser_solve_captcha",
++        "description": "Solve an image CAPTCHA blocking the current page (reCAPTCHA checkbox or image grid, hCaptcha, GeeTest, Yidun, text captchas, ...) in this browser with a self-hosted vision model: it ticks the captcha checkbox, reads each challenge round and clicks or drags the answer. Takes up to 2 minutes. Returns status 'solved', 'no_captcha' or 'failed' (with reason), the vendor, rounds and seconds. After 'solved', submit the page's form if it has one. Requires browser_navigate first.",
++        "parameters": {
++            "type": "object", "properties": {}, "required": []
++        }
++    },
+ ]
+ 
+ from tools import browser_tool_snapshot as _snapshot
+@@ -1173,6 +1180,18 @@ def check_browser_downloads_requirements() -> bool:
+     return _is_camofox_mode() and _install.check_browser_requirements()
+ 
+ 
++def browser_solve_captcha(task_id: Optional[str] = None) -> str:
++    """Solve the captcha on the current page. The solver runs inside camofox-browser on the
++    tab's live page, so the tool exists only in Camofox mode."""
++    if not _is_camofox_mode():
++        return _dumps(_err("browser_solve_captcha needs the Camofox browser backend."))
++    return _camofox("camofox_solve_captcha", task_id)
++
++
++def check_browser_solve_captcha_requirements() -> bool:
++    return _is_camofox_mode() and _install.check_browser_requirements()
++
++
+ _GET_IMAGES_JS = """JSON.stringify(
+         [...document.images].map(img => ({
+             src: img.src, alt: img.alt || '', width: img.naturalWidth, height: img.naturalHeight
+@@ -1351,11 +1370,16 @@ for _name, _emoji, _check_fn, _defaults, *_extra in _BROWSER_TOOL_TABLE:
+                       handler=_routed_handler(_name, _fallback_call(_name, _defaults, *_extra)),
+                       check_fn=_check_fn, emoji=_emoji)
+ 
+-# Downloads come from camofox-browser alone, so this tool is not routed to an extension controller.
++# Downloads and captcha solves come from camofox-browser alone, so these tools are not routed to an
++# extension controller.
+ _downloads_call = _fallback_call("browser_downloads", {"save": None, "path": None, "overwrite": False})
+ registry.register(name="browser_downloads", toolset="browser", schema=_BROWSER_SCHEMA_MAP["browser_downloads"],
+                   handler=lambda args, **kw: _downloads_call(args, kw),
+                   check_fn=check_browser_downloads_requirements, emoji="📥")
++_solve_captcha_call = _fallback_call("browser_solve_captcha", {})
++registry.register(name="browser_solve_captcha", toolset="browser", schema=_BROWSER_SCHEMA_MAP["browser_solve_captcha"],
++                  handler=lambda args, **kw: _solve_captcha_call(args, kw),
++                  check_fn=check_browser_solve_captcha_requirements, emoji="🧩")
+ 
+ 
+ # ---- BEGIN PLUGIN-COMPAT (revert-scheduled; see COMPAT_MANIFEST.md) ----
+diff --git a/toolsets.py b/toolsets.py
+index 65d0b06..1edafca 100644
+--- a/toolsets.py
++++ b/toolsets.py
+@@ -17,7 +17,7 @@ _HERMES_CORE_TOOLS = [
+     "browser_navigate", "browser_snapshot", "browser_click",
+     "browser_type", "browser_scroll", "browser_back",
+     "browser_press", "browser_get_images",
+-    "browser_vision", "browser_console", "browser_downloads", "browser_cdp", "browser_dialog",
++    "browser_vision", "browser_console", "browser_downloads", "browser_solve_captcha", "browser_cdp", "browser_dialog",
+     "browser_vault_list", "browser_vault_unlock", "browser_vault_fill", "browser_vault_save_login", "browser_vault_enter_code",  # ride with the browser
+     "browser_exec",  # replaces the other browser tools when browser.backend is "browser-use"
+     "text_to_speech",

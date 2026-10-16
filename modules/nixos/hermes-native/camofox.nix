@@ -127,6 +127,13 @@ in
             # Firefox closes after 5 idle minutes; the server stays.
             BROWSER_IDLE_TIMEOUT_MS = "300000";
             BROWSER_RSS_RESTART_THRESHOLD_MB = "1200";
+          }
+          # hermes' browser_solve_captcha: the captcha plugin
+          # (pkgs/camofox-browser) runs CaptchaKraken's engine, which reads
+          # each challenge with this model.
+          // lib.optionalAttrs (cfg.captchaSolver.baseUrl != null) {
+            VLLM_BASE_URL = cfg.captchaSolver.baseUrl;
+            CAPTCHA_LORA_NAME = cfg.captchaSolver.model;
           };
           # Xvfb for the headful browser; camoufox-js finds it with `which`.
           path = [

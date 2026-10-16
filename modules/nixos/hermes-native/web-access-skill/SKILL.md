@@ -1,6 +1,6 @@
 ---
 name: web-access
-description: Find, read and download things on the web from this host. Use whenever a task fetches or reads a web page or file, or a site answers 403, Cloudflare "Just a moment...", a CAPTCHA or another bot wall. Read before reaching for curl or blocked-page-recovery.
+description: Find, read and download things on the web from this host. Use whenever a task fetches or reads a web page or file, or a site answers 403, Cloudflare "Just a moment...", a CAPTCHA (browser_solve_captcha) or another bot wall. Read before reaching for curl or blocked-page-recovery.
 ---
 
 # Web access on this host
@@ -29,8 +29,14 @@ starting cold: retry once, not more.
 A `g-recaptcha` class or a reCAPTCHA badge in the page source is no
 reason to give up. Most such buttons carry an invisible reCAPTCHA that
 passes without a challenge when clicked in the browser: click through
-(close any ad tab it opens) and see what happens before reporting a
-CAPTCHA.
+(close any ad tab it opens) and see what happens first.
+
+When an image CAPTCHA blocks the page (a reCAPTCHA checkbox or image
+grid, hCaptcha, GeeTest, a slider or distorted text), call
+`browser_solve_captcha`: the browser ticks the box and solves the
+challenge itself (up to 2 min). On `solved`, submit the page's form. On
+`failed`, call it once more; after a second failure report the CAPTCHA
+as the blocker. Do not click grid tiles yourself.
 
 ## Downloads
 

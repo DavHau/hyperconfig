@@ -66,6 +66,29 @@ in
       description = "Packages on the agent's PATH, in addition to the built-in toolset.";
     };
 
+    captchaSolver = {
+      baseUrl = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = "http://vit.d:8096/v1";
+        description = ''
+          OpenAI-compatible endpoint of the CaptchaKraken model behind the
+          agents' browser_solve_captcha (the captcha plugin of their
+          camofox-browser). Null: the tool answers that this browser has no
+          captcha model.
+        '';
+      };
+      model = mkOption {
+        type = types.str;
+        default = "CaptchaKraken/CaptchaKraken-v1.2-GGUF";
+        description = ''
+          Served model name. A name registered in CaptchaKraken's
+          models.json also picks the prompts and pixel budget of those
+          weights.
+        '';
+      };
+    };
+
     users = mkOption {
       default = { };
       description = ''
