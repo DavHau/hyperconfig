@@ -13,6 +13,13 @@
 # the working directory, an existing file and a file over 50 MiB. Neither
 # another camofox userId on her server nor bob sees her downloads, and
 # closing the session deletes the server's copies.
+#
+# Captchas: hermes' browser_solve_captcha (patches/hermes-camofox-solve-captcha.patch)
+# drives the captcha plugin of alice's server (pkgs/camofox-browser) against a
+# local 3x3 grid captcha, with a stand-in for the model that answers only a
+# request carrying an image and no tools: the browser clicks the right tiles
+# and Verify, and the tool reports solved; on a page without a captcha it
+# reports no_captcha. Another camofox userId cannot solve on her tab.
 { pkgs, inputs }:
 let
   inherit (pkgs) lib;
@@ -30,15 +37,18 @@ let
       cfg = { };
     }).hermesPackage;
   site = ./camofox-test-site.py;
+  captchaSite = ./camofox-test-captcha-site.py;
 
   # Runs the driver as an agent with hermes' own interpreter, the agent's
   # camofox URL and key from its .env (as hermes reads them) and its
   # working directory.
-  driver =
-    user: args:
+  driverScript =
+    script: user: args:
     "runuser -u ${user} -- sh -c 'set -a; . ${hlib.stateDir user}/.hermes/.env; set +a; "
     + "HERMES_HOME=/home/${user}/hermes-test TERMINAL_CWD=${hlib.workspace user} "
-    + "exec ${hermes.hermesVenv}/bin/python3 ${./camofox-test-downloads.py} ${args}' 2>&1";
+    + "exec ${hermes.hermesVenv}/bin/python3 ${script} ${args}' 2>&1";
+  driver = driverScript ./camofox-test-downloads.py;
+  captchaDriver = driverScript ./camofox-test-captcha.py;
   privateTmp = "/tmp/systemd-private-*-hermes-camofox-alice.service-*/tmp";
 in
 pkgs.testers.runNixOSTest {
@@ -66,6 +76,7 @@ pkgs.testers.runNixOSTest {
       enable = true;
       users.alice = { };
       users.bob = { };
+      captchaSolver.baseUrl = "http://127.0.0.1:8766/v1";
     };
 
     # What agents.nix provides around camofox.nix: the state dirs, and an
@@ -91,6 +102,13 @@ pkgs.testers.runNixOSTest {
         serviceConfig = {
           DynamicUser = true;
           ExecStart = "${pkgs.python3}/bin/python3 ${site} 8765";
+        };
+      };
+      captcha-site = {
+        wantedBy = [ "multi-user.target" ];
+        serviceConfig = {
+          DynamicUser = true;
+          ExecStart = "${pkgs.python3}/bin/python3 ${captchaSite} 8766";
         };
       };
     };
@@ -156,6 +174,12 @@ pkgs.testers.runNixOSTest {
         assert machine.succeed(copies).strip() == "0", machine.succeed("ls ${privateTmp}")
         # Playwright's own copies (its artifacts dir) go with the browser context.
         assert machine.succeed("find ${privateTmp}/playwright-artifacts-* -type f").strip() == "", machine.succeed("ls -laR ${privateTmp}")
+
+    with subtest("browser_solve_captcha solves alice's grid captcha in her browser"):
+        machine.wait_for_unit("captcha-site.service")
+        out = machine.succeed("${captchaDriver "alice" "captcha http://127.0.0.1:8766"}")
+        print(out)
+        assert "ALL PASSED" in out
 
     with subtest("bob reaches neither alice's port nor her backend"):
         machine.fail("runuser -u bob -- curl -s --max-time 10 http://127.0.0.1:${port}/health")

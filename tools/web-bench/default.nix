@@ -2,7 +2,7 @@
 let
   camoufox-browser = callPackage ../../pkgs/camoufox/browser.nix { };
   camoufox = python3Packages.callPackage ../../pkgs/camoufox/python.nix { };
-  captchakraken = python3Packages.callPackage ./captchakraken/python.nix { };
+  captchakraken = python3Packages.callPackage ../../pkgs/captchakraken/python.nix { };
 in
 python3Packages.buildPythonApplication {
   pname = "web-bench";
