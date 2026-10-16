@@ -723,6 +723,39 @@ in
         # the build. spaces' own tests never build the script. Drop this
         # once spaces groups the redirects.
         systemd.services.spaces-integrations-managed-load.enableStrictShellChecks = false;
+
+        # The integration unit loads the broker's own store (config.toml and
+        # a sealed secrets blob) as credentials next to the managed tree, and
+        # a missing source fails it with 243/CREDENTIALS. The broker writes
+        # that store only when someone sets an account in the Integrations
+        # app, which never happens for an agent whose only account is this
+        # managed one; so the mail tools never came up. Seed an empty store,
+        # sealed the way the broker seals it, before the unit starts.
+        systemd.user.services.agent-mail-store-seed = {
+          description = "Seed an empty spaces mail store for an agent mailbox";
+          wantedBy = [ "spaces-integration-mail.service" ];
+          before = [ "spaces-integration-mail.service" ];
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+          };
+          script = ''
+            case "$(${pkgs.coreutils}/bin/id -un)" in
+              ${lib.concatStringsSep "|" (lib.attrNames cfg.agents)}) ;;
+              *) exit 0 ;;
+            esac
+            dir="''${XDG_STATE_HOME:-$HOME/.local/state}/spaces-integrationd/mail"
+            ${pkgs.coreutils}/bin/mkdir -p "$dir"
+            ${pkgs.coreutils}/bin/chmod 0700 "$dir"
+            [ -e "$dir/config.toml" ] || : > "$dir/config.toml"
+            if [ ! -e "$dir/secrets" ]; then
+              empty=$(${pkgs.coreutils}/bin/mktemp)
+              ${pkgs.systemd}/bin/systemd-creds encrypt --user --uid=self --with-key=host+tpm2 \
+                --name=secrets "$empty" "$dir/secrets"
+              ${pkgs.coreutils}/bin/rm -f "$empty"
+            fi
+          '';
+        };
       })
     ]
   );
