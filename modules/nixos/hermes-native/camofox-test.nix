@@ -4,7 +4,16 @@
 # root-held port nor her backend, cannot read her key or profile store,
 # and a listener he binds on her backend port while her server is down
 # never receives her traffic.
-{ pkgs }:
+#
+# Downloads: hermes' browser_downloads tool (the patched hermes package,
+# patches/hermes-camofox-browser-downloads.patch), called through hermes'
+# tool registry against alice's real server and a local site, saves the
+# files that a link, a form POST, a form POST redirected to another origin
+# and a script start, and reports their sha256. It refuses paths outside
+# the working directory, an existing file and a file over 50 MiB. Neither
+# another camofox userId on her server nor bob sees her downloads, and
+# closing the session deletes the server's copies.
+{ pkgs, inputs }:
 let
   inherit (pkgs) lib;
   hlib = import ./lib.nix { inherit lib; };
@@ -12,6 +21,25 @@ let
   port = toString (hlib.camofoxPortFor "alice");
   backend = toString (hlib.camofoxBackendBase + aliceUid);
   dir = hlib.camofoxDir "alice";
+
+  # Only the hermes package is used; it reads neither cfg nor hlib.
+  hermes =
+    (import ./agent-config.nix {
+      inherit lib pkgs inputs;
+      hlib = null;
+      cfg = { };
+    }).hermesPackage;
+  site = ./camofox-test-site.py;
+
+  # Runs the driver as an agent with hermes' own interpreter, the agent's
+  # camofox URL and key from its .env (as hermes reads them) and its
+  # working directory.
+  driver =
+    user: args:
+    "runuser -u ${user} -- sh -c 'set -a; . ${hlib.stateDir user}/.hermes/.env; set +a; "
+    + "HERMES_HOME=/home/${user}/hermes-test TERMINAL_CWD=${hlib.workspace user} "
+    + "exec ${hermes.hermesVenv}/bin/python3 ${./camofox-test-downloads.py} ${args}' 2>&1";
+  privateTmp = "/tmp/systemd-private-*-hermes-camofox-alice.service-*/tmp";
 in
 pkgs.testers.runNixOSTest {
   name = "hermes-camofox-isolation";
@@ -48,10 +76,23 @@ pkgs.testers.runNixOSTest {
       "d ${hlib.stateDir u}/.hermes 0700 ${u} users - -"
       "f ${hlib.stateDir u}/.hermes/.env 0600 ${u} users - -"
     ]) [ "alice" "bob" ];
-    systemd.services.hermes-agent-alice.serviceConfig = {
-      Type = "oneshot";
-      User = "alice";
-      ExecStart = "${pkgs.coreutils}/bin/true";
+    systemd.services = lib.genAttrs [ "hermes-agent-alice" "hermes-agent-bob" ] (unit: {
+      serviceConfig = {
+        Type = "oneshot";
+        User = lib.removePrefix "hermes-agent-" unit;
+        ExecStart = "${pkgs.coreutils}/bin/true";
+      };
+    }) // {
+      # The downloads test opens two camofox userIds next to the "a" one
+      # the routes subtest left open.
+      hermes-camofox-alice.environment.MAX_SESSIONS = lib.mkForce "3";
+      download-site = {
+        wantedBy = [ "multi-user.target" ];
+        serviceConfig = {
+          DynamicUser = true;
+          ExecStart = "${pkgs.python3}/bin/python3 ${site} 8765";
+        };
+      };
     };
 
     environment.systemPackages = [
@@ -87,6 +128,35 @@ pkgs.testers.runNixOSTest {
         listed = json.loads(machine.succeed(f"runuser -u alice -- curl -sf -H 'Authorization: Bearer {key}' 'http://127.0.0.1:${port}/tabs?userId=a'"))
         assert len(listed["tabs"]) == 1, listed
 
+    with subtest("browser_downloads saves alice's downloads, and only into her workspace"):
+        machine.wait_for_unit("download-site.service")
+        out = machine.succeed("${driver "alice" "owner http://127.0.0.1:8765 ${site}"}")
+        print(out)
+        assert "ALL PASSED" in out
+        ids = json.loads(out.split("IDS: ", 1)[1].splitlines()[0])
+        users = json.loads(out.split("USERS: ", 1)[1].splitlines()[0])
+        # The workspace files belong to alice.
+        machine.succeed("test \"$(stat -c %U ${hlib.workspace "alice"}/redirect.bin)\" = alice")
+
+    with subtest("bob sees none of alice's downloads"):
+        machine.succeed("systemctl start hermes-agent-bob.service")
+        machine.succeed(f"echo '{json.dumps(ids)}' > /tmp/alice-ids.json && chmod 644 /tmp/alice-ids.json")
+        out = machine.succeed("${driver "bob" "other http://127.0.0.1:8765 /tmp/alice-ids.json"}")
+        print(out)
+        assert "ALL PASSED" in out
+        out = machine.succeed("runuser -u bob -- env CAMOFOX_URL=http://127.0.0.1:${port} CAMOFOX_API_KEY=x HERMES_HOME=/home/bob/hermes-test2 TERMINAL_CWD=/home/bob/ws ${hermes.hermesVenv}/bin/python3 ${./camofox-test-downloads.py} unreachable 2>&1")
+        print(out)
+        assert "ALL PASSED" in out
+
+    with subtest("closing a session deletes the server's copies of its downloads"):
+        copies = "ls ${privateTmp} | grep -c '^camofox-download-' || true"
+        assert machine.succeed(copies).strip() == str(len(ids)), machine.succeed("ls ${privateTmp}")
+        for u in users:
+            machine.succeed(f"runuser -u alice -- curl -sf -X DELETE -H 'Authorization: Bearer {key}' http://127.0.0.1:${port}/sessions/{u}")
+        assert machine.succeed(copies).strip() == "0", machine.succeed("ls ${privateTmp}")
+        # Playwright's own copies (its artifacts dir) go with the browser context.
+        assert machine.succeed("find ${privateTmp}/playwright-artifacts-* -type f").strip() == "", machine.succeed("ls -laR ${privateTmp}")
+
     with subtest("bob reaches neither alice's port nor her backend"):
         machine.fail("runuser -u bob -- curl -s --max-time 10 http://127.0.0.1:${port}/health")
         machine.fail("runuser -u bob -- curl -s --max-time 10 http://127.0.0.1:${backend}/health")
@@ -98,8 +168,8 @@ pkgs.testers.runNixOSTest {
 
     with subtest("a listener bob binds on alice's backend gets none of her traffic"):
         machine.succeed("systemctl stop hermes-camofox-alice.service")
-        # Stopping saves the profile's cookies, owner-only.
-        machine.succeed("test \"$(stat -c '%a %U' ${dir}/profiles/*/storage-state.json)\" = '600 alice'")
+        # Stopping saves the profiles' cookies, owner-only.
+        machine.succeed("test \"$(stat -c '%a %U' ${dir}/profiles/*/storage-state.json | sort -u)\" = '600 alice'")
         machine.fail("journalctl -u hermes-camofox-alice --no-pager | grep -q 'failed to persist'")
         machine.succeed("systemd-run --uid=bob --unit=squat ${pkgs.python3}/bin/python3 -m http.server ${backend} --bind 127.0.0.1")
         # root may dial any gated port; bob's own dial is rejected too.

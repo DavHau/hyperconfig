@@ -34,11 +34,28 @@ CAPTCHA.
 
 ## Downloads
 
-The browser tools cannot save a file. Use the browser to reach the real
-file link (read its `href` from the snapshot or with `browser_console`,
-e.g. `[...document.links].map(a => a.href)`), then fetch that URL with
-`curl -fL -o <file> <url>` in the terminal. `web_extract` refuses files
-over 25 MB and binaries; it says so, then use curl.
+The browser keeps every file a click starts: a download link or button,
+a form that answers with a file, a script. After the click, call
+`browser_downloads` without arguments: it lists the session's downloads
+(id, filename, size, status) and waits up to 15 s for a new one; call it
+again while a slow one runs. Then `browser_downloads` with
+`save="<id>"` (or `save="latest"`) writes the file into the working
+directory and returns its path, size and sha256 (`path` picks a name or
+subdirectory inside it, `overwrite=true` replaces a file). Over 50 MB it
+refuses; fetch the listed URL with curl.
+
+A file URL you can read (an `href`) is fine with `curl -fL -o <file>
+<url>`. `web_extract` refuses files over 25 MB and binaries.
+
+If `browser_downloads` fails or never lists the file, hand the CAPTCHA
+token to curl: stop the form's submit (set its `action` to
+`javascript:void(0)`), click so the browser passes the CAPTCHA, read the
+form fields including `g-recaptcha-response` and `document.cookie` with
+`browser_console`, then re-POST with `curl -L -b '<cookies>' -d
+'<fields>' <form URL>`. A needed HttpOnly cookie is missing from
+`document.cookie`; then this fails, so report that. Do not re-POST with
+`fetch()` in the page: a redirect to another host fails there with
+"NetworkError".
 
 ## Never
 

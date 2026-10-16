@@ -250,6 +250,7 @@
         hermes-camofox-isolation =
           import ./modules/nixos/hermes-native/camofox-test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
+            inherit inputs;
           };
         per-user-tmp =
           import ./modules/nixos/per-user-tmp/test.nix {
