@@ -28,5 +28,6 @@
     ./searxng.nix
     ./web-extract.nix
     ./camofox.nix
+    ./web-access-skill.nix
   ];
 }

@@ -10,9 +10,13 @@
  const BUILDREFS_TIMEOUT_MS = CONFIG.buildrefsTimeoutMs;
  const NATIVE_MEM_RESTART_THRESHOLD_MB = CONFIG.nativeMemRestartThresholdMb;
  let _nativeMemBaseline = null; // RSS - heapUsed at first idle measurement
-@@ -605,14 +608,14 @@
+@@ -604,15 +607,19 @@
+   return proxyPool?.canRotateSessions ? Math.max(baseMs, 180000) : baseMs;
  }
  
++// The challenge wait of a navigation ends within CHALLENGE_WAIT_MS plus a
++// second each for a mouse release and the cleared page's DOM
++// (waitForChallengeClear); the 5 s margin holds those.
  function navigationRequestTimeoutMs() {
 -  return Math.max(requestTimeoutMs(), NAVIGATE_TIMEOUT_MS + 5000);
 +  return Math.max(requestTimeoutMs(), NAVIGATE_TIMEOUT_MS + CHALLENGE_WAIT_MS + 5000);
@@ -20,14 +24,16 @@
  
  // A tab creation can make one bounded new-page attempt, rebuild the browser
  // session, then make one more. Keep the route deadline outside that recovery
- // budget so a healthy replacement session can return its tab.
+-// budget so a healthy replacement session can return its tab.
++// budget so a healthy replacement session can return its tab, and outside
++// the challenge wait of its first navigation.
  function tabCreateRequestTimeoutMs() {
 -  return Math.max(requestTimeoutMs(), (NEW_PAGE_TIMEOUT_MS * 2) + 5000);
 +  return Math.max(requestTimeoutMs(), (NEW_PAGE_TIMEOUT_MS * 2) + 5000) + CHALLENGE_WAIT_MS;
  }
  
  const userConcurrency = new Map();
-@@ -1173,6 +1176,9 @@
+@@ -1173,6 +1180,9 @@
          headless: useVirtualDisplay ? false : !useDesktopWindow,
          os: hostOS,
          humanize: true,
@@ -37,7 +43,7 @@
          enable_cache: true,
          proxy: launchProxy,
          geoip: !!launchProxy,
-@@ -2077,7 +2083,87 @@
+@@ -2077,7 +2087,126 @@
    if (!contentType.startsWith('image/')) {
      await page.waitForLoadState('domcontentloaded', { timeout });
    }
@@ -45,17 +51,39 @@
 +  return (await waitForChallengeClear(page)) || response;
 +}
 +
++// Every step of the wait is a Juggler call, and Juggler may be slow to
++// answer one or not answer at all: it waits for the renderer to ack each
++// mouse event (Camoufox before 156 waited for good on one dropped at the
++// content's edge, 156 gives up after 5 s). So each step gets a few
++// seconds, never past the wait's deadline; one that runs out counts as
++// not known.
++const CHALLENGE_PROBE_TIMEOUT_MS = 3000;
++const PROBE_TIMED_OUT = Symbol('challenge probe timed out');
++
++// The step's value, null when it fails, PROBE_TIMED_OUT when it runs out.
++function challengeProbe(promise, deadline) {
++  let timer;
++  const ms = Math.max(0, Math.min(CHALLENGE_PROBE_TIMEOUT_MS, deadline - Date.now()));
++  const timedOut = new Promise((resolve) => { timer = setTimeout(resolve, ms, PROBE_TIMED_OUT); });
++  return Promise.race([promise.catch(() => null), timedOut]).finally(() => clearTimeout(timer));
++}
++
++function sleepUntil(ms, deadline) {
++  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(ms, deadline - Date.now()))));
++}
++
 +// Cloudflare's "Just a moment" and similar non-interactive checks run a
 +// script, set a clearance cookie and reload into the real page. Camoufox
 +// evaluates in an isolated world, so page globals (_cf_chl_opt) are read
-+// from the script text. null when the document cannot be read
++// from the script text. null when the document cannot be read in time
 +// (mid-navigation).
-+async function isChallengePage(page) {
-+  return page.evaluate(() => {
++async function isChallengePage(page, deadline) {
++  const verdict = await challengeProbe(page.evaluate(() => {
 +    const title = (document.title || '').toLowerCase();
 +    return /^(just a moment|checking your browser|one moment, please|vercel security checkpoint)/.test(title)
 +      || [...document.scripts].some((s) => s.textContent.includes('_cf_chl_opt'));
-+  }).catch(() => null);
++  }), deadline);
++  return typeof verdict === 'boolean' ? verdict : null;
 +}
 +
 +// Cloudflare's managed challenge can ask for a click on its Turnstile box.
@@ -66,33 +94,46 @@
 +const TURNSTILE_HOST = 'challenges.cloudflare.com';
 +const TURNSTILE_MAX_CLICKS = 3;
 +const TURNSTILE_CLICK_GAP_MS = 8000;
++// A click is begun only with this much of the wait left, so that the
++// deadline does not cut it between press and release.
++const TURNSTILE_CLICK_MIN_MS = 4000;
 +
-+async function turnstileBox(page) {
++async function turnstileBox(page, deadline) {
 +  for (const frame of page.frames()) {
 +    if (!frame.url().includes(TURNSTILE_HOST)) continue;
-+    const box = await frame.frameElement().then((el) => el.boundingBox()).catch(() => null);
-+    if (box && box.width >= 150 && box.height >= 40) return box;
++    const el = await challengeProbe(frame.frameElement(), deadline);
++    if (!el || el === PROBE_TIMED_OUT) continue;
++    const box = await challengeProbe(el.boundingBox(), deadline);
++    if (box && box !== PROBE_TIMED_OUT && box.width >= 150 && box.height >= 40) return box;
 +  }
 +  return null;
 +}
 +
-+async function clickTurnstile(page, box) {
-+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
++// false when a mouse step went unanswered. Juggler sends a page's input
++// one event at a time for the whole browser, so that step holds every
++// later mouse event, on any page, for as long as it waits; after a move
++// that went unanswered nothing more is sent, and a press is always
++// followed by its release.
++async function clickTurnstile(page, box, deadline) {
++  const answered = async (step, by) => (await challengeProbe(step, by)) !== PROBE_TIMED_OUT;
 +  const jitter = () => (Math.random() - 0.5) * 10;
-+  await page.mouse.move(box.x + 28 + jitter(), box.y + box.height / 2 + jitter());
-+  await sleep(150 + Math.random() * 300);
-+  await page.mouse.down();
-+  await sleep(60 + Math.random() * 100);
-+  await page.mouse.up();
++  if (!(await answered(page.mouse.move(box.x + 28 + jitter(), box.y + box.height / 2 + jitter()), deadline))) return false;
++  await sleepUntil(150 + Math.random() * 300, deadline);
++  const pressed = await answered(page.mouse.down(), deadline);
++  await sleepUntil(60 + Math.random() * 100, deadline);
++  const released = await answered(page.mouse.up(), Math.max(deadline, Date.now() + 1000));
++  return pressed && released;
 +}
 +
 +// Waits while the page is a challenge interstitial, up to CHALLENGE_WAIT_MS,
-+// ticking a Turnstile checkbox when one is drawn. Returns the response of
-+// the document it reloaded into, or null.
++// ticking a Turnstile checkbox when one is drawn; a cleared page then gets
++// at most a second more for its DOM. Returns the response of the document
++// it reloaded into, or null.
 +async function waitForChallengeClear(page) {
-+  if (CHALLENGE_WAIT_MS <= 0 || !(await isChallengePage(page))) return null;
++  if (CHALLENGE_WAIT_MS <= 0) return null;
 +  const started = Date.now();
 +  const deadline = started + CHALLENGE_WAIT_MS;
++  if (!(await isChallengePage(page, deadline))) return null;
 +  let latest = null;
 +  const onResponse = (resp) => {
 +    if (resp.request().isNavigationRequest() && resp.frame() === page.mainFrame()) latest = resp;
@@ -101,19 +142,21 @@
 +  let cleared = false;
 +  let clicks = 0;
 +  let lastClick = 0;
++  let mouseStuck = false;
 +  try {
 +    while (!cleared && Date.now() < deadline && !page.isClosed()) {
-+      await new Promise((resolve) => setTimeout(resolve, 1000));
-+      cleared = (await isChallengePage(page)) === false;
-+      if (cleared || clicks >= TURNSTILE_MAX_CLICKS || Date.now() - lastClick < TURNSTILE_CLICK_GAP_MS) continue;
-+      if (!(await turnstileBox(page))) continue;
++      await sleepUntil(1000, deadline);
++      cleared = (await isChallengePage(page, deadline)) === false;
++      if (cleared || mouseStuck || clicks >= TURNSTILE_MAX_CLICKS || Date.now() - lastClick < TURNSTILE_CLICK_GAP_MS) continue;
++      if (!(await turnstileBox(page, deadline))) continue;
 +      // A person reads the box before ticking it.
-+      await new Promise((resolve) => setTimeout(resolve, 800 + Math.random() * 1200));
-+      const box = await turnstileBox(page);
++      await sleepUntil(800 + Math.random() * 1200, deadline);
++      if (deadline - Date.now() < TURNSTILE_CLICK_MIN_MS) continue;
++      const box = await turnstileBox(page, deadline);
 +      if (!box) continue;
-+      await clickTurnstile(page, box).catch(() => {});
 +      clicks += 1;
 +      lastClick = Date.now();
++      mouseStuck = !(await clickTurnstile(page, box, deadline));
 +    }
 +    if (cleared) {
 +      await page.waitForLoadState('domcontentloaded', { timeout: Math.max(1000, deadline - Date.now()) }).catch(() => {});
@@ -121,7 +164,9 @@
 +  } finally {
 +    page.off('response', onResponse);
 +  }
-+  log('info', 'challenge wait', { cleared, turnstileClicks: clicks, waitedMs: Date.now() - started, url: page.isClosed() ? null : page.url() });
++  log(mouseStuck ? 'warn' : 'info', 'challenge wait', {
++    cleared, turnstileClicks: clicks, mouseStuck, waitedMs: Date.now() - started, url: page.isClosed() ? null : page.url(),
++  });
 +  return latest;
  }
  
