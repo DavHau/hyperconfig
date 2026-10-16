@@ -36,7 +36,7 @@ if !cs.enable || s == null then { exists = false; } else {
   exists = true;
   inherit (s) id mode memoryMax cpuQuota;
   inherit (cs) ipv6Prefix;
-  keys = map comment cs.deployKeys;
+  keys = map comment s.deployKeys;
   shares = builtins.attrNames s.shares;
 }
 EOF
@@ -119,9 +119,16 @@ pushed. Keep the brackets: a bare IPv6 address breaks nix-copy-closure.
 
 - boot.isNspawnContainer = true;
 - services.openssh.enable = true; plus your key in
-  users.users.root.openssh.authorizedKeys.keys. The bootstrap's keys are
-  gone after your first deploy, and $machine does not repair a slot that
+  users.users.root.openssh.authorizedKeys.keys, or keep the bootstrap's
+  services.openssh.authorizedKeysFiles =
+  [ "/var/lib/container-slot/authorized_keys" ]; ($machine provides the
+  keys above there at every start). Without either, your access is gone
+  after your first deploy, and $machine does not repair a slot that
   locked its deployer out.
+- To keep the slot's ssh host key (generated and kept by $machine, so it
+  survives resets and redeploys and $machine can pin it):
+  services.openssh.hostKeys = [ { type = "ed25519";
+  path = "/var/lib/container-slot/ssh_host_ed25519_key"; } ];
 
 What it need not (and should not) do:
 

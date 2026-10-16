@@ -20,7 +20,9 @@
 # The guest config needs exactly one line beyond its own content:
 # `boot.isNspawnContainer = true;` (what nixos-generate-config emits inside
 # nspawn). It must also keep its own way in (sshd + a key for root): this
-# host does not repair a slot that locked its deployer out.
+# host does not repair a slot that locked its deployer out. The simplest way
+# is the bootstrap's own: `services.openssh.authorizedKeysFiles =
+# [ "/var/lib/container-slot/authorized_keys" ];` (see first boot below).
 #
 # What the host provides, so the guest config does not have to:
 #   - addresses: the slot's public v6 /128 (<ipv6Prefix>::5107:<id hex>) is
@@ -31,14 +33,50 @@
 #     so the DHCP lease is stable.
 #   - DNS: a public-resolver resolv.conf is copied in at every start (the
 #     host's own points at resolved's stub, unreachable from the slot).
-#   - first boot: a bootstrap system (sshd, `deployKeys` on root) seeds
-#     the slot's profile if it has none yet. After that the profile belongs
-#     to the deployer.
+#   - first boot: a bootstrap system (sshd) seeds the slot's profile if it
+#     has none yet. After that the profile belongs to the deployer. Its sshd
+#     lets in root with the slot's `deployKeys` (default: the host-wide
+#     list), from a file this host bind-mounts read-only at
+#     /var/lib/container-slot/authorized_keys at every start. The keys live
+#     in that file, not in the bootstrap system, so one bootstrap serves
+#     slots with different deployers. The file is owned by the slot's root
+#     (sshd's StrictModes refuses a file owned by anyone else, and a host
+#     root file shows up as nobody in the slot's user namespace); the
+#     read-only bind keeps the slot from rewriting it. It sits under /var,
+#     not /etc, so it survives a guest whose /etc is an overlay.
+#   - host key: one ed25519 key per slot, generated here once
+#     (/var/lib/container-slots/host-keys/<slot>/) and bind-mounted
+#     read-only at /var/lib/container-slot/ssh_host_ed25519_key the same
+#     way, so it survives resets, hard resets and redeploys, and this host
+#     can pin it: known_hosts next to it lists the slot's addresses
+#     (`hostKeysDir`). The bootstrap's sshd uses it; a deployed guest
+#     keeps it with `services.openssh.hostKeys = [ { type = "ed25519";
+#     path = "/var/lib/container-slot/ssh_host_ed25519_key"; } ];`, or
+#     clients that pin it refuse the slot.
+#   - start: `autoStart` (default on) starts the slot at boot; off, the
+#     unit container@<slot> exists and something else starts it
+#     (./agent-slots.nix).
+#   - the root tree: the slot's root owns /var/lib/nixos-containers/<slot>
+#     (user namespace, ownership auto), but nixpkgs' container start script
+#     runs as host root on it (mkdir -p, chmod, touch, cp) and follows
+#     symlinks. A slot that replaced /root by a link to / would get host
+#     root to chmod 0700 this host's /. So before every start, with the
+#     slot stopped (nothing of it runs to race the check), the prep step
+#     refuses to start a slot whose usr, usr/bin, etc, var, var/lib,
+#     var/lib/private or root is a symlink (checked top-down, so each
+#     check resolves no planted link), and removes a symlinked
+#     etc/resolv.conf (replaced by the copy anyway) and any symlinked
+#     etc/machine-id: the script touches it unless it exists, and whether
+#     a link's target exists is host state the agent can flip between the
+#     check and the touch (a second hop in its own home). etc/os-release
+#     stays: a NixOS guest's is always a link, and the script already
+#     leaves a link alone. nixpkgs upstream has no fix (checked 2026-10).
 #
 # Evaluation cost: this host evaluates no NixOS system per slot. All slots
-# share one bootstrap system (same keys everywhere; nspawn sets the
-# hostname to the slot name), and the containers module's per-container
-# `config` stays undefined, so its eval-config is never forced.
+# share one bootstrap system (no keys of its own, see first boot; nspawn
+# sets the hostname to the slot name), and the containers module's
+# per-container `config` stays undefined, so its eval-config is never
+# forced.
 #
 # Isolation: every slot runs in its own user namespace, at a fixed host uid
 # base (uidBase: 0x60000000 + id * 0x10000; container uid n is host uid
@@ -72,9 +110,21 @@
 # Modes (host-side only; the guest cannot tell and need not care):
 #   isolated  routed veth; this host answers NDP on the bridge for the /128
 #             and forwards. The slot reaches the internet only (v4 NAT'd);
-#             LAN, private ranges, other slots and this host itself are
-#             dropped; inbound is open to the /128 (the guest's firewall
-#             decides), v4 inbound none.
+#             LAN, private ranges, `isolatedBlockedDestinations`, other
+#             slots and this host itself are dropped; inbound is open to the
+#             /128 (the guest's firewall decides). v4 inbound only on
+#             `publicIPv4Ports`: TCP arriving on `publicIPv4Interface` (the
+#             borrowed public IPv4, ./ipv4-forward.nix) at one of those ports
+#             is DNATed to the same port at 10.43.<id>.2, client address
+#             kept. With `isolatedEgress`, every connection the slot opens
+#             leaves through that interface (on som: Mullvad), masqueraded
+#             to its addresses, v6 included; connections that came in (v6
+#             from the internet, forwarded v4) answer the way they came. A
+#             forward-chain kill switch drops the slot's own connections on
+#             any other interface, so a dead tunnel means no egress, not the
+#             home uplink. While a slot is stopped, unreachable routes for
+#             10.43.0.0/16 and its /128 keep its addresses from falling back
+#             to the LAN (where any peer could claim the v6 by NDP).
 #   lan       veth on the LAN bridge: a LAN peer like any other, unfiltered.
 # Either way inbound from the internet additionally needs an allow rule for
 # the slot's v6 address on both routers in front of the LAN, the AIS ZTE
@@ -92,6 +142,7 @@
 # Rescue (admin only): reseed a slot with its bootstrap system:
 #   rm /nix/var/nix/profiles/per-container/<slot>/system
 #   systemctl restart container@<slot>
+# (agent slots: `systemctl start agent-slot-reset@<slot>`, ./agent-slots.nix)
 {
   config,
   lib,
@@ -111,6 +162,34 @@ let
   # (bridged); the rules below match those names.
   vethOf = name: "ve-${name}";
   isolatedIfs = lib.concatMapStringsSep ", " (n: ''"${vethOf n}"'') (lib.attrNames isolated);
+  forwarded = lib.filterAttrs (_: s: s.publicIPv4Ports != [ ]) isolated;
+  ports = slot: lib.concatMapStringsSep ", " toString slot.publicIPv4Ports;
+  isolatedV6s = lib.concatMapStringsSep ", " ipv6Of (lib.attrValues isolated);
+
+  egress = cfg.isolatedEgress;
+  # Where an isolated slot's own connections may leave: the egress
+  # interface if there is one, else the bridge (the home uplink).
+  outIf = if egress != null then egress.interface else cfg.bridge;
+  # fwmark of the packets of connections an isolated slot opened, which the
+  # egress rule routes into egress.table. 0x02000000: outside every other
+  # mark on som (checked by an assertion below): the Mullvad app's
+  # 0x6d6f6c65 (services.mullvad-vpn, ./vpn.nix), tailscale's 0xff0000 mask
+  # and ./ipv4-forward.nix's returnMark. Decimal, which networkd and nft read.
+  egressMark = 33554432;
+  foreignMarks = {
+    mullvad-app = 1836018789;
+    tailscale = 16711680;
+  }
+  // lib.optionalAttrs (config.hyper ? ipv4Forward) {
+    ipv4-forward = config.hyper.ipv4Forward.returnMark;
+  };
+  # ", "-prefixed, appended to the always-dropped ranges in isolated-out
+  blockedOf = ds: lib.concatMapStrings (d: ", ${d}") ds;
+  blocked4 = blockedOf (lib.filter (d: !lib.hasInfix ":" d) cfg.isolatedBlockedDestinations);
+  blocked6 = blockedOf (lib.filter (lib.hasInfix ":") cfg.isolatedBlockedDestinations);
+  # The slot's own route metrics stay below this, so the unreachable routes
+  # only answer while the slot (and its routes) is gone.
+  failClosedMetric = 65535;
 
   profileDir = name: "/nix/var/nix/profiles/per-container/${name}";
 
@@ -132,13 +211,22 @@ let
 
   # The one bootstrap system every slot is seeded with. Nothing slot-specific
   # goes in here (see "Evaluation cost" above): hostName "" keeps the one
-  # nspawn sets.
+  # nspawn sets, root's keys and the host key come from files the host binds
+  # in.
+  slotKeysPath = "/var/lib/container-slot/authorized_keys";
+  slotHostKeyPath = "/var/lib/container-slot/ssh_host_ed25519_key";
   bootstrap =
     (pkgs.nixos {
       boot.isNspawnContainer = true;
       networking.hostName = "";
       services.openssh.enable = true;
-      users.users.root.openssh.authorizedKeys.keys = cfg.deployKeys;
+      services.openssh.authorizedKeysFiles = [ slotKeysPath ];
+      services.openssh.hostKeys = [
+        {
+          type = "ed25519";
+          path = slotHostKeyPath;
+        }
+      ];
       system.stateVersion = config.system.stateVersion;
     }).toplevel;
 
@@ -158,20 +246,78 @@ let
   shareName = path: lib.removePrefix "-" (lib.replaceStrings [ "/" ] [ "-" ] path);
   slotRun = name: "/run/container-slots/${name}";
   shareMount = name: path: "${slotRun name}/${shareName path}";
+  slotKeys = name: "${slotRun name}/authorized_keys";
+  slotHostKey = name: "${slotRun name}/ssh_host_ed25519_key";
+  # The host-side home of a slot's host key: root's, outside the slot's
+  # tree, so no reset or deploy touches it.
+  hostKeysDir = "/var/lib/container-slots/host-keys";
+  hostKeyDir = name: "${hostKeysDir}/${name}";
   # The slot's /tmp: a host directory instead of nspawn's tmpfs, so it lives
   # wherever the host's /tmp does (on som: disk, emptied at boot) and not in
   # RAM. Owned by the slot's root; the 0700 parent keeps host users out.
   slotTmp = name: "/tmp/.slots/${name}";
   shareUnit = name: path: "container-slot-${name}-${shareName path}";
+  containerRoot = name: "/var/lib/nixos-containers/${name}";
 
-  # Before the slot starts: create the share mount points (owned by the
-  # share's account, which fusermount requires). findmnt reads mountinfo
-  # only: nothing here may stat a FUSE mount whose NFS source might hang.
+  # Before the slot starts, as host root, with the slot stopped: refuse a
+  # root tree with planted symlinks (see "the root tree" above), create the
+  # share mount points (owned by the share's account, which fusermount
+  # requires), and put the slot's authorized_keys and host key in place
+  # (owned by the slot's root, see first boot above). findmnt reads
+  # mountinfo only: nothing here may stat a FUSE mount whose NFS source
+  # might hang.
   slotPrep =
     name: slot:
+    let
+      owner = toString (uidBase slot);
+      keyDir = hostKeyDir name;
+      addresses = lib.concatStringsSep "," (
+        lib.optional (slot.mode == "isolated") "10.43.${toString slot.id}.2" ++ [ (ipv6Of slot) ]
+      );
+    in
     pkgs.writeShellScript "container-slot-prep-${name}" ''
-      PATH=${lib.makeBinPath [ pkgs.coreutils pkgs.util-linux ]}
+      set -eu
+      PATH=${lib.makeBinPath [ pkgs.coreutils pkgs.util-linux pkgs.openssh ]}
+
+      root=${containerRoot name}
+      if [ -L "$root" ]; then
+        echo "container-slots: ${name}: $root is a symlink, not starting" >&2
+        exit 1
+      fi
+      # Parents first: once a directory is known not to be a link, the
+      # next check below it cannot be steered either.
+      for p in usr usr/bin etc var var/lib var/lib/private root; do
+        if [ -L "$root/$p" ]; then
+          echo "container-slots: ${name}: /$p in the slot is a symlink; the start script would follow it as host root. Not starting; reset the slot (hard) to recover." >&2
+          exit 1
+        fi
+      done
+      # Replaced by a copy at start anyway; dangling, touch would create
+      # its target on this host.
+      if [ -L "$root/etc/resolv.conf" ]; then
+        rm -f "$root/etc/resolv.conf"
+      fi
+      if [ -L "$root/etc/machine-id" ]; then
+        echo "container-slots: ${name}: removing the /etc/machine-id link" >&2
+        rm -f "$root/etc/machine-id"
+      fi
+
       install -d -m 0711 /run/container-slots ${slotRun name}
+      install -m 0444 -o ${owner} -g ${owner} \
+        ${pkgs.writeText "container-slot-${name}-keys" (lib.concatLines slot.deployKeys)} \
+        ${slotKeys name}
+
+      install -d -m 0755 /var/lib/container-slots ${hostKeysDir} ${keyDir}
+      if [ ! -s ${keyDir}/ssh_host_ed25519_key ] || [ ! -s ${keyDir}/ssh_host_ed25519_key.pub ]; then
+        rm -f ${keyDir}/ssh_host_ed25519_key ${keyDir}/ssh_host_ed25519_key.pub
+        ssh-keygen -q -t ed25519 -N "" -C ${name} -f ${keyDir}/ssh_host_ed25519_key
+      fi
+      install -m 0400 -o ${owner} -g ${owner} ${keyDir}/ssh_host_ed25519_key ${slotHostKey name}
+      read -r type key _ <${keyDir}/ssh_host_ed25519_key.pub
+      echo "${addresses} $type $key" >${keyDir}/known_hosts.new
+      chmod 0444 ${keyDir}/known_hosts.new
+      mv ${keyDir}/known_hosts.new ${keyDir}/known_hosts
+
       ${lib.concatStrings (
         lib.mapAttrsToList (path: share: ''
           m=${shareMount name path}
@@ -223,6 +369,26 @@ let
         example = "200%";
         description = "CPUQuota= of container@<slot>.";
       };
+      deployKeys = mkOption {
+        type = types.listOf types.str;
+        default = cfg.deployKeys;
+        defaultText = lib.literalExpression "config.hyper.containerSlots.deployKeys";
+        description = "SSH keys for root in this slot's bootstrap system (the bind-mounted authorized_keys, see the module header).";
+      };
+      autoStart = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Start the slot at boot. Off: container@<slot> starts only when something starts it.";
+      };
+      publicIPv4Ports = mkOption {
+        type = types.listOf types.port;
+        default = [ ];
+        example = [
+          14040
+          14041
+        ];
+        description = "TCP ports of the public IPv4 (on `publicIPv4Interface`) DNATed to the same port of this isolated slot.";
+      };
       shares = mkOption {
         type = types.attrsOf (types.submodule shareOptions);
         default = { };
@@ -251,7 +417,50 @@ in
     };
     deployKeys = mkOption {
       type = types.listOf types.str;
-      description = "SSH keys for root in the bootstrap system every slot starts with. Used only until a slot's first deploy; deployed guests own their keys.";
+      description = "Default `deployKeys` of every slot: root's keys in the bootstrap system a slot starts with. Used only until a slot's first deploy; deployed guests own their keys.";
+    };
+    hostKeysDir = mkOption {
+      type = types.str;
+      readOnly = true;
+      default = hostKeysDir;
+      description = "Where each slot's host key lives on this host: <hostKeysDir>/<slot>/ssh_host_ed25519_key, and known_hosts (the slot's addresses and that key, written at every start; see the module header).";
+    };
+    isolatedEgress = mkOption {
+      type = types.nullOr (
+        types.submodule {
+          options = {
+            interface = mkOption {
+              type = types.str;
+              example = "wg-mullvad";
+              description = "The only interface isolated slots' own connections may leave through (masqueraded to its addresses).";
+            };
+            table = mkOption {
+              type = types.ints.positive;
+              example = 51830;
+              description = "Routing table whose default routes (v4 and v6) leave through `interface`.";
+            };
+          };
+        }
+      );
+      default = null;
+      description = ''
+        Route every connection an isolated slot opens through `table` and
+        drop it on any interface but `interface` (kill switch). null: the
+        slots' own connections leave over `bridge`, v4 masqueraded.
+        Connections that come in keep answering the way they came.
+      '';
+    };
+    isolatedBlockedDestinations = mkOption {
+      type = types.listOf types.str;
+      default = [ ];
+      example = [ "2405:9800:b014::/64" ];
+      description = "Extra v4/v6 destinations isolated slots must not reach, beyond the LAN and private ranges (e.g. the routers' WAN side).";
+    };
+    publicIPv4Interface = mkOption {
+      type = types.nullOr types.str;
+      default = null;
+      example = "wg-v4fwd";
+      description = "Link the public IPv4 arrives on (./ipv4-forward.nix); slots' `publicIPv4Ports` are forwarded from it.";
     };
     bridge = mkOption {
       type = types.str;
@@ -284,7 +493,26 @@ in
       ++ lib.mapAttrsToList (name: slot: {
         assertion = lib.count (s: s.id == slot.id) (lib.attrValues cfg.slots) == 1;
         message = "hyper.containerSlots.slots.${name}: id ${toString slot.id} is not unique";
-      }) cfg.slots;
+      }) cfg.slots
+      ++ lib.mapAttrsToList (name: slot: {
+        assertion = slot.publicIPv4Ports == [ ] || (slot.mode == "isolated" && cfg.publicIPv4Interface != null);
+        message = "hyper.containerSlots.slots.${name}: publicIPv4Ports need mode isolated and publicIPv4Interface";
+      }) cfg.slots
+      ++ (
+        let
+          all = lib.concatMap (s: s.publicIPv4Ports) (lib.attrValues cfg.slots);
+        in
+        [
+          {
+            assertion = lib.length all == lib.length (lib.unique all);
+            message = "hyper.containerSlots: a publicIPv4Ports port is claimed by more than one slot";
+          }
+        ]
+      )
+      ++ lib.mapAttrsToList (owner: mark: {
+        assertion = builtins.bitAnd egressMark mark == 0;
+        message = "hyper.containerSlots: the slots' egress mark overlaps ${owner}'s fwmark";
+      }) foreignMarks;
 
     # --- the LAN bridge -------------------------------------------------
     systemd.network = {
@@ -309,6 +537,35 @@ in
           IPv6AcceptRA = true;
           IPv6ProxyNDP = isolated != { };
           IPv6ProxyNDPAddress = lib.mapAttrsToList (_: ipv6Of) isolated;
+        };
+        # While a slot is stopped its host routes are gone; without these
+        # its v4 would follow the default route and its v6 the LAN /64 (to
+        # whichever LAN peer answers NDP for it). Metric above the
+        # container units' own routes, which therefore win while it runs.
+        routes = lib.optionals (isolated != { }) (
+          [
+            {
+              Destination = "10.43.0.0/16";
+              Type = "unreachable";
+              Metric = failClosedMetric;
+            }
+          ]
+          ++ lib.mapAttrsToList (_: slot: {
+            Destination = "${ipv6Of slot}/128";
+            Type = "unreachable";
+            Metric = failClosedMetric;
+          }) isolated
+        );
+        # The slots' own connections (marked in the container-slots nft
+        # table) use the egress table. Ahead of the meshes' rules
+        # (tailscale 5210+, ./mullvad-egress 5999+), after
+        # ./ipv4-forward.nix's (100, 101). An empty table (tunnel down)
+        # falls through to main, where the kill switch drops them.
+        routingPolicyRules = lib.optional (egress != null && isolated != { }) {
+          FirewallMark = "${toString egressMark}/${toString egressMark}";
+          Table = egress.table;
+          Priority = 5000;
+          Family = "both";
         };
       };
       # systemd ships 80-container-ve/vb.network, which would give the
@@ -351,7 +608,7 @@ in
     containers = lib.mapAttrs (
       name: slot:
       {
-        autoStart = true;
+        inherit (slot) autoStart;
         privateUsers = uidBase slot;
         privateNetwork = true;
         extraFlags = [
@@ -361,10 +618,21 @@ in
           "--private-users-ownership=auto"
           "--bind=${slotTmp name}:/tmp"
         ];
-        bindMounts = lib.mapAttrs (path: _: {
-          hostPath = shareMount name path;
-          isReadOnly = false;
-        }) slot.shares;
+        bindMounts =
+          lib.mapAttrs (path: _: {
+            hostPath = shareMount name path;
+            isReadOnly = false;
+          }) slot.shares
+          // {
+            ${slotKeysPath} = {
+              hostPath = slotKeys name;
+              isReadOnly = true;
+            };
+            ${slotHostKeyPath} = {
+              hostPath = slotHostKey name;
+              isReadOnly = true;
+            };
+          };
         # No `config`: defining it would make the containers module evaluate
         # a whole NixOS system per slot. Resolved inside the container,
         # where <profileDir> is bind-mounted on /nix/var/nix/profiles: always
@@ -458,7 +726,9 @@ in
       ) cfg.slots)
     ];
 
-    programs.fuse.userAllowOther = lib.mkIf (lib.any (s: s.shares != { }) (lib.attrValues cfg.slots)) true;
+    programs.fuse.userAllowOther = lib.mkIf (lib.any (s: s.shares != { }) (
+      lib.attrValues cfg.slots
+    )) true;
 
     # --- isolated-mode policy --------------------------------------------
     networking.nftables.tables.container-slots = lib.mkIf (isolated != { }) {
@@ -475,6 +745,23 @@ in
           drop
         }
 
+        ${lib.optionalString (egress != null) ''
+          # Packets of connections an isolated slot opened (it sent the
+          # first packet: original direction) carry egressMark, which the
+          # routing rule sends into the egress table. Its answers to
+          # connections that came in are reply-direction and stay unmarked,
+          # so they take the main table back out the way they came.
+          chain mark-egress {
+            type filter hook prerouting priority mangle; policy accept;
+            iifname { ${isolatedIfs} } ct direction original meta mark set meta mark or ${toString egressMark}
+          }
+          # The egress link's MTU (a tunnel) is below the veth's 1500.
+          chain egress-mss {
+            type filter hook forward priority mangle; policy accept;
+            iifname { ${isolatedIfs} } oifname "${egress.interface}" tcp flags syn tcp option maxseg size set rt mtu
+          }
+        ''}
+
         chain forward {
           type filter hook forward priority filter; policy accept;
           iifname { ${isolatedIfs} } jump isolated-out
@@ -487,10 +774,16 @@ in
               iifname "${vethOf name}" ip6 saddr != ${ipv6Of slot} drop
             '') isolated
           )}
+          ${lib.optionalString (egress != null) ''
+            # kill switch: the slot's own connections leave through the
+            # egress link or not at all, established ones too (a route
+            # change mid-connection must not move them to the uplink)
+            ct direction original oifname != "${egress.interface}" drop
+          ''}
           ct state established,related accept
-          oifname != "${cfg.bridge}" drop
-          ip daddr { ${cfg.lanIPv4}, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16 } drop
-          ip6 daddr { ${cfg.ipv6Prefix}::/64, fc00::/7, fe80::/10 } drop
+          oifname != "${outIf}" drop
+          ip daddr { ${cfg.lanIPv4}, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16${blocked4} } drop
+          ip6 daddr { ${cfg.ipv6Prefix}::/64, fc00::/7, fe80::/10${blocked6} } drop
           accept
         }
         chain isolated-in {
@@ -500,12 +793,27 @@ in
               oifname "${vethOf name}" ip6 daddr ${ipv6Of slot} accept
             '') isolated
           )}
+          ${lib.concatStrings (lib.mapAttrsToList (name: slot: ''
+            iifname "${cfg.publicIPv4Interface}" oifname "${vethOf name}" ip daddr 10.43.${toString slot.id}.2 tcp dport { ${ports slot} } accept
+          '') forwarded)}
           drop
+        }
+
+        # public IPv4 -> slot, same port; the client's address stays as the
+        # source (replies find their way back by ./ipv4-forward.nix's mark)
+        chain prerouting {
+          type nat hook prerouting priority dstnat; policy accept;
+          ${lib.concatStrings (lib.mapAttrsToList (name: slot: ''
+            iifname "${cfg.publicIPv4Interface}" tcp dport { ${ports slot} } dnat ip to 10.43.${toString slot.id}.2
+          '') forwarded)}
         }
 
         chain postrouting {
           type nat hook postrouting priority srcnat; policy accept;
-          ip saddr 10.43.0.0/16 oifname "${cfg.bridge}" masquerade
+          ip saddr 10.43.0.0/16 oifname "${outIf}" masquerade
+          ${lib.optionalString (egress != null) ''
+            ip6 saddr { ${isolatedV6s} } oifname "${outIf}" masquerade
+          ''}
         }
       '';
     };

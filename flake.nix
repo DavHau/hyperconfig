@@ -257,6 +257,11 @@
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
             inherit inputs;
           };
+        agent-slots =
+          import ./modules/nixos/agent-slots-test {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+            spaces = inputs.spaces;
+          };
         per-user-tmp =
           import ./modules/nixos/per-user-tmp/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
