@@ -1,9 +1,9 @@
-# CaptchaKraken v1.2 (Qwen3.5-9B captcha merge, GGUF Q8_0 + F16 vision
+# CaptchaKraken v1.2 (Qwen3.5-9B captcha merge, GGUF Q4_K_M + F16 vision
 # projector) on llama-server, for web-bench's camoufox-captchakraken setup
-# on som (tools/web-bench).
+# and the hermes agents' Camofox browsers on som.
 #
 # Socket-activated so the card stays free for the agents' GPU jobs: the
-# first request to [vit ygg]:8096 starts llama-server (~12 GB VRAM, fewer
+# first request to [vit ygg]:8096 starts llama-server (~6 GB VRAM, fewer
 # GPU layers if a job holds memory: --fit is on), and it unloads after
 # `idle` without a connection. Reachable from som's yggdrasil address only;
 # llama-server itself listens on loopback and has no other network.
@@ -51,7 +51,10 @@ let
       url = "https://huggingface.co/CaptchaKraken/CaptchaKraken-v1.2-GGUF/resolve/695643a9f997e0ac2e99a84febdf249eb53d7d61/${file}";
       inherit sha256;
     };
-  model = hf "CaptchaKraken-v1.2-Q8_0.gguf" "cbfcb18fb9d88a06ed45c33d0070e721286210cdf56184d104c3a767f1658a66";
+  # Q4_K_M, not Q8_0: the model card measures under a point between the
+  # two (both GGUF builds sit ~5 points under the vLLM weights), and it
+  # leaves ~4 GB more of the card to the agents' GPU jobs.
+  model = hf "CaptchaKraken-v1.2-Q4_K_M.gguf" "51a57a12ae469f9b02d5109cf9c5dfc7c0b33a879f3672beb8519956d9779cdc";
   # The vision half; without it the model answers blind instead of failing.
   mmproj = hf "mmproj-F16.gguf" "642055c3e02ad042c4d52be1a4267400bf8d27a2481bd48265137dcfa3273e0d";
 
