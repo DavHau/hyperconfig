@@ -252,6 +252,11 @@
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
             inherit inputs;
           };
+        agent-mail =
+          import ./modules/nixos/agent-mail/test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+            inherit inputs;
+          };
         per-user-tmp =
           import ./modules/nixos/per-user-tmp/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;

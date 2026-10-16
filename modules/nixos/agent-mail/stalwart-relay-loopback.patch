@@ -1,0 +1,43 @@
+Backport of upstream 237d90f16456 ("Fix MTA: Relay routes are rejected
+with `host resolves loopback address`, which prevents relaying through a
+local proxy or tunnel"), first released in v0.16; CHANGELOG hunk dropped.
+
+diff -ru a/crates/smtp/src/outbound/lookup.rs b/crates/smtp/src/outbound/lookup.rs
+--- a/crates/smtp/src/outbound/lookup.rs	2026-10-16 21:42:51.342197862 +0700
++++ b/crates/smtp/src/outbound/lookup.rs	2026-10-16 21:42:51.342586014 +0700
+@@ -104,7 +104,6 @@
+         }
+     }
+ 
+-    #[allow(unused_mut)]
+     async fn resolve_host(
+         &self,
+         remote_host: &NextHop<'_>,
+@@ -147,8 +146,7 @@
+             })?;
+ 
+         if !remote_ips.is_empty() {
+-            #[cfg(not(feature = "test_mode"))]
+-            if remote_ips.iter().any(|ip| ip.is_loopback()) {
++            if !remote_host.allow_loopback() && remote_ips.iter().any(|ip| ip.is_loopback()) {
+                 remote_ips.retain(|ip| !ip.is_loopback());
+                 if remote_ips.is_empty() {
+                     return Err(Status::PermanentFailure(ErrorDetails {
+diff -ru a/crates/smtp/src/outbound/mod.rs b/crates/smtp/src/outbound/mod.rs
+--- a/crates/smtp/src/outbound/mod.rs	2026-10-16 21:42:51.342293643 +0700
++++ b/crates/smtp/src/outbound/mod.rs	2026-10-16 21:42:51.342627572 +0700
+@@ -292,6 +292,14 @@
+     }
+ 
+     #[inline(always)]
++    fn allow_loopback(&self) -> bool {
++        match self {
++            NextHop::MX { .. } => cfg!(feature = "test_mode"),
++            NextHop::Relay(_) => true,
++        }
++    }
++
++    #[inline(always)]
+     fn credentials(&self) -> Option<&Credentials<String>> {
+         match self {
+             NextHop::MX { .. } => None,

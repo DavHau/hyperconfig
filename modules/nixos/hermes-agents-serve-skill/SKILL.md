@@ -46,8 +46,13 @@ trust those headers. Websockets work.
 - On a public port, assume the whole internet reads it. Never put secrets,
   your home directory or `/vault` there; serve a dedicated directory.
 - Only cookies whose name starts with a letter or digit (and jupyter's
-  `_xsrf`) reach your app; name your own cookies that way. Names starting
-  with `_` are the visitors' login and never reach you. There is no
-  identity header to trust. Private pages are protected by the proxy, not
-  by your app.
+  `_xsrf`) reach your app; name your own cookies that way. Every other
+  cookie is dropped before your app sees it: names starting with `_` (the
+  visitors' login, but also app defaults such as Streamlit's
+  `_streamlit_xsrf`, Rails' `_<app>_session`, Gitea's `_csrf`) and the
+  `__Host-` / `__Secure-` prefixed ones (`__Secure-next-auth.session-token`).
+  An app that relies on such a cookie loops on login or answers 403; rename
+  the cookie in the app's settings.
+  There is no identity header to trust. Private pages are protected by the
+  proxy, not by your app.
 - Stop servers you no longer need, so the port is free for the next job.

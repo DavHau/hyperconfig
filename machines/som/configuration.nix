@@ -39,6 +39,7 @@ in
     ../../modules/nixos/web-bench-mullvad.nix
     ../../modules/nixos/zfs-ephemeral-tmp.nix
     ../../modules/nixos/per-user-tmp
+    ../../modules/nixos/agent-mail
   ];
 
   # Public IPv4 38.89.142.76, borrowed from sgp through a WireGuard tunnel
@@ -99,6 +100,16 @@ in
   # address below), pocket-id login through oauth2-proxy, each account
   # routed to its own backend. Every agent in ./hermes-agents.nix is published.
   hyper.hermesDashboard.host = "hermes.davhau.com";
+
+  # Receive-only mail for every agent in ./hermes-agents.nix at
+  # <agent>@agents.davhau.com (../../modules/nixos/agent-mail, DNS records
+  # listed there). Inbound SMTP arrives only as IPv4 forwarded from sgp, on
+  # the tunnel interface of ../../modules/nixos/ipv4-forward.nix; 25 is open
+  # there and nowhere else.
+  hyper.agentMail = {
+    enable = true;
+    smtpInterfaces = [ "wg-v4fwd" ];
+  };
 
   # Public address 2405:9800:b901:94e3::c0de:ba5e on the LAN bridge (prefix
   # from the RA, ../../modules/nixos/public-ipv6-token.nix); the matching AIS
