@@ -18,8 +18,13 @@
 #
 # Agents are untrusted, so nothing of the visitor's login reaches them:
 #   - oauth2-proxy's cookie is scoped to .<host> (it must cover the
-#     subdomains) and nginx strips every _oauth2_proxy* cookie before
-#     proxying,
+#     subdomains), so the browser sends it here. nginx forwards only an
+#     allowlist of cookies (./hermes-agents-serve-cookies.js, njs): names
+#     that start with a letter or digit, plus jupyter's `_xsrf`. Every login
+#     cookie starts with an underscore (`_oauth2_proxy*`, the mail owner
+#     page's `__Host-mailgate*`), so none passes, however many there are.
+#     Apps that set their own cookies (a token-gated proxy, jupyter) keep
+#     working,
 #   - proxy_cookie_domain pins any Set-Cookie Domain to the serving
 #     subdomain, so an agent cannot plant cookies on the dashboard host
 #     through headers (document.cookie still can; residual),
@@ -88,15 +93,6 @@ let
         (builtins.readFile ./hermes-agents-serve-skill/SKILL.md)
     );
   };
-
-  # Drops one `_oauth2_proxy*=...` pair per map; three in a row cover the
-  # session cookie, a split second chunk and a CSRF cookie.
-  stripCookie = from: to: n: ''
-    map ${from} ${to} {
-      default ${from};
-      "~^(?<hs_pre${n}>.*?)_oauth2_proxy[^=;]*=[^;]*;?\s*(?<hs_post${n}>.*)$" "$hs_pre${n}$hs_post${n}";
-    }
-  '';
 in
 {
   config = lib.mkIf (agents != { }) {
@@ -159,7 +155,11 @@ in
     };
 
     services.nginx = {
+      additionalModules = [ pkgs.nginxModules.njs ];
       appendHttpConfig = ''
+        js_import hermes_serve_cookies from ${./hermes-agents-serve-cookies.js};
+        js_set $hermes_serve_cookie hermes_serve_cookies.appCookies;
+
         map $hermes_serve_port $hermes_serve_public {
           default 0;
         ${lib.concatMapStrings (name: lib.concatMapStrings (p: "  ${toString p} 1;\n") (portsOf name).public) (
@@ -176,10 +176,6 @@ in
           lib.concatMapStrings (port: "  \"~^${toString port} \" 127.0.0.1:${toString port};\n") p.public
           + lib.concatMapStrings (port: "  \"${toString port} ${accountOf name}\" 127.0.0.1:${toString port};\n") p.private
         ) (lib.attrNames agents)}}
-
-        ${stripCookie "$http_cookie" "$hermes_serve_cookie1" "1"}
-        ${stripCookie "$hermes_serve_cookie1" "$hermes_serve_cookie2" "2"}
-        ${stripCookie "$hermes_serve_cookie2" "$hermes_serve_cookie" "3"}
       '';
 
       virtualHosts = {

@@ -45,7 +45,9 @@ trust those headers. Websockets work.
 - Never `--port 0` / a random port for something a person should open.
 - On a public port, assume the whole internet reads it. Never put secrets,
   your home directory or `/vault` there; serve a dedicated directory.
-- Visitors' login cookies are removed before requests reach you; there is
-  no identity header to trust. Private pages are protected by the proxy,
-  not by your app.
+- Only cookies whose name starts with a letter or digit (and jupyter's
+  `_xsrf`) reach your app; name your own cookies that way. Names starting
+  with `_` are the visitors' login and never reach you. There is no
+  identity header to trust. Private pages are protected by the proxy, not
+  by your app.
 - Stop servers you no longer need, so the port is free for the next job.

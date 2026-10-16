@@ -25,6 +25,20 @@
 # agent. No path prefix, so none of the upstream X-Forwarded-Prefix gaps
 # apply.
 #
+# The agent behind a dashboard is untrusted, so nothing of the visitor's
+# login reaches it, in either direction:
+#   - it gets no cookies at all. On a loopback bind hermes reads none (its
+#     cookie sessions exist only in gated mode, hermes_cli/dashboard_auth),
+#     so an empty allowlist costs nothing. Stripping just the login cookies
+#     was a deny list, and it leaked: each pass removed one pair, so a
+#     fourth `_oauth2_proxy*` cookie (decoys the agent planted) went through,
+#   - it sets none: Set-Cookie is dropped, so it cannot plant cookies on
+#     this host and its subdomains through headers (document.cookie still
+#     can; the mail owner page's `__Host-` cookie is immune to that,
+#     ./agent-mail/owner-page.nix).
+# The mail owner page has its own login for the same reason: no page an
+# agent controls may hold a session that opens it.
+#
 # Secrets (clan vars, root-owned, LoadCredential): the `hermes` client
 # secret is the shared oidc var the oidc service declares; the cookie
 # secret is per-machine (`hermes-oauth2-proxy`).
@@ -188,6 +202,8 @@ in
               auth_request_set $hermes_account $upstream_http_x_auth_request_preferred_username;
               proxy_set_header Host 127.0.0.1;
               proxy_set_header Origin "";
+              proxy_set_header Cookie "";
+              proxy_hide_header Set-Cookie;
               proxy_set_header X-Real-IP $remote_addr;
               proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
               proxy_set_header X-Forwarded-Proto $scheme;
