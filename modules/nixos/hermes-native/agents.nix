@@ -128,6 +128,13 @@ let
         stateDir
         home
       ];
+      # The user's private /tmp, as in their own sessions (../per-user-tmp).
+      # No "-": with per-user tmp on, a missing instance must stop the unit,
+      # not quietly put it on the shared /tmp.
+      userTmpBinds = lib.optionals (config.hyper.perUserTmp.enable or false) [
+        "/tmp/.inst/${user}:/tmp"
+        "/var/tmp/.inst/${user}:/var/tmp"
+      ];
       # Upstream's activation for one state dir, run as the owner before
       # every start. The state dir is owner-owned, so no root is needed.
       agentPreStart = ''
@@ -232,6 +239,7 @@ let
             Restart = "always";
             RestartSec = 5;
             UMask = "0007";
+            BindPaths = userTmpBinds;
           };
         };
 
@@ -270,6 +278,7 @@ let
             Restart = "always";
             RestartSec = 5;
             UMask = "0007";
+            BindPaths = userTmpBinds;
           };
         };
       };

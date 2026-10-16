@@ -158,6 +158,10 @@ let
   shareName = path: lib.removePrefix "-" (lib.replaceStrings [ "/" ] [ "-" ] path);
   slotRun = name: "/run/container-slots/${name}";
   shareMount = name: path: "${slotRun name}/${shareName path}";
+  # The slot's /tmp: a host directory instead of nspawn's tmpfs, so it lives
+  # wherever the host's /tmp does (on som: disk, emptied at boot) and not in
+  # RAM. Owned by the slot's root; the 0700 parent keeps host users out.
+  slotTmp = name: "/tmp/.slots/${name}";
   shareUnit = name: path: "container-slot-${name}-${shareName path}";
 
   # Before the slot starts: create the share mount points (owned by the
@@ -337,6 +341,13 @@ in
     boot.kernel.sysctl."net.ipv4.conf.all.forwarding" = lib.mkDefault 1;
 
     # --- the slots ------------------------------------------------------
+    systemd.tmpfiles.rules = [
+      "d /tmp/.slots 0700 root root -"
+    ]
+    ++ lib.mapAttrsToList (
+      name: slot: "d ${slotTmp name} 1777 ${toString (uidBase slot)} ${toString (uidBase slot)} -"
+    ) cfg.slots;
+
     containers = lib.mapAttrs (
       name: slot:
       {
@@ -348,6 +359,7 @@ in
           # implied by "pick", not by a numeric base: without it the root
           # tree stays host-root-owned, i.e. nobody's inside the slot
           "--private-users-ownership=auto"
+          "--bind=${slotTmp name}:/tmp"
         ];
         bindMounts = lib.mapAttrs (path: _: {
           hostPath = shareMount name path;
@@ -380,6 +392,7 @@ in
       (lib.mapAttrs' (
         name: slot:
         lib.nameValuePair "container@${name}" {
+          environment.SYSTEMD_NSPAWN_TMPFS_TMP = "0";
           serviceConfig = {
             ExecStartPre = [
               "+${slotPrep name slot}"

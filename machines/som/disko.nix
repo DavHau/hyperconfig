@@ -84,6 +84,22 @@
           mountpoint = "/home/grmpf/temp";
           options.mountpoint = "/home/grmpf/temp";
         };
+        # /tmp on disk instead of tmpfs, emptied at every boot by rolling
+        # back to @blank (../../modules/nixos/zfs-ephemeral-tmp.nix). Legacy
+        # mountpoint: only fileSystems."/tmp" mounts it, after the rollback.
+        # Created by hand on the live pool; disko applies this on a fresh
+        # install only.
+        "root/nobackup/tmp" = {
+          type = "zfs_fs";
+          mountpoint = "/tmp";
+          options = {
+            mountpoint = "legacy";
+            sync = "disabled";
+            devices = "off";
+            setuid = "off";
+          };
+          postCreateHook = "zfs snapshot zroot/root/nobackup/tmp@blank";
+        };
       };
     };
   };
