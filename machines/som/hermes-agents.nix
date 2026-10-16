@@ -19,11 +19,15 @@ in
 {
   imports = [
     ../../modules/nixos/hermes-agents.nix
+    ../../modules/nixos/lightning-wallet.nix
     # stefan's account (uid, vault-ro) is shared with vit.
     ../../modules/nixos/users/stefan-vault.nix
   ];
 
   hyper.hermesAgentsGpuHost = "vit.d";
+
+  # One shared phoenixd Lightning wallet for every agent below.
+  hyper.lightningWallet.enable = true;
 
   hyper.hermesAgents = {
     # uid and vault-ro from users/stefan-vault.nix.
