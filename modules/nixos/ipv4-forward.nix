@@ -14,6 +14,14 @@
 #   intact. Only traffic sourced from the tunnel address is policy-routed back
 #   through the tunnel; som's own traffic keeps using the home uplink. som's
 #   firewall still decides which ports are reachable.
+#   Connections som forwards on (DNAT to a container slot,
+#   ./container-slots.nix) answer from the container's own address, which
+#   the source rule does not match, and their un-DNAT back to the tunnel
+#   address happens only after routing. So a connection that arrives through
+#   the tunnel is marked (ct mark), its packets from elsewhere carry the mark
+#   as fwmark, and a mark rule sends them to the tunnel's table too. The
+#   container's MSS (from a 1500 veth) is clamped to the tunnel on the way
+#   out, as the gateway does for its side.
 {
   config,
   lib,
@@ -31,8 +39,21 @@ let
   gatewayAddress = "10.99.0.1";
   backendAddress = "10.99.0.2";
   interface = "wg-v4fwd";
-  # The backend's return route lives in its own table, selected by source.
+  # The backend's return route lives in its own table, selected by source
+  # (or by returnMark, for connections it forwards on).
   routeTable = 51820;
+  # 0x10000000, decimal (networkd and nft both read that). A bit no other
+  # fwmark user on som sets or masks: tailscale's 0xff0000 mask, the Mullvad
+  # app's 0x6d6f6c65 (services.mullvad-vpn, ./vpn.nix; matched with a mask
+  # by the priority-101 rule below, any shared bit would send the app's
+  # tunnel packets into wg-v4fwd) and the container slots' egress mark
+  # (./container-slots.nix). Asserted below.
+  returnMarkInt = 268435456;
+  returnMark = toString returnMarkInt;
+  foreignMarks = {
+    mullvad-app = 1836018789;
+    tailscale = 16711680;
+  };
 
   isGateway = cfg.role == "gateway";
   peerName = if isGateway then backendName else gatewayName;
@@ -41,16 +62,29 @@ let
   );
 in
 {
-  options.hyper.ipv4Forward.role = lib.mkOption {
-    type = lib.types.enum [
-      "gateway"
-      "backend"
-    ];
-    description = "gateway (${gatewayName}) owns the public IPv4 and forwards it; backend (${backendName}) serves it.";
+  options.hyper.ipv4Forward = {
+    role = lib.mkOption {
+      type = lib.types.enum [
+        "gateway"
+        "backend"
+      ];
+      description = "gateway (${gatewayName}) owns the public IPv4 and forwards it; backend (${backendName}) serves it.";
+    };
+    returnMark = lib.mkOption {
+      type = lib.types.int;
+      readOnly = true;
+      default = returnMarkInt;
+      description = "fwmark bit the backend gives forwarded connections' return traffic (other mark users check against it).";
+    };
   };
 
   config = lib.mkMerge [
     {
+      assertions = lib.mapAttrsToList (owner: mark: {
+        assertion = builtins.bitAnd returnMarkInt mark == 0;
+        message = "hyper.ipv4Forward: returnMark overlaps ${owner}'s fwmark";
+      }) foreignMarks;
+
       clan.core.vars.generators.ipv4-forward-wg = {
         files.privateKey.owner = "systemd-network";
         files.publicKey.secret = false;
@@ -138,7 +172,29 @@ in
             Table = routeTable;
             Priority = 100;
           }
+          {
+            FirewallMark = "${returnMark}/${returnMark}";
+            Table = routeTable;
+            Priority = 101;
+          }
         ];
+      };
+
+      networking.nftables.enable = true;
+      networking.nftables.tables.ipv4-forward = {
+        family = "ip";
+        content = ''
+          chain prerouting {
+            type filter hook prerouting priority mangle; policy accept;
+            iifname "${interface}" ct state new ct mark set ct mark or ${returnMark}
+            iifname != "${interface}" ct mark and ${returnMark} == ${returnMark} meta mark set meta mark or ${returnMark}
+          }
+
+          chain forward {
+            type filter hook forward priority mangle; policy accept;
+            oifname "${interface}" tcp flags syn tcp option maxseg size set rt mtu
+          }
+        '';
       };
     })
   ];

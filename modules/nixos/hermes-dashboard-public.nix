@@ -58,6 +58,8 @@ let
   forbiddenPort = hlib.dashboardBackendBase - 1;
 in
 {
+  imports = [ ./oauth2-proxy-cookie-guard.nix ];
+
   options.hyper.hermesDashboard = {
     host = lib.mkOption {
       type = lib.types.str;
@@ -106,6 +108,11 @@ in
           message = "hyper.hermesDashboard: two dashboards claim the same account.";
         }
       ];
+
+    # Hosts under the same registrable domain (the agent slots) can toss
+    # cookies onto this one: refuse a request carrying a login cookie name
+    # twice (./oauth2-proxy-cookie-guard.nix).
+    hyper.oauth2ProxyCookieGuard.virtualHosts = [ cfg.host ];
 
     clan.core.vars.generators.hermes-oauth2-proxy = {
       files.cookie_secret = { };

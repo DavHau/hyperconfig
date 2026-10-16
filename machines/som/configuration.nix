@@ -35,6 +35,7 @@ in
     ../../modules/nixos/cooler-lcd
     ../../modules/nixos/ipv4-forward.nix
     ../../modules/nixos/container-slots.nix
+    ../../modules/nixos/agent-slots.nix
     ../../modules/nixos/mullvad-egress
     ../../modules/nixos/web-bench-mullvad.nix
     ../../modules/nixos/zfs-ephemeral-tmp.nix
@@ -122,15 +123,37 @@ in
   # Container slots for other repos to deploy into
   # (../../modules/nixos/container-slots.nix). enp6s0 is a port of br0,
   # which keeps its MAC and carries som's own DHCP/SLAAC addresses. Add a
-  # slot as `slots.<name> = { id; mode; }`.
+  # slot as `slots.<name> = { id; mode; }`; ids 4..14 are the agent slots
+  # below (slotIds).
   hyper.containerSlots = {
     enable = true;
     uplink = "enp6s0";
     uplinkMac = "a4:0c:66:1b:29:f1";
-    # root's key in the bootstrap system every slot starts with.
+    # Default root key in the bootstrap system every slot starts with
+    # (agent slots take their agent's key instead).
     deployKeys = [
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM7ptVA/R16UvtWJD3VfJUWdEL2nzonoFRz2Na6lg+UU agent@amy"
     ];
+    # The borrowed public IPv4 (../../modules/nixos/ipv4-forward.nix).
+    publicIPv4Interface = "wg-v4fwd";
+
+    # The isolated (agent) slots' own connections leave through Mullvad,
+    # like the agents' own traffic (hyper.mullvadEgress below; 51830 is its
+    # table, ../../modules/nixos/mullvad-egress/egress.nix), never the home
+    # uplink. No tunnel, no egress. Inbound to the slots is unchanged.
+    isolatedEgress = {
+      interface = "wg-mullvad";
+      table = 51830;
+    };
+    # The routers' WAN side, which "never the LAN" does not cover by itself
+    # (seen from som, 2026-10-17): the Beryl relays v6 (its addresses are in
+    # the LAN /64, its ULA fdea:fc9f:d6a5::1, WAN v4 192.168.1.x), the AIS
+    # ZTE is 192.168.1.1 and 2405:9800:b901:94e3:ea81:75ff:fec9:619c on the
+    # LAN side, CGNAT 100.67.x on the WAN side: all in the always-dropped
+    # ranges. Its WAN v6 is not visible from the LAN; its upstream hop is
+    # 2405:9800:b014::1, so that link's /64 is the likely home of it.
+    # Through Mullvad these would arrive from the internet anyway.
+    isolatedBlockedDestinations = [ "2405:9800:b014::/64" ];
 
     # v6 2405:9800:b901:94e3::5107:1, v4 from the LAN's DHCP.
     slots.asof = {
@@ -162,6 +185,42 @@ in
       mode = "lan";
     };
   };
+
+  # One isolated slot per hermes agent (../../modules/nixos/agent-slots.nix),
+  # off until the agent starts it. The ids are fixed: addresses, ports and
+  # the router rules derive from them, so never renumber or reuse one; a new
+  # agent takes the next free id. The deploy key is the agent's own clan
+  # key (hermes-agent-ssh-<name>, ../../modules/nixos/hermes-agents.nix), the
+  # one vit's GPU accounts also trust.
+  hyper.agentSlots =
+    let
+      slotIds = {
+        dave-hermes = 4;
+        adam = 5;
+        chris = 6;
+        domi = 7;
+        egg = 8;
+        j = 9;
+        momentum = 10;
+        pinpox = 11;
+        rti = 12;
+        stefan = 13;
+        willi = 14;
+      };
+      key = name: config.clan.core.vars.generators."hermes-agent-ssh-${name}".files;
+    in
+    {
+      domain = "slots.davhau.com";
+      publicIPv4 = "38.89.142.76";
+      agents = lib.genAttrs agents (name: {
+        id =
+          slotIds.${name}
+            or (throw "machines/som: hermes agent ${name} has no slot id; add it to slotIds");
+        deployKey = (key name)."key.pub".value;
+        identityFile = (key name).key.path;
+      });
+    };
+
   users.users.slot-asof = {
     isSystemUser = true;
     uid = 1201;

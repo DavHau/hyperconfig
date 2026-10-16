@@ -133,6 +133,9 @@ in
       cookie.domain = host;
       extraConfig.whitelist-domain = ".${host}";
     };
+    # Tossed login cookies (./oauth2-proxy-cookie-guard.nix): the serve
+    # subdomains get the same login cookie as the dashboard.
+    hyper.oauth2ProxyCookieGuard.virtualHosts = [ certName ];
 
     # Shared var, same definition as ./dyndns-porkbun.nix; only DNS-01
     # reads it here.
