@@ -17,7 +17,14 @@
 let
   port = 8096;
   backendPort = 8097;
-  idle = "15min";
+  # One solve is a burst of requests seconds apart, and a cold start costs
+  # 5-20 s of model load (5 s on an idle card, 17 s with a GPU job holding
+  # memory, both with the GGUFs in page cache; more after a reboot).
+  # Three idle minutes cover the gaps within a solve and between an agent's
+  # retries on one page; past that, a reload is cheaper than holding ~10 GB
+  # of VRAM away from the agents' GPU jobs. When the proxy exits,
+  # StopWhenUnneeded below stops llama-server too.
+  idle = "3min";
 
   vitYgg = config.clan.core.vars.generators.yggdrasil.files.address.value;
   somYgg = inputs.clan-core.clanLib.getPublicValue {

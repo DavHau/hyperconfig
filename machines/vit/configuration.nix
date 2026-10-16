@@ -10,8 +10,7 @@
     ../../modules/nixos/storagebox.nix
     ../../modules/nixos/vault-nfs-client.nix
     ../../modules/nixos/hermes-agents-gpu-host.nix
-    # Disabled for now; module kept for later.
-    # ../../modules/nixos/captchakraken-server.nix
+    ../../modules/nixos/captchakraken-server.nix
     ../../modules/nixos/users/stefan-vault.nix
     ../../modules/nixos/tang-server.nix
     ../../modules/nixos/luks-unlock
