@@ -37,6 +37,8 @@ in
     ../../modules/nixos/container-slots.nix
     ../../modules/nixos/mullvad-egress
     ../../modules/nixos/web-bench-mullvad.nix
+    ../../modules/nixos/zfs-ephemeral-tmp.nix
+    ../../modules/nixos/per-user-tmp
   ];
 
   # Public IPv4 38.89.142.76, borrowed from sgp through a WireGuard tunnel
@@ -51,6 +53,12 @@ in
   # The 1 GiB ESP holds one ~80 MiB initrd per distinct generation; with no
   # cap ~100 entries kept 13 of them and filled it.
   boot.loader.systemd-boot.configurationLimit = 20;
+
+  # /tmp on disk (zroot/root/nobackup/tmp, ./disko.nix), emptied at boot,
+  # and a private /tmp and /var/tmp per user: users with ssh access must
+  # not see each other's temp files.
+  hyper.zfsEphemeralTmp.dataset = "zroot/root/nobackup/tmp";
+  hyper.perUserTmp.enable = true;
 
   # Boot unlock without a passphrase while vit is up
   # (../../modules/nixos/tang-client.nix), and som serves vit in turn. bam

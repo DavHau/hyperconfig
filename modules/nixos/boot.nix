@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ lib, pkgs, ... }:
 {
   # BOOTLOADER
   boot.loader.systemd-boot.enable = true;
@@ -13,7 +13,7 @@
   };
 
   # FILESYSTEMS
-  boot.tmp.useTmpfs = true;
+  boot.tmp.useTmpfs = lib.mkDefault true;
   boot.tmp.tmpfsSize = "80%";
   boot.supportedFilesystems = [ "ntfs-3g" "exfat" "cifs" "smb" ];
   # boot.initrd.supportedFilesystems = ["zfs"];
