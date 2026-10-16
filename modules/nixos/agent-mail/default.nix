@@ -134,6 +134,11 @@ in
         PORKBUN_API_KEY_FILE = vars.porkbun.files.apikey.path;
         PORKBUN_SECRET_API_KEY_FILE = vars.porkbun.files.secretkey.path;
       };
+      # lego finds the zone by walking SOA queries up from the challenge
+      # name. som's upstream (the AIS router, via resolved) answers
+      # REFUSED, not NXDOMAIN, for names that do not exist yet, like
+      # _acme-challenge.mail.agents.davhau.com, and lego gives up.
+      dnsResolver = "1.1.1.1:53";
       # Stalwart reads the files at start (LoadCredential).
       reloadServices = [ "stalwart.service" ];
     };
