@@ -150,6 +150,10 @@ in
             TasksMax = 1024;
             CPUQuota = "200%";
             # Holds the Xvfb socket: other uids cannot reach the display.
+            # Also where the server keeps downloads (os.tmpdir(), for
+            # hermes' browser_downloads): the last 20 per tab, deleted
+            # with their tab or session, and all of them when the unit
+            # stops. A tmpfs /tmp would count them against MemoryMax.
             PrivateTmp = true;
             ProtectSystem = "strict";
             ProtectHome = true;

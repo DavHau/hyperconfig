@@ -1,0 +1,487 @@
+hermes v2026.9.14 (0.21.3): with the Camofox backend the agent cannot get
+a file that a page download starts.
+
+Symptom: a click on a download link or button, a form whose answer is a
+file (e.g. APKSum's reCAPTCHA form: POST, 302 to dl.apksum.com, attachment),
+or a script-started blob download leaves the page as it is, and
+browser_click reports success. camofox-browser does capture the file (its
+Playwright download listener saves it to its temp dir and lists it under
+GET /tabs/<id>/downloads), but no browser_* tool reads that route, so the
+agent re-POSTs the form with fetch() from the page, which Firefox fails with
+"NetworkError when attempting to fetch resource" (the cross-origin redirect
+carries no CORS header), or hands the CAPTCHA token to curl.
+
+Upstream: NousResearch/hermes-agent#52939 (open) proposes the same two
+camofox calls; no PR, and main (848fc0ad) has nothing yet.
+
+Fix: one tool, browser_downloads, offered only in Camofox mode and not
+routed to an extension controller (no controller captures downloads).
+Without arguments it lists the downloads of every tab of the session's own
+camofox userId (popups included), oldest first, each with id, filename,
+size, mime, url, status and whether this task saw it before; when none is
+new it polls up to 15 s, since camofox lists a download only once saved.
+save=<id>|"latest" writes the file under the working directory (the base the
+file tools resolve against, TERMINAL_CWD): the target is resolved through
+symlinks and must stay inside it, the page-chosen filename only supplies the
+last component, an existing file is kept unless overwrite=true (the final
+step is a hard link, so a file that appears meanwhile is kept as well), and
+files over 50 MiB (camofox's MAX_FETCHED_RESOURCE_BYTES) are refused before
+any byte moves. It asks camofox with includeData and maxBytes equal to the
+chosen record's size, checks the length, and returns path, size and sha256.
+
+The new test fails before this change: tools.browser_camofox has no
+camofox_downloads.
+
+diff --git a/tests/tools/test_browser_camofox_downloads.py b/tests/tools/test_browser_camofox_downloads.py
+new file mode 100644
+index 0000000..227556b
+--- /dev/null
++++ b/tests/tools/test_browser_camofox_downloads.py
+@@ -0,0 +1,165 @@
++"""browser_downloads on the Camofox backend: listing, saving, and its refusals.
++
++A fake camofox-browser answers GET /tabs and GET /tabs/<id>/downloads per userId the way
++the real server does (records appear once saved; includeData inlines base64 up to maxBytes).
++"""
++
++import base64
++import hashlib
++import json
++import os
++
++import pytest
++
++import tools.browser_camofox as bc
++
++
++class FakeCamofox:
++    def __init__(self):
++        self.tabs = {}  # userId -> {tabId: [record, ...]}
++        self.data = {}  # download id -> bytes
++        self.data_requests = []
++
++    def add(self, user, tab, rid, name, raw, created, failure=None):
++        self.tabs.setdefault(user, {}).setdefault(tab, []).append({
++            "id": rid, "url": f"https://example.com/{name}", "suggestedFilename": name,
++            "mimeType": "application/octet-stream", "bytes": None if failure else len(raw),
++            "createdAt": created, "failure": failure})
++        self.data[rid] = raw
++
++    def get(self, path, params=None, timeout=None):
++        user = params["userId"]
++        if path == "/tabs":
++            return {"running": True, "tabs": [{"tabId": t} for t in self.tabs.get(user, {})]}
++        tab = path.split("/")[2]
++        records = self.tabs.get(user, {}).get(tab)
++        if records is None:
++            raise AssertionError(f"{user} asked for foreign tab {tab}")
++        out = []
++        for r in records:
++            item = dict(r)
++            if params.get("includeData") == "true" and not r["failure"]:
++                self.data_requests.append((r["id"], int(params["maxBytes"])))
++                if r["bytes"] <= int(params["maxBytes"]):
++                    item["dataBase64"] = base64.b64encode(self.data[r["id"]]).decode()
++                else:
++                    item["dataSkipped"] = "max_bytes_exceeded"
++            out.append(item)
++        return {"tabId": tab, "downloads": out}
++
++
++@pytest.fixture
++def camofox(monkeypatch, tmp_path):
++    fake = FakeCamofox()
++    monkeypatch.setattr(bc, "_get", fake.get)
++    monkeypatch.setattr(bc, "_DOWNLOAD_WAIT_SECONDS", 0.2)
++    monkeypatch.setattr(bc, "_DOWNLOAD_POLL_SECONDS", 0.05)
++    workspace = tmp_path / "ws"
++    workspace.mkdir()
++    monkeypatch.setenv("TERMINAL_CWD", str(workspace))
++    monkeypatch.setenv("TERMINAL_ENV", "local")
++    with bc._sessions_lock:
++        bc._sessions.clear()
++        bc._sessions["a"] = {"user_id": "user-a", "tab_id": "tab-a", "session_key": "task_a",
++                             "managed": False, "adopt_existing_tab": False}
++        bc._sessions["b"] = {"user_id": "user-b", "tab_id": None, "session_key": "task_b",
++                             "managed": False, "adopt_existing_tab": False}
++    yield fake, workspace
++    with bc._sessions_lock:
++        bc._sessions.clear()
++
++
++def _call(**kw):
++    return json.loads(bc.camofox_downloads(**kw))
++
++
++def test_lists_downloads_of_every_tab_once_as_new(camofox):
++    fake, _ = camofox
++    fake.add("user-a", "tab-a", "d1", "a.bin", b"aaa", "2026-01-01T00:00:01Z")
++    fake.add("user-a", "popup", "d2", "b.bin", b"bb", "2026-01-01T00:00:02Z")
++    fake.add("user-a", "tab-a", "d3", "c.bin", b"", "2026-01-01T00:00:03Z", failure="canceled")
++
++    first = _call(task_id="a")
++    assert [(d["id"], d["filename"], d["size"], d["status"], d["new"]) for d in first["downloads"]] == [
++        ("d1", "a.bin", 3, "complete", True), ("d2", "b.bin", 2, "complete", True),
++        ("d3", "c.bin", None, "failed: canceled", True)]
++    again = _call(task_id="a")
++    assert not any(d["new"] for d in again["downloads"])
++    assert "No new download" in again["note"]
++
++
++def test_saves_into_workspace_with_sha256(camofox):
++    fake, ws = camofox
++    raw = os.urandom(4096)
++    fake.add("user-a", "popup", "d1", "file.apk", raw, "2026-01-01T00:00:01Z")
++    fake.add("user-a", "tab-a", "d0", "huge.bin", b"x" * 9000, "2026-01-01T00:00:00Z")
++
++    out = _call(task_id="a", save="d1")
++    assert out["success"] is True
++    assert out["path"] == str(ws / "file.apk")
++    assert out["size"] == 4096
++    assert out["sha256"] == hashlib.sha256(raw).hexdigest()
++    assert (ws / "file.apk").read_bytes() == raw
++    # Only records up to the chosen size are inlined.
++    assert fake.data_requests == [("d1", 4096)]
++
++    latest = _call(task_id="a", save="latest", path="sub/")
++    assert latest["path"] == str(ws / "sub" / "file.apk")
++
++
++def test_existing_file_needs_overwrite(camofox):
++    fake, ws = camofox
++    fake.add("user-a", "tab-a", "d1", "f.bin", b"new", "2026-01-01T00:00:01Z")
++    (ws / "f.bin").write_bytes(b"old")
++
++    refused = _call(task_id="a", save="d1")
++    assert "exists" in refused["error"]
++    assert (ws / "f.bin").read_bytes() == b"old"
++    assert _call(task_id="a", save="d1", overwrite=True)["success"] is True
++    assert (ws / "f.bin").read_bytes() == b"new"
++
++
++@pytest.mark.parametrize("path", ["../out.bin", "/etc/out.bin", "a/../../out.bin", "link/out.bin"])
++def test_refuses_paths_outside_workspace(camofox, path, tmp_path):
++    fake, ws = camofox
++    (ws / "link").symlink_to(tmp_path)
++    fake.add("user-a", "tab-a", "d1", "f.bin", b"x", "2026-01-01T00:00:01Z")
++
++    out = _call(task_id="a", save="d1", path=path)
++    assert "outside the working directory" in out["error"]
++    assert not (tmp_path / "out.bin").exists()
++    assert fake.data_requests == []
++
++
++def test_page_filename_cannot_traverse(camofox):
++    fake, ws = camofox
++    fake.add("user-a", "tab-a", "d1", "../../evil.bin", b"x", "2026-01-01T00:00:01Z")
++    out = _call(task_id="a", save="d1")
++    assert out["path"] == str(ws / "evil.bin")
++
++
++def test_refuses_oversize_without_fetching(camofox, monkeypatch):
++    fake, ws = camofox
++    monkeypatch.setattr(bc, "_DOWNLOAD_MAX_BYTES", 10)
++    fake.add("user-a", "tab-a", "d1", "big.bin", b"x" * 11, "2026-01-01T00:00:01Z")
++
++    out = _call(task_id="a", save="d1")
++    assert "over the 10-byte limit" in out["error"]
++    assert fake.data_requests == []
++    assert not (ws / "big.bin").exists()
++
++
++def test_other_session_sees_nothing(camofox):
++    fake, _ = camofox
++    fake.add("user-a", "tab-a", "d1", "f.bin", b"x", "2026-01-01T00:00:01Z")
++
++    assert "browser_navigate" in _call(task_id="b")["error"]
++    fake.tabs["user-b"] = {"tab-b": []}
++    assert _call(task_id="b")["downloads"] == []
++    assert "No download 'd1'" in _call(task_id="b", save="d1")["error"]
++
++
++def test_failed_download_is_not_saved(camofox):
++    fake, _ = camofox
++    fake.add("user-a", "tab-a", "d1", "f.bin", b"", "2026-01-01T00:00:01Z", failure="canceled")
++    assert "failed in the browser" in _call(task_id="a", save="d1")["error"]
+diff --git a/tools/browser_camofox.py b/tools/browser_camofox.py
+index 8618a59..6d323a4 100644
+--- a/tools/browser_camofox.py
++++ b/tools/browser_camofox.py
+@@ -11,13 +11,17 @@ scroll by ref, screenshots). Setup: ``npm start`` in a checkout or ``docker run
+ from __future__ import annotations
+ 
+ import base64
++import hashlib
+ import ipaddress
+ import json
+ import logging
+ import os
+ import re
++import tempfile
+ import threading
++import time
+ import uuid
++from pathlib import Path
+ from typing import Any, Callable, Dict, Optional
+ from urllib.parse import SplitResult, urlsplit, urlunsplit
+ 
+@@ -599,3 +603,179 @@ def camofox_console(clear: bool = False, task_id: Optional[str] = None) -> str:
+         "success": True, "console_messages": [], "js_errors": [], "total_messages": 0, "total_errors": 0,
+         "note": "Console log capture is not available with the Camofox backend. "
+                 "Use browser_snapshot or browser_vision to inspect page state."})
++
++
++# ---- Downloads ----
++# camofox-browser saves every download a tab starts (link, form response, script) into its own
++# temp dir and lists it under GET /tabs/<id>/downloads once saved; it keeps the last 20 per tab
++# and deletes them when the tab or session closes. Popups (ad tabs, target=_blank forms) are
++# tabs of the same userId, so listing walks every tab of this agent's userId, and only those.
++# includeData inlines base64 for every record up to maxBytes, so a save asks for exactly the
++# chosen record's size; the cap is camofox's own limit for files it stores
++# (MAX_FETCHED_RESOURCE_BYTES).
++_DOWNLOAD_MAX_BYTES = 50 * 1024 * 1024
++_DOWNLOAD_WAIT_SECONDS = 15.0
++_DOWNLOAD_POLL_SECONDS = 1.0
++
++
++def _session_downloads(session: Dict[str, Any]) -> Optional[list[Dict[str, Any]]]:
++    """Every download record of the session's userId, oldest first, each tagged with its tab;
++    None when the userId has no tab at all."""
++    tabs = _get("/tabs", params=_user_params(session)).get("tabs") or []
++    if not tabs:
++        return None
++    items: list[Dict[str, Any]] = []
++    for tab in tabs:
++        tab_id = tab.get("tabId") if isinstance(tab, dict) else None
++        if not tab_id:
++            continue
++        try:
++            data = _get(f"/tabs/{tab_id}/downloads", params=_user_params(session))
++        except requests.HTTPError as e:
++            if e.response is not None and e.response.status_code in (404, 410):
++                continue  # closed between the two calls
++            raise
++        for record in data.get("downloads", []):
++            if isinstance(record, dict) and record.get("id"):
++                items.append({**record, "_tab_id": tab_id})
++    items.sort(key=lambda r: str(r.get("createdAt") or ""))
++    return items
++
++
++def _download_view(record: Dict[str, Any]) -> Dict[str, Any]:
++    failure = record.get("failure")
++    return {"id": record["id"], "filename": record.get("suggestedFilename"), "size": record.get("bytes"),
++            "mime": record.get("mimeType"), "url": record.get("url"), "created": record.get("createdAt"),
++            "status": f"failed: {failure}" if failure else "complete"}
++
++
++def _wait_for_new_download(session: Dict[str, Any]) -> Optional[list[Dict[str, Any]]]:
++    """List downloads; when none is new since this task last looked, poll briefly, since camofox
++    lists a download only after it finished saving it."""
++    seen = session.setdefault("seen_downloads", set())
++    deadline = time.monotonic() + _DOWNLOAD_WAIT_SECONDS
++    while True:
++        items = _session_downloads(session)
++        if items is None or any(r["id"] not in seen for r in items) or time.monotonic() >= deadline:
++            return items
++        time.sleep(_DOWNLOAD_POLL_SECONDS)
++
++
++def _download_destination(task_id: Optional[str], path: Optional[str], filename: str) -> Path:
++    """Resolve the save target inside the agent's working directory, the base the file tools
++    use. Symlinks are resolved before the containment check, so neither ``..`` nor a link
++    leads out; the page-chosen filename only ever supplies the last component."""
++    from tools.file_tools_paths import _resolve_base_dir, _uses_container_paths
++    task = task_id or "default"
++    if _uses_container_paths(task):
++        raise ValueError("Saving downloads needs a local terminal backend: the working directory "
++                         "is inside a container this process cannot write to.")
++    root = Path(_resolve_base_dir(task, container_paths=False)).resolve()
++    name = os.path.basename(filename) or "download.bin"
++    if name in (".", ".."):
++        name = "download.bin"
++    target = Path(os.path.expanduser(path)) if path else Path(name)
++    if not target.is_absolute():
++        target = root / target
++    if path and (path.endswith(("/", os.sep)) or target.is_dir()):
++        target = target / name
++    target = target.resolve()
++    if root not in target.parents:
++        raise ValueError(f"Refusing to save outside the working directory {root}: {target}")
++    return target
++
++
++def _write_new_file(target: Path, raw: bytes, overwrite: bool) -> None:
++    """Write via a temp file in the target's directory; without ``overwrite`` the final link
++    fails on an existing file, so a file that appears meanwhile is not replaced either."""
++    target.parent.mkdir(parents=True, exist_ok=True)
++    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=".download-")
++    try:
++        with os.fdopen(fd, "wb") as f:
++            f.write(raw)
++        if overwrite:
++            os.replace(tmp, target)
++        else:
++            os.link(tmp, target)
++    finally:
++        if os.path.exists(tmp):
++            os.unlink(tmp)
++
++
++def _save_download(session: Dict[str, Any], items: list[Dict[str, Any]], save: str,
++                   path: Optional[str], overwrite: bool, task_id: Optional[str]) -> str:
++    done = [r for r in items if not r.get("failure")]
++    if save == "latest":
++        record = done[-1] if done else None
++    else:
++        record = next((r for r in items if r["id"] == save), None)
++    if record is None:
++        return tool_error(f"No download {save!r} in this browser session. Call browser_downloads "
++                          "without arguments to list them.", success=False)
++    if record.get("failure"):
++        return tool_error(f"Download {record['id']} failed in the browser: {record['failure']}", success=False)
++    size = record.get("bytes")
++    if not isinstance(size, int) or size < 0:
++        return tool_error(f"Download {record['id']} has no recorded size.", success=False)
++    if size > _DOWNLOAD_MAX_BYTES:
++        return tool_error(f"Download {record['id']} is {size} bytes, over the {_DOWNLOAD_MAX_BYTES}-byte "
++                          f"limit; fetch its URL with curl instead: {record.get('url')}", success=False)
++    target = _download_destination(task_id, path, str(record.get("suggestedFilename") or ""))
++    if target.exists() and not overwrite:
++        return tool_error(f"{target} exists; pass overwrite=true to replace it, or another path.", success=False)
++
++    data = _get(f"/tabs/{record['_tab_id']}/downloads",
++                params={**_user_params(session), "includeData": "true", "maxBytes": str(max(size, 1))},
++                timeout=max(_get_command_timeout(), 120))
++    entry = next((d for d in data.get("downloads", []) if d.get("id") == record["id"]), None)
++    if entry is None:
++        return tool_error(f"Download {record['id']} is gone from the browser (its tab was closed).",
++                          success=False)
++    if "dataBase64" not in entry:
++        reason = entry.get("readError") or entry.get("dataSkipped") or "no data returned"
++        return tool_error(f"Camofox could not return download {record['id']}: {reason}", success=False)
++    raw = base64.b64decode(entry["dataBase64"])
++    if len(raw) != size:
++        return tool_error(f"Download {record['id']} arrived with {len(raw)} of {size} bytes.", success=False)
++    try:
++        _write_new_file(target, raw, overwrite)
++    except FileExistsError:
++        return tool_error(f"{target} exists; pass overwrite=true to replace it, or another path.", success=False)
++    return json.dumps({"success": True, "path": str(target), "size": len(raw),
++                       "sha256": hashlib.sha256(raw).hexdigest(), "filename": record.get("suggestedFilename"),
++                       "mime": record.get("mimeType"), "url": record.get("url")}, ensure_ascii=False)
++
++
++def camofox_downloads(save: Optional[str] = None, path: Optional[str] = None, overwrite: bool = False,
++                      task_id: Optional[str] = None) -> str:
++    """List this session's browser downloads, or save one (id or ``"latest"``) under the
++    working directory."""
++    try:
++        session = _get_session(task_id)
++        save = (save or "").strip()
++        if save:
++            items = _session_downloads(session)
++            if items is not None and save == "latest" and all(r.get("failure") for r in items):
++                items = _wait_for_new_download(session)
++        else:
++            items = _wait_for_new_download(session)
++        if items is None:
++            return tool_error(_NO_SESSION_ERROR, success=False)
++        if save:
++            return _save_download(session, items, save, path, bool(overwrite), task_id)
++        seen = session["seen_downloads"]
++        views = []
++        for record in items:
++            view = _download_view(record)
++            view["new"] = record["id"] not in seen
++            views.append(view)
++        seen.update(r["id"] for r in items)
++        result: Dict[str, Any] = {"success": True, "downloads": views}
++        if not any(v["new"] for v in views):
++            result["note"] = (f"No new download within {int(_DOWNLOAD_WAIT_SECONDS)} s. A download is "
++                              "listed once the browser has saved it; call again if one is still running.")
++        return json.dumps(result, ensure_ascii=False)
++    except requests.HTTPError as e:
++        return tool_error(f"Camofox downloads request failed: {e}", success=False)
++    except Exception as e:
++        return tool_error(str(e), success=False)
+diff --git a/tools/browser_tool.py b/tools/browser_tool.py
+index 104bc76..5ffc506 100644
+--- a/tools/browser_tool.py
++++ b/tools/browser_tool.py
+@@ -574,6 +574,29 @@ BROWSER_TOOL_SCHEMAS = [
+             "required": []
+         }
+     },
++    {
++        "name": "browser_downloads",
++        "description": "Files the browser downloaded: a click on a download link or button, a form whose answer is a file, or a script-started download (also in popup tabs). Without `save`: lists this session's downloads (id, filename, size, mime, url, status), waiting up to 15 s for a new one; a download appears once the browser has saved it. With `save` (an id from the list, or 'latest'): writes that file into the working directory and returns its path, size and sha256. Files over 50 MB are refused; fetch those with curl. Requires browser_navigate first.",
++        "parameters": {
++            "type": "object",
++            "properties": {
++                "save": {
++                    "type": "string",
++                    "description": "Download id from the list, or 'latest' for the newest complete download. Omit to list."
++                },
++                "path": {
++                    "type": "string",
++                    "description": "Target file or directory, relative to the working directory and inside it. Default: the download's filename in the working directory."
++                },
++                "overwrite": {
++                    "type": "boolean",
++                    "default": False,
++                    "description": "Replace an existing file at the target."
++                }
++            },
++            "required": []
++        }
++    },
+ ]
+ 
+ from tools import browser_tool_snapshot as _snapshot
+@@ -1137,6 +1160,19 @@ def _maybe_stop_recording(task_id: str):
+             _recording_sessions.discard(task_id)
+ 
+ 
++def browser_downloads(save: Optional[str] = None, path: Optional[str] = None, overwrite: bool = False,
++                      task_id: Optional[str] = None) -> str:
++    """List the session's completed downloads, or save one into the working directory.
++    Only camofox-browser captures downloads, so the tool exists only in Camofox mode."""
++    if not _is_camofox_mode():
++        return _dumps(_err("browser_downloads needs the Camofox browser backend."))
++    return _camofox("camofox_downloads", save, path, overwrite, task_id)
++
++
++def check_browser_downloads_requirements() -> bool:
++    return _is_camofox_mode() and _install.check_browser_requirements()
++
++
+ _GET_IMAGES_JS = """JSON.stringify(
+         [...document.images].map(img => ({
+             src: img.src, alt: img.alt || '', width: img.naturalWidth, height: img.naturalHeight
+@@ -1315,6 +1351,12 @@ for _name, _emoji, _check_fn, _defaults, *_extra in _BROWSER_TOOL_TABLE:
+                       handler=_routed_handler(_name, _fallback_call(_name, _defaults, *_extra)),
+                       check_fn=_check_fn, emoji=_emoji)
+ 
++# Downloads come from camofox-browser alone, so this tool is not routed to an extension controller.
++_downloads_call = _fallback_call("browser_downloads", {"save": None, "path": None, "overwrite": False})
++registry.register(name="browser_downloads", toolset="browser", schema=_BROWSER_SCHEMA_MAP["browser_downloads"],
++                  handler=lambda args, **kw: _downloads_call(args, kw),
++                  check_fn=check_browser_downloads_requirements, emoji="📥")
++
+ 
+ # ---- BEGIN PLUGIN-COMPAT (revert-scheduled; see COMPAT_MANIFEST.md) ----
+ # Names external plugins imported from this module before the Sep 2026 decomposition.
+diff --git a/toolsets.py b/toolsets.py
+index 24c58b9..65d0b06 100644
+--- a/toolsets.py
++++ b/toolsets.py
+@@ -17,7 +17,7 @@ _HERMES_CORE_TOOLS = [
+     "browser_navigate", "browser_snapshot", "browser_click",
+     "browser_type", "browser_scroll", "browser_back",
+     "browser_press", "browser_get_images",
+-    "browser_vision", "browser_console", "browser_cdp", "browser_dialog",
++    "browser_vision", "browser_console", "browser_downloads", "browser_cdp", "browser_dialog",
+     "browser_vault_list", "browser_vault_unlock", "browser_vault_fill", "browser_vault_save_login", "browser_vault_enter_code",  # ride with the browser
+     "browser_exec",  # replaces the other browser tools when browser.backend is "browser-use"
+     "text_to_speech",

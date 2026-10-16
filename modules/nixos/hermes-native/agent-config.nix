@@ -69,7 +69,7 @@ rec {
     ])
     ++ skillCliPackages;
 
-  # hermes_cli patches cannot ride an overrideAttrs: upstream seals the
+  # hermes patches cannot ride an overrideAttrs: upstream seals the
   # venv from a source filter rooted in its own nix/ directory, and the
   # built package only symlinks into that venv. So the package is built
   # again through upstream's own nix/packages.nix, with upstream's own
@@ -81,12 +81,13 @@ rec {
   # nix/packages.nix from it would be import-from-derivation. Instead the
   # uv2nix input that packages.nix receives gets one more overlay that
   # patches the hermes-agent wheel. The wheel source drops tests/, so
-  # filterdiff keeps only the hermes_cli hunks.
+  # filterdiff drops the test hunks.
   hermesInputs = inputs.hermes-agent.inputs;
   hermesPkgs = hermesInputs.nixpkgs.legacyPackages.${system};
   hermesWheelPatches = [
     ./patches/hermes-auth-bare-named-provider.patch
     ./patches/hermes-gateway-restart-foreign-unit.patch
+    ./patches/hermes-camofox-browser-downloads.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {
@@ -94,7 +95,7 @@ rec {
       postPatch =
         (old.postPatch or "")
         + lib.concatMapStrings (p: ''
-          filterdiff -p1 -i 'hermes_cli/*' ${p} | patch -p1
+          filterdiff -p1 -x 'tests/*' ${p} | patch -p1
         '') hermesWheelPatches;
     });
   };
