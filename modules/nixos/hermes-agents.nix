@@ -68,6 +68,7 @@ in
   imports = [
     ./hermes-common.nix
     ./hermes-dashboard-public.nix
+    ./hermes-dashboard-oauth2-gate.nix
     ./hermes-agents-serve.nix
   ];
 

@@ -227,9 +227,14 @@ in {
                 public = true;
                 allowedGroups = [ "apps" ];
               };
+              # The agent mail owner page (modules/nixos/agent-mail/owner-page.nix)
+              # signs in through the same client with its own oauth2-proxy.
               roles.client.machines.som.settings.clients.hermes = {
                 name = "Hermes dashboards";
-                callbackURLs = [ "https://hermes.davhau.com/oauth2/callback" ];
+                callbackURLs = [
+                  "https://hermes.davhau.com/oauth2/callback"
+                  "https://mailgate.hermes.davhau.com/oauth2/callback"
+                ];
                 pkce = true; # oauth2-proxy sends S256
                 allowedGroups = [ "hermes" ];
               };
