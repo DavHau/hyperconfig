@@ -4,7 +4,8 @@
   profile generations older than 14 days, plus gcroots/auto entries older
   than that: nix-direnv devshells not loaded within the window and other
   auto roots (`nix build` result links, ...) registered before it. The
-  active generation of every profile stays.
+  active generation of every profile stays, plus its two newest other
+  generations as rollback targets, however old.
 
   Replaces nix.gc everywhere; nix's min-free/max-free (per-machine
   nix.settings) remain the build-time safety net. Laptops gate the timer
@@ -20,6 +21,7 @@
     dates = "daily";
     randomizedDelaySec = "1h";
     deleteOlderThan = "14d";
+    keepGenerations = 2;
     # Keep paths fetched for builds of the last day.
     keepRecent = "1d";
   };
