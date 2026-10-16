@@ -390,11 +390,11 @@
         "treefmt-nix": "treefmt-nix_5"
       },
       "locked": {
-        "lastModified": 1786191454,
-        "narHash": "sha256-6sBEaFoA34AcvKF4bkNdrE+qCFFFZ6/QiilOPkkhk5U=",
+        "lastModified": 1792123807,
+        "narHash": "sha256-aQM4NX1Fo3FjFgC6J8njQ4HrE2WCYeQHThlaVAIn8T4=",
         "ref": "prune-stale-auto-roots",
-        "rev": "76021438764e2d412cdf74a23bd98704b8a636da",
-        "revCount": 214,
+        "rev": "620d08c7af0945e61bea66dc30e0f1a16acfa16f",
+        "revCount": 215,
         "type": "git",
         "url": "file:///home/grmpf/synced/projects/fast-nix-gc"
       },
