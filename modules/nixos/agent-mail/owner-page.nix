@@ -80,8 +80,12 @@ in
         pkgs.coreutils
         pkgs.openssl
       ];
+      # oauth2-proxy decodes a cookie secret only as URL-safe base64 and
+      # otherwise takes the raw bytes, which must then be 16, 24 or 32
+      # long: standard base64 with a '+' or '/' is 44 raw bytes and the
+      # proxy refuses to start. 32 hex characters are 32 raw bytes.
       script = ''
-        openssl rand -base64 32 | tr -d '\n' > "$out"/cookie_secret
+        openssl rand -hex 16 | tr -d '\n' > "$out"/cookie_secret
       '';
     };
 
