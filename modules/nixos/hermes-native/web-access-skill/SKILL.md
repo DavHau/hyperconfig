@@ -26,6 +26,12 @@ terminal for web pages.
 If the first navigation answers HTTP 500 or times out, the browser was
 starting cold: retry once, not more.
 
+A `g-recaptcha` class or a reCAPTCHA badge in the page source is no
+reason to give up. Most such buttons carry an invisible reCAPTCHA that
+passes without a challenge when clicked in the browser: click through
+(close any ad tab it opens) and see what happens before reporting a
+CAPTCHA.
+
 ## Downloads
 
 The browser tools cannot save a file. Use the browser to reach the real
