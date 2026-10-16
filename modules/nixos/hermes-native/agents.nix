@@ -100,6 +100,53 @@ let
     exec "$@"
   '';
 
+  # Hermes copies its bundled skills from the store into
+  # $HERMES_HOME/skills/<category>/<name> and keeps the store's
+  # read-only modes. When upstream moves a skill to another category,
+  # hermes renames the old copy (tools/skills_sync.py,
+  # _recover_renamed_skill), but renaming a directory to another parent
+  # needs write access to the directory itself, for its "..". The rename
+  # fails, shutil.move falls back to copy-then-delete, the delete fails
+  # too, and both copies stay. Two skills of one name make skill_view
+  # refuse with "Ambiguous skill name". Hermes never retries: the new
+  # copy exists from then on.
+  #
+  # So before every start, once the new copy is in place, drop the old
+  # one if it is still hermes' own: its name is in .bundled_manifest and
+  # no entry under it carries a write bit. A byte comparison would not
+  # do, as the old copy holds the old release's text. Hermes copies
+  # bundled skills read-only, and an edit by the user or the agent needs
+  # a write bit. A skill the user wrote or touched is therefore never
+  # removed. While the new copy is missing, the old one stays, because
+  # hermes takes a skill in its manifest but missing on disk as deleted
+  # by the user and would not install it again.
+  pruneMovedBundledSkills = pkgs.writeShellScript "hermes-prune-moved-bundled-skills" ''
+    PATH=${lib.makeBinPath [ pkgs.coreutils pkgs.findutils pkgs.gnugrep ]}
+    bundled=$1
+    skills=$2
+    manifest=$skills/.bundled_manifest
+    [ -d "$bundled" ] && [ -f "$manifest" ] || exit 0
+    for md in "$bundled"/*/*/SKILL.md; do
+      [ -e "$md" ] || continue
+      src=''${md%/SKILL.md}
+      name=''${src##*/}
+      category=''${src%/*}
+      category=''${category##*/}
+      [ -d "$skills/$category/$name" ] || continue
+      cut -d: -f1 "$manifest" | grep -qxF -- "$name" || continue
+      for old in "$skills"/*/"$name"; do
+        [ "$old" != "$skills/$category/$name" ] && [ -d "$old" ] && [ ! -L "$old" ] || continue
+        [ -z "$(find "$old" -perm /222 -print -quit)" ] || continue
+        if chmod -R u+w "$old" && rm -rf "$old"; then
+          echo "removed stale copy $old of bundled skill $category/$name"
+        else
+          echo "could not remove stale copy $old of bundled skill $category/$name" >&2
+        fi
+      done
+    done
+    exit 0
+  '';
+
   perUser =
     user: ucfg:
     let
@@ -163,6 +210,7 @@ let
         } >> "$env_file"
         ${ac.envRewriteScript stateDir}
         ${ac.modelSeedScript stateDir}
+        ${pruneMovedBundledSkills} ${ac.hermesPackage}/share/hermes-agent/skills ${hermesHome}/skills
       '';
     in
     {

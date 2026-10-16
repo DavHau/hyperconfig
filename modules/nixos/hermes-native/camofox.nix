@@ -29,12 +29,13 @@ let
   cfg = config.services.hermes-native;
   hlib = import ./lib.nix { inherit lib; };
 
-  # The build camofox-browser 1.18.1 tests against
-  # (lib/camoufox-download.js); camoufox-js rejects newer ones.
-  camoufox = pkgs.callPackage ../../../pkgs/camoufox/browser.nix {
-    version = "152.0.4-beta.30";
-    hash = "sha256-VyDUW4lM4XcFQ94CTG8Q1RSzi+Vg+i3DIms9hYbK9nI=";
-  };
+  # The default build (pkgs/camoufox/browser.nix), as web-extract uses.
+  # camofox-browser 1.18.1 downloads 152.0.4-beta.30 for itself
+  # (lib/camoufox-download.js), but its camoufox-js 0.11.5 runs 156 as
+  # well, and 152 can drop a humanized mouse event on the content's top
+  # row and then hold every later mouse event of the browser behind it
+  # (Camoufox #751/#752, fixed in 156.0.1-beta.36).
+  camoufox = pkgs.callPackage ../../../pkgs/camoufox/browser.nix { };
   camofox = pkgs.callPackage ../../../pkgs/camofox-browser { };
 
   # Seconds a navigation waits for a challenge interstitial to clear,
