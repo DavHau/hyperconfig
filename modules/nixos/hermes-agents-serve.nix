@@ -1,13 +1,13 @@
-# Web pages the native hermes agents serve, published under the dashboard
-# host: https://<port>.<dashboard host>/ -> nginx -> 127.0.0.1:<port>.
+# Web pages the native hermes agents serve, published under the front
+# door's host: https://<port>.<dashboard host>/ -> nginx -> 127.0.0.1:<port>.
 #
 # Ports: each agent owns 10 loopback ports, servePortBase + (uid - 1000) * 10
 # .. +9, disjoint per uid and below the kernel's ephemeral range (32768+).
-# The first five are PRIVATE: pocket-id login through the dashboard's
-# oauth2-proxy, and only the agent's own dashboard account
-# (hyper.hermesDashboard.users.<name>.account) gets through. The last five
-# are PUBLIC: no login. The agent picks the mode by picking the port; the
-# URL cannot upgrade a private port to public.
+# The first five are PRIVATE: pocket-id login through the front door's
+# oauth2-proxy (./hermes-dashboard-public.nix), and only the agent's own
+# dashboard account (hyper.hermesDashboard.users.<name>.account) gets
+# through. The last five are PUBLIC: no login. The agent picks the mode by
+# picking the port; the URL cannot upgrade a private port to public.
 #
 # One wildcard vhost serves both modes. nginx cannot switch auth_request on
 # and off per variable, so the auth subrequest answers 204 itself for a
@@ -69,7 +69,7 @@ let
   accountOf = name: dashboard.users.${name}.account;
 
   # Nothing of the agents listens here; nginx answers 403 from its own
-  # server block (hermes-dashboard-public.nix has its own such port).
+  # server block.
   forbiddenPort = servePortBase - 1;
   oauth2 = config.services.oauth2-proxy.httpAddress;
 

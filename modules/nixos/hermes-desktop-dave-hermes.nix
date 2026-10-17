@@ -2,14 +2,17 @@
 # gateway in hermes-desktop, reached as dave-hermes@hermes.davhau.com over
 # ssh. Imported by ./dave.nix, so every dave desktop machine carries it.
 #
-# Why ssh and not the https dashboard: som's dashboards sit behind
-# oauth2-proxy (./hermes-dashboard-public.nix), which rejects the app's
-# static-token auth. The SSH connection kind needs no token: the app runs
+# Why ssh and not the https dashboard: it predates the per-agent dashboards
+# with hermes' own OIDC login (./hermes-dashboard-public.nix) and needs no
+# browser sign-in. The SSH connection kind needs no token: the app runs
 # `hermes serve --isolated` as dave-hermes over ssh, tunnels the ephemeral
 # port and adopts the token the remote mints. On som the command lands in
 # the `hermes` shim of ./hermes-native, which exports the account's real
 # HERMES_HOME, so it serves the same state (sessions, memories) the gateway
-# and dashboard use. One `hermes serve` per open connection.
+# and dashboard use. The managed dashboard.public_url does not gate it:
+# hermes exempts the loopback backend the desktop spawns (HERMES_DESKTOP=1
+# plus its session token, web_server.py _desktop_loopback_auth_exempt).
+# One `hermes serve` per open connection.
 #
 # Identity: one passphrase-less ed25519 key for the fleet (shared clan var
 # below), never the admin key. The var itself stays root 0400; activation

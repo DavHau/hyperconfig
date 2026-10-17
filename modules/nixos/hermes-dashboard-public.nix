@@ -1,43 +1,65 @@
-# Public web dashboards for native hermes agents, one shared vhost:
-# https://<host>/ (AAAA -> this host's stable public v6,
-# networking.publicIPv6Token) -> nginx -> oauth2-proxy (auth_request against
-# the clan's pocket-id, modules/clan/oidc) -> the root-held dashboard port of
-# the signed-in account's agent (./hermes-native/forwards.nix), which
-# bridges to that agent's backend after checking the backend's owner.
+# Public web dashboards for native hermes agents, one hostname per agent:
+# https://<agent>.<agentDomain>/ -> nginx -> the root-held dashboard port of
+# that agent (./hermes-native/forwards.nix), which bridges to the agent's
+# loopback backend after checking the backend's owner.
 #
-# Everyone uses the same URL; the account decides which hermes answers.
-# nginx maps the authenticated preferred_username (oauth2-proxy's
-# X-Auth-Request-Preferred-Username, --set-xauthrequest) to a backend port
-# and 403s any other account. Authorisation is therefore twofold:
-# pocket-id only issues tokens for the `hermes` client to members of the
-# `hermes` group, and only accounts named in users.<user>.account reach a
-# backend at all.
+# The login is hermes' own: the dashboard runs gated, with its bundled
+# `self_hosted` OIDC provider against the clan's pocket-id
+# (modules/clan/oidc). Each agent has its own PUBLIC pocket-id client
+# `hermes-<agent>` (PKCE, no secret: the agent could read one anyway),
+# callback https://<agent>.<agentDomain>/auth/callback, open to the group
+# `hermes-<agent>` only. The inventory derives the clients and the group
+# memberships from machines/som/hermes-dashboards.nix, which machines/som
+# reads for the accounts too; the assertions below catch a client that
+# does not match. Browsers and the Hermes Mobile app (RFC 8252 native PKCE,
+# brokered by the dashboard's /auth/native/*) sign in the same way.
 #
-# This login is the only one. The backends stay exactly as
-# ./hermes-native/agents.nix runs them: loopback bind, which hermes treats as
-# "trusted operator" (no login gate of its own, a per-start session token
-# injected into the SPA). That is safe here because nothing reaches the
-# port without oauth2-proxy's cookie, and the owner-only iptables rules
-# (./hermes-native/firewall.nix) still reject every other local uid; nginx
-# gets its own RETURN rule on the root-held port, never on the backend. A
-# backend another agent squatted while its owner's dashboard was down is
-# refused by the forward, so a signed-in request never reaches the wrong
-# agent. No path prefix, so none of the upstream X-Forwarded-Prefix gaps
-# apply.
+# Trust: the agent behind a dashboard is untrusted and IS the relying party.
+# That is fine here because everything that would make its login worth
+# stealing is per agent: the client (ID tokens are aud-bound to
+# hermes-<agent>; hermes verifies signature, iss and aud), the hostname
+# (its `__Host-` session cookies reach no other site), pocket-id's group
+# restriction (only that agent's accounts get a token at all), and the
+# passkeys (bound to the issuer's origin, never to the dashboard's). The
+# agent can switch its own gate off; it could already publish itself
+# through an outbound tunnel, so that opens nothing new.
 #
-# The agent behind a dashboard is untrusted, so nothing of the visitor's
-# login reaches it, in either direction:
-#   - it gets no cookies at all. On a loopback bind hermes reads none (its
-#     cookie sessions exist only in gated mode, hermes_cli/dashboard_auth),
-#     so an empty allowlist costs nothing. Stripping just the login cookies
-#     was a deny list, and it leaked: each pass removed one pair, so a
-#     fourth `_oauth2_proxy*` cookie (decoys the agent planted) went through,
-#   - it sets none: Set-Cookie is dropped, so it cannot plant cookies on
-#     this host and its subdomains through headers (document.cookie still
-#     can; the mail owner page's `__Host-` cookie is immune to that,
-#     ./agent-mail/owner-page.nix).
-# The mail owner page has its own login for the same reason: no page an
-# agent controls may hold a session that opens it.
+# The settings are pinned through hermes' managed scope
+# (./hermes-native/agents.nix, managedDirFor), so neither the dashboard nor
+# the CLI can change them: dashboard.public_url (a non-loopback public URL
+# turns the gate on even on the loopback bind, and is the only Host and WS
+# Origin hermes accepts), the issuer and the client id. Scopes include
+# offline_access: pocket-id issues a refresh token without it today
+# (fosite RefreshTokenScopes = []), but offline_access is what the spec
+# asks for, so sessions keep refreshing past the ID token's lifetime
+# either way. Hermes accepts RS256 (pocket-id's only key) and ES*.
+#
+# nginx, per agent: Host and Origin unchanged; X-Forwarded-Proto, -For and
+# Real-IP set by nginx (hermes runs uvicorn with proxy_headers in gated mode
+# and trusts loopback, which is only nginx and the owner's own bridge here;
+# its rate limits read the FIRST X-Forwarded-For hop, so the client's list
+# is replaced, not appended to), X-Forwarded-Prefix and Forwarded cleared.
+# Cookies: only `__Host-hermes_*` go in (./hermes-dashboard-cookies.js);
+# a `__Host-` cookie cannot be tossed from another host, so nothing another
+# davhau.com site sets reaches the agent. Set-Cookie passes (hermes' login
+# needs it), with any Domain pinned to the agent's own host. The
+# parent domain is not hermes.davhau.com on purpose: oauth2-proxy's login
+# cookie carries Domain=<host> (./hermes-agents-serve.nix), and browsers
+# would send it to an agent-controlled dashboard below it. Unknown names
+# under agentDomain get a 404 from a server of their own, never a backend.
+#
+# The old URL https://<host>/ stays behind oauth2-proxy (client `hermes`,
+# group `hermes`, as the serve ports and the mail owner page) and only
+# redirects: an account with one agent goes to that agent's dashboard,
+# one with several gets a list of links, any other a 403. nginx learns the
+# account after auth_request, which an `if` in the vhost would not see, so
+# it asks a server on a unix socket that only nginx can reach.
+#
+# DNS: *.<agentDomain> A (publicIPv4: sgp's v4, forwarded here by
+# ./ipv4-forward.nix) and AAAA (this host's networking.publicIPv6), kept by
+# ./porkbun-records. A wildcard does not shadow names that have records of
+# their own (the mail names, ./agent-mail). TLS: one wildcard cert via
+# porkbun DNS-01, so no agent name lands in the CT logs.
 #
 # Secrets (clan vars, root-owned, LoadCredential): the `hermes` client
 # secret is the shared oidc var the oidc service declares; the cookie
@@ -53,26 +75,48 @@ let
   hlib = import ./hermes-native/lib.nix { inherit lib; };
   portOf = hlib.dashboardPortFor;
   client = config.hyper.oidc.clients.${cfg.oidcClient};
-  # nginx answers 403 for accounts without a dashboard from its own server
-  # block on this port, just below the backend window.
-  forbiddenPort = hlib.dashboardBackendBase - 1;
+  certName = "hermes-dashboards";
+  frontSocket = "/run/nginx/hermes-front.sock";
+  scopes = "openid profile email offline_access";
+
+  clientIdOf = user: "hermes-${user}";
+  # Agents per front-door account.
+  agentsOf = lib.foldlAttrs (
+    acc: user: u:
+    acc // { ${u.account} = (acc.${u.account} or [ ]) ++ [ user ]; }
+  ) { } cfg.users;
+  # Reserved names under agentDomain that have records of their own.
+  reserved = lib.optional (config.hyper.agentMail.enable or false) config.hyper.agentMail.hostname;
 in
 {
-  imports = [ ./oauth2-proxy-cookie-guard.nix ];
+  imports = [
+    ./oauth2-proxy-cookie-guard.nix
+    ./porkbun-records
+  ];
 
   options.hyper.hermesDashboard = {
     host = lib.mkOption {
       type = lib.types.str;
-      description = "Shared public hostname; every user's dashboard lives at https://<host>/.";
+      description = "Front door behind oauth2-proxy: https://<host>/ redirects to the signed-in account's dashboard; the serve ports and the mail owner page hang below it.";
+    };
+    agentDomain = lib.mkOption {
+      type = lib.types.str;
+      description = "Parent domain of the dashboards: every agent's lives at https://<agent>.<agentDomain>/. Must not be <host> or below it.";
+    };
+    publicIPv4 = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "38.89.142.76";
+      description = "Address of the *.<agentDomain> A record; its AAAA is networking.publicIPv6. Null: no DNS records are kept.";
     };
     oidcClient = lib.mkOption {
       type = lib.types.str;
       default = "hermes";
-      description = "Id of this machine's oidc client (inventory, roles.client.machines.<host>.settings.clients).";
+      description = "Id of the front door's oidc client (inventory, roles.client.machines.<host>.settings.clients).";
     };
     users = lib.mkOption {
       default = { };
-      description = "Native hermes users whose dashboard is published.";
+      description = "Native hermes agents whose dashboard is published.";
       type = lib.types.attrsOf (
         lib.types.submodule (
           { name, ... }:
@@ -81,7 +125,13 @@ in
               account = lib.mkOption {
                 type = lib.types.str;
                 default = name;
-                description = "pocket-id username that lands on this dashboard.";
+                description = "pocket-id username that signs in to this dashboard (member of group hermes-<agent>) and owns the agent's private serve ports.";
+              };
+              publicUrl = lib.mkOption {
+                type = lib.types.str;
+                readOnly = true;
+                default = "https://${name}.${cfg.agentDomain}";
+                description = "The dashboard's public URL (hermes' dashboard.public_url).";
               };
             };
           }
@@ -91,23 +141,56 @@ in
   };
 
   config = lib.mkIf (cfg.users != { }) {
-    assertions =
-      lib.mapAttrsToList (user: _: {
-        assertion = config.services.hermes-native.enable && config.services.hermes-native.users ? ${user};
-        message = "hyper.hermesDashboard.users.${user}: only a native hermes user (services.hermes-native.users) has a host dashboard unit to publish.";
-      }) cfg.users
-      ++ [
-        {
-          assertion = config.hyper.oidc.clients ? ${cfg.oidcClient};
-          message = "hyper.hermesDashboard: the inventory declares no oidc client `${cfg.oidcClient}` for this machine.";
-        }
-        {
-          assertion =
-            lib.length (lib.unique (lib.mapAttrsToList (_: u: u.account) cfg.users))
-            == lib.length (lib.attrNames cfg.users);
-          message = "hyper.hermesDashboard: two dashboards claim the same account.";
-        }
-      ];
+    assertions = [
+      {
+        assertion = config.hyper.oidc.clients ? ${cfg.oidcClient};
+        message = "hyper.hermesDashboard: the inventory declares no oidc client `${cfg.oidcClient}` for this machine.";
+      }
+      {
+        assertion = cfg.agentDomain != cfg.host && !lib.hasSuffix ".${cfg.host}" cfg.agentDomain;
+        message = "hyper.hermesDashboard.agentDomain: must not be ${cfg.host} or below it, where oauth2-proxy's login cookie is sent.";
+      }
+    ]
+    ++ lib.concatLists (
+      lib.mapAttrsToList (
+        user: u:
+        let
+          c = config.hyper.oidc.clients.${clientIdOf user} or null;
+        in
+        [
+          {
+            assertion = config.hyper.hermesAgents ? ${user};
+            message = "hyper.hermesDashboard.users.${user}: only an agent of hyper.hermesAgents has a host dashboard unit to publish.";
+          }
+          {
+            assertion = builtins.match "[a-z0-9]([a-z0-9-]*[a-z0-9])?" user != null;
+            message = "hyper.hermesDashboard.users.${user}: the name is the dashboard's DNS label; use a-z, 0-9 and inner dashes.";
+          }
+          {
+            assertion = !lib.elem "${user}.${cfg.agentDomain}" reserved;
+            message = "hyper.hermesDashboard.users.${user}: ${user}.${cfg.agentDomain} is taken by another service.";
+          }
+          {
+            assertion =
+              c != null
+              && c.public
+              && c.callbackURLs == [ "${u.publicUrl}/auth/callback" ]
+              && c.allowedGroups == [ "hermes-${user}" ];
+            message = "hyper.hermesDashboard.users.${user}: the inventory must declare the public oidc client ${clientIdOf user} for this machine, callback ${u.publicUrl}/auth/callback, group hermes-${user} (derived from machines/<machine>/hermes-dashboards.nix).";
+          }
+        ]
+      ) cfg.users
+    );
+
+    # Managed (locked) .env keys of each agent: the gate and its provider.
+    services.hermes-native.users = lib.mapAttrs (user: u: {
+      environment = {
+        HERMES_DASHBOARD_PUBLIC_URL = u.publicUrl;
+        HERMES_DASHBOARD_OIDC_ISSUER = config.hyper.oidc.issuer;
+        HERMES_DASHBOARD_OIDC_CLIENT_ID = clientIdOf user;
+        HERMES_DASHBOARD_OIDC_SCOPES = scopes;
+      };
+    }) cfg.users;
 
     # Hosts under the same registrable domain (the agent slots) can toss
     # cookies onto this one: refuse a request carrying a login cookie name
@@ -153,7 +236,7 @@ in
     # OIDC discovery needs DNS for the issuer, and network-online.target
     # promises nothing where the wait-online services are masked (som). The
     # stock Restart=always at 100ms burnt the start limit within a second of
-    # boot and left the dashboards down; retry every 5s, indefinitely, until
+    # boot and left the front door down; retry every 5s, indefinitely, until
     # the issuer resolves and answers.
     systemd.services.oauth2-proxy = {
       serviceConfig.RestartSec = "5s";
@@ -169,6 +252,39 @@ in
       '') (lib.attrNames cfg.users)
     );
 
+    hyper.porkbunRecords.records = lib.mkIf (cfg.publicIPv4 != null) {
+      "*.${cfg.agentDomain}" = {
+        A = cfg.publicIPv4;
+        AAAA.ipv6OnLink = {
+          inherit (config.networking.publicIPv6) interface;
+          suffix = config.networking.publicIPv6.token;
+        };
+      };
+    };
+
+    # Shared var, same definition as ./dyndns-porkbun.nix; only DNS-01
+    # reads it here.
+    clan.core.vars.generators.porkbun = {
+      share = true;
+      prompts.apikey.type = "hidden";
+      prompts.apikey.persist = true;
+      prompts.secretkey.type = "hidden";
+      prompts.secretkey.persist = true;
+    };
+    security.acme.certs.${certName} = {
+      domain = "*.${cfg.agentDomain}";
+      dnsProvider = "porkbun";
+      # Not an enableACME cert, so the nginx module leaves the group alone.
+      group = "nginx";
+      credentialFiles = {
+        PORKBUN_API_KEY_FILE = config.clan.core.vars.generators.porkbun.files.apikey.path;
+        PORKBUN_SECRET_API_KEY_FILE = config.clan.core.vars.generators.porkbun.files.secretkey.path;
+      };
+      # som's upstream answers REFUSED for names that do not exist yet,
+      # which ends lego's SOA walk (./agent-mail/default.nix).
+      dnsResolver = "1.1.1.1:53";
+    };
+
     networking.firewall.allowedTCPPorts = [
       80
       443
@@ -180,59 +296,110 @@ in
     services.nginx = {
       enable = true;
       recommendedProxySettings = true;
+      additionalModules = [ pkgs.nginxModules.njs ];
       appendHttpConfig = ''
-        map $hermes_account $hermes_backend {
-          default 127.0.0.1:${toString forbiddenPort};
+        js_import hermes_dashboard_cookies from ${./hermes-dashboard-cookies.js};
+        js_set $hermes_dashboard_cookie hermes_dashboard_cookies.hermesCookies;
+
+        map $http_x_hermes_account $hermes_front_redirect {
+          default "";
         ${lib.concatStrings (
-          lib.mapAttrsToList (user: u: ''
-            "${u.account}" 127.0.0.1:${toString (portOf user)};
-          '') cfg.users
-        )}
-        }
+          lib.mapAttrsToList (
+            account: agents:
+            lib.optionalString (lib.length agents == 1) ''
+              "${account}" "${cfg.users.${lib.head agents}.publicUrl}/";
+            ''
+          ) agentsOf
+        )}}
+
+        map $http_x_hermes_account $hermes_front_choices {
+          default "";
+        ${lib.concatStrings (
+          lib.mapAttrsToList (
+            account: agents:
+            lib.optionalString (lib.length agents > 1) ''
+              "${account}" "Your hermes dashboards:\n${
+                lib.concatMapStrings (a: "  ${cfg.users.${a}.publicUrl}/\\n") agents
+              }";
+            ''
+          ) agentsOf
+        )}}
       '';
-      virtualHosts = {
-        ${cfg.host} = {
-          forceSSL = true;
-          enableACME = true;
-          locations."/" = {
-            proxyPass = "http://$hermes_backend";
-            # /api/ws and /api/pty are long-lived websockets; the PTY
-            # stream and SSE status feeds sit idle far longer than 60s.
-            proxyWebsockets = true;
-            # hermes accepts only a loopback Host (and WS Origin) on a
-            # loopback bind (web_server.py _is_accepted_host,
-            # web_server_chat.py _ws_host_origin_reason); declaring the
-            # public host instead would re-arm its own auth gate. So the
-            # recommended header set (Host $host) is replaced by hand.
-            recommendedProxySettings = false;
+      virtualHosts =
+        {
+          ${cfg.host} = {
+            forceSSL = true;
+            enableACME = true;
+            locations."/" = {
+              proxyPass = "http://unix:${frontSocket}:";
+              recommendedProxySettings = false;
+              extraConfig = ''
+                auth_request_set $hermes_account $upstream_http_x_auth_request_preferred_username;
+                proxy_set_header Host $host;
+                proxy_set_header X-Hermes-Account $hermes_account;
+                proxy_set_header Cookie "";
+              '';
+            };
+          };
+          # Answers the front door with the account nginx puts in the
+          # header; nothing but nginx can connect (/run/nginx is 0750).
+          hermes-front = {
+            serverName = "_";
+            listen = [ { addr = "unix:${frontSocket}"; } ];
             extraConfig = ''
-              auth_request_set $hermes_account $upstream_http_x_auth_request_preferred_username;
-              proxy_set_header Host 127.0.0.1;
-              proxy_set_header Origin "";
-              proxy_set_header Cookie "";
-              proxy_hide_header Set-Cookie;
-              proxy_set_header X-Real-IP $remote_addr;
-              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-              proxy_set_header X-Forwarded-Proto $scheme;
-              proxy_set_header X-Forwarded-Host $host;
-              proxy_read_timeout 1h;
-              proxy_send_timeout 1h;
-              client_max_body_size 256m;
+              default_type text/plain;
+              if ($hermes_front_redirect) {
+                return 302 $hermes_front_redirect;
+              }
+              if ($hermes_front_choices) {
+                return 200 $hermes_front_choices;
+              }
+              return 403 "No hermes dashboard for this account.\n";
             '';
           };
-        };
-        hermes-forbidden = {
-          serverName = "_";
-          listen = [
-            {
-              addr = "127.0.0.1";
-              port = forbiddenPort;
-            }
-          ];
-          locations."/".return = "403 'No hermes dashboard for this account.\\n'";
-          extraConfig = "default_type text/plain;";
-        };
-      };
+          # Names under agentDomain that are no dashboard, and the default
+          # server, so a request for an unknown Host on this host never
+          # reaches a backend either.
+          hermes-dashboard = {
+            serverName = "*.${cfg.agentDomain}";
+            default = true;
+            forceSSL = true;
+            useACMEHost = certName;
+            locations."/".return = "404";
+          };
+        }
+        // lib.mapAttrs' (
+          user: u:
+          lib.nameValuePair "hermes-dashboard-${user}" {
+            serverName = "${user}.${cfg.agentDomain}";
+            forceSSL = true;
+            useACMEHost = certName;
+            locations."/" = {
+              proxyPass = "http://127.0.0.1:${toString (portOf user)}";
+              # /api/ws, /api/pty, /api/events and the kanban feed are
+              # long-lived websockets / SSE streams that sit idle far
+              # longer than 60s.
+              proxyWebsockets = true;
+              # recommendedProxySettings appends to the client's
+              # X-Forwarded-For; hermes reads its first hop.
+              recommendedProxySettings = false;
+              extraConfig = ''
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $remote_addr;
+                proxy_set_header X-Forwarded-Proto https;
+                proxy_set_header X-Forwarded-Host $host;
+                proxy_set_header X-Forwarded-Prefix "";
+                proxy_set_header Forwarded "";
+                proxy_set_header Cookie $hermes_dashboard_cookie;
+                proxy_cookie_domain ~.+ $host;
+                proxy_read_timeout 1h;
+                proxy_send_timeout 1h;
+                client_max_body_size 256m;
+              '';
+            };
+          }
+        ) cfg.users;
     };
   };
 }

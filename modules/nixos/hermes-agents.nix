@@ -9,11 +9,13 @@
 #     state under /var/lib/hermes/<name>/state), brain p0's
 #     Qwen (the seed-once initialModel in ./hermes-common.nix), no
 #     OpenRouter,
-#   - the web dashboard on the shared host (./hermes-dashboard-public.nix;
-#     pocket-id account = the agent name unless `dashboard.account` says
-#     otherwise; passkey, enrolled through the login link hermes-onboard prints),
+#   - the web dashboard at https://<name>.<agentDomain>/ with hermes' own
+#     pocket-id login (./hermes-dashboard-public.nix; the account that signs
+#     in is hyper.hermesDashboard.users.<name>.account, the agent name by
+#     default; passkey, enrolled through the login link hermes-onboard
+#     prints),
 #   - 10 loopback ports published at https://<port>.<dashboard host>/, five
-#     private (owner's pocket-id login) and five public
+#     private (that account's pocket-id login) and five public
 #     (./hermes-agents-serve.nix, taught by the serve-ports skill),
 #   - oh-my-pi on p0 through a per-user token copy (./inference-api-key.nix),
 #   - bash as login shell, not the site default fish: hermes-desktop's SSH
@@ -103,11 +105,6 @@ in
             default = { };
             description = "Merged into hyper.hermes.users.<name> (telegram, environment).";
           };
-          dashboard = lib.mkOption {
-            type = lib.types.deferredModule;
-            default = { };
-            description = "Merged into hyper.hermesDashboard.users.<name> (account).";
-          };
         };
       }
     );
@@ -158,7 +155,7 @@ in
       }
     ) cfg;
 
-    hyper.hermesDashboard.users = lib.mapAttrs (_: a: { ... }: { imports = [ a.dashboard ]; }) cfg;
+    hyper.hermesDashboard.users = lib.mapAttrs (_: _: { }) cfg;
 
     hyper.inferenceApiKey.users = lib.attrNames cfg;
 

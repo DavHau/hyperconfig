@@ -1,5 +1,6 @@
 # ./mail.nix and ./owner-page.nix end to end, with the real nginx config of
-# the dashboards (../hermes-dashboard-public.nix) and the serve ports
+# the front door and the agents' dashboards (../hermes-dashboard-public.nix,
+# hermes itself stubbed by an echo backend) and the serve ports
 # (../hermes-agents-serve.nix): Stalwart as MX, mailgate, two agents (alice,
 # bob), both oauth2-proxy instances against a stub OIDC provider, and a
 # sending client that also serves the senders' DNS (SPF, DKIM, DMARC) and a
@@ -24,6 +25,8 @@ let
   dashHost = "hermes.test";
   ownerHost = "mailgate.${dashHost}";
   aliceDashPort = hlib.dashboardPortFor "alice";
+  # The dashboards share the mail domain, as on som.
+  aliceDashHost = "alice.${domain}";
   # alice is uid 1001: serve ports 30010-30014 private, 30015-30019 public.
   alicePrivate = 30010;
   alicePublic = 30015;
@@ -586,6 +589,8 @@ pkgs.testers.runNixOSTest {
         ownerHost
         "${toString alicePrivate}.${dashHost}"
         "${toString alicePublic}.${dashHost}"
+        aliceDashHost
+        "nobody.${domain}"
       ];
 
       users.users.alice = {
@@ -626,6 +631,7 @@ pkgs.testers.runNixOSTest {
       };
       hyper.hermesDashboard = {
         host = dashHost;
+        agentDomain = domain;
         users.alice.account = "alice-owner";
         users.bob.account = "bob-owner";
       };
@@ -637,6 +643,20 @@ pkgs.testers.runNixOSTest {
           secretFile = "/etc/mailtest/oidc-hermes";
           callbackURLs = [ ];
           allowedGroups = [ ];
+        };
+        clients.hermes-alice = {
+          clientId = "hermes-alice";
+          public = true;
+          secretFile = null;
+          callbackURLs = [ "https://${aliceDashHost}/auth/callback" ];
+          allowedGroups = [ "hermes-alice" ];
+        };
+        clients.hermes-bob = {
+          clientId = "hermes-bob";
+          public = true;
+          secretFile = null;
+          callbackURLs = [ "https://bob.${domain}/auth/callback" ];
+          allowedGroups = [ "hermes-bob" ];
         };
       };
       # No ACME server here: the self-signed placeholders stay, and the
@@ -1152,20 +1172,24 @@ pkgs.testers.runNixOSTest {
     with subtest("F2: no login cookie reaches an agent backend; the owner page has its own login"):
         server.wait_for_open_port(4180, "127.0.0.1")
         server.wait_for_open_port(443)
-        # The owner signs in to the dashboard (stub OIDC, real oauth2-proxy).
+        # The owner signs in at the front door (stub OIDC, real
+        # oauth2-proxy), which sends her on to her agent's dashboard.
         code, eff, body = https("https://${dashHost}/", "-L -c /tmp/j1 -b /tmp/j1")
-        assert code == "200" and body == "backend ${toString aliceDashPort}\n", (code, eff, body)
+        assert code == "200" and eff == "https://${aliceDashHost}/" and body == "backend ${toString aliceDashPort}\n", (code, eff, body)
+        # A name under the dashboards' domain that is no dashboard.
+        assert https("https://nobody.${domain}/")[0] == "404"
         dash = {n: c for n, c in jar_cookies("/tmp/j1").items() if n.startswith("_oauth2_proxy")}
         assert "_oauth2_proxy" in dash, dash
         session = "; ".join(f"{n}={c[2]}" for n, c in dash.items())
         # The agent planted three decoys with a longer Path (they come
-        # first); the real session follows, then a CSRF cookie and the
-        # agent app's own cookies.
+        # first); the real session follows, then a CSRF cookie, the agent
+        # app's own cookies and the dashboard's own session.
         cookies = ("_oauth2_proxy_a=1; _oauth2_proxy_b=1; _oauth2_proxy_c=1; " + session
-                   + "; _oauth2_proxy_csrf=x; app=1; trader_dashboard=tok; _xsrf=abc; __Host-mailgate=stolen")
+                   + "; _oauth2_proxy_csrf=x; app=1; trader_dashboard=tok; _xsrf=abc; __Host-mailgate=stolen"
+                   + "; __Host-hermes_session_at=hs")
         secrets_ = [c[2] for c in dash.values()] + ["stolen"]
         for port, url, expected in (
-            (${toString aliceDashPort}, "https://${dashHost}/leak", None),
+            (${toString aliceDashPort}, "https://${aliceDashHost}/leak", ["__Host-hermes_session_at=hs"]),
             (${toString alicePrivate}, "https://${toString alicePrivate}.${dashHost}/leak", ["app=1; trader_dashboard=tok; _xsrf=abc"]),
             (${toString alicePublic}, "https://${toString alicePublic}.${dashHost}/leak", ["app=1; trader_dashboard=tok; _xsrf=abc"]),
         ):
@@ -1175,9 +1199,12 @@ pkgs.testers.runNixOSTest {
             print(port, got)
             assert got == expected, (url, got)
             assert not any(s in json.dumps(got) for s in secrets_), (url, got)
-        # The dashboard backend cannot set cookies on the dashboard domain.
+        # The dashboard backend sets cookies on its own host only.
+        hdrs = server.succeed("curl -sk -D - -o /dev/null https://${aliceDashHost}/")
+        assert "planted=1; Domain=${aliceDashHost};" in hdrs and "Domain=${dashHost}" not in hdrs, hdrs
+        # The front door only redirects; it proxies to no agent.
         hdrs = server.succeed("curl -sk -D - -o /dev/null -b /tmp/j1 https://${dashHost}/")
-        assert "planted" not in hdrs, hdrs
+        assert "planted" not in hdrs and "location: https://${aliceDashHost}/" in hdrs.lower(), hdrs
 
         # The dashboard session does not open the owner page.
         server.wait_for_open_port(4181, "127.0.0.1")

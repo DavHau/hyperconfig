@@ -97,10 +97,18 @@ in
   # (../../modules/nixos/cooler-lcd).
   hyper.coolerLcd.usbPort = "1-0:1.0/usb1-port8";
 
-  # Public hermes dashboards: https://hermes.davhau.com/ (AAAA -> the token
-  # address below), pocket-id login through oauth2-proxy, each account
-  # routed to its own backend. Every agent in ./hermes-agents.nix is published.
-  hyper.hermesDashboard.host = "hermes.davhau.com";
+  # Public hermes dashboards, one per agent in ./hermes-agents.nix:
+  # https://<agent>.agents.davhau.com/ with hermes' own pocket-id login
+  # (../../modules/nixos/hermes-dashboard-public.nix). *.agents.davhau.com
+  # A -> sgp (forwarded here), AAAA -> the token address below, kept by
+  # porkbun-records. https://hermes.davhau.com/ (oauth2-proxy) redirects the
+  # signed-in account to its dashboard and carries the serve ports and the
+  # mail owner page.
+  hyper.hermesDashboard = {
+    host = "hermes.davhau.com";
+    agentDomain = (import ./hermes-dashboards.nix).domain;
+    publicIPv4 = "38.89.142.76";
+  };
 
   # Receive-only mail for every agent in ./hermes-agents.nix at
   # <agent>@agents.davhau.com (../../modules/nixos/agent-mail, DNS records
