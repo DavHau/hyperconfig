@@ -9,10 +9,11 @@
 # in a prefix the router hands out and may change. The zone is the fqdn's
 # last two labels, as in tools/porkbun-dns.
 #
-# porkbun-records.service (./sync.sh) runs at boot once the network is up
-# and then hourly, and only writes what differs: a second run makes no
-# write call. It touches only records it declares, plus the records of a
-# name/type it declared before (/var/lib/porkbun-records/managed.json) and
+# porkbun-records.service (./sync.sh) runs at boot once the network is up,
+# after every deploy that changes the records, and hourly, and only writes
+# what differs: a second run makes no write call. It touches only records
+# it declares, plus the records of a name/type it declared before
+# (/var/lib/porkbun-records/managed.json) and
 # no longer does, which it deletes. A record someone else made under a
 # declared name/type is taken over (edited, and deleted once undeclared).
 # Emptying `records` altogether removes the unit and leaves its records
@@ -231,6 +232,21 @@ in
           "200::/7"
           "42::/16"
         ];
+      };
+    };
+    # A deploy that changes the declared records syncs them right away
+    # instead of at the next hourly run: this unit's restart trigger is the
+    # record set, so switch-to-configuration restarts it exactly then.
+    # RemainAfterExit makes it a unit a switch restarts on change; the sync
+    # itself stays a plain oneshot the timer can start again.
+    systemd.services.porkbun-records-on-change = {
+      description = "Sync declared porkbun DNS records after they change";
+      wantedBy = [ "multi-user.target" ];
+      restartTriggers = [ configFile ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        ExecStart = "${config.systemd.package}/bin/systemctl start --no-block porkbun-records.service";
       };
     };
     systemd.timers.porkbun-records = {
