@@ -6,7 +6,10 @@
 # a relay does. Covered: each agent starts, stops and resets only its own
 # slot, through the control socket and never through systemd itself (no
 # --job-mode=flush); only its key gets in, only its uid (and root, nginx)
-# reaches any port of its slot, and its ssh pins the slot's host key; the
+# reaches the slot's ssh, internal v4 and veth, every packet of a flow,
+# while the other agent reaches the public v6 like the internet does (TCP
+# and UDP, from the uplink address, never the proxy hop or the veth's host
+# side), and its ssh pins the slot's host key; the
 # slots reach the internet only through the egress link (kill switch),
 # never the host, each other or the blocked destinations, while inbound v6
 # and forwarded v4 answer the way they came; a slot cannot steer the
@@ -15,7 +18,8 @@
 # a slot whose deploy dropped sshd, a hard reset also drops its gc roots;
 # the slots run in agent-slots.slice; the public IPv4 reaches the right slot
 # by port, by Host (80) and by SNI (443), with the host's own https site
-# keeping the client address and refusing a doubled login cookie; the
+# keeping the client address and refusing a doubled or whole-and-split
+# login cookie; the
 # return mark leaves the Mullvad app's mark alone; each slot's hostname
 # gets its A and AAAA at a stub of porkbun's API.
 { pkgs, spaces }:
@@ -309,6 +313,8 @@ pkgs.testers.runNixOSTest {
       networking.firewall.extraReversePathFilterRules = ''
         iifname "eth2" accept
       '';
+      # As on som (../vpn.nix): isolatedEgress needs a loose rpfilter.
+      networking.firewall.checkReversePath = "loose";
 
       # nspawn idmaps /nix/store into a slot with its own user namespace;
       # neither the host's virtiofs share nor the writable overlay on it
@@ -573,20 +579,57 @@ pkgs.testers.runNixOSTest {
             ("_oauth2_proxy=a; _oauth2_proxy_csrf=b", "200"),
             ("_oauth2_proxy=tossed; x=1; _oauth2_proxy=mine", "400"),
             ("_oauth2_proxy_csrf=tossed;_oauth2_proxy_csrf=mine", "400"),
+            # a whole session cookie next to a split one, either order
+            ("_oauth2_proxy=tossed; _oauth2_proxy_0=a; _oauth2_proxy_1=b", "400"),
+            ("_oauth2_proxy_0=a; x=1; _oauth2_proxy_1=b;_oauth2_proxy=tossed", "400"),
+            # a split session alone is fine
+            ("_oauth2_proxy_0=a; _oauth2_proxy_1=b", "200"),
         ]:
             code = client.succeed(get + f"-H 'Cookie: {cookie}' https://som.test/")
             assert code == want, (cookie, code)
 
-    with subtest("only the owner, root and nginx reach any port of a slot"):
+    with subtest("other agents reach a slot's public v6 like the internet, nothing else"):
         serve("alice", "a-any", 14043, "alice-any")
         serve("alice", "a-any6", 8086, "alice-any6", v6=True)
+        som.succeed(f"systemd-run --unit=a-udp6 {in_slot('alice')} ${pkgs.socat}/bin/socat UDP6-RECVFROM:8087,fork SYSTEM:'echo alice-udp'")
         som.wait_until_succeeds(f"nc -z -w 5 {alice4} 14043", timeout=30)
         som.wait_until_succeeds(f"nc -z -w 5 {alice6} 8086", timeout=30)
+        nginx = "setpriv --reuid=nginx --regid=nginx --clear-groups "
         for target in [f"{alice4} 14043", f"{alice6} 8086"]:
             som.succeed(f"runuser -u alice -- nc -z -w 5 {target}")
-            som.fail(f"runuser -u bob -- nc -z -w 5 {target}")
-            som.succeed(f"setpriv --reuid=nginx --regid=nginx --clear-groups nc -z -w 5 {target}")
+            som.succeed(f"nc -z -w 5 {target}")
+            som.succeed(nginx + f"nc -z -w 5 {target}")
+        # bob: the public v6, TCP and UDP, on a port that is not ssh ...
+        out = som.succeed(f"runuser -u bob -- curl -g -s -m 10 'http://[{alice6}]:8086/'")
+        assert out.startswith("alice-any6"), out
+        # ... from this host's uplink address, as the slot's v6 gateway (the
+        # veth's host side) is deprecated; never the proxy hop 10.43.4.1
+        src = ipaddress.ip_address(peer(out))
+        assert src == ipaddress.ip_address("${prefix}::2"), out
+        assert src not in ipaddress.ip_network("fd43:5107::/64") and not src.is_link_local, out
+        udp6 = f"echo hi | runuser -u bob -- ${pkgs.socat}/bin/socat -t 5 -T 5 - 'UDP6:[{alice6}]:8087'"
+        som.wait_until_succeeds(udp6 + " | grep -qx alice-udp", timeout=30)
+        # ... but not from the veth's host side, picked by hand
+        som.fail(f"runuser -u bob -- nc -z -w 5 -s fd43:5107::4:1 {alice6} 8086")
+        som.succeed(f"runuser -u alice -- nc -z -w 5 -s fd43:5107::4:1 {alice6} 8086")
+        # the internal v4, where the proxies come from: no port at all
+        som.fail(f"runuser -u bob -- nc -z -w 5 {alice4} 14043")
         som.fail(f"runuser -u bob -- ${pkgs.curl}/bin/curl -s -m 5 -H 'X-Forwarded-For: 1.2.3.4' http://{alice4}:14043/")
+        # Every packet is gated, not only a flow's first: alice holds a UDP
+        # flow to her slot's v4 from port 40000 with SO_REUSEADDR, which
+        # lets bob bind the same port (no uid check for REUSEADDR) and send
+        # on her established conntrack entry. The slot must not hear him.
+        assert "ct state" not in som.succeed("nft list chain inet agent-slots output")
+        grep = "${pkgs.gnugrep}/bin/grep"
+        som.succeed(f"systemd-run --unit=a-udp4 {in_slot('alice')} ${pkgs.socat}/bin/socat UDP4-LISTEN:9999 SYSTEM:'${pkgs.coreutils}/bin/tee -a /root/udp.log'")
+        som.succeed(f"systemd-run --unit=alice-udp --uid=alice ${pkgs.socat}/bin/socat UDP4:{alice4}:9999,sourceport=40000,reuseaddr SYSTEM:'echo alice; ${pkgs.coreutils}/bin/cat >/tmp/alice-udp.reply; true'")
+        # the slot echoed: the flow is established both ways
+        som.wait_until_succeeds(f"{grep} -qx alice /tmp/alice-udp.reply", timeout=30)
+        som.execute(f"echo bob | runuser -u bob -- ${pkgs.socat}/bin/socat -u - UDP4-SENDTO:{alice4}:9999,sourceport=40000,reuseaddr")
+        som.sleep(2)
+        heard = som.succeed(in_slot("alice") + "${pkgs.coreutils}/bin/cat /root/udp.log")
+        assert heard.split() == ["alice"], heard
+        som.succeed("systemctl stop alice-udp a-udp4 a-udp6")
 
     with subtest("a slot's own connections leave only through the egress link"):
         curl = in_slot("alice") + "${pkgs.curl}/bin/curl -s -m 5 -g "

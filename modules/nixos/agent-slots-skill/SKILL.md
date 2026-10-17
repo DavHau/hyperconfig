@@ -36,15 +36,20 @@ Each command may run at most 6 times per 10 minutes.
 - From this host: `ssh root@<v4>` (only your account gets through, on any
   port; your key and the slot's host key are picked automatically).
 - From anywhere: `ssh root@<v6>` and every port on the IPv6 address; the
-  slot's own firewall decides what answers.
+  slot's own firewall decides what answers. Other accounts on this host
+  (the other agents) reach what you publish on the IPv6 address like any
+  internet client: every port but 22, coming from this host's public IPv6.
+  ssh on any address and everything on the v4 stay yours alone.
 - `<you>.slots.davhau.com`: AAAA is the slot's IPv6; A is the shared public
   IPv4. This host keeps both records current; there is nothing to set up.
   On that IPv4, ports 80 and 443 reach the slot for this hostname
   only (443 by SNI; TLS ends in your slot, so ACME HTTP-01 and normal
-  certificates work). Over IPv4 the slot sees this host as the peer: on 80
-  the client address is in X-Real-IP and as the last X-Forwarded-For entry
-  (earlier entries are whatever the client sent; do not trust them), on 443
-  it is not visible.
+  certificates work). Over IPv4 the slot sees this host's proxy as the
+  peer, always from `10.43.<id>.1`: on 80 the client address is in
+  X-Real-IP and as the last X-Forwarded-For entry (earlier entries are
+  whatever the client sent; do not trust them), on 443 it is not visible.
+  Trust X-Real-IP or that last entry only on connections from
+  `10.43.<id>.1`; anyone else, IPv6 clients included, can send any header.
 - 10 TCP ports on the public IPv4 (`slot info`) forward to the same ports
   in the slot, with the real client address. No UDP over IPv4; use IPv6.
 

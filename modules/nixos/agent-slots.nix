@@ -8,16 +8,22 @@
 # host's isolatedEgress says (on som: Mullvad, like the agents' own
 # traffic, machines/som/configuration.nix), never the home uplink.
 #
-# Only the agent gets in. The slot's bootstrap sshd lets in root with the
-# agent's key alone (the slot's deployKeys, bind-mounted read-only by
-# ./container-slots.nix), not the host-wide deploy keys. A second lock in
-# front of it: from this host, every port of the slot answers only the
-# agent's uid, root and nginx (the proxies below) (the `agent-slots` nft
-# table; like the owner-only gates in ./hermes-native/firewall.nix, but
+# Only the agent gets in by ssh. The slot's bootstrap sshd lets in root
+# with the agent's key alone (the slot's deployKeys, bind-mounted read-only
+# by ./container-slots.nix), not the host-wide deploy keys. A second lock
+# in front of it: from this host, ssh on any slot address, every port of
+# the internal v4 10.43.<id>.2 and anything else over the veth answer only
+# the agent's uid, root and nginx (the proxies below) (the `agent-slots`
+# nft table; like the owner-only gates in ./hermes-native/firewall.nix, but
 # nft's own socket-uid match). Otherwise another agent could reach the
-# slot from the same address the proxies use and pass for them. Everyone
-# on the internet reaches the slot's public /128 once the routers allow
-# it; there the key is the only lock. Root here keeps the admin path
+# slot from 10.43.<id>.1, the address the proxies use, and pass for them;
+# a slot may trust X-Real-IP (or the last X-Forwarded-For entry) from that
+# address only. Services an agent publishes on the slot's public /128 are
+# for everyone, the other agents on this host included: they reach every
+# port but 22 there, as the internet does, from this host's uplink
+# address, never from the veth's host side. Everyone on the internet
+# reaches the slot's public /128 once the routers allow it; there the key
+# is the only lock for ssh. Root here keeps the admin path
 # (machinectl shell <agent>, the reset units below). The agent's ssh pins
 # the slot's host key (one per slot, kept by this host across resets and
 # deploys, ./container-slots.nix); a stopped slot's addresses are
@@ -107,7 +113,8 @@
 # serve subdomains. oauth2-proxy's login cookie cannot be a `__Host-` one
 # (it carries Domain=hermes.davhau.com to cover the serve subdomains), so
 # ./oauth2-proxy-cookie-guard.nix rejects requests carrying a login cookie
-# name twice (a tossed one next to the real one) instead. Residual: a
+# name twice, or the session both whole and split (a tossed one next to
+# the real one) instead. Residual: a
 # tossed login cookie when the visitor has none (login CSRF into an account
 # the slot's owner holds at pocket-id, or a junk-cookie lockout until the
 # visitor clears cookies), and tossed cookies for apps on the serve
@@ -136,6 +143,9 @@ let
   hex = id: lib.toLower (lib.toHexString id);
   ipv4Of = a: "10.43.${toString a.id}.2";
   ipv6Of = a: "${slotsCfg.ipv6Prefix}::5107:${hex a.id}";
+  # Where ./container-slots.nix puts the host side of every isolated slot's
+  # veth (hostAddress6 fd43:5107::<id hex>:1, the slot's v6 gateway).
+  vethHost6Prefix = "fd43:5107::/64";
   portsOf = a: lib.genList (i: portBase + 10 * a.id + i) 10;
   portRange = a: "${toString (portBase + 10 * a.id)}-${toString (portBase + 10 * a.id + 9)}";
   hostOf = name: "${name}.${cfg.domain}";
@@ -348,8 +358,9 @@ let
       slot:      $me (off by default; slot start|stop|reset [--hard]|status)
       ssh:       root@$v4 (from this host; only you and root get through)
                  root@[$v6] (anywhere)
-      ipv6:      $v6 (public, all ports; the slot's firewall decides)
-      ipv4:      $v4 (this host only); public ${cfg.publicIPv4} shared
+      ipv6:      $v6 (public, all ports; the slot's firewall decides;
+                 other agents here reach all but 22, like the internet)
+      ipv4:      $v4 (this host only, you alone); public ${cfg.publicIPv4} shared
       hostname:  $host (A ${cfg.publicIPv4}, AAAA $v6)
       http(s):   $host on ${cfg.publicIPv4} ports 80/443 reaches the slot's
                  80/443 (TLS passes through by SNI; ends in the slot)
@@ -597,13 +608,25 @@ in
     networking.nftables.tables.agent-slots = {
       family = "inet";
       content = ''
-        # this host -> a slot, any port: the owning agent, root and nginx
-        # (the :80 vhost and the SNI hop dial the slot) only. By interface:
-        # link-local too; by address: whatever the route. Packets without a
-        # local socket (forwarded, the kernel's own) never match skuid.
+        # this host -> a slot. The owning agent, root and nginx (the :80
+        # vhost and the SNI hop dial the slot from 10.43.<id>.1) reach
+        # everything. Every other uid (the other agents) gets what the
+        # internet gets: the public /128, every port but ssh. ssh on any
+        # address, the internal v4 and whatever else leaves over the veth
+        # (link-local) stay the owner's. The internal v4 is the proxies'
+        # path: a slot may trust 10.43.<id>.1 as its proxy hop only because
+        # nobody else reaches it from there.
+        #
+        # Every packet, not only a flow's first: two UDP sockets that both
+        # set SO_REUSEADDR share a local port whatever their uid, so another
+        # agent's datagrams could otherwise ride the owner's established
+        # flow. Packets without a local socket (forwarded, the kernel's own:
+        # ND, TCP resets) never match skuid and pass; this host serves
+        # nothing to the slots (container-slots' input chain), so no reply
+        # of one of its sockets is caught here either.
         chain output {
           type filter hook output priority filter; policy accept;
-          ct state new jump slot-gate
+          jump slot-gate
         }
         chain slot-gate {
           ${lib.concatStrings (
@@ -611,11 +634,21 @@ in
               name: a:
               let
                 ok = "{ 0, ${toString (uidOf name)}, ${toString nginxUid} }";
+                other = "meta skuid != ${ok}";
               in
               ''
-                oifname "ve-${name}" meta skuid != ${ok} jump refuse
-                ip daddr ${ipv4Of a} meta skuid != ${ok} jump refuse
-                ip6 daddr ${ipv6Of a} meta skuid != ${ok} jump refuse
+                ip daddr ${ipv4Of a} ${other} jump refuse
+                oifname "ve-${name}" meta nfproto ipv4 ${other} jump refuse
+                oifname "ve-${name}" ip6 daddr != ${ipv6Of a} ${other} jump refuse
+                ip6 daddr ${ipv6Of a} ${other} meta l4proto { tcp, udp } th dport 22 jump refuse
+                # From one of this host's own addresses (no IPV6_FREEBIND
+                # spoofing), and never from a veth's host side (the slots'
+                # v6 gateways fd43:5107::<id>:1, link-local): a slot must be
+                # able to tell the host itself from another agent. With the
+                # gateway deprecated (./container-slots.nix) the kernel picks
+                # the uplink's global address, as for the internet.
+                ip6 daddr ${ipv6Of a} ${other} ip6 saddr { fe80::/10, ${vethHost6Prefix} } jump refuse
+                ip6 daddr ${ipv6Of a} ${other} fib saddr type != local jump refuse
               ''
             ) cfg.agents
           )}

@@ -122,9 +122,13 @@
 #             from the internet, forwarded v4) answer the way they came. A
 #             forward-chain kill switch drops the slot's own connections on
 #             any other interface, so a dead tunnel means no egress, not the
-#             home uplink. While a slot is stopped, unreachable routes for
-#             10.43.0.0/16 and its /128 keep its addresses from falling back
-#             to the LAN (where any peer could claim the v6 by NDP).
+#             home uplink. It needs a loose reverse-path filter (asserted;
+#             som's ./vpn.nix sets one). While a slot is stopped, unreachable
+#             routes for 10.43.0.0/16 and its /128 keep its addresses from
+#             falling back to the LAN (where any peer could claim the v6 by
+#             NDP). The veth's host side fd43:5107::<id>:1 (the slot's v6
+#             gateway) is deprecated, so this host's own connections to the
+#             /128 come from its uplink address, not from the gateway.
 #   lan       veth on the LAN bridge: a LAN peer like any other, unfiltered.
 # Either way inbound from the internet additionally needs an allow rule for
 # the slot's v6 address on both routers in front of the LAN, the AIS ZTE
@@ -156,6 +160,9 @@ let
   hex = id: lib.toLower (lib.toHexString id);
   hex2 = id: lib.fixedWidthString 2 "0" (hex id);
   ipv6Of = slot: "${cfg.ipv6Prefix}::5107:${hex slot.id}";
+  # The host side of an isolated slot's veth: the slot's v6 gateway.
+  # ./agent-slots.nix refuses other agents' packets from fd43:5107::/64.
+  hostIPv6Of = slot: "fd43:5107::${hex slot.id}:1";
 
   isolated = lib.filterAttrs (_: s: s.mode == "isolated") cfg.slots;
   # nspawn names the host side of the veth ve-<name> (routed) or vb-<name>
@@ -448,6 +455,10 @@ in
         drop it on any interface but `interface` (kill switch). null: the
         slots' own connections leave over `bridge`, v4 masqueraded.
         Connections that come in keep answering the way they came.
+        Needs a loose reverse-path filter (asserted): the mark is set
+        before the firewall's rpfilter runs, so a strict one looks the
+        slot's source up in `table`, finds `interface` instead of the
+        slot's veth and drops every packet the slot opens.
       '';
     };
     isolatedBlockedDestinations = mkOption {
@@ -512,7 +523,21 @@ in
       ++ lib.mapAttrsToList (owner: mark: {
         assertion = builtins.bitAnd egressMark mark == 0;
         message = "hyper.containerSlots: the slots' egress mark overlaps ${owner}'s fwmark";
-      }) foreignMarks;
+      }) foreignMarks
+      ++ [
+        {
+          # see isolatedEgress: a strict rpfilter cuts off all slot egress
+          assertion =
+            egress == null
+            || isolated == { }
+            || !config.networking.firewall.enable
+            || !(lib.elem config.networking.firewall.checkReversePath [
+              true
+              "strict"
+            ]);
+          message = "hyper.containerSlots: isolatedEgress needs networking.firewall.checkReversePath = \"loose\" (a strict check drops every packet an isolated slot opens)";
+        }
+      ];
 
     # --- the LAN bridge -------------------------------------------------
     systemd.network = {
@@ -644,7 +669,7 @@ in
           {
             hostAddress = "10.43.${toString slot.id}.1";
             localAddress = "10.43.${toString slot.id}.2";
-            hostAddress6 = "fd43:5107::${hex slot.id}:1";
+            hostAddress6 = hostIPv6Of slot;
             localAddress6 = ipv6Of slot;
           }
         else
@@ -672,6 +697,19 @@ in
           }
           // lib.optionalAttrs (slot.memoryMax != null) { MemoryMax = slot.memoryMax; }
           // lib.optionalAttrs (slot.cpuQuota != null) { CPUQuota = slot.cpuQuota; };
+          # The veth's host side is the slot's v6 gateway, not an address
+          # this host should speak from: the kernel prefers a source on the
+          # outgoing interface, so every connection from here to the /128
+          # would carry it, and the slot could not tell this host's admin
+          # path from anyone else on it (./agent-slots.nix lets other agents
+          # reach the /128). Deprecated (preferred_lft 0) it still answers
+          # as the gateway, but source selection takes the uplink's global
+          # address instead, as for any internet client.
+          postStart = lib.mkIf (slot.mode == "isolated") (
+            lib.mkAfter ''
+              ip -6 addr change ${hostIPv6Of slot}/128 dev ${vethOf name} preferred_lft 0
+            ''
+          );
         }
       ) cfg.slots)
 
