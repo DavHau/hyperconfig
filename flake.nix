@@ -262,6 +262,10 @@
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
             spaces = inputs.spaces;
           };
+        porkbun-records =
+          import ./modules/nixos/porkbun-records/test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          };
         per-user-tmp =
           import ./modules/nixos/per-user-tmp/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;

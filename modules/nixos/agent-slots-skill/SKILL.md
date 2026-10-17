@@ -38,7 +38,8 @@ Each command may run at most 6 times per 10 minutes.
 - From anywhere: `ssh root@<v6>` and every port on the IPv6 address; the
   slot's own firewall decides what answers.
 - `<you>.slots.davhau.com`: AAAA is the slot's IPv6; A is the shared public
-  IPv4. On that IPv4, ports 80 and 443 reach the slot for this hostname
+  IPv4. This host keeps both records current; there is nothing to set up.
+  On that IPv4, ports 80 and 443 reach the slot for this hostname
   only (443 by SNI; TLS ends in your slot, so ACME HTTP-01 and normal
   certificates work). Over IPv4 the slot sees this host as the peer: on 80
   the client address is in X-Real-IP and as the last X-Forwarded-For entry

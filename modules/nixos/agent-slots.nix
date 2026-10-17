@@ -52,8 +52,13 @@
 #            allow rules as in ./container-slots.nix); outbound NAT'd to the
 #            egress link's address
 #   v4       10.43.<id>.2, this host only; outbound NAT'd the same way
-#   hostname <agent>.<domain>: AAAA the v6, A the shared public IPv4 (a
-#            wildcard A for *.<domain> does)
+#   hostname <agent>.<domain>: AAAA the v6, A the shared public IPv4, both
+#            kept at porkbun by this host (./porkbun-records, hourly and at
+#            boot; nobody edits them by hand). A new agent's records appear
+#            after the deploy at the next sync (or `systemctl start
+#            porkbun-records`); a removed agent's are deleted. The AAAA
+#            takes the /64 on the bridge at sync time and warns when it is
+#            no longer ipv6Prefix (then redeploy with the new prefix).
 #   ports    TCP portBase + 10 * id .. +9 on the public IPv4, DNATed to the
 #            same port in the slot (./container-slots.nix publicIPv4Ports),
 #            client address kept. TCP only: IPv6 already gives the slot every
@@ -408,6 +413,8 @@ let
   };
 in
 {
+  imports = [ ./porkbun-records ];
+
   options.hyper.agentSlots = {
     agents = mkOption {
       type = types.attrsOf (types.submodule agentOptions);
@@ -472,6 +479,27 @@ in
       deployKeys = [ a.deployKey ];
       publicIPv4Ports = portsOf a;
     }) cfg.agents;
+
+    # --- DNS: <agent>.<domain> A and AAAA (./porkbun-records) -------------
+    # Each name needs its own A: a wildcard A does not answer a name that
+    # has records of its own (the AAAA). The AAAA follows the /64 on the
+    # bridge at sync time, not ipv6Prefix: the slot's configured address
+    # (ipv6Of) is dead anyway once the router advertises another /64,
+    # because the router routes only its current prefix to the LAN. The
+    # record then already names the address the slot gets with the redeploy
+    # the warning asks for (ipv6Prefix set to the new /64), instead of
+    # staying wrong after it until the next sync.
+    hyper.porkbunRecords.records = lib.mapAttrs' (
+      name: a:
+      lib.nameValuePair (hostOf name) {
+        A = cfg.publicIPv4;
+        AAAA.ipv6OnLink = {
+          interface = slotsCfg.bridge;
+          suffix = "::5107:${hex a.id}";
+          expectedPrefix = slotsCfg.ipv6Prefix;
+        };
+      }
+    ) cfg.agents;
 
     # --- resources: all slots together ------------------------------------
     systemd.slices.agent-slots = {
