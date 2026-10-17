@@ -16,7 +16,8 @@
 # the slots run in agent-slots.slice; the public IPv4 reaches the right slot
 # by port, by Host (80) and by SNI (443), with the host's own https site
 # keeping the client address and refusing a doubled login cookie; the
-# return mark leaves the Mullvad app's mark alone.
+# return mark leaves the Mullvad app's mark alone; each slot's hostname
+# gets its A and AAAA at a stub of porkbun's API.
 { pkgs, spaces }:
 let
   inherit (pkgs) lib;
@@ -163,6 +164,10 @@ let
       networking.hostName = "";
       system.stateVersion = lib.trivial.release;
     }).toplevel;
+
+  porkbunStub = pkgs.writers.writePython3 "porkbun-stub" { flakeIgnore = [ "E501" ]; } (
+    builtins.readFile ../porkbun-records/stub.py
+  );
 in
 pkgs.testers.runNixOSTest {
   name = "agent-slots";
@@ -363,6 +368,19 @@ pkgs.testers.runNixOSTest {
         }) { alice = 4; bob = 5; };
       };
 
+      # DNS for the slots (../porkbun-records), against its test's stub of
+      # porkbun's API; the test runs the unit itself.
+      hyper.porkbunRecords = {
+        apiBase = "http://127.0.0.1:8053/api/json/v3";
+        apiKeyFile = "${pkgs.writeText "apikey" "test-key"}";
+        secretKeyFile = "${pkgs.writeText "secretkey" "test-secret"}";
+      };
+      systemd.timers.porkbun-records.timerConfig.OnBootSec = lib.mkForce "1d";
+      systemd.services.porkbun-stub = {
+        wantedBy = [ "multi-user.target" ];
+        serviceConfig.ExecStart = "${porkbunStub} 8053 ${pkgs.writeText "seed.json" "[]"}";
+      };
+
       users.users.alice = {
         isNormalUser = true;
         uid = 1000;
@@ -404,6 +422,7 @@ pkgs.testers.runNixOSTest {
 
   testScript = ''
     import ipaddress
+    import json
 
     def in_slot(name):
         return f"${pkgs.util-linux}/bin/nsenter -t $(machinectl show {name} -p Leader --value) -a "
@@ -463,6 +482,18 @@ pkgs.testers.runNixOSTest {
         info = som.succeed("runuser -u alice -- slot info")
         for want in ["14040-14049", "alice.slots.test", alice6, "root@" + alice4, "${publicIPv4}"]:
             assert want in info, info
+
+    with subtest("the slots' hostnames are published"):
+        som.wait_for_unit("porkbun-stub.service")
+        som.wait_until_succeeds("curl -sf http://127.0.0.1:8053/_records", timeout=30)
+        som.succeed("systemctl start porkbun-records")
+        zone = {(r["name"], r["type"]): r["content"] for r in json.loads(som.succeed("curl -sf http://127.0.0.1:8053/_records"))}
+        assert zone == {
+            ("alice.slots.test", "A"): "${publicIPv4}",
+            ("alice.slots.test", "AAAA"): alice6,
+            ("bob.slots.test", "A"): "${publicIPv4}",
+            ("bob.slots.test", "AAAA"): bob6,
+        }, zone
 
     with subtest("only the owner's key gets in"):
         som.wait_until_succeeds(ssh_as("alice", alice4), timeout=90)
@@ -637,6 +668,14 @@ pkgs.testers.runNixOSTest {
         som.succeed("test ! -e /srv/nologin-probe && test ! -e /srv/probe/resolv")
         som.succeed(f"test ! -L {root}/etc/machine-id && test ! -L {root}/etc/resolv.conf")
         assert modes() == before, (before, modes())
+        # a machine-id link to a file that exists on the host goes too:
+        # its target's existence is host state the agent can flip
+        som.succeed("systemctl stop container@alice.service")
+        som.succeed("echo keep > /srv/mid-probe && touch -d @1000000000 /srv/mid-probe")
+        som.succeed(f"ln -sfn /srv/mid-probe {root}/etc/machine-id")
+        som.succeed("systemctl start container@alice.service")
+        som.succeed(f"test ! -L {root}/etc/machine-id")
+        som.succeed("test \"$(stat -c %Y /srv/mid-probe)\" = 1000000000 && grep -qx keep /srv/mid-probe")
         # a NixOS guest's own /etc/os-release link does not stop it
         som.succeed(f"test -L {root}/etc/os-release")
         # The agent's way out is a hard reset, which also drops the gc
