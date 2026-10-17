@@ -12,8 +12,10 @@
       )
   );
 
-  # som's hermes dashboards (machines/som/hermes-dashboards.nix): one public
-  # pocket-id client and one group per agent, joined by the agent's account.
+  # som's hermes dashboards (machines/som/hermes-dashboards.nix): one
+  # confidential pocket-id client and one group per agent, joined by the
+  # agent's account (modules/nixos/hermes-dashboard-public.nix says why
+  # confidential and why every login asks for the passkey).
   somDashboards = import ../../machines/som/hermes-dashboards.nix;
   dashboardGroupsOf = account:
     lib.mapAttrsToList (agent: _: "hermes-${agent}")
@@ -29,7 +31,8 @@
     lib.nameValuePair "hermes-${agent}" {
       name = "Hermes ${agent}";
       callbackURLs = [ "https://${agent}.${somDashboards.domain}/auth/callback" ];
-      public = true;
+      pkce = true;
+      requiresReauthentication = true;
       allowedGroups = [ "hermes-${agent}" ];
     }) somDashboards.accounts;
 in {
@@ -194,7 +197,7 @@ in {
             };
 
             # Pocket ID at id.davhau.com (modules/clan/oidc). som's hermes
-            # dashboards sign in with hermes' own OIDC login, one public
+            # dashboards sign in with hermes' own OIDC login, one confidential
             # client and group hermes-<agent> per agent, derived from
             # machines/som/hermes-dashboards.nix
             # (modules/nixos/hermes-dashboard-public.nix). The `hermes`

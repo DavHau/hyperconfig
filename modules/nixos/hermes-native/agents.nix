@@ -147,6 +147,13 @@ let
     exit 0
   '';
 
+  # Drops .env keys before a dashboard start (./drop-env-keys.py, which
+  # reads the file the way hermes does).
+  dropEnvKeys = pkgs.writers.writePython3 "hermes-drop-env-keys" {
+    libraries = [ pkgs.python3Packages.python-dotenv ];
+    flakeIgnore = [ "E501" ];
+  } (builtins.readFile ./drop-env-keys.py);
+
   perUser =
     user: ucfg:
     let
@@ -315,6 +322,19 @@ let
           unitConfig.RequiresMountsFor = mounts;
           environment = unitEnv;
           path = rt.path;
+          # The agent may have written keys the dashboard must not see
+          # since the agent's preStart ran (options.nix, dashboardDropEnv);
+          # killing the dashboard restarts it through here. Both files
+          # hermes reads keys from (hermes_cli/env_loader.py): .env, and
+          # .op.env, the 1Password bootstrap it loads after .env without
+          # override, so a key missing from .env would come from there.
+          preStart = lib.concatMapStrings (file: ''
+            ${dropEnvKeys} ${hermesHome}/${file} ${
+              lib.escapeShellArg (
+                lib.concatMapStringsSep "|" (k: "(?:${k})") ([ "HERMES_MANAGED(_DIR)?" ] ++ ucfg.dashboardDropEnv)
+              )
+            }
+          '') [ ".env" ".op.env" ];
           script = ''
             exec ${withSession} ${ac.hermesPackage}/bin/hermes dashboard \
               --no-open --host 127.0.0.1 \

@@ -54,6 +54,16 @@ let
           defaultText = "public";
           description = "Require PKCE. Always on for public clients; a confidential relying party may not support it (vikunja).";
         };
+        requiresReauthentication = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = ''
+            Every authorization asks for the passkey again, even with a live
+            pocket-id session (pocket-id's requiresReauthentication; the
+            device-code grant asks too). Without it, a browser with a session
+            gets a code without any interaction.
+          '';
+        };
         allowedGroups = lib.mkOption {
           type = lib.types.listOf lib.types.str;
           description = "User groups whose members may log in to this client. Must be non-empty.";
@@ -180,6 +190,7 @@ in
                     logoutCallbackURLs
                     public
                     pkce
+                    requiresReauthentication
                     allowedGroups
                     ;
                 }) clients;
@@ -374,6 +385,8 @@ in
                     options = {
                       clientId = lib.mkOption { type = lib.types.str; };
                       public = lib.mkOption { type = lib.types.bool; };
+                      pkce = lib.mkOption { type = lib.types.bool; };
+                      requiresReauthentication = lib.mkOption { type = lib.types.bool; };
                       secretFile = lib.mkOption { type = lib.types.nullOr lib.types.path; };
                       callbackURLs = lib.mkOption { type = lib.types.listOf lib.types.str; };
                       allowedGroups = lib.mkOption { type = lib.types.listOf lib.types.str; };
@@ -387,7 +400,13 @@ in
               hyper.oidc.issuer = server.settings.appUrl;
               hyper.oidc.clients = lib.mapAttrs (id: c: {
                 clientId = id;
-                inherit (c) public callbackURLs allowedGroups;
+                inherit (c)
+                  public
+                  pkce
+                  requiresReauthentication
+                  callbackURLs
+                  allowedGroups
+                  ;
                 secretFile =
                   if c.public then null else config.clan.core.vars.generators."oidc-client-${id}".files.secret.path;
               }) settings.clients;
