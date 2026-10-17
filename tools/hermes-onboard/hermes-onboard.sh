@@ -63,11 +63,11 @@ pocket_id_link() {
   echo "$issuer/lc/$token"
 }
 
-# One eval for every fact. The public dashboard is declared in
-# hyper.hermesDashboard (modules/nixos/hermes-dashboard-public.nix):
-# https://<host>/. The
-# shared host is also the public DNS name of the machine, so SSH uses it.
-# The user name is spliced into the expression; \${n} is Nix's, not the
+# One eval for every fact. The public dashboards are declared in
+# hyper.hermesDashboard (modules/nixos/hermes-dashboard-public.nix): each
+# agent's at users.<user>.publicUrl, with hermes' own pocket-id login. The
+# front door's host is also the public DNS name of the machine, so SSH uses
+# it. The user name is spliced into the expression; \${n} is Nix's, not the
 # shell's.
 expr=$(cat <<EOF
 c:
@@ -85,7 +85,7 @@ in
   native = hn != null;
   keys = if u == null then [ ] else map comment u.openssh.authorizedKeys.keys;
   publicHost = if d == null then null else c.hyper.hermesDashboard.host;
-  dashboard = if d == null then null else "https://\${c.hyper.hermesDashboard.host}/";
+  dashboard = if d == null then null else "\${d.publicUrl}/";
   account = if d == null then null else d.account;
   issuer = if d == null then null else c.hyper.oidc.issuer;
   hasTelegram = (c.hyper.hermes.users.$user.telegram.enable or false);

@@ -292,9 +292,10 @@ let
         };
 
         # Web dashboard, a separate process upstream; it shares state
-        # through HERMES_HOME. It binds its backend on loopback, where
-        # hermes serves without a login of its own; the root-held port
-        # (forwards.nix) bridges to it.
+        # through HERMES_HOME. It binds its backend on loopback; the
+        # root-held port (forwards.nix) bridges to it. Whether it asks for
+        # a login is the managed environment's business
+        # (../hermes-dashboard-public.nix turns hermes' OIDC gate on).
         "hermes-dashboard-${user}" = {
           description = "Hermes Agent web dashboard for ${user}";
           wantedBy = [ "multi-user.target" ];

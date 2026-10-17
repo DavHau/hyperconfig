@@ -12,6 +12,26 @@
       )
   );
 
+  # som's hermes dashboards (machines/som/hermes-dashboards.nix): one public
+  # pocket-id client and one group per agent, joined by the agent's account.
+  somDashboards = import ../../machines/som/hermes-dashboards.nix;
+  dashboardGroupsOf = account:
+    lib.mapAttrsToList (agent: _: "hermes-${agent}")
+      (lib.filterAttrs (_: a: a == account) somDashboards.accounts);
+  withDashboardGroups = users:
+    let
+      unknown = lib.filter (a: !(users ? ${a})) (lib.attrValues somDashboards.accounts);
+    in
+      assert lib.assertMsg (unknown == [ ])
+        "machines/som/hermes-dashboards.nix names accounts the oidc instance does not declare: ${toString unknown}";
+      lib.mapAttrs (name: u: u // { groups = (u.groups or [ ]) ++ dashboardGroupsOf name; }) users;
+  dashboardClients = lib.mapAttrs' (agent: _:
+    lib.nameValuePair "hermes-${agent}" {
+      name = "Hermes ${agent}";
+      callbackURLs = [ "https://${agent}.${somDashboards.domain}/auth/callback" ];
+      public = true;
+      allowedGroups = [ "hermes-${agent}" ];
+    }) somDashboards.accounts;
 in {
   flake =
     let
@@ -173,10 +193,13 @@ in {
               roles.client.machines.amy.settings.barToggle = true;
             };
 
-            # Pocket ID at id.davhau.com (modules/clan/oidc). The hermes
-            # dashboards share one client behind oauth2-proxy on som
-            # (modules/nixos/hermes-dashboard-public.nix): the `hermes` group
-            # may sign in, nginx routes each account to its own backend.
+            # Pocket ID at id.davhau.com (modules/clan/oidc). som's hermes
+            # dashboards sign in with hermes' own OIDC login, one public
+            # client and group hermes-<agent> per agent, derived from
+            # machines/som/hermes-dashboards.nix
+            # (modules/nixos/hermes-dashboard-public.nix). The `hermes`
+            # group still opens som's oauth2-proxy (serve ports, the mail
+            # owner page, the redirect at hermes.davhau.com).
             oidc = {
               module.name = "oidc";
               module.input = "self";
@@ -184,7 +207,7 @@ in {
                 appUrl = "https://id.davhau.com";
                 appName = "DavHau";
                 logo = ../../assets/davhau-avatar.png;
-                users = {
+                users = withDashboardGroups {
                   dave = {
                     email = "need-more-ram@davhau.com";
                     displayName = "Dave";
@@ -205,7 +228,7 @@ in {
                   # The coding agent's account for end-to-end login tests
                   # (`pocket-id-enroll agent` on edi gives it a one-time
                   # session, no passkey needed). In `hermes` on purpose: it
-                  # has no dashboard, so it exercises nginx's 403 path.
+                  # owns no agent, so it exercises the front door's 403 path.
                   agent = { email = "agent@davhau.com"; displayName = "Agent"; groups = [ "apps" "hermes" ]; };
                 };
               };
@@ -227,16 +250,20 @@ in {
                 public = true;
                 allowedGroups = [ "apps" ];
               };
-              # The agent mail owner page (modules/nixos/agent-mail/owner-page.nix)
-              # signs in through the same client with its own oauth2-proxy.
-              roles.client.machines.som.settings.clients.hermes = {
-                name = "Hermes dashboards";
-                callbackURLs = [
-                  "https://hermes.davhau.com/oauth2/callback"
-                  "https://mailgate.hermes.davhau.com/oauth2/callback"
-                ];
-                pkce = true; # oauth2-proxy sends S256
-                allowedGroups = [ "hermes" ];
+              # som's oauth2-proxy front door: hermes.davhau.com (redirects
+              # to the account's dashboard, carries the serve ports) and the
+              # agent mail owner page (modules/nixos/agent-mail/owner-page.nix,
+              # its own oauth2-proxy), plus one client per agent dashboard.
+              roles.client.machines.som.settings.clients = dashboardClients // {
+                hermes = {
+                  name = "Hermes";
+                  callbackURLs = [
+                    "https://hermes.davhau.com/oauth2/callback"
+                    "https://mailgate.hermes.davhau.com/oauth2/callback"
+                  ];
+                  pkce = true; # oauth2-proxy sends S256
+                  allowedGroups = [ "hermes" ];
+                };
               };
               # Grafana at stats.davhau.com (modules/nixos/monitoring-grafana-sso.nix).
               roles.client.machines.edi.settings.clients.grafana = {

@@ -1,10 +1,13 @@
 # som's native hermes agents. The shared shape and the Telegram how-to are in
 # ../../modules/nixos/hermes-agents.nix; entries here carry only what differs.
+# Who signs in to which agent's dashboard: ./hermes-dashboards.nix.
 {
   config,
+  lib,
   ...
 }:
 let
+  dashboards = import ./hermes-dashboards.nix;
   # The clan sshd instance fills root's list; accounts without keys of their
   # own reuse it.
   adminKeys = config.users.users.root.openssh.authorizedKeys.keys;
@@ -124,7 +127,6 @@ in
       sshKeys = adminKeys ++ [
         ''restrict,port-forwarding,permitopen="127.0.0.1:*" ${desktopKey}''
       ];
-      dashboard.account = "dave";
     };
 
     # momentum: OpenRouter brain + a Telegram bot in ONE group chat where
@@ -160,6 +162,10 @@ in
       };
     };
   };
+
+  # Each agent's dashboard account; the inventory reads the same file for
+  # the pocket-id clients and groups.
+  hyper.hermesDashboard.users = lib.mapAttrs (_: account: { inherit account; }) dashboards.accounts;
 
   # Only the native agents above, on the local module (hermes-native, with
   # its loopback SearXNG). spaces' microVM module and its slirp-facing
