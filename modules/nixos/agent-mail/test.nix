@@ -457,6 +457,10 @@ let
             type = types.listOf types.str;
             default = [ ];
           };
+          settings.dashboard = mkOption {
+            type = freeform;
+            default = { };
+          };
         };
         hyper.oidc = {
           issuer = mkOption { type = types.str; };
@@ -646,15 +650,19 @@ pkgs.testers.runNixOSTest {
         };
         clients.hermes-alice = {
           clientId = "hermes-alice";
-          public = true;
-          secretFile = null;
+          public = false;
+          pkce = true;
+          requiresReauthentication = true;
+          secretFile = "/etc/mailtest/oidc-hermes-alice";
           callbackURLs = [ "https://${aliceDashHost}/auth/callback" ];
           allowedGroups = [ "hermes-alice" ];
         };
         clients.hermes-bob = {
           clientId = "hermes-bob";
-          public = true;
-          secretFile = null;
+          public = false;
+          pkce = true;
+          requiresReauthentication = true;
+          secretFile = "/etc/mailtest/oidc-hermes-bob";
           callbackURLs = [ "https://bob.${domain}/auth/callback" ];
           allowedGroups = [ "hermes-bob" ];
         };
@@ -1199,9 +1207,34 @@ pkgs.testers.runNixOSTest {
             print(port, got)
             assert got == expected, (url, got)
             assert not any(s in json.dumps(got) for s in secrets_), (url, got)
-        # The dashboard backend sets cookies on its own host only.
+        # Hermes Mobile's bare-named session cookies and hermes' sign-in
+        # cookies reach the dashboard too, nothing else of the kind
+        # (__Secure- is only for a path prefix; bare PKCE/SSO names only
+        # for plain HTTP).
+        mobile = ("hermes_session_at=m-at; hermes_session_rt=m-rt; hermes_session_provider=self_hosted"
+                  + "; __Host-hermes_session_pkce=pk; __Host-hermes_sso_attempt=1; __Host-hermes_other=x"
+                  + "; __Secure-hermes_session_at=sec; hermes_session_pkce=bare; hermes_sso_attempt=1"
+                  + "; hermes_session_atx=x; " + session)
+        code, _, _ = https("https://${aliceDashHost}/mobile", f"-H 'Cookie: {mobile}'")
+        assert code == "200", code
+        got = [e for e in echo_log(${toString aliceDashPort}) if e["path"] == "/mobile"][-1]["cookie"]
+        assert got == ["hermes_session_at=m-at; hermes_session_rt=m-rt; hermes_session_provider=self_hosted"
+                       "; __Host-hermes_session_pkce=pk; __Host-hermes_sso_attempt=1"], got
+        # The dashboard backend sets cookies on its own host only, and no
+        # other site may frame it.
         hdrs = server.succeed("curl -sk -D - -o /dev/null https://${aliceDashHost}/")
         assert "planted=1; Domain=${aliceDashHost};" in hdrs and "Domain=${dashHost}" not in hdrs, hdrs
+        assert "content-security-policy: frame-ancestors 'self'" in hdrs.lower(), hdrs
+        assert "x-frame-options: sameorigin" in hdrs.lower(), hdrs
+        # Sign-ins are rate-limited per client: 1 + a burst of 10, then 429.
+        codes = [https("https://${aliceDashHost}/auth/native/authorize")[0] for _ in range(14)]
+        assert codes[:11] == ["200"] * 11 and codes[-1] == "429", codes
+        # IPv6 clients have buckets of their own, keyed on the /64: the njs
+        # key works (an empty key would land in the exhausted bucket above).
+        v6 = "--resolve '${aliceDashHost}:443:[::1]'"
+        codes = [https("https://${aliceDashHost}/auth/native/authorize", v6)[0] for _ in range(14)]
+        assert codes[:11] == ["200"] * 11 and codes[-1] == "429", codes
+        assert https("https://${aliceDashHost}/")[0] == "200"
         # The front door only redirects; it proxies to no agent.
         hdrs = server.succeed("curl -sk -D - -o /dev/null -b /tmp/j1 https://${dashHost}/")
         assert "planted" not in hdrs and "location: https://${aliceDashHost}/" in hdrs.lower(), hdrs

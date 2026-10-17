@@ -115,6 +115,18 @@ in
                 enters the store.
               '';
             };
+            dashboardDropEnv = mkOption {
+              type = types.listOf types.str;
+              default = [ ];
+              example = [ "HERMES_DESKTOP" ];
+              description = ''
+                Keys removed from the owner's $HERMES_HOME/.env before
+                every start of hermes-dashboard-<user>, as Python regular
+                expressions matched against the whole key. The agent can
+                write its .env, so a key that must never reach the dashboard
+                goes here; HERMES_MANAGED and HERMES_MANAGED_DIR always go.
+              '';
+            };
           };
         }
       );

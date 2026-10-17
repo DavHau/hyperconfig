@@ -141,7 +141,7 @@ def reconcile_clients(desired, group_ids):
             "isPublic": spec["public"],
             "pkceEnabled": spec["pkce"],
             "skipConsent": True,
-            "requiresReauthentication": False,
+            "requiresReauthentication": spec["requiresReauthentication"],
             "requiresPushedAuthorizationRequests": False,
             # Without this pocket-id ignores allowedUserGroups (anyone may
             # sign in) and an update clears them. Every client declares groups.
