@@ -32,7 +32,6 @@
       name = "Hermes ${agent}";
       callbackURLs = [ "https://${agent}.${somDashboards.domain}/auth/callback" ];
       pkce = true;
-      requiresReauthentication = true;
       allowedGroups = [ "hermes-${agent}" ];
     }) somDashboards.accounts;
 in {

@@ -344,7 +344,8 @@ let
   '';
 
   # An agent backend that records the Cookie headers it receives and tries
-  # to plant a cookie on the whole dashboard domain.
+  # to plant a cookie on the whole dashboard domain. Its sign-in paths
+  # answer like hermes: a redirect to the issuer's authorize endpoint.
   echoBackend = pkgs.writeText "echo-backend.py" ''
     import json, sys
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -354,6 +355,12 @@ let
         def do_GET(self):
             with open(log, "a") as f:
                 f.write(json.dumps({"path": self.path, "cookie": self.headers.get_all("Cookie")}) + "\n")
+            if self.path.startswith(("/auth/login", "/auth/native/authorize")):
+                self.send_response(302)
+                self.send_header("Location", "http://127.0.0.1:9000/authorize?client_id=hermes-alice&state=s")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             out = f"backend {port}\n".encode()
             self.send_response(200)
             self.send_header("Set-Cookie", "planted=1; Domain=${dashHost}; Path=/")
@@ -652,7 +659,6 @@ pkgs.testers.runNixOSTest {
           clientId = "hermes-alice";
           public = false;
           pkce = true;
-          requiresReauthentication = true;
           secretFile = "/etc/mailtest/oidc-hermes-alice";
           callbackURLs = [ "https://${aliceDashHost}/auth/callback" ];
           allowedGroups = [ "hermes-alice" ];
@@ -661,7 +667,6 @@ pkgs.testers.runNixOSTest {
           clientId = "hermes-bob";
           public = false;
           pkce = true;
-          requiresReauthentication = true;
           secretFile = "/etc/mailtest/oidc-hermes-bob";
           callbackURLs = [ "https://bob.${domain}/auth/callback" ];
           allowedGroups = [ "hermes-bob" ];
@@ -1228,12 +1233,22 @@ pkgs.testers.runNixOSTest {
         assert "x-frame-options: sameorigin" in hdrs.lower(), hdrs
         # Sign-ins are rate-limited per client: 1 + a burst of 10, then 429.
         codes = [https("https://${aliceDashHost}/auth/native/authorize")[0] for _ in range(14)]
-        assert codes[:11] == ["200"] * 11 and codes[-1] == "429", codes
+        assert codes[:11] == ["302"] * 11 and codes[-1] == "429", codes
         # IPv6 clients have buckets of their own, keyed on the /64: the njs
         # key works (an empty key would land in the exhausted bucket above).
         v6 = "--resolve '${aliceDashHost}:443:[::1]'"
         codes = [https("https://${aliceDashHost}/auth/native/authorize", v6)[0] for _ in range(14)]
-        assert codes[:11] == ["200"] * 11 and codes[-1] == "429", codes
+        assert codes[:11] == ["302"] * 11 and codes[-1] == "429", codes
+        # The app's sign-in always asks for the passkey (prompt=login on the
+        # issuer redirect); the browser's rides the pocket-id session. From
+        # 127.0.0.2, a bucket of its own.
+        fresh = "--interface 127.0.0.2"
+        def location(path):
+            return server.succeed(f"curl -sk -o /dev/null -w '%{{http_code}} %{{redirect_url}}' {fresh} 'https://${aliceDashHost}{path}'").strip()
+        native = location("/auth/native/authorize?provider=self-hosted")
+        assert native == "302 http://127.0.0.1:9000/authorize?client_id=hermes-alice&state=s&prompt=login", native
+        browser = location("/auth/login?provider=self-hosted")
+        assert browser == "302 http://127.0.0.1:9000/authorize?client_id=hermes-alice&state=s", browser
         assert https("https://${aliceDashHost}/")[0] == "200"
         # The front door only redirects; it proxies to no agent.
         hdrs = server.succeed("curl -sk -D - -o /dev/null -b /tmp/j1 https://${dashHost}/")
