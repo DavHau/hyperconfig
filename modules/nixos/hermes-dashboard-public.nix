@@ -19,12 +19,20 @@
 # credential into the agent's unit and lands in the owner's 0600 .env as
 # HERMES_DASHBOARD_OIDC_CLIENT_SECRET (services.hermes-native secretEnv),
 # never in the store or the managed dir; hermes sends it with HTTP Basic,
-# which pocket-id's discovery offers. The clients also require
-# re-authentication: every authorization asks for the passkey, even with a
-# live pocket-id session, so a sign-in never completes silently. Hermes'
-# native-app flow accepts any http://127.0.0.1:<port> redirect, and a
-# local program listening there would otherwise collect a login it started
-# itself in the browser.
+# which pocket-id's discovery offers.
+#
+# Sign-in prompts: the browser flow rides the pocket-id session, so one
+# passkey at the front door (or anywhere else at pocket-id) opens every
+# dashboard the account may use without asking again. That is safe because
+# its code only ever goes to the dashboard's own registered callback. The
+# native-app flow is different: hermes accepts any http://127.0.0.1:<port>
+# redirect for it, so a program on the user's device listening there could
+# start a login in the browser and collect it silently. nginx therefore
+# adds prompt=login to the pocket-id redirect /auth/native/authorize
+# answers with, and pocket-id asks for the passkey on every app sign-in.
+# The broker state rides in a `__Host-` cookie of that same browser
+# response, so taking the redirect without the prompt and replaying it
+# elsewhere breaks the callback.
 #
 # The inventory derives the clients and the group memberships from
 # machines/som/hermes-dashboards.nix, which machines/som reads for the
@@ -235,10 +243,9 @@ in
               && !c.public
               && c.secretFile != null
               && c.pkce
-              && c.requiresReauthentication
               && c.callbackURLs == [ "${u.publicUrl}/auth/callback" ]
               && c.allowedGroups == [ "hermes-${user}" ];
-            message = "hyper.hermesDashboard.users.${user}: the inventory must declare the confidential oidc client ${clientIdOf user} for this machine, with pkce and requiresReauthentication, callback ${u.publicUrl}/auth/callback, group hermes-${user} (derived from machines/<machine>/hermes-dashboards.nix).";
+            message = "hyper.hermesDashboard.users.${user}: the inventory must declare the confidential oidc client ${clientIdOf user} for this machine, with pkce, callback ${u.publicUrl}/auth/callback, group hermes-${user} (derived from machines/<machine>/hermes-dashboards.nix).";
           }
         ]
       ) cfg.users
@@ -536,7 +543,12 @@ in
             '';
             locations."/" = location;
             locations."= /auth/login" = signIn;
-            locations."= /auth/native/authorize" = signIn;
+            # The app's sign-in always asks for the passkey (the header).
+            locations."= /auth/native/authorize" = signIn // {
+              extraConfig = signIn.extraConfig + ''
+                proxy_redirect "~^(${lib.escapeRegex config.hyper.oidc.issuer}/authorize\?.*)$" "$1&prompt=login";
+              '';
+            };
           }
         ) cfg.users;
     };
