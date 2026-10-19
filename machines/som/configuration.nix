@@ -226,6 +226,7 @@ in
         rti = 12;
         stefan = 13;
         willi = 14;
+        b3x = 15;
       };
       key = name: config.clan.core.vars.generators."hermes-agent-ssh-${name}".files;
     in
