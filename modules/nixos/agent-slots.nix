@@ -121,11 +121,21 @@
 #
 # Transition (legacyDomain): the old names <agent>.<legacyDomain> (on som
 # <agent>.slots.davhau.com) answer 301 to https://slot.<agent>.<domain>/,
-# path and query kept, and reach no slot: this host terminates TLS for
-# them (wildcard cert *.<legacyDomain>, porkbun DNS-01) instead of passing
-# them through, and their records point at this host (A the shared IPv4,
-# AAAA networking.publicIPv6 where the host has one). Drop legacyDomain
-# once the old links are gone.
+# path and query kept, on port 80 as on 443, and reach no slot: this host
+# terminates TLS for them (wildcard cert *.<legacyDomain>, porkbun DNS-01)
+# instead of passing them through, and their records point at this host (A
+# the shared IPv4, AAAA networking.publicIPv6 where the host has one). Drop
+# legacyDomain once the old links are gone. Let's Encrypt follows redirects
+# in HTTP-01, and the 301 leads into the slot, so the old names answer 404
+# under /.well-known/acme-challenge/, and CAA on <legacyDomain> lets Let's
+# Encrypt issue below it by DNS-01 only (the porkbun key is root's): the
+# agent cannot get a certificate for an old name anymore. The slots still
+# hold the certificates they got for their old names before the move,
+# valid up to 90 days after their last renewal. A slot can present one
+# only on a connection that reaches it, which for the old name no longer
+# happens (its A and AAAA lead here, and the SNI router passes only the
+# new name through) short of stale DNS or someone on the path; it expires
+# unrenewed.
 {
   config,
   lib,
@@ -142,7 +152,9 @@ let
 
   portBase = 14000;
   # Internal: where nft sends v4 443, and the two nginx hops behind it.
-  sniPort = 8443;
+  # Below 1024: only root may bind it, so no agent takes the shared IPv4's
+  # 443 while nginx restarts.
+  sniPort = 444;
   httpsSock = "/run/nginx/agent-slots-https.sock";
   hopSock = "/run/nginx/agent-slots-hop.sock";
   stateDir = "/var/lib/agent-slots";
@@ -528,7 +540,8 @@ in
           };
         }
       ) cfg.agents
-      # The old names point at this host, which only redirects them.
+      # The old names point at this host, which only redirects them; CAA
+      # (the header).
       // lib.optionalAttrs (cfg.legacyDomain != null) (
         lib.genAttrs (map legacyHostOf names) (
           _:
@@ -542,6 +555,9 @@ in
             };
           }
         )
+        // {
+          ${cfg.legacyDomain}.CAA = ''0 issue "letsencrypt.org; validationmethods=dns-01"'';
+        }
       );
 
     # The old names' certificate (the header). Shared var, same definition
@@ -810,12 +826,14 @@ virtualHosts =
         ) cfg.agents
         // lib.optionalAttrs (cfg.legacyDomain != null) {
           # Transition only (the header): 301 to the new name, never a
-          # slot. Sorts after "slot-*" too.
+          # slot, on 80 and 443 alike; no ACME challenge answer. Sorts after
+          # "slot-*" too.
           slots-legacy = {
             serverName = "*.${cfg.legacyDomain}";
-            forceSSL = true;
+            addSSL = true;
             useACMEHost = legacyCert;
-            extraConfig = ''
+            locations."^~ /.well-known/acme-challenge/".return = "404";
+            locations."/".extraConfig = ''
               if ($agent_slots_legacy = "") {
                 return 404;
               }

@@ -519,6 +519,8 @@ pkgs.testers.runNixOSTest {
             # the old names: this host only (no publicIPv6 here, so no AAAA)
             ("alice.slots.test", "A"): "${publicIPv4}",
             ("bob.slots.test", "A"): "${publicIPv4}",
+            # and below them, certificates by DNS-01 only
+            ("slots.test", "CAA"): '0 issue "letsencrypt.org; validationmethods=dns-01"',
         }, zone
 
     with subtest("only the owner's key gets in"):
@@ -588,7 +590,13 @@ pkgs.testers.runNixOSTest {
         # and query kept), over both ports; nothing reaches a slot
         where = "-o /dev/null -w '%{http_code} %{redirect_url}' "
         out = client.succeed(get + where + "-H 'Host: alice.slots.test' 'http://${publicIPv4}/a?b=1'")
-        assert out == "301 https://alice.slots.test/a?b=1", out
+        assert out == "301 https://slot.alice.fyi.test/a?b=1", out
+        # no ACME HTTP-01 challenge for an old name follows that 301 into
+        # the slot, on either port
+        out = client.succeed(get + where + "-H 'Host: alice.slots.test' 'http://${publicIPv4}/.well-known/acme-challenge/tok'")
+        assert out == "404 ", out
+        out = client.succeed(get + where + "-k --resolve alice.slots.test:443:${publicIPv4} https://alice.slots.test/.well-known/acme-challenge/tok")
+        assert out == "404 ", out
         old = "-k --resolve alice.slots.test:443:${publicIPv4} 'https://alice.slots.test/a?b=1'"
         out = client.succeed(get + where + old)
         assert out == "301 https://slot.alice.fyi.test/a?b=1", out

@@ -14,8 +14,9 @@
 #   flood.test    nothing                              (rate limit target)
 #
 # The subtests named after a finding (F1..F9 of the first review, G1..G6
-# of the second) are its regression tests; each reproduced the finding
-# against the code before the fix.
+# of the second, HIGH-1, MEDIUM-1 and LOW-2 of the third) are its
+# regression tests; those of the first two reviews each reproduced the
+# finding against the code before the fix.
 { pkgs, inputs }:
 let
   inherit (pkgs) lib;
@@ -385,9 +386,12 @@ let
 
     ThreadingHTTPServer(("127.0.0.1", port), H).serve_forever()
   '';
-  echoService = port: {
+  echoService = user: port: {
     wantedBy = [ "multi-user.target" ];
-    serviceConfig.ExecStart = "${pkgs.python3}/bin/python3 ${echoBackend} ${toString port} /tmp/echo-${toString port}.log";
+    serviceConfig = {
+      User = user;
+      ExecStart = "${pkgs.python3}/bin/python3 ${echoBackend} ${toString port} /tmp/echo-${toString port}.log";
+    };
   };
 
   # Prints the agent's INBOX (IMAP, the agent's own password) as JSON.
@@ -430,6 +434,34 @@ let
   connect = pkgs.writeText "connect.py" ''
     import socket, sys
     socket.create_connection((sys.argv[1], int(sys.argv[2])), 5).close()
+  '';
+
+  # A hostile agent on a loopback port someone else should own: it logs
+  # every request and answers like an oauth2-proxy that signed in alice's
+  # owner, and like an app.
+  squatter = pkgs.writeText "squatter.py" ''
+    import sys
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    port, log = int(sys.argv[1]), sys.argv[2]
+
+    class H(BaseHTTPRequestHandler):
+        def answer(self):
+            with open(log, "a") as f:
+                f.write(f"{self.command} {self.headers.get('Host')} {self.path}\n")
+            out = b"squatter\n"
+            self.send_response(202)
+            self.send_header("X-Auth-Request-Preferred-Username", "alice-owner")
+            self.send_header("X-Auth-Request-User", "alice-owner")
+            self.send_header("Content-Length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+        do_GET = do_POST = do_HEAD = answer
+
+        def log_message(self, *a):
+            pass
+
+    open(log, "a").close()
+    ThreadingHTTPServer(("127.0.0.1", port), H).serve_forever()
   '';
 
   secret = name: value: {
@@ -598,7 +630,6 @@ pkgs.testers.runNixOSTest {
         ./mail.nix
         ./owner-page.nix
         ../hermes-dashboard-public.nix
-        ../hermes-dashboard-oauth2-gate.nix
         ../hermes-agents-serve.nix
         inputs.spaces.nixosModules.spaces-users
         stubs
@@ -619,6 +650,7 @@ pkgs.testers.runNixOSTest {
         aliceDashHost
         "bob.${fyi}"
         "nobody.${fyi}"
+        "slot.alice.${fyi}"
         # the old names
         "alice.${domain}"
         "nobody.${domain}"
@@ -733,11 +765,12 @@ pkgs.testers.runNixOSTest {
         };
       };
       # alice's agent backends: her dashboard and two private, one public
-      # serve port.
-      systemd.services.echo-dashboard = echoService aliceDashPort;
-      systemd.services.echo-private = echoService alicePrivate;
-      systemd.services.echo-private2 = echoService alicePrivate2;
-      systemd.services.echo-public = echoService alicePublic;
+      # serve port. The serve ports' bridges take only a backend alice
+      # runs.
+      systemd.services.echo-dashboard = echoService "root" aliceDashPort;
+      systemd.services.echo-private = echoService "alice" alicePrivate;
+      systemd.services.echo-private2 = echoService "alice" alicePrivate2;
+      systemd.services.echo-public = echoService "alice" alicePublic;
       # clan turns persisted prompts into files; the stub does not.
       clan.core.vars.generators.porkbun.files = {
         apikey = { };
@@ -1228,8 +1261,10 @@ pkgs.testers.runNixOSTest {
         server.fail(f"runuser -u bob -- mailgate-admin confirm {ids[1]}")
 
     with subtest("F2: no login cookie reaches an agent backend; the owner page has its own login"):
-        server.wait_for_open_port(4180, "127.0.0.1")
-        server.wait_for_open_port(4182, "127.0.0.1")
+        def proxy_up(sock):
+            server.wait_until_succeeds(f"curl -sf -o /dev/null --unix-socket {sock} http://localhost/ping", timeout=120)
+        proxy_up("/run/oauth2-proxy.sock")
+        proxy_up("/run/oauth2-proxy-serve.sock")
         server.wait_for_open_port(443)
         def redirect(url, *opts):
             """(status, Location) of one request, not followed."""
@@ -1386,16 +1421,30 @@ pkgs.testers.runNixOSTest {
                              "-H 'Sec-Fetch-Site: cross-site'", "-H 'Sec-Fetch-Mode: navigate'", "-H 'Sec-Fetch-Dest: document'")
         assert "another site" not in body, (code, body)
 
-        # The old names only redirect, path and query kept, and never reach
-        # a backend.
-        for old, new in (("https://alice.${domain}/old?q=1", "https://${aliceDashHost}/old?q=1"),
-                         ("https://${toString alicePrivate}.${dashHost}/old?q=1", "https://${alicePrivateHost}/old?q=1"),
-                         ("https://${toString alicePublic}.${dashHost}/old?q=1", "https://${alicePublicHost}/old?q=1")):
-            assert redirect(old, "-b /tmp/j3") == ("301", new), (old, redirect(old))
+        # The old names only redirect, path and query kept, on port 80 as on
+        # 443, and never reach a backend.
+        for old, new in (("alice.${domain}/old?q=1", "https://${aliceDashHost}/old?q=1"),
+                         ("${toString alicePrivate}.${dashHost}/old?q=1", "https://${alicePrivateHost}/old?q=1"),
+                         ("${toString alicePublic}.${dashHost}/old?q=1", "https://${alicePublicHost}/old?q=1")):
+            for scheme in ("https", "http"):
+                assert redirect(f"{scheme}://{old}", "-b /tmp/j3") == ("301", new), (scheme, old, redirect(f"{scheme}://{old}"))
+        # MEDIUM-1: no ACME HTTP-01 challenge on an old name follows the 301
+        # into an agent's page.
+        for host in ("alice.${domain}", "${toString alicePrivate}.${dashHost}", "${toString alicePublic}.${dashHost}"):
+            for scheme in ("https", "http"):
+                assert redirect(f"{scheme}://{host}/.well-known/acme-challenge/tok") == ("404", ""), (scheme, host)
         for port in (${toString aliceDashPort}, ${toString alicePrivate}, ${toString alicePublic}):
-            assert not any(e["path"].startswith("/old") for e in echo_log(port)), port
+            assert not any(e["path"].startswith(("/old", "/.well-known")) for e in echo_log(port)), port
         assert https("https://nobody.${domain}/")[0] == "404"
         assert https("https://12345.${dashHost}/")[0] == "404"
+
+        # LOW-2: the agent's wildcard cert covers its slot's name; a request
+        # for the slot on a connection to one of these hosts gets 421, so
+        # the browser opens a connection of its own for it.
+        assert https("https://slot.alice.${fyi}/")[0] == "421"
+        code = server.succeed("curl -sk -o /dev/null -w '%{http_code}' -H 'Host: slot.alice.${fyi}' https://${alicePublicHost}/x")
+        assert code == "421", code
+        assert not any(e["path"] == "/x" for e in echo_log(${toString alicePublic}))
 
         # Sign-ins are rate-limited per client: 1 + a burst of 10, then 429.
         codes = [https("https://${aliceDashHost}/auth/native/authorize")[0] for _ in range(14)]
@@ -1421,7 +1470,7 @@ pkgs.testers.runNixOSTest {
         assert "planted" not in hdrs and "location: https://${aliceDashHost}/" in hdrs.lower(), hdrs
 
         # The front door's session does not open the owner page.
-        server.wait_for_open_port(4181, "127.0.0.1")
+        proxy_up("/run/oauth2-proxy-mailgate.sock")
         code, eff, _ = https("https://${ownerHost}/", "-b /tmp/j1")
         assert code == "307" and "/oauth2/start" in server.succeed("curl -sk -o /dev/null -w '%{redirect_url}' -b /tmp/j1 https://${ownerHost}/"), code
         code, _, _ = https("https://${ownerHost}/", f"-H 'Cookie: __Host-hermes={front_value}'")
@@ -1455,18 +1504,25 @@ pkgs.testers.runNixOSTest {
         rc, r2 = mailgate("alice", "allowlist")
         assert [x["state"] for x in r2["requests"] if x["request"] == r["request"]] == ["denied"], r2
 
-    with subtest("G6: the oauth2-proxy ports answer nginx and root only; the owner page's and the serve ports' are sandboxed"):
-        for port in (4180, 4181, 4182):
-            server.succeed(f"python3 ${connect} 127.0.0.1 {port}")
+    with subtest("G6: the oauth2-proxy sockets answer nginx and root only; the owner page's and the serve ports' are sandboxed"):
+        socks = ("/run/oauth2-proxy.sock", "/run/oauth2-proxy-mailgate.sock", "/run/oauth2-proxy-serve.sock")
+        for sock in socks:
+            server.succeed(f"curl -sf -o /dev/null --unix-socket {sock} http://localhost/ping")
+            assert server.succeed(f"stat -c '%U:%G %a' {sock}").strip() == "root:nginx 660", sock
             for user in ("alice", "bob", "mallory"):
-                server.fail(f"runuser -u {user} -- python3 ${connect} 127.0.0.1 {port}")
+                server.fail(f"runuser -u {user} -- curl -sf -o /dev/null --unix-socket {sock} http://localhost/ping")
+        # No oauth2-proxy listens on TCP at all.
+        listen = server.succeed("ss -Hltn | awk '{print $4}'").split()
+        assert not any(a.endswith((":4180", ":4181", ":4182")) for a in listen), listen
         # nginx still reaches them (the F2 sign-ins above went through them).
         code, _, _ = https("https://${ownerHost}/", "-b /tmp/j2")
         assert code == "200", code
         assert https("https://${alicePrivateHost}/", "-b /tmp/j3")[0] == "200"
-        for unit in ("oauth2-proxy-mailgate", "oauth2-proxy-serve"):
+        for unit in ("oauth2-proxy", "oauth2-proxy-mailgate", "oauth2-proxy-serve"):
             cat = server.succeed(f"systemctl cat {unit}")
-            assert "--trusted-proxy-ip=127.0.0.1" in cat, cat
+            for flag in ("--trusted-proxy-ip='?127.0.0.1", "--http-address='?fd:3"):
+                assert re.search(flag, cat), (unit, flag, cat)
+        for unit in ("oauth2-proxy-mailgate", "oauth2-proxy-serve"):
             props = server.succeed(
                 f"systemctl show {unit} -p MemoryDenyWriteExecute -p RestrictNamespaces "
                 "-p LockPersonality -p ProtectProc -p SystemCallFilter -p ActiveState")
@@ -1479,6 +1535,70 @@ pkgs.testers.runNixOSTest {
         cat = server.succeed("systemctl cat oauth2-proxy-serve")
         for flag in ("--redirect-url", "--cookie-domain", "--whitelist-domain"):
             assert flag not in cat, (flag, cat)
+
+    with subtest("HIGH-1: nginx never dials a loopback port another agent may have bound"):
+        def squat(port):
+            server.succeed(f"systemd-run --uid=bob --unit=squat-{port} ${pkgs.python3}/bin/python3 ${squatter} {port} /tmp/squat-{port}.log")
+            server.wait_until_succeeds(f"python3 ${connect} 127.0.0.1 {port}")
+        def squatted(port):
+            return server.succeed(f"cat /tmp/squat-{port}.log")
+        proxies = ("oauth2-proxy", "oauth2-proxy-mailgate", "oauth2-proxy-serve")
+
+        # The oauth2-proxies down, bob on their old ports (forging alice's
+        # owner as the signed-in account): every login-gated page fails
+        # closed, none asks bob.
+        server.succeed("systemctl stop " + " ".join(f"{u}.socket {u}.service" for u in proxies))
+        for port in (4180, 4181, 4182):
+            squat(port)
+        # nor can bob put a socket where nginx looks
+        server.fail("runuser -u bob -- python3 -c \"import socket; socket.socket(socket.AF_UNIX).bind('/run/oauth2-proxy-serve.sock')\"")
+        for url, opts in (("https://${dashHost}/", ""), ("https://${ownerHost}/", "-b /tmp/j2"),
+                          ("https://${alicePrivateHost}/forged", ""), ("https://${alicePrivateHost}/forged", "-b /tmp/j3")):
+            code, loc = redirect(url, opts)
+            assert code.startswith("5"), (url, opts, code, loc)
+        assert not any(e["path"] == "/forged" for e in echo_log(${toString alicePrivate}))
+        # The proxies start while bob still holds the ports: they need none.
+        server.succeed("systemctl start " + " ".join(f"{u}.socket {u}.service" for u in proxies))
+        for sock in socks:
+            proxy_up(sock)
+        assert redirect("https://${dashHost}/", "-b /tmp/j1") == ("302", "https://${aliceDashHost}/")
+        assert https("https://${ownerHost}/", "-b /tmp/j2")[0] == "200"
+        assert https("https://${alicePrivateHost}/", "-b /tmp/j3")[0] == "200"
+        code, loc = redirect("https://${alicePrivateHost}/forged")
+        assert code == "302" and loc.startswith("http://127.0.0.1:9000/authorize?"), (code, loc)
+        for port in (4180, 4181, 4182):
+            assert squatted(port) == "", (port, squatted(port))
+
+        # alice's private and public app down, bob on their ports: 502, and
+        # bob sees nothing (the bridge refuses a backend uid 1002 bound).
+        server.succeed("systemctl stop echo-private echo-public")
+        for port in (${toString alicePrivate}, ${toString alicePublic}):
+            squat(port)
+        code, _, body = https("https://${alicePrivateHost}/squat", "-b /tmp/j3")
+        assert code == "502" and "squatter" not in body, (code, body)
+        code, _, body = https("https://${alicePublicHost}/squat", "-H 'Cookie: app=1'")
+        assert code == "502" and "squatter" not in body, (code, body)
+        for port in (${toString alicePrivate}, ${toString alicePublic}):
+            assert squatted(port) == "", (port, squatted(port))
+            server.wait_until_succeeds(f"journalctl -u 'hermes-serve-fwd-{port}@*' | grep -q 'owned by uid 1002'")
+        server.succeed("systemctl stop squat-${toString alicePrivate} squat-${toString alicePublic}")
+        server.succeed("systemctl start echo-private echo-public")
+        server.wait_until_succeeds("python3 ${connect} 127.0.0.1 ${toString alicePublic}")
+        server.wait_until_succeeds("python3 ${connect} 127.0.0.1 ${toString alicePrivate}")
+        code, _, body = https("https://${alicePrivateHost}/back", "-b /tmp/j3")
+        assert code == "200" and body == "backend ${toString alicePrivate}\n", (code, body)
+        code, _, body = https("https://${alicePublicHost}/back")
+        assert code == "200" and body == "backend ${toString alicePublic}\n", (code, body)
+
+        # The old 403 port held by bob: nginx (re)starts without it and the
+        # refusal never asks bob.
+        squat(29999)
+        server.succeed("systemctl restart nginx")
+        server.wait_for_open_port(443)
+        code, _, body = https("https://${portHost bobPrivate "bob"}/", f"-H 'Cookie: __Host-hermes_serve={serve_value}'")
+        assert code == "403" and "Not published" in body, (code, body)
+        assert squatted(29999) == ""
+        server.succeed("systemctl stop squat-4180 squat-4181 squat-4182 squat-29999")
 
     with subtest("F3: a hostile stylesheet stalls nothing"):
         alice_before, bob_before = entry_ids("alice"), entry_ids("bob")

@@ -7,7 +7,14 @@
 #   allowed groups and secrets, logo/favicon. Groups and clients are fully
 #   declarative; users are created/updated but never deleted (passkeys are
 #   not reproducible). The app config is env-only (UI_CONFIG_DISABLED), so
-#   nothing drifts through the admin UI.
+#   nothing drifts through the admin UI. Users cannot edit their own account
+#   (ALLOW_OWN_ACCOUNT_EDIT=false, env-only config makes it take effect):
+#   consumers authorize by username (preferred_username, e.g. the hermes
+#   serve ports' account map) and the reconciler assigns groups to whoever
+#   holds a declared username, so a user renaming themselves onto a
+#   declared or vacated name would take over that account's access. Admins
+#   still edit other users, and the reconciler writes through the admin API
+#   (PUT /api/users/<id>), which the setting does not restrict.
 # roles.client (any machine): declares the OIDC clients it consumes in its
 #   inventory settings. The server sees every client role's settings, so
 #   no machine evaluates another's nixosConfiguration. The role exposes
@@ -258,6 +265,8 @@ in
                 EMAILS_VERIFIED = true;
                 # Accounts may be declared without an email.
                 REQUIRE_USER_EMAIL = false;
+                # The username is an identity (the header).
+                ALLOW_OWN_ACCOUNT_EDIT = false;
                 ANALYTICS_DISABLED = true;
                 VERSION_CHECK_DISABLED = true;
               };

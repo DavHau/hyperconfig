@@ -27,6 +27,14 @@
 # Residual: a cross-origin GET navigation passes, so an app with side
 # effects on GET stays exposed to links; browsers without Fetch Metadata
 # (Safari before 16.4) are not protected.
+#
+# What it breaks (no security impact): a cross-site top-level POST is
+# refused, so an OIDC provider answering with response_mode=form_post
+# would fail at the callback (hermes and oauth2-proxy use the query mode,
+# pocket-id redirects by GET), and so would an app's own cross-site form
+# posts to these hosts. A client still posting to an old name (a stale
+# Hermes Mobile server address) loses the body anyway: the 301 to the new
+# name turns the POST into a GET.
 { config, lib, ... }:
 let
   cfg = config.hyper.fetchMetadataGate;

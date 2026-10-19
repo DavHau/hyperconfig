@@ -1,7 +1,9 @@
-// Per-connection bridge from a root-held loopback socket to a backend TCP
-// listener the OWNER runs. systemd hands the accepted connection over as
+// Per-connection bridge from a root-held socket (loopback TCP, or a unix
+// socket only the client's group may open) to a backend TCP listener the
+// OWNER runs on 127.0.0.1. systemd hands the accepted connection over as
 // fd 0/1 (Accept=yes, StandardInput=socket). This process runs as the
-// owner. argv[1] is a port base; the backend port is base + euid.
+// owner. argv[1] is a port base, argv[2] an optional stride (default 1);
+// the backend port is base + stride * euid.
 //
 // The threat: the backend port belongs to whoever binds it first. When the
 // owner's daemon is down, any other local user may bind it and receive the
@@ -55,8 +57,8 @@ fn hex_addr(a: SocketAddrV4) -> String {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 2 {
-        eprintln!("usage: hermes-tcp-owner-bridge <port-base>");
+    if args.len() != 2 && args.len() != 3 {
+        eprintln!("usage: hermes-tcp-owner-bridge <port-base> [<stride>]");
         exit(2);
     }
     let base: u32 = match args[1].parse() {
@@ -66,13 +68,23 @@ fn main() {
             exit(2);
         }
     };
+    let stride: u32 = match args.get(2).map(|s| s.parse()) {
+        None => 1,
+        Some(Ok(s)) => s,
+        Some(Err(_)) => {
+            eprintln!("bad stride: {}", args[2]);
+            exit(2);
+        }
+    };
     // SAFETY: geteuid never fails.
     let uid = unsafe { geteuid() };
-    let port = base + uid;
-    if port > u16::MAX as u32 {
-        eprintln!("uid {} puts the backend port past 65535", uid);
-        exit(2);
-    }
+    let port = match stride.checked_mul(uid).and_then(|p| p.checked_add(base)) {
+        Some(p) if p <= u16::MAX as u32 => p,
+        _ => {
+            eprintln!("uid {} puts the backend port past 65535", uid);
+            exit(2);
+        }
+    };
     let backend = SocketAddrV4::new(Ipv4Addr::LOCALHOST, port as u16);
 
     let target = match TcpStream::connect(backend) {

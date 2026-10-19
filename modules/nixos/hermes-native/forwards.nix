@@ -18,14 +18,7 @@ let
   cfg = config.services.hermes-native;
   hlib = import ./lib.nix { inherit lib; };
 
-  # ./tcp-owner-bridge.rs explains why the check IS the access control.
-  tcpOwnerBridgeBin = pkgs.writers.writeRustBin "hermes-tcp-owner-bridge" {
-    rustcArgs = [
-      "-O"
-      "--edition"
-      "2021"
-    ];
-  } ./tcp-owner-bridge.rs;
+  tcpOwnerBridgeBin = import ./tcp-owner-bridge.nix { inherit pkgs; };
 
   # Static top-level option keys only (see agents.nix).
   forEachForward =
