@@ -145,11 +145,17 @@
 # whose sockets carry no trigger limit, so a flood never stops them). Per
 # agent host (dashboards here, serve ports in ./hermes-agents-serve.nix)
 # and client network as above, nginx passes 50 requests a second after a
-# burst of 500, below the socket's poll limit of 75 a second, and at most
-# 128 requests in flight (websockets included; HTTP/2's 128 streams per
-# connection), then answers 429. A single page load of a dev server with
-# hundreds of modules fits the burst; one client network cannot take a
-# socket's whole capacity.
+# burst of 500 and at most 128 requests in flight (websockets included;
+# HTTP/2's 128 streams per connection), then answers 429. The sockets'
+# poll limit (2000 accepts per 2s) holds the bursts of three client
+# networks at once. A single page load of a dev server with hundreds of
+# modules fits the burst; one client network cannot take a socket's whole
+# capacity. Per host, all client networks together get at most 384
+# requests in flight, below the socket's 512 bridges, so the owner's own
+# dialers always find a slot. Residual: clients spread over four or more
+# networks can still fill those 384 and the host's other visitors get 429
+# until their requests end; the agent, its other hosts and the other
+# agents stay up.
 #
 # The front door https://<host>/ (hermes.davhau.com) stays behind
 # oauth2-proxy (client `hermes`, group `hermes`, as the mail owner page)
@@ -630,6 +636,8 @@ in
         # header). 10m holds some 80000 keys.
         limit_req_zone "$hermes_dashboard_client_net $host" zone=hermes_agent_requests:10m rate=50r/s;
         limit_conn_zone "$hermes_dashboard_client_net $host" zone=hermes_agent_conns:10m;
+        # Per host alone, every client network together (the header).
+        limit_conn_zone $host zone=hermes_agent_host_conns:1m;
 
         # Hermes' own X-Frame-Options, if it ever sends one, stays alone.
         map $upstream_http_x_frame_options $hermes_dashboard_frame_options {
@@ -774,6 +782,7 @@ in
             add_header X-Frame-Options $hermes_dashboard_frame_options always;
             limit_req zone=hermes_agent_requests burst=500 nodelay;
             limit_conn hermes_agent_conns 128;
+            limit_conn hermes_agent_host_conns 384;
             limit_req_status 429;
             limit_conn_status 429;
           '';
