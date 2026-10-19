@@ -26,8 +26,11 @@ Your account name is `id -un`. Your ports:
 
 1. Pick a free port of the right kind from your row. Check which are taken:
    `ss -ltn 'sport >= :<first> and sport <= :<last>'`.
-2. Listen on `127.0.0.1:<port>`. Not `0.0.0.0` and not `::` (nothing else
-   is reachable anyway, and `::` is not protected from other local users).
+2. Listen on IPv4 `127.0.0.1:<port>`. Not `::` or dual-stack (the proxy
+   checks that the listener is yours in the kernel's IPv4 table and
+   answers 502 for one on `::`), not `::1`, and not `localhost` (many
+   servers, vite and node among them, bind that to `::1` only): both give
+   502. Not `0.0.0.0` either: nothing else is reachable anyway.
    - `python3 -m http.server <port> --bind 127.0.0.1 --directory <dir>`
    - `vite --host 127.0.0.1 --port <port> --strictPort`
    - `uvicorn app:app --host 127.0.0.1 --port <port> --proxy-headers`
@@ -54,6 +57,9 @@ app's own same-origin check passes; other origins arrive unchanged.
   form posts, fetch, websockets, iframes. Links to them still work, and the
   port's own pages are not affected.
 - Never `--port 0` / a random port for something a person should open.
+- Each visitor's network gets at most 128 requests in flight and 50 a
+  second (after a burst of 500, enough for a dev server's page load) per
+  port; beyond that the proxy answers 429.
 - On a public port, assume the whole internet reads it. Never put secrets,
   your home directory or `/vault` there; serve a dedicated directory.
 - Only cookies whose name starts with a letter or digit (and jupyter's

@@ -140,6 +140,17 @@
 # (./hermes-dashboard-ratelimit.js). Clients spread over many /64s still
 # get through.
 #
+# Request limits: nginx opens a connection to the agent's socket per
+# request, and each one runs a bridge process (./hermes-native/forwards.nix,
+# whose sockets carry no trigger limit, so a flood never stops them). Per
+# agent host (dashboards here, serve ports in ./hermes-agents-serve.nix)
+# and client network as above, nginx passes 50 requests a second after a
+# burst of 500, below the socket's poll limit of 75 a second, and at most
+# 128 requests in flight (websockets included; HTTP/2's 128 streams per
+# connection), then answers 429. A single page load of a dev server with
+# hundreds of modules fits the burst; one client network cannot take a
+# socket's whole capacity.
+#
 # The front door https://<host>/ (hermes.davhau.com) stays behind
 # oauth2-proxy (client `hermes`, group `hermes`, as the mail owner page)
 # and only redirects: an account with one agent goes to that agent's
@@ -515,7 +526,15 @@ in
       description = "Socket of the hermes front door's oauth2-proxy";
       wantedBy = [ "sockets.target" ];
       listenStreams = [ oauth2Socket ];
+      # While the issuer is unreachable the proxy fails at start, and the
+      # requests queued on the socket keep activating it; the default
+      # trigger limit (20 activations per 2s) would put the socket into
+      # the failed state, where it stays after the issuer is back.
+      # TriggerLimitIntervalSec=0 disables it (systemd.socket(5)). The
+      # restarts still wait RestartSec: the socket starts no service that
+      # is waiting to restart (systemd counts that as activating already).
       socketConfig = {
+        TriggerLimitIntervalSec = 0;
         SocketUser = "root";
         SocketGroup = config.services.nginx.group;
         SocketMode = "0660";
@@ -606,6 +625,11 @@ in
 
         # Per agent and client network (the header).
         limit_req_zone "$hermes_dashboard_client_net $host" zone=hermes_dashboard_login:1m rate=6r/m;
+        # Every request to an agent's host, a dashboard or a serve port
+        # (./hermes-agents-serve.nix), per host and client network (the
+        # header). 10m holds some 80000 keys.
+        limit_req_zone "$hermes_dashboard_client_net $host" zone=hermes_agent_requests:10m rate=50r/s;
+        limit_conn_zone "$hermes_dashboard_client_net $host" zone=hermes_agent_conns:10m;
 
         # Hermes' own X-Frame-Options, if it ever sends one, stays alone.
         map $upstream_http_x_frame_options $hermes_dashboard_frame_options {
@@ -742,9 +766,16 @@ in
           useACMEHost = certName;
           # Server level, so every location inherits them: none adds a
           # header of its own, which would drop these (nginx add_header).
+          # The sign-in locations' own limit_req replaces the request
+          # limit there (nginx inherits limit_req only into a level without
+          # one); the stricter sign-in limit holds.
           extraConfig = ''
             add_header Content-Security-Policy "frame-ancestors 'self'" always;
             add_header X-Frame-Options $hermes_dashboard_frame_options always;
+            limit_req zone=hermes_agent_requests burst=500 nodelay;
+            limit_conn hermes_agent_conns 128;
+            limit_req_status 429;
+            limit_conn_status 429;
           '';
           locations."/" = location;
           locations."= /auth/login" = signIn;

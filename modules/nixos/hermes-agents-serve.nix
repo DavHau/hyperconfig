@@ -78,7 +78,10 @@
 #     the port's owner that refuses a backend another uid bound
 #     (./hermes-native/tcp-owner-bridge.rs, as the dashboards'
 #     ./hermes-native/forwards.nix). An app that is down, or a squatter,
-#     gives 502, never someone else's page.
+#     gives 502, never someone else's page. A request flood slows these
+#     sockets down but never stops them, and nginx limits requests per
+#     client network and port host, as for the dashboards (the request
+#     limits in ./hermes-dashboard-public.nix).
 #   - the ports are owner-only on loopback (iptables, the same chain
 #     ./hermes-native/firewall.nix gates the dashboard ports in): the owner
 #     (and so its bridge) and root may dial them, other agents may not.
@@ -224,6 +227,16 @@ let
       serverAliases = lib.tail hosts;
       forceSSL = true;
       useACMEHost = certOf name;
+      # The request limits of the dashboards, zones and all
+      # (./hermes-dashboard-public.nix says why and how much), per port
+      # host and client network; on a private host they cover the
+      # sign-in too.
+      extraConfig = ''
+        limit_req zone=hermes_agent_requests burst=500 nodelay;
+        limit_conn hermes_agent_conns 128;
+        limit_req_status 429;
+        limit_conn_status 429;
+      '';
     };
 
   portList = ps: lib.concatMapStringsSep ", " toString ps;
@@ -292,7 +305,11 @@ in
 
     # The sockets nginx dials, held by systemd for the whole uptime, and
     # per connection a bridge as the port's owner (the header). The bridge
-    # dials base + 10 * its euid: this port, for the owner's uid.
+    # dials base + 10 * its euid: this port, for the owner's uid. No
+    # trigger limit and a deliberate MaxConnections, as the dashboards'
+    # (./hermes-native/forwards.nix says why): a public port takes a
+    # request flood from anyone, and nginx opens one connection per
+    # request.
     systemd.sockets =
       lib.listToAttrs (
         lib.concatMap (
@@ -305,6 +322,8 @@ in
               listenStreams = [ "${backendDir}/${toString port}.sock" ];
               socketConfig = {
                 Accept = true;
+                TriggerLimitIntervalSec = 0;
+                MaxConnections = 512;
                 SocketUser = "root";
                 SocketGroup = config.services.nginx.group;
                 SocketMode = "0660";
@@ -319,7 +338,10 @@ in
           description = "Socket of the hermes agents' private serve ports' oauth2-proxy";
           wantedBy = [ "sockets.target" ];
           listenStreams = [ loginSocket ];
+          # No trigger limit, as the front door's
+          # (./hermes-dashboard-public.nix says why).
           socketConfig = {
+            TriggerLimitIntervalSec = 0;
             SocketUser = "root";
             SocketGroup = config.services.nginx.group;
             SocketMode = "0660";
