@@ -36,7 +36,7 @@ let
         };
         callbackURLs = lib.mkOption {
           type = lib.types.listOf lib.types.str;
-          description = "Exact redirect URIs the client may use.";
+          description = "Redirect URIs the client may use: exact, or pocket-id patterns (`*` in the host matches any labels, e.g. https://*.example.com/cb also takes a.b.example.com; `*`/`**` in the path one/several segments).";
         };
         logoutCallbackURLs = lib.mkOption {
           type = lib.types.listOf lib.types.str;

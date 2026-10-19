@@ -65,9 +65,11 @@ pocket_id_link() {
 
 # One eval for every fact. The public dashboards are declared in
 # hyper.hermesDashboard (modules/nixos/hermes-dashboard-public.nix): each
-# agent's at users.<user>.publicUrl, with hermes' own pocket-id login. The
-# front door's host is also the public DNS name of the machine, so SSH uses
-# it. The user name is spliced into the expression; \${n} is Nix's, not the
+# agent's at users.<user>.publicUrl (on the agents' site, davhau.fyi), with
+# hermes' own pocket-id login. The front door's host (hermes.davhau.com)
+# redirects there after sign-in and lists the addresses for Hermes Mobile
+# at /app; it is also the public DNS name of the machine, so SSH uses it.
+# The user name is spliced into the expression; \${n} is Nix's, not the
 # shell's.
 expr=$(cat <<EOF
 c:
@@ -143,6 +145,10 @@ if [ -n "$dashboard" ]; then
   echo "  Open $dashboard in your browser"
   echo "  and log in with your passkey (account name: $account)."
   echo "  Bookmark the page: this is where you chat with Hermes from now on."
+  echo "  https://$host/ takes you there too after signing in."
+  echo
+  echo "  Hermes Mobile app: open https://$host/app in your browser, sign in,"
+  echo "  and enter the address it shows as the server in the app."
 fi
 
 claude=$(jq -r .claudeAuth <<<"$facts")

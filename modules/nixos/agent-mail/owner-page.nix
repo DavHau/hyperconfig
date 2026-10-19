@@ -1,23 +1,26 @@
 # The owner page, https://<ownerPage.host>/: where an agent's owner confirms
-# allowlist requests. It has its own login, separate from the dashboards'.
+# allowlist requests. It has its own login, separate from the front door's.
 #
-# The dashboards' oauth2-proxy session cookie is scoped to the dashboard
-# host and every subdomain of it (the serve ports need it), and every one of
-# those hosts proxies to something an agent controls. nginx no longer
-# forwards login cookies to agents (../hermes-dashboard-public.nix,
+# It lives under davhau.com, a site apart from the agent-controlled
+# davhau.fyi (../hermes-dashboard-public.nix), and nginx forwards no login
+# cookie to agents (../hermes-dashboard-public.nix,
 # ../hermes-agents-serve.nix), but a page an agent controls must never hold
-# the key to this one anyway. So this page runs a second oauth2-proxy:
+# the key to this one anyway, nor the front door's session. So this page
+# runs an oauth2-proxy of its own:
 #   - its session cookie is `__Host-mailgate`: host-only by browser rule
 #     (no Domain attribute allowed), Secure, Path=/. No agent-controlled
 #     host ever receives it, and no other host can set or overwrite it,
-#   - a separate cookie secret, so the dashboards' session cookie is
+#   - a separate cookie secret, so the front door's session cookie is
 #     meaningless here,
 #   - prompt=login: every sign-in asks pocket-id for the passkey again,
 #     even inside a live pocket-id session, and the session lasts
 #     `sessionLifetime` without refresh. Confirming an allowlist entry
 #     therefore always follows a fresh passkey check.
-# Same OIDC client as the dashboards (pocket-id's `hermes` client, which
+# Same OIDC client as the front door (pocket-id's `hermes` client, which
 # lists this host's callback; modules/flake-parts/nixosConfigurations.nix).
+# Requests a browser sends from another origin are refused unless they are
+# top-level GET navigations (../fetch-metadata-gate.nix); the sign-in is
+# navigations only, the confirmations are same-origin posts.
 #
 # nginx passes the signed-in account to mailgate in a header it always
 # overwrites; mailgate shows that account's agents only, and checks Origin
@@ -25,8 +28,8 @@
 #
 # oauth2-proxy's loopback port answers nginx and root only (an owner gate in
 # mailgate-firewall, ./mail.nix), and it trusts X-Forwarded-* from loopback
-# only, which after that gate means nginx. The dashboards' instance gets the
-# same gate in ../hermes-dashboard-oauth2-gate.nix.
+# only, which after that gate means nginx. The front door's and the serve
+# ports' instances get the same gate in ../hermes-dashboard-oauth2-gate.nix.
 {
   config,
   lib,
@@ -73,6 +76,8 @@ let
   };
 in
 {
+  imports = [ ../fetch-metadata-gate.nix ];
+
   config = lib.mkIf (cfg.enable && host != null) {
     clan.core.vars.generators.mailgate-oauth2-proxy = {
       files.cookie_secret.restartUnits = [ "oauth2-proxy-mailgate.service" ];
@@ -160,9 +165,11 @@ in
       done
     '';
 
+    hyper.fetchMetadataGate.virtualHosts = [ host ];
     services.nginx.virtualHosts.${host} = {
       forceSSL = true;
-      useACMEHost = "hermes-serve";
+      # *.<front door host> (../hermes-dashboard-public.nix)
+      useACMEHost = "hermes-subdomains";
       locations."/oauth2/" = {
         proxyPass = "http://${address}";
         recommendedProxySettings = false;

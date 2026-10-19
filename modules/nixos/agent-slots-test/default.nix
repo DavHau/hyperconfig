@@ -17,11 +17,12 @@
 # are unreachable; the desired state survives a reboot; a reset brings back
 # a slot whose deploy dropped sshd, a hard reset also drops its gc roots;
 # the slots run in agent-slots.slice; the public IPv4 reaches the right slot
-# by port, by Host (80) and by SNI (443), with the host's own https site
-# keeping the client address and refusing a doubled or whole-and-split
-# login cookie; the
-# return mark leaves the Mullvad app's mark alone; each slot's hostname
-# gets its A and AAAA at a stub of porkbun's API.
+# by port, by Host (80) and by SNI (443) under slot.<agent>.<domain>, with
+# the host's own https site keeping the client address; the old names
+# <agent>.<legacyDomain> only answer this host's 301 to the new one, path
+# kept, and never reach a slot; the return mark leaves the Mullvad app's
+# mark alone; each slot's hostname gets its A and AAAA, each old name its
+# A, at a stub of porkbun's API.
 { pkgs, spaces }:
 let
   inherit (pkgs) lib;
@@ -131,7 +132,7 @@ let
   cert = pkgs.runCommand "agent-slots-test-cert" { nativeBuildInputs = [ pkgs.openssl ]; } ''
     mkdir $out
     openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj /CN=test \
-      -addext "subjectAltName=DNS:som.test,DNS:alice.slots.test,DNS:bob.slots.test" \
+      -addext "subjectAltName=DNS:som.test,DNS:slot.alice.fyi.test,DNS:slot.bob.fyi.test" \
       -keyout $out/key.pem -out $out/cert.pem
   '';
 
@@ -273,7 +274,6 @@ pkgs.testers.runNixOSTest {
         ../container-slots.nix
         ../agent-slots.nix
         ../hermes-native/options.nix
-        ../oauth2-proxy-cookie-guard.nix
       ];
       _module.args.inputs = { inherit spaces; };
       virtualisation.memorySize = 3072;
@@ -365,7 +365,8 @@ pkgs.testers.runNixOSTest {
       };
 
       hyper.agentSlots = {
-        domain = "slots.test";
+        domain = "fyi.test";
+        legacyDomain = "slots.test";
         inherit publicIPv4;
         agents = lib.mapAttrs (name: id: {
           inherit id;
@@ -395,14 +396,20 @@ pkgs.testers.runNixOSTest {
         isNormalUser = true;
         uid = 1001;
       };
-      environment.etc = lib.mapAttrs' (
-        name: k:
-        lib.nameValuePair "agent-keys/${name}" {
-          text = k.priv;
-          mode = "0600";
-          user = name;
-        }
-      ) sshKeys;
+      environment.etc =
+        lib.mapAttrs' (
+          name: k:
+          lib.nameValuePair "agent-keys/${name}" {
+            text = k.priv;
+            mode = "0600";
+            user = name;
+          }
+        ) sshKeys
+        # the porkbun var the old names' DNS-01 certificate names
+        // {
+          "test-vars/porkbun/apikey".text = "unused";
+          "test-vars/porkbun/secretkey".text = "unused";
+        };
 
       # This host's own https site (as hermes.davhau.com on som); it sorts
       # before the slot vhosts, as som's own do.
@@ -414,8 +421,18 @@ pkgs.testers.runNixOSTest {
         locations."/".return = "200 'som $remote_addr\\n'";
         extraConfig = "default_type text/plain;";
       };
-      # as hermes.davhau.com (../hermes-dashboard-public.nix)
-      hyper.oauth2ProxyCookieGuard.virtualHosts = [ "host-site" ];
+      # The old names' DNS-01 certificate: no ACME server here, so the
+      # self-signed placeholder stays and the renewals fail fast.
+      security.acme = {
+        acceptTerms = true;
+        defaults.email = "test@example.org";
+        defaults.server = "https://127.0.0.1:1/directory";
+      };
+      # clan turns persisted prompts into files; the stub does not.
+      clan.core.vars.generators.porkbun.files = {
+        apikey = { };
+        secretkey = { };
+      };
 
       system.extraDependencies = [ broken ];
       # the agents' tools (hermes-native puts them on the agents' PATH;
@@ -486,7 +503,7 @@ pkgs.testers.runNixOSTest {
 
     with subtest("slot info names the ports, addresses and hostname"):
         info = som.succeed("runuser -u alice -- slot info")
-        for want in ["14040-14049", "alice.slots.test", alice6, "root@" + alice4, "${publicIPv4}"]:
+        for want in ["14040-14049", "slot.alice.fyi.test", alice6, "root@" + alice4, "${publicIPv4}"]:
             assert want in info, info
 
     with subtest("the slots' hostnames are published"):
@@ -495,10 +512,13 @@ pkgs.testers.runNixOSTest {
         som.succeed("systemctl start porkbun-records")
         zone = {(r["name"], r["type"]): r["content"] for r in json.loads(som.succeed("curl -sf http://127.0.0.1:8053/_records"))}
         assert zone == {
+            ("slot.alice.fyi.test", "A"): "${publicIPv4}",
+            ("slot.alice.fyi.test", "AAAA"): alice6,
+            ("slot.bob.fyi.test", "A"): "${publicIPv4}",
+            ("slot.bob.fyi.test", "AAAA"): bob6,
+            # the old names: this host only (no publicIPv6 here, so no AAAA)
             ("alice.slots.test", "A"): "${publicIPv4}",
-            ("alice.slots.test", "AAAA"): alice6,
             ("bob.slots.test", "A"): "${publicIPv4}",
-            ("bob.slots.test", "AAAA"): bob6,
         }, zone
 
     with subtest("only the owner's key gets in"):
@@ -556,14 +576,28 @@ pkgs.testers.runNixOSTest {
         client.succeed(get + "http://${publicIPv4}:14050/ | grep -qx 'bob-port peer=${clientIPv4} xff='")
         # a port of alice's range that her slot does not serve is not bob's
         client.fail(get + "http://${publicIPv4}:14044/")
-        out = client.succeed(get + "-H 'Host: alice.slots.test' http://${publicIPv4}/")
+        out = client.succeed(get + "-H 'Host: slot.alice.fyi.test' http://${publicIPv4}/")
         assert out.strip() == "alice-http peer=10.43.4.1 xff=${clientIPv4}", out
-        out = client.succeed(get + "-H 'Host: bob.slots.test' http://${publicIPv4}/")
+        out = client.succeed(get + "-H 'Host: slot.bob.fyi.test' http://${publicIPv4}/")
         assert out.startswith("bob-http"), out
-        out = client.succeed(get + "-k --resolve alice.slots.test:443:${publicIPv4} https://alice.slots.test/")
+        out = client.succeed(get + "-k --resolve slot.alice.fyi.test:443:${publicIPv4} https://slot.alice.fyi.test/")
         assert out.strip() == "alice-tls peer=10.43.4.1 xff=", out
-        out = client.succeed(get + "-k --resolve bob.slots.test:443:${publicIPv4} https://bob.slots.test/")
+        out = client.succeed(get + "-k --resolve slot.bob.fyi.test:443:${publicIPv4} https://slot.bob.fyi.test/")
         assert out.startswith("bob-tls"), out
+        # the old names: this host answers, with a 301 to the new name (path
+        # and query kept), over both ports; nothing reaches a slot
+        where = "-o /dev/null -w '%{http_code} %{redirect_url}' "
+        out = client.succeed(get + where + "-H 'Host: alice.slots.test' 'http://${publicIPv4}/a?b=1'")
+        assert out == "301 https://alice.slots.test/a?b=1", out
+        old = "-k --resolve alice.slots.test:443:${publicIPv4} 'https://alice.slots.test/a?b=1'"
+        out = client.succeed(get + where + old)
+        assert out == "301 https://slot.alice.fyi.test/a?b=1", out
+        out = client.succeed(get + old)
+        assert "alice-tls" not in out and "alice-http" not in out, out
+        out = client.succeed(get + where + "-k --resolve bob.slots.test:443:${publicIPv4} https://bob.slots.test/")
+        assert out == "301 https://slot.bob.fyi.test/", out
+        out = client.succeed(get + "-o /dev/null -w '%{http_code}' -k --resolve carol.slots.test:443:${publicIPv4} https://carol.slots.test/")
+        assert out == "404", out
         # this host's own sites: unchanged, client address intact
         out = client.succeed(get + "-k --resolve som.test:443:${publicIPv4} https://som.test/")
         assert out.strip() == "som ${clientIPv4}", out
@@ -571,22 +605,6 @@ pkgs.testers.runNixOSTest {
         assert code == "301", code
         # the helpers hold the slots' namespaces: nspawn would wait on them
         som.succeed("systemctl stop a-http a-tls a-port b-http b-tls b-port")
-
-    with subtest("this host's sites refuse a doubled login cookie"):
-        get = "curl -s -m 10 -k --resolve som.test:443:${publicIPv4} -o /dev/null -w '%{http_code}' "
-        for cookie, want in [
-            ("_oauth2_proxy=mine", "200"),
-            ("_oauth2_proxy=a; _oauth2_proxy_csrf=b", "200"),
-            ("_oauth2_proxy=tossed; x=1; _oauth2_proxy=mine", "400"),
-            ("_oauth2_proxy_csrf=tossed;_oauth2_proxy_csrf=mine", "400"),
-            # a whole session cookie next to a split one, either order
-            ("_oauth2_proxy=tossed; _oauth2_proxy_0=a; _oauth2_proxy_1=b", "400"),
-            ("_oauth2_proxy_0=a; x=1; _oauth2_proxy_1=b;_oauth2_proxy=tossed", "400"),
-            # a split session alone is fine
-            ("_oauth2_proxy_0=a; _oauth2_proxy_1=b", "200"),
-        ]:
-            code = client.succeed(get + f"-H 'Cookie: {cookie}' https://som.test/")
-            assert code == want, (cookie, code)
 
     with subtest("other agents reach a slot's public v6 like the internet, nothing else"):
         serve("alice", "a-any", 14043, "alice-any")

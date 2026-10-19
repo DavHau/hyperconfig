@@ -58,9 +58,11 @@
 #            allow rules as in ./container-slots.nix); outbound NAT'd to the
 #            egress link's address
 #   v4       10.43.<id>.2, this host only; outbound NAT'd the same way
-#   hostname <agent>.<domain>: AAAA the v6, A the shared public IPv4, both
-#            kept at porkbun by this host (./porkbun-records, hourly and at
-#            boot; nobody edits them by hand). A new agent's records appear
+#   hostname slot.<agent>.<domain> (on som slot.<agent>.davhau.fyi, the
+#            agents' site, below the agent's name like its serve ports):
+#            AAAA the v6, A the shared public IPv4, both kept at porkbun by
+#            this host (./porkbun-records, hourly and at boot; nobody edits
+#            them by hand). A new agent's records appear
 #            after the deploy at the next sync (or `systemctl start
 #            porkbun-records`); a removed agent's are deleted. The AAAA
 #            takes the /64 on the bridge at sync time and warns when it is
@@ -76,14 +78,14 @@
 #            ...) and below the kernel's ephemeral range (32768+).
 #
 # The shared public IPv4 on 80/443 (it arrives on publicIPv4Interface from
-# sgp, ./ipv4-forward.nix): by hostname, <agent>.<domain> goes to that
+# sgp, ./ipv4-forward.nix): by hostname, slot.<agent>.<domain> goes to that
 # agent's slot, everything else stays with this host's nginx.
 #   80   nginx proxies a vhost per agent to 10.43.<id>.2:80 (Host kept,
 #        websockets, no buffering), so ACME HTTP-01 works inside the slot.
 #        The slot sees this host as the peer, the client in X-Forwarded-For.
 #   443  redirected (nft, only on publicIPv4Interface) to an nginx stream
 #        server that reads the SNI without terminating TLS (ssl_preread).
-#        <agent>.<domain> is passed through to 10.43.<id>.2:443, so TLS ends
+#        slot.<agent>.<domain> is passed through to 10.43.<id>.2:443, so TLS ends
 #        in the slot; the slot sees this host (10.43.<id>.1) as the peer and
 #        gets no PROXY header: plain TLS servers work unchanged, and the v4
 #        client address of an https connection is not visible in the slot
@@ -107,22 +109,27 @@
 # som's shared ZFS datasets without per-slot quotas; per-slot datasets would
 # mean moving roots on a 92% full production pool, not done here.
 #
-# Cookies: the slots share davhau.com, som's own registrable domain, which
-# is on no public suffix list, so a page in a slot can set cookies with
-# Domain=davhau.com that browsers then send to hermes.davhau.com and its
-# serve subdomains. oauth2-proxy's login cookie cannot be a `__Host-` one
-# (it carries Domain=hermes.davhau.com to cover the serve subdomains), so
-# ./oauth2-proxy-cookie-guard.nix rejects requests carrying a login cookie
-# name twice, or the session both whole and split (a tossed one next to
-# the real one) instead. Residual: a
-# tossed login cookie when the visitor has none (login CSRF into an account
-# the slot's owner holds at pocket-id, or a junk-cookie lockout until the
-# visitor clears cookies), and tossed cookies for apps on the serve
-# subdomains and other davhau.com sites. Only a separate registrable domain
-# for the slots would close these.
+# Cookies: a slot serves whatever its agent deploys, so it lives on the
+# agents' site (davhau.fyi, ./hermes-dashboard-public.nix), never on
+# davhau.com. A page in the slot can set cookies for <agent>.<domain> (its
+# own agent's dashboard and serve ports: nothing the agent does not control
+# already; logins there are `__Host-` cookies it cannot touch) or for
+# <domain> (every agent: the cookie-bombing residual the dashboard module
+# names). The slot's hostname also matches the agent's private serve ports'
+# OIDC callback pattern (./hermes-agents-serve.nix); a code that lands
+# here is useless without that client's secret and PKCE verifier.
+#
+# Transition (legacyDomain): the old names <agent>.<legacyDomain> (on som
+# <agent>.slots.davhau.com) answer 301 to https://slot.<agent>.<domain>/,
+# path and query kept, and reach no slot: this host terminates TLS for
+# them (wildcard cert *.<legacyDomain>, porkbun DNS-01) instead of passing
+# them through, and their records point at this host (A the shared IPv4,
+# AAAA networking.publicIPv6 where the host has one). Drop legacyDomain
+# once the old links are gone.
 {
   config,
   lib,
+  options,
   pkgs,
   inputs,
   ...
@@ -148,7 +155,9 @@ let
   vethHost6Prefix = "fd43:5107::/64";
   portsOf = a: lib.genList (i: portBase + 10 * a.id + i) 10;
   portRange = a: "${toString (portBase + 10 * a.id)}-${toString (portBase + 10 * a.id + 9)}";
-  hostOf = name: "${name}.${cfg.domain}";
+  hostOf = name: "slot.${name}.${cfg.domain}";
+  legacyHostOf = name: "${name}.${cfg.legacyDomain}";
+  legacyCert = "agent-slots-legacy";
   uidOf = name: config.users.users.${name}.uid;
   nginxUid = config.users.users.${nginxCfg.user}.uid;
   names = lib.attrNames cfg.agents;
@@ -434,8 +443,14 @@ in
     };
     domain = mkOption {
       type = types.str;
+      example = "davhau.fyi";
+      description = "The agents' domain; each slot's hostname is slot.<agent>.<domain>.";
+    };
+    legacyDomain = mkOption {
+      type = types.nullOr types.str;
+      default = null;
       example = "slots.davhau.com";
-      description = "Parent domain of the slots' hostnames (<agent>.<domain>).";
+      description = "Transition: the slots' old parent domain. https://<agent>.<legacyDomain>/ answers 301 to the slot's hostname from this host's nginx, nothing else.";
     };
     publicIPv4 = mkOption {
       type = types.str;
@@ -491,26 +506,67 @@ in
       publicIPv4Ports = portsOf a;
     }) cfg.agents;
 
-    # --- DNS: <agent>.<domain> A and AAAA (./porkbun-records) -------------
+    # --- DNS: slot.<agent>.<domain> A and AAAA (./porkbun-records) --------
     # Each name needs its own A: a wildcard A does not answer a name that
-    # has records of its own (the AAAA). The AAAA follows the /64 on the
-    # bridge at sync time, not ipv6Prefix: the slot's configured address
-    # (ipv6Of) is dead anyway once the router advertises another /64,
-    # because the router routes only its current prefix to the LAN. The
-    # record then already names the address the slot gets with the redeploy
-    # the warning asks for (ipv6Prefix set to the new /64), instead of
-    # staying wrong after it until the next sync.
-    hyper.porkbunRecords.records = lib.mapAttrs' (
-      name: a:
-      lib.nameValuePair (hostOf name) {
-        A = cfg.publicIPv4;
-        AAAA.ipv6OnLink = {
-          interface = slotsCfg.bridge;
-          suffix = "::5107:${hex a.id}";
-          expectedPrefix = slotsCfg.ipv6Prefix;
+    # has records of its own (the AAAA); the agent's *.<agent>.<domain>
+    # (./hermes-agents-serve.nix) does not apply to it either. The AAAA
+    # follows the /64 on the bridge at sync time, not ipv6Prefix: the
+    # slot's configured address (ipv6Of) is dead anyway once the router
+    # advertises another /64, because the router routes only its current
+    # prefix to the LAN. The record then already names the address the slot
+    # gets with the redeploy the warning asks for (ipv6Prefix set to the new
+    # /64), instead of staying wrong after it until the next sync.
+    hyper.porkbunRecords.records =
+      lib.mapAttrs' (
+        name: a:
+        lib.nameValuePair (hostOf name) {
+          A = cfg.publicIPv4;
+          AAAA.ipv6OnLink = {
+            interface = slotsCfg.bridge;
+            suffix = "::5107:${hex a.id}";
+            expectedPrefix = slotsCfg.ipv6Prefix;
+          };
+        }
+      ) cfg.agents
+      # The old names point at this host, which only redirects them.
+      // lib.optionalAttrs (cfg.legacyDomain != null) (
+        lib.genAttrs (map legacyHostOf names) (
+          _:
+          {
+            A = cfg.publicIPv4;
+          }
+          // lib.optionalAttrs (options.networking ? publicIPv6) {
+            AAAA.ipv6OnLink = {
+              inherit (config.networking.publicIPv6) interface;
+              suffix = config.networking.publicIPv6.token;
+            };
+          }
+        )
+      );
+
+    # The old names' certificate (the header). Shared var, same definition
+    # as ./dyndns-porkbun.nix; only DNS-01 reads it here.
+    clan.core.vars.generators.porkbun = lib.mkIf (cfg.legacyDomain != null) {
+      share = true;
+      prompts.apikey.type = "hidden";
+      prompts.apikey.persist = true;
+      prompts.secretkey.type = "hidden";
+      prompts.secretkey.persist = true;
+    };
+    security.acme.certs = lib.mkIf (cfg.legacyDomain != null) {
+      ${legacyCert} = {
+        domain = "*.${cfg.legacyDomain}";
+        dnsProvider = "porkbun";
+        # Not an enableACME cert, so the nginx module leaves the group alone.
+        group = "nginx";
+        credentialFiles = {
+          PORKBUN_API_KEY_FILE = config.clan.core.vars.generators.porkbun.files.apikey.path;
+          PORKBUN_SECRET_API_KEY_FILE = config.clan.core.vars.generators.porkbun.files.secretkey.path;
         };
-      }
-    ) cfg.agents;
+        # As the dashboards' cert (./hermes-dashboard-public.nix).
+        dnsResolver = "1.1.1.1:53";
+      };
+    };
 
     # --- resources: all slots together ------------------------------------
     systemd.slices.agent-slots = {
@@ -690,6 +746,13 @@ in
       appendHttpConfig = ''
         set_real_ip_from unix:;
         real_ip_header proxy_protocol;
+      ''
+      + lib.optionalString (cfg.legacyDomain != null) ''
+        map $host $agent_slots_legacy {
+          default "";
+        ${lib.concatMapStrings (name: ''
+          "${legacyHostOf name}" ${hostOf name};
+        '') names}}
       '';
       streamConfig = ''
         map $ssl_preread_server_name $agent_slots_hop {
@@ -723,27 +786,43 @@ in
           proxy_timeout 1h;
         }
       '';
-      virtualHosts = lib.mapAttrs' (
-        name: a:
-        # nginx makes the first vhost (by attribute name) listening on a port
-        # its default server; "slot-*" sorts after this host's own (hermes*),
-        # so a request with an unknown Host never lands in a slot.
-        lib.nameValuePair "slot-${name}" {
-          serverName = hostOf name;
-          locations."/" = {
-            proxyPass = "http://${ipv4Of a}:80";
-            proxyWebsockets = true;
-            recommendedProxySettings = true;
+virtualHosts =
+        lib.mapAttrs' (
+          name: a:
+          # nginx makes the first vhost (by attribute name) listening on a port
+          # its default server; "slot-*" sorts after this host's own (hermes*),
+          # so a request with an unknown Host never lands in a slot.
+          lib.nameValuePair "slot-${name}" {
+            serverName = hostOf name;
+            locations."/" = {
+              proxyPass = "http://${ipv4Of a}:80";
+              proxyWebsockets = true;
+              recommendedProxySettings = true;
+              extraConfig = ''
+                proxy_buffering off;
+                proxy_request_buffering off;
+                client_max_body_size 0;
+                proxy_read_timeout 1h;
+                proxy_send_timeout 1h;
+              '';
+            };
+          }
+        ) cfg.agents
+        // lib.optionalAttrs (cfg.legacyDomain != null) {
+          # Transition only (the header): 301 to the new name, never a
+          # slot. Sorts after "slot-*" too.
+          slots-legacy = {
+            serverName = "*.${cfg.legacyDomain}";
+            forceSSL = true;
+            useACMEHost = legacyCert;
             extraConfig = ''
-              proxy_buffering off;
-              proxy_request_buffering off;
-              client_max_body_size 0;
-              proxy_read_timeout 1h;
-              proxy_send_timeout 1h;
+              if ($agent_slots_legacy = "") {
+                return 404;
+              }
+              return 301 https://$agent_slots_legacy$request_uri;
             '';
           };
-        }
-      ) cfg.agents;
+        };
     };
 
     # --- what the agents get ----------------------------------------------

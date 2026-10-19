@@ -1,8 +1,9 @@
 # ./mail.nix and ./owner-page.nix end to end, with the real nginx config of
 # the front door and the agents' dashboards (../hermes-dashboard-public.nix,
 # hermes itself stubbed by an echo backend) and the serve ports
-# (../hermes-agents-serve.nix): Stalwart as MX, mailgate, two agents (alice,
-# bob), both oauth2-proxy instances against a stub OIDC provider, and a
+# (../hermes-agents-serve.nix) on the agents' own domain, with the old
+# names' redirects: Stalwart as MX, mailgate, two agents (alice, bob), all
+# three oauth2-proxy instances against a stub OIDC provider, and a
 # sending client that also serves the senders' DNS (SPF, DKIM, DMARC) and a
 # stub OpenAI-compatible summariser.
 #
@@ -24,12 +25,22 @@ let
   domain = "agents.test";
   dashHost = "hermes.test";
   ownerHost = "mailgate.${dashHost}";
+  # The agents' own site, as davhau.fyi on som; the mail domain doubles as
+  # the dashboards' old one, as agents.davhau.com does.
+  fyi = "fyi.test";
   aliceDashPort = hlib.dashboardPortFor "alice";
-  # The dashboards share the mail domain, as on som.
-  aliceDashHost = "alice.${domain}";
-  # alice is uid 1001: serve ports 30010-30014 private, 30015-30019 public.
+  aliceDashHost = "alice.${fyi}";
+  # alice is uid 1001: serve ports 30010-30014 private, 30015-30019 public;
+  # bob (1002) has 30020-30024 private.
   alicePrivate = 30010;
+  alicePrivate2 = 30011;
   alicePublic = 30015;
+  bobPrivate = 30020;
+  portHost = port: agent: "${toString port}.${agent}.${fyi}";
+  alicePrivateHost = portHost alicePrivate "alice";
+  alicePrivate2Host = portHost alicePrivate2 "alice";
+  alicePublicHost = portHost alicePublic "alice";
+  serveCallback = agent: "https://*.${agent}.${fyi}/.hermes-serve-login/callback";
 
   limits = {
     messageBytes = 4194304;
@@ -343,8 +354,8 @@ let
     ThreadingHTTPServer(("127.0.0.1", 9000), H).serve_forever()
   '';
 
-  # An agent backend that records the Cookie headers it receives and tries
-  # to plant a cookie on the whole dashboard domain. Its sign-in paths
+  # An agent backend that records the Cookie, Origin and Host headers it
+  # receives and tries to plant a cookie on the agents' whole domain. Its sign-in paths
   # answer like hermes: a redirect to the issuer's authorize endpoint.
   echoBackend = pkgs.writeText "echo-backend.py" ''
     import json, sys
@@ -354,7 +365,8 @@ let
     class H(BaseHTTPRequestHandler):
         def do_GET(self):
             with open(log, "a") as f:
-                f.write(json.dumps({"path": self.path, "cookie": self.headers.get_all("Cookie")}) + "\n")
+                f.write(json.dumps({"path": self.path, "cookie": self.headers.get_all("Cookie"),
+                                    "origin": self.headers.get("Origin"), "host": self.headers.get("Host")}) + "\n")
             if self.path.startswith(("/auth/login", "/auth/native/authorize")):
                 self.send_response(302)
                 self.send_header("Location", "http://127.0.0.1:9000/authorize?client_id=hermes-alice&state=s")
@@ -363,7 +375,7 @@ let
                 return
             out = f"backend {port}\n".encode()
             self.send_response(200)
-            self.send_header("Set-Cookie", "planted=1; Domain=${dashHost}; Path=/")
+            self.send_header("Set-Cookie", "planted=1; Domain=${fyi}; Path=/")
             self.send_header("Content-Length", str(len(out)))
             self.end_headers()
             self.wfile.write(out)
@@ -598,10 +610,21 @@ pkgs.testers.runNixOSTest {
       networking.hosts."127.0.0.1" = [
         dashHost
         ownerHost
+        alicePrivateHost
+        alicePrivate2Host
+        alicePublicHost
+        (portHost bobPrivate "bob")
+        # alice's port under bob's name
+        (portHost alicePrivate "bob")
+        aliceDashHost
+        "bob.${fyi}"
+        "nobody.${fyi}"
+        # the old names
+        "alice.${domain}"
+        "nobody.${domain}"
         "${toString alicePrivate}.${dashHost}"
         "${toString alicePublic}.${dashHost}"
-        aliceDashHost
-        "nobody.${domain}"
+        "12345.${dashHost}"
       ];
 
       users.users.alice = {
@@ -622,7 +645,9 @@ pkgs.testers.runNixOSTest {
         (secret "imap-alice" "alice-imap-password")
         (secret "imap-bob" "bob-imap-password")
         (secret "oidc-hermes" "test-oidc-client-secret")
+        (secret "oidc-hermes-serve" "test-oidc-serve-secret")
         (var "hermes-oauth2-proxy" "cookie_secret" "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+        (var "hermes-serve-oauth2-proxy" "cookie_secret" "0123456789abcdef0123456789abcdef")
         (var "mailgate-oauth2-proxy" "cookie_secret" "ZmVkY2JhOTg3NjU0MzIxMGZlZGNiYTk4NzY1NDMyMTA=")
         (var "porkbun" "apikey" "unused")
         (var "porkbun" "secretkey" "unused")
@@ -642,7 +667,11 @@ pkgs.testers.runNixOSTest {
       };
       hyper.hermesDashboard = {
         host = dashHost;
-        agentDomain = domain;
+        agentDomain = fyi;
+        legacy = {
+          agentDomain = domain;
+          servePorts = true;
+        };
         users.alice.account = "alice-owner";
         users.bob.account = "bob-owner";
       };
@@ -668,8 +697,22 @@ pkgs.testers.runNixOSTest {
           public = false;
           pkce = true;
           secretFile = "/etc/mailtest/oidc-hermes-bob";
-          callbackURLs = [ "https://bob.${domain}/auth/callback" ];
+          callbackURLs = [ "https://bob.${fyi}/auth/callback" ];
           allowedGroups = [ "hermes-bob" ];
+        };
+        clients.hermes-serve = {
+          clientId = "hermes-serve";
+          public = false;
+          pkce = true;
+          secretFile = "/etc/mailtest/oidc-hermes-serve";
+          callbackURLs = map serveCallback [
+            "alice"
+            "bob"
+          ];
+          allowedGroups = [
+            "hermes-alice"
+            "hermes-bob"
+          ];
         };
       };
       # No ACME server here: the self-signed placeholders stay, and the
@@ -680,6 +723,7 @@ pkgs.testers.runNixOSTest {
         before = [
           "oauth2-proxy.service"
           "oauth2-proxy-mailgate.service"
+          "oauth2-proxy-serve.service"
         ];
         serviceConfig = {
           ExecStartPre = "${pkgs.bash}/bin/sh -c 'echo alice-owner > /run/stub-oidc/user'";
@@ -688,10 +732,11 @@ pkgs.testers.runNixOSTest {
           RuntimeDirectoryPreserve = true;
         };
       };
-      # alice's agent backends: her dashboard and one private, one public
+      # alice's agent backends: her dashboard and two private, one public
       # serve port.
       systemd.services.echo-dashboard = echoService aliceDashPort;
       systemd.services.echo-private = echoService alicePrivate;
+      systemd.services.echo-private2 = echoService alicePrivate2;
       systemd.services.echo-public = echoService alicePublic;
       # clan turns persisted prompts into files; the stub does not.
       clan.core.vars.generators.porkbun.files = {
@@ -1184,27 +1229,95 @@ pkgs.testers.runNixOSTest {
 
     with subtest("F2: no login cookie reaches an agent backend; the owner page has its own login"):
         server.wait_for_open_port(4180, "127.0.0.1")
+        server.wait_for_open_port(4182, "127.0.0.1")
         server.wait_for_open_port(443)
+        def redirect(url, *opts):
+            """(status, Location) of one request, not followed."""
+            out = server.succeed(
+                "curl -sk -o /dev/null -w '%{http_code} %{redirect_url}' " + " ".join(opts) + f" '{url}'")
+            code, _, loc = out.partition(" ")
+            return code, loc
+        def login_as(account):
+            server.succeed(f"echo {account} > /run/stub-oidc/user")
+        def last_authorize():
+            return [json.loads(l) for l in server.succeed("cat /run/stub-oidc/authorize.log").splitlines()][-1]
+
         # The owner signs in at the front door (stub OIDC, real
-        # oauth2-proxy), which sends her on to her agent's dashboard.
+        # oauth2-proxy), which sends her on to her agent's dashboard on the
+        # agents' own domain.
         code, eff, body = https("https://${dashHost}/", "-L -c /tmp/j1 -b /tmp/j1")
         assert code == "200" and eff == "https://${aliceDashHost}/" and body == "backend ${toString aliceDashPort}\n", (code, eff, body)
-        # A name under the dashboards' domain that is no dashboard.
-        assert https("https://nobody.${domain}/")[0] == "404"
-        dash = {n: c for n, c in jar_cookies("/tmp/j1").items() if n.startswith("_oauth2_proxy")}
-        assert "_oauth2_proxy" in dash, dash
-        session = "; ".join(f"{n}={c[2]}" for n, c in dash.items())
-        # The agent planted three decoys with a longer Path (they come
-        # first); the real session follows, then a CSRF cookie, the agent
-        # app's own cookies and the dashboard's own session.
-        cookies = ("_oauth2_proxy_a=1; _oauth2_proxy_b=1; _oauth2_proxy_c=1; " + session
-                   + "; _oauth2_proxy_csrf=x; app=1; trader_dashboard=tok; _xsrf=abc; __Host-mailgate=stolen"
-                   + "; __Host-hermes_session_at=hs")
-        secrets_ = [c[2] for c in dash.values()] + ["stolen"]
+        # A name under the agents' domain that is no dashboard.
+        assert https("https://nobody.${fyi}/")[0] == "404"
+        front = jar_cookies("/tmp/j1")
+        assert "__Host-hermes" in front, front
+        assert front["__Host-hermes"][:2] == ("${dashHost}", "FALSE"), front
+        assert not any(n.startswith("_oauth2_proxy") for n in front), front
+        front_value = front["__Host-hermes"][2]
+
+        # /app: the signed-in account's dashboard addresses, nothing else.
+        code, _, body = https("https://${dashHost}/app", "-b /tmp/j1")
+        assert code == "200" and body == "Hermes Mobile: enter this address as the server.\n  https://${aliceDashHost}\n", (code, body)
+        assert "content-type: text/plain" in server.succeed("curl -sk -D - -o /dev/null -b /tmp/j1 https://${dashHost}/app").lower()
+        login_as("bob-owner")
+        code, _, body = https("https://${dashHost}/app", "-L -c /tmp/jb -b /tmp/jb")
+        assert code == "200" and "https://bob.${fyi}" in body and "alice" not in body, (code, body)
+        login_as("nobody-owner")
+        code, _, body = https("https://${dashHost}/app", "-L -c /tmp/jn -b /tmp/jn")
+        assert code == "403", (code, body)
+        assert https("https://${dashHost}/", "-b /tmp/jn")[0] == "403"
+        login_as("alice-owner")
+
+        # A private port: a sign-in on its own host (no prompt=login: it
+        # rides the pocket-id session), back to the page asked for, with a
+        # host-only __Host- cookie.
+        code, eff, body = https("https://${alicePrivateHost}/p?x=1&y=2", "-L -c /tmp/j3 -b /tmp/j3")
+        assert code == "200" and eff == "https://${alicePrivateHost}/p?x=1&y=2" and body == "backend ${toString alicePrivate}\n", (code, eff, body)
+        last = last_authorize()
+        assert last["client_id"] == "hermes-serve" and "prompt" not in last, last
+        assert last["redirect_uri"] == "https://${alicePrivateHost}/.hermes-serve-login/callback", last
+        # (the app's own `planted` is in the jar too)
+        serve = {n: c for n, c in jar_cookies("/tmp/j3").items() if n.startswith("_")}
+        assert set(serve) == {"__Host-hermes_serve"}, serve
+        assert serve["__Host-hermes_serve"][:2] == ("${alicePrivateHost}", "FALSE"), serve
+        serve_value = serve["__Host-hermes_serve"][2]
+        # Set-Cookie itself: no Domain, Secure, Path=/.
+        hdrs = server.succeed("curl -sk -D - -o /dev/null 'https://${alicePrivateHost}/.hermes-serve-login/start?rd=/'")
+        csrf = [l for l in hdrs.splitlines() if l.lower().startswith("set-cookie: __host-hermes_serve")]
+        assert csrf and all("domain=" not in l.lower() and "secure" in l.lower() and "path=/;" in l.lower() for l in csrf), hdrs
+        # The browser sends it to that host only: the next port signs in
+        # again, on its own host.
+        code, loc = redirect("https://${alicePrivate2Host}/", "-b /tmp/j3")
+        assert code == "302" and loc.startswith("http://127.0.0.1:9000/authorize?"), (code, loc)
+        assert "redirect_uri=https%3A%2F%2F${alicePrivate2Host}%2F.hermes-serve-login%2Fcallback" in loc, loc
+        # Another agent's private host refuses it, and alice's port under
+        # bob's name is no server at all.
+        code, _, body = https("https://${portHost bobPrivate "bob"}/", f"-H 'Cookie: __Host-hermes_serve={serve_value}'")
+        assert code == "403" and "Not published" in body, (code, body)
+        assert https("https://${portHost alicePrivate "bob"}/", f"-H 'Cookie: __Host-hermes_serve={serve_value}'")[0] == "404"
+        assert https("https://${portHost alicePrivate "bob"}/")[0] == "404"
+        # Nor does the front door's session open a private port.
+        code, loc = redirect("https://${alicePrivateHost}/", f"-H 'Cookie: __Host-hermes={front_value}'")
+        assert code == "302" and loc.startswith("http://127.0.0.1:9000/authorize?"), (code, loc)
+        # Only the agent's own account gets through.
+        login_as("bob-owner")
+        code, _, body = https("https://${alicePrivate2Host}/", "-L -c /tmp/j4 -b /tmp/j4")
+        assert code == "403" and "Not published" in body, (code, body)
+        login_as("alice-owner")
+        # The login's redirect stays on the host.
+        code, loc = redirect("https://${alicePrivateHost}/.hermes-serve-login/start?rd=https://evil.example/")
+        assert code == "302" and loc.startswith("http://127.0.0.1:9000/authorize?") and "evil.example" not in loc, (code, loc)
+
+        # Cookies: the agent planted decoys; the app gets its own cookies
+        # only, the dashboard hermes' own, never a login.
+        cookies = ("__Host-hermes_serve_csrf=x; __Host-hermes=" + front_value
+                   + "; app=1; trader_dashboard=tok; _xsrf=abc; __Host-mailgate=stolen; __Host-hermes_session_at=hs; "
+                   + "__Host-hermes_serve=" + serve_value)
+        secrets_ = [front_value, serve_value, "stolen"]
         for port, url, expected in (
             (${toString aliceDashPort}, "https://${aliceDashHost}/leak", ["__Host-hermes_session_at=hs"]),
-            (${toString alicePrivate}, "https://${toString alicePrivate}.${dashHost}/leak", ["app=1; trader_dashboard=tok; _xsrf=abc"]),
-            (${toString alicePublic}, "https://${toString alicePublic}.${dashHost}/leak", ["app=1; trader_dashboard=tok; _xsrf=abc"]),
+            (${toString alicePrivate}, "https://${alicePrivateHost}/leak", ["app=1; trader_dashboard=tok; _xsrf=abc"]),
+            (${toString alicePublic}, "https://${alicePublicHost}/leak", ["app=1; trader_dashboard=tok; _xsrf=abc"]),
         ):
             code, _, _ = https(url, f"-H 'Cookie: {cookies}'")
             assert code == "200", (url, code)
@@ -1219,18 +1332,71 @@ pkgs.testers.runNixOSTest {
         mobile = ("hermes_session_at=m-at; hermes_session_rt=m-rt; hermes_session_provider=self_hosted"
                   + "; __Host-hermes_session_pkce=pk; __Host-hermes_sso_attempt=1; __Host-hermes_other=x"
                   + "; __Secure-hermes_session_at=sec; hermes_session_pkce=bare; hermes_sso_attempt=1"
-                  + "; hermes_session_atx=x; " + session)
+                  + "; hermes_session_atx=x; __Host-hermes=" + front_value)
         code, _, _ = https("https://${aliceDashHost}/mobile", f"-H 'Cookie: {mobile}'")
         assert code == "200", code
         got = [e for e in echo_log(${toString aliceDashPort}) if e["path"] == "/mobile"][-1]["cookie"]
         assert got == ["hermes_session_at=m-at; hermes_session_rt=m-rt; hermes_session_provider=self_hosted"
                        "; __Host-hermes_session_pkce=pk; __Host-hermes_sso_attempt=1"], got
-        # The dashboard backend sets cookies on its own host only, and no
-        # other site may frame it.
+        # Backends set cookies on their own host only (the agent asked for
+        # the whole agents' domain), and no other site may frame a
+        # dashboard.
         hdrs = server.succeed("curl -sk -D - -o /dev/null https://${aliceDashHost}/")
-        assert "planted=1; Domain=${aliceDashHost};" in hdrs and "Domain=${dashHost}" not in hdrs, hdrs
+        assert "planted=1; Domain=${aliceDashHost};" in hdrs and "Domain=${fyi};" not in hdrs, hdrs
         assert "content-security-policy: frame-ancestors 'self'" in hdrs.lower(), hdrs
         assert "x-frame-options: sameorigin" in hdrs.lower(), hdrs
+        hdrs = server.succeed("curl -sk -D - -o /dev/null -b /tmp/j3 https://${alicePrivateHost}/")
+        assert "planted=1; Domain=${alicePrivateHost};" in hdrs, hdrs
+
+        # Origin: the page's own becomes the loopback origin the app sees
+        # as its Host; any other arrives unchanged; none stays none.
+        for origin, seen in (("https://${alicePublicHost}", "http://127.0.0.1:${toString alicePublic}"),
+                             ("https://${alicePrivateHost}", "https://${alicePrivateHost}"),
+                             ("https://evil.example", "https://evil.example"),
+                             (None, None)):
+            https("https://${alicePublicHost}/origin", *([f"-H 'Origin: {origin}'"] if origin else []))
+            e = [e for e in echo_log(${toString alicePublic}) if e["path"] == "/origin"][-1]
+            assert e["origin"] == seen and e["host"] == "127.0.0.1:${toString alicePublic}", (origin, e)
+
+        # Fetch Metadata: other origins may only navigate (GET) to a
+        # dashboard, a private port or the front door; the public ports
+        # take anything.
+        nav = ["Sec-Fetch-Mode: navigate", "Sec-Fetch-Dest: document"]
+        def fm(url, site, extra, method="GET"):
+            hs = ([f"Sec-Fetch-Site: {site}"] if site else []) + extra
+            return https(url, "-b /tmp/j3", f"-X {method}", *[f"-H '{h}'" for h in hs])[0]
+        for url in ("https://${aliceDashHost}/fm", "https://${alicePrivateHost}/fm"):
+            for site in ("cross-site", "same-site"):
+                assert fm(url, site, nav, "POST") == "403", (url, site)
+                assert fm(url, site, ["Sec-Fetch-Mode: cors", "Sec-Fetch-Dest: empty"]) == "403", (url, site)
+                assert fm(url, site, ["Sec-Fetch-Mode: no-cors", "Sec-Fetch-Dest: image"]) == "403", (url, site)
+                assert fm(url, site, ["Sec-Fetch-Mode: websocket", "Sec-Fetch-Dest: websocket"]) == "403", (url, site)
+                assert fm(url, site, ["Sec-Fetch-Mode: navigate", "Sec-Fetch-Dest: iframe"]) == "403", (url, site)
+                assert fm(url, site, nav) == "200", (url, site)
+            assert fm(url, "", []) == "200", url
+            assert fm(url, "same-origin", ["Sec-Fetch-Mode: cors", "Sec-Fetch-Dest: empty"]) == "200", url
+            assert fm(url, "none", nav) == "200", url
+        assert fm("https://${alicePublicHost}/fm", "cross-site", ["Sec-Fetch-Mode: cors", "Sec-Fetch-Dest: empty"]) == "200"
+        assert fm("https://${dashHost}/", "cross-site", nav, "POST") == "403"
+        code, _, body = https("https://${ownerHost}/action", "-X POST", "-H 'Sec-Fetch-Site: same-site'", "-H 'Sec-Fetch-Mode: navigate'")
+        assert code == "403" and "another site" in body, (code, body)
+        # The sign-in flows above were navigations: a cross-site callback
+        # passes the gate.
+        code, _, body = https("https://${alicePrivateHost}/.hermes-serve-login/callback?code=x&state=y",
+                             "-H 'Sec-Fetch-Site: cross-site'", "-H 'Sec-Fetch-Mode: navigate'", "-H 'Sec-Fetch-Dest: document'")
+        assert "another site" not in body, (code, body)
+
+        # The old names only redirect, path and query kept, and never reach
+        # a backend.
+        for old, new in (("https://alice.${domain}/old?q=1", "https://${aliceDashHost}/old?q=1"),
+                         ("https://${toString alicePrivate}.${dashHost}/old?q=1", "https://${alicePrivateHost}/old?q=1"),
+                         ("https://${toString alicePublic}.${dashHost}/old?q=1", "https://${alicePublicHost}/old?q=1")):
+            assert redirect(old, "-b /tmp/j3") == ("301", new), (old, redirect(old))
+        for port in (${toString aliceDashPort}, ${toString alicePrivate}, ${toString alicePublic}):
+            assert not any(e["path"].startswith("/old") for e in echo_log(port)), port
+        assert https("https://nobody.${domain}/")[0] == "404"
+        assert https("https://12345.${dashHost}/")[0] == "404"
+
         # Sign-ins are rate-limited per client: 1 + a burst of 10, then 429.
         codes = [https("https://${aliceDashHost}/auth/native/authorize")[0] for _ in range(14)]
         assert codes[:11] == ["302"] * 11 and codes[-1] == "429", codes
@@ -1254,26 +1420,25 @@ pkgs.testers.runNixOSTest {
         hdrs = server.succeed("curl -sk -D - -o /dev/null -b /tmp/j1 https://${dashHost}/")
         assert "planted" not in hdrs and "location: https://${aliceDashHost}/" in hdrs.lower(), hdrs
 
-        # The dashboard session does not open the owner page.
+        # The front door's session does not open the owner page.
         server.wait_for_open_port(4181, "127.0.0.1")
         code, eff, _ = https("https://${ownerHost}/", "-b /tmp/j1")
         assert code == "307" and "/oauth2/start" in server.succeed("curl -sk -o /dev/null -w '%{redirect_url}' -b /tmp/j1 https://${ownerHost}/"), code
-        code, _, _ = https("https://${ownerHost}/", f"-H 'Cookie: {session}'")
+        code, _, _ = https("https://${ownerHost}/", f"-H 'Cookie: __Host-hermes={front_value}'")
         assert code == "307", code
         # Its own login: a fresh passkey prompt (prompt=login), a host-only
         # __Host- cookie.
         code, eff, page = https("https://${ownerHost}/", "-L -c /tmp/j2 -b /tmp/j2")
         assert code == "200" and "Agent mail: alice-owner" in page, (code, eff, page)
-        auth = [json.loads(l) for l in server.succeed("cat /run/stub-oidc/authorize.log").splitlines()]
-        last = auth[-1]
+        last = last_authorize()
         assert last["redirect_uri"] == "https://${ownerHost}/oauth2/callback" and last["prompt"] == "login", last
         mg = jar_cookies("/tmp/j2")
         assert "__Host-mailgate" in mg, mg
         d, sub, value = mg["__Host-mailgate"]
         assert d == "${ownerHost}" and sub == "FALSE", mg["__Host-mailgate"]
-        assert not any(n.startswith("_oauth2_proxy") for n in mg), mg
+        assert "__Host-hermes" not in mg, mg
         # Not even the real owner-page cookie reaches an agent.
-        code, _, _ = https("https://${toString alicePublic}.${dashHost}/leak2", f"-H 'Cookie: __Host-mailgate={value}; app=2'")
+        code, _, _ = https("https://${alicePublicHost}/leak2", f"-H 'Cookie: __Host-mailgate={value}; app=2'")
         got = [e for e in echo_log(${toString alicePublic}) if e["path"] == "/leak2"][-1]["cookie"]
         assert got == ["app=2"], got
         # A confirmation through the real vhost.
@@ -1283,30 +1448,37 @@ pkgs.testers.runNixOSTest {
         assert found, page
         code, _, _ = https(
             "https://${ownerHost}/action",
-            "-b /tmp/j2 -H 'Origin: https://${ownerHost}'",
+            "-b /tmp/j2 -H 'Origin: https://${ownerHost}' -H 'Sec-Fetch-Site: same-origin'",
             f"--data 'csrf={found.group(1)}&agent=alice&op=deny&id={r['request']}'",
         )
         assert code == "303", code
         rc, r2 = mailgate("alice", "allowlist")
         assert [x["state"] for x in r2["requests"] if x["request"] == r["request"]] == ["denied"], r2
 
-    with subtest("G6: both oauth2-proxy ports answer nginx and root only; the owner page's is sandboxed"):
-        for port in (4180, 4181):
+    with subtest("G6: the oauth2-proxy ports answer nginx and root only; the owner page's and the serve ports' are sandboxed"):
+        for port in (4180, 4181, 4182):
             server.succeed(f"python3 ${connect} 127.0.0.1 {port}")
             for user in ("alice", "bob", "mallory"):
                 server.fail(f"runuser -u {user} -- python3 ${connect} 127.0.0.1 {port}")
-        # nginx still reaches both (the F2 sign-ins above went through them).
+        # nginx still reaches them (the F2 sign-ins above went through them).
         code, _, _ = https("https://${ownerHost}/", "-b /tmp/j2")
         assert code == "200", code
-        unit = server.succeed("systemctl cat oauth2-proxy-mailgate")
-        assert "--trusted-proxy-ip=127.0.0.1" in unit, unit
-        props = server.succeed(
-            "systemctl show oauth2-proxy-mailgate -p MemoryDenyWriteExecute -p RestrictNamespaces "
-            "-p LockPersonality -p ProtectProc -p SystemCallFilter -p ActiveState")
-        print(props)
-        for want in ("MemoryDenyWriteExecute=yes", "RestrictNamespaces=yes", "LockPersonality=yes",
-                     "ProtectProc=invisible", "ActiveState=active"):
-            assert want in props, (want, props)
+        assert https("https://${alicePrivateHost}/", "-b /tmp/j3")[0] == "200"
+        for unit in ("oauth2-proxy-mailgate", "oauth2-proxy-serve"):
+            cat = server.succeed(f"systemctl cat {unit}")
+            assert "--trusted-proxy-ip=127.0.0.1" in cat, cat
+            props = server.succeed(
+                f"systemctl show {unit} -p MemoryDenyWriteExecute -p RestrictNamespaces "
+                "-p LockPersonality -p ProtectProc -p SystemCallFilter -p ActiveState")
+            print(props)
+            for want in ("MemoryDenyWriteExecute=yes", "RestrictNamespaces=yes", "LockPersonality=yes",
+                         "ProtectProc=invisible", "ActiveState=active"):
+                assert want in props, (unit, want, props)
+        # The serve ports' proxy: callback from the request's host, no
+        # cookie domain, no redirect beyond it.
+        cat = server.succeed("systemctl cat oauth2-proxy-serve")
+        for flag in ("--redirect-url", "--cookie-domain", "--whitelist-domain"):
+            assert flag not in cat, (flag, cat)
 
     with subtest("F3: a hostile stylesheet stalls nothing"):
         alice_before, bob_before = entry_ids("alice"), entry_ids("bob")

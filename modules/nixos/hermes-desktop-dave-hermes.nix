@@ -1,10 +1,13 @@
 # dave-hermes (som's native agent, machines/som/hermes-agents.nix) as a
 # gateway in hermes-desktop, reached as dave-hermes@hermes.davhau.com over
-# ssh. Imported by ./dave.nix, so every dave desktop machine carries it.
+# ssh (hermes.davhau.com is som's public name; the web pages of the agent
+# are on davhau.fyi). Imported by ./dave.nix, so every dave desktop machine
+# carries it.
 #
-# Why ssh and not the https dashboard: it predates the per-agent dashboards
-# with hermes' own OIDC login (./hermes-dashboard-public.nix) and needs no
-# browser sign-in. The SSH connection kind needs no token: the app runs
+# Why ssh and not the https dashboard (https://dave-hermes.davhau.fyi/): it
+# predates the per-agent dashboards with hermes' own OIDC login
+# (./hermes-dashboard-public.nix) and needs no browser sign-in. The SSH
+# connection kind needs no token: the app runs
 # `hermes serve --isolated` as dave-hermes over ssh, tunnels the ephemeral
 # port and adopts the token the remote mints. On som the command lands in
 # the `hermes` shim of ./hermes-native, which exports the account's real

@@ -1,42 +1,89 @@
-# Web pages the native hermes agents serve, published under the front
-# door's host: https://<port>.<dashboard host>/ -> nginx -> 127.0.0.1:<port>.
+# Web pages the native hermes agents serve, each port on a host of its own
+# below the agent's name: https://<port>.<agent>.<agentDomain>/ (on som
+# <port>.<agent>.davhau.fyi) -> nginx -> 127.0.0.1:<port>. agentDomain is
+# the agent-controlled site (./hermes-dashboard-public.nix says why it is
+# not davhau.com); the port sits below the agent's name so that a Public
+# Suffix List entry for davhau.fyi would make every agent a site of its own
+# without further changes.
 #
 # Ports: each agent owns 10 loopback ports, servePortBase + (uid - 1000) * 10
 # .. +9, disjoint per uid and below the kernel's ephemeral range (32768+).
-# The first five are PRIVATE: pocket-id login through the front door's
-# oauth2-proxy (./hermes-dashboard-public.nix), and only the agent's own
-# dashboard account (hyper.hermesDashboard.users.<name>.account) gets
-# through. The last five are PUBLIC: no login. The agent picks the mode by
-# picking the port; the URL cannot upgrade a private port to public.
+# The first five are PRIVATE: a pocket-id login per host, and only the
+# agent's own dashboard account (hyper.hermesDashboard.users.<name>.account)
+# gets through. The last five are PUBLIC: no login. The agent picks the
+# mode by picking the port; the URL cannot upgrade a private port to
+# public, and a port under another agent's name is no server at all (the
+# catch-all of ./hermes-dashboard-public.nix answers 404).
 #
-# One wildcard vhost serves both modes. nginx cannot switch auth_request on
-# and off per variable, so the auth subrequest answers 204 itself for a
-# public port and asks oauth2-proxy otherwise. The backend comes from a map
-# over "<port> <account>": public ports match any account, private ports
-# only their owner; everything else lands on a 403 listener. The map runs
-# at proxy_pass time, after auth_request_set, which an `if` would not.
+# Private ports, per host:
+#   - their own oauth2-proxy (`oauth2-proxy-serve`, its own cookie secret
+#     and pocket-id client `hermes-serve`), apart from the davhau.com front
+#     door's. Its login cookie is `__Host-hermes_serve` (and
+#     `__Host-hermes_serve_csrf` during a sign-in): host-only by browser
+#     rule, Secure, Path=/, so every port host has a login of its own that
+#     no other host receives, sets or overwrites. With pocket-id's session
+#     the second and later sign-ins are silent (the client does not require
+#     reauthentication).
+#   - its endpoints sit below `/.hermes-serve-login/` on the port's own
+#     host (a path apps do not use). No redirect-url: oauth2-proxy builds
+#     the callback from X-Forwarded-Host, which nginx sets to the host it
+#     matched, one of the exact private names below; the proxy trusts it
+#     from 127.0.0.1 only, and only nginx and root reach that port
+#     (./hermes-dashboard-oauth2-gate.nix). No whitelist-domain: the
+#     post-login redirect may only be a path on the same host. A request
+#     without a session is handed to /start internally, with its URI as
+#     X-Auth-Request-Redirect.
+#   - pocket-id matches the callback against
+#     https://*.<agent>.<agentDomain>/.hermes-serve-login/callback, one
+#     pattern per agent: pocket-id takes `*` in the host as a wildcard over
+#     any labels (tested against v2.16.0's matchCallbackURL), and the ports
+#     derive from uids that the inventory, which never evaluates a
+#     machine's config, does not know. The pattern also covers the public
+#     ports and the agent slot, which the agent controls; a code delivered
+#     there is useless to it: the client is confidential (the secret lives
+#     only in oauth2-proxy-serve's credentials) and every code is bound to a
+#     PKCE verifier the proxy keeps in the visitor's CSRF cookie.
+#   - authorization: a map over "<host> <account>" names the backend;
+#     each private host matches its owner's account only, everything else
+#     lands on a 403 listener. The map runs at proxy_pass time, after
+#     auth_request_set, which an `if` would not.
+#   - a Fetch Metadata gate (./fetch-metadata-gate.nix): another origin
+#     (another agent's page, a public port) cannot post, fetch or open a
+#     websocket here with the visitor's login; links still work.
+# The session cookie is sealed with one secret for every host: one copied
+# from host A replays on host B, but it is the visitor's own login, and the
+# map still checks the account against B's owner.
 #
 # Agents are untrusted, so nothing of the visitor's login reaches them:
-#   - oauth2-proxy's cookie is scoped to .<host> (it must cover the
-#     subdomains), so the browser sends it here. nginx forwards only an
-#     allowlist of cookies (./hermes-agents-serve-cookies.js, njs): names
-#     that start with a letter or digit, plus jupyter's `_xsrf`. Every login
-#     cookie starts with an underscore (`_oauth2_proxy*`, the mail owner
-#     page's `__Host-mailgate*`), so none passes, however many there are.
-#     Apps that set their own cookies (a token-gated proxy, jupyter) keep
-#     working,
-#   - proxy_cookie_domain pins any Set-Cookie Domain to the serving
-#     subdomain, so an agent cannot plant cookies on the dashboard host
-#     through headers (document.cookie still can; residual),
+#   - nginx forwards only an allowlist of cookies
+#     (./hermes-agents-serve-cookies.js, njs): names that start with a
+#     letter or digit, plus jupyter's `_xsrf`. Every login cookie starts with
+#     an underscore (`__Host-hermes_serve*`), so none passes, however many
+#     there are. Apps that set their own cookies (a token-gated proxy,
+#     jupyter) keep working,
+#   - proxy_cookie_domain pins any Set-Cookie Domain to the serving host,
+#     so an agent cannot plant cookies on its other hosts through headers
+#     (document.cookie still can; residual, see the dashboard module),
 #   - the ports are owner-only on loopback (iptables, the same chain
 #     ./hermes-native/firewall.nix gates the dashboard ports in): the owner,
 #     nginx and root may dial them, other agents may not. Nothing opens
 #     them in the firewall.
 #
-# TLS: one wildcard cert via porkbun DNS-01 (as edi's *.maker.davhau.com).
-# DNS: `porkbun-dns set '*.<host>' AAAA <public v6>` and `... A <public v4>`
-# (tools/porkbun-dns), the same addresses as <host> (v4 is sgp's, forwarded
-# by ./ipv4-forward.nix).
+# Origin: apps get `Host: 127.0.0.1:<port>` (dev servers such as vite and
+# jupyter reject unknown hosts). A same-origin Origin (https://<the host>)
+# is rewritten to http://127.0.0.1:<port>, so an app's own Origin-vs-Host
+# check (jupyter's) passes for its own pages; any other Origin reaches the
+# app unchanged, so that check still refuses it.
+#
+# Transition (hyper.hermesDashboard.legacy.servePorts): the old names
+# https://<port>.<host>/ answer 301 to the new one, path and query kept, and
+# serve nothing else; drop it once the old links are gone.
+#
+# TLS: one wildcard cert per agent, *.<agent>.<agentDomain>, via porkbun
+# DNS-01; no port number lands in the CT logs. DNS: *.<agent>.<agentDomain>
+# A (sgp's v4, forwarded by ./ipv4-forward.nix) and AAAA (this host's
+# networking.publicIPv6), TXT "v=spf1 -all", kept by ./porkbun-records; the
+# agent slot's name has records of its own (./agent-slots.nix).
 #
 # The serve-ports skill (./hermes-agents-serve-skill, rendered with this
 # host's port table) teaches the agent all of this.
@@ -49,10 +96,11 @@
 }:
 let
   agents = config.hyper.hermesAgents;
+  names = lib.attrNames agents;
   dashboard = config.hyper.hermesDashboard;
+  domain = dashboard.agentDomain;
   inherit (import ./hermes-native/lib.nix { inherit lib; }) chain;
-  host = dashboard.host;
-  certName = "hermes-serve";
+  vars = config.clan.core.vars.generators;
 
   servePortBase = 30000;
   portsOf =
@@ -67,28 +115,103 @@ let
       to = from + 9;
     };
   accountOf = name: dashboard.users.${name}.account;
+  hostOf = name: port: "${toString port}.${name}.${domain}";
+  certOf = name: "hermes-fyi-${name}";
+
+  # The private ports' login (the header).
+  clientId = "hermes-serve";
+  client = config.hyper.oidc.clients.${clientId} or null;
+  loginPrefix = "/.hermes-serve-login";
+  loginPort = 4182;
+  login = "127.0.0.1:${toString loginPort}";
+  callbackFor = name: "https://*.${name}.${domain}${loginPrefix}/callback";
+  # `--flag=value` (toCommandLineShellGNU's form): oauth2-proxy's boolean
+  # flags take no separate argument.
+  loginArgs = lib.cli.toCommandLineShellGNU { } {
+    provider = "oidc";
+    oidc-issuer-url = config.hyper.oidc.issuer;
+    client-id = clientId;
+    client-secret-file = "%d/client-secret";
+    cookie-secret-file = "%d/cookie-secret";
+    cookie-name = "__Host-hermes_serve";
+    cookie-secure = "true";
+    cookie-httponly = "true";
+    cookie-samesite = "lax";
+    proxy-prefix = loginPrefix;
+    http-address = login;
+    upstream = "static://202";
+    email-domain = "*";
+    set-xauthrequest = "true";
+    reverse-proxy = "true";
+    trusted-proxy-ip = "127.0.0.1";
+    # Accounts may have no email; identify them by username, as the
+    # dashboards do.
+    oidc-email-claim = "preferred_username";
+    insecure-oidc-allow-unverified-email = "true";
+    code-challenge-method = "S256";
+    skip-provider-button = "true";
+  };
+  # What oauth2-proxy-serve needs to see of the request it answers.
+  loginHeaders = ''
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Host $host;
+  '';
 
   # Nothing of the agents listens here; nginx answers 403 from its own
   # server block.
   forbiddenPort = servePortBase - 1;
-  oauth2 = config.services.oauth2-proxy.httpAddress;
 
-  range = p: "${toString p.from}-${toString p.to}";
+  # The app's side of every published port, private or public.
+  appLocation = backend: {
+    proxyPass = "http://${backend}";
+    proxyWebsockets = true;
+    # Loopback Host: dev servers (vite, jupyter) reject unknown hosts; the
+    # public one rides in X-Forwarded-Host.
+    recommendedProxySettings = false;
+    extraConfig = ''
+      proxy_set_header Host 127.0.0.1:$hermes_serve_port;
+      proxy_set_header Origin $hermes_serve_origin;
+      proxy_set_header Cookie $hermes_serve_cookie;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+      proxy_set_header X-Forwarded-Host $host;
+      proxy_cookie_domain ~.+ $host;
+      proxy_read_timeout 1h;
+      proxy_send_timeout 1h;
+      client_max_body_size 256m;
+    '';
+  };
+  vhostFor =
+    name: ports:
+    let
+      hosts = map (hostOf name) ports;
+    in
+    {
+      serverName = lib.head hosts;
+      serverAliases = lib.tail hosts;
+      forceSSL = true;
+      useACMEHost = certOf name;
+    };
+
   portList = ps: lib.concatMapStringsSep ", " toString ps;
   skill = inputs.spaces.lib.mkAgentSkill pkgs {
     name = "serve-ports";
     src = pkgs.writeTextDir "SKILL.md" (
       builtins.replaceStrings
-        [ "@HOST@" "@PORTS@" ]
+        [ "@DOMAIN@" "@PORTS@" ]
         [
-          host
+          domain
           (lib.concatMapStringsSep "\n" (
             name:
             let
               p = portsOf name;
             in
             "| ${name} | ${portList p.private} | ${portList p.public} |"
-          ) (lib.attrNames agents))
+          ) names)
         ]
         (builtins.readFile ./hermes-agents-serve-skill/SKILL.md)
     );
@@ -96,14 +219,27 @@ let
 in
 {
   config = lib.mkIf (agents != { }) {
-    assertions = lib.mapAttrsToList (name: _: {
-      assertion =
-        let
-          uid = config.users.users.${name}.uid;
-        in
-        uid == null || (uid >= 1000 && (portsOf name).to < 32768);
-      message = "hyper.hermesAgents.${name}: uid must be in 1000..1276 so its serve ports (${toString servePortBase} + (uid - 1000) * 10) stay below the ephemeral range.";
-    }) agents;
+    assertions =
+      lib.mapAttrsToList (name: _: {
+        assertion =
+          let
+            uid = config.users.users.${name}.uid;
+          in
+          uid == null || (uid >= 1000 && (portsOf name).to < 32768);
+        message = "hyper.hermesAgents.${name}: uid must be in 1000..1276 so its serve ports (${toString servePortBase} + (uid - 1000) * 10) stay below the ephemeral range.";
+      }) agents
+      ++ [
+        {
+          assertion =
+            client != null
+            && !client.public
+            && client.secretFile != null
+            && client.pkce
+            && client.callbackURLs == map callbackFor names
+            && client.allowedGroups == map (name: "hermes-${name}") names;
+          message = "hermes-agents-serve: the inventory must declare the confidential oidc client ${clientId} for this machine, with pkce, callbacks ${toString (map callbackFor names)} and groups ${toString (map (name: "hermes-${name}") names)} (derived from machines/<machine>/hermes-dashboards.nix).";
+        }
+      ];
 
     services.hermes-native.settings.skills.external_dirs = [ "${skill}/share/skills" ];
 
@@ -121,41 +257,122 @@ in
           iptables -w -A ${chain} -p tcp --dport ${ports} -m owner --uid-owner 0 -j RETURN
           iptables -w -A ${chain} -p tcp --dport ${ports} -j REJECT --reject-with tcp-reset
         ''
-      ) (lib.attrNames agents)
+      ) names
     );
 
-    # The login cookie has to reach <port>.<host>; the post-login redirect
-    # back there has to be allowed. No leading dot on the cookie domain:
-    # oauth2-proxy picks it by suffix match against the request host, which
-    # must also hold for <host> itself; browsers send a Domain cookie to
-    # every subdomain anyway.
-    services.oauth2-proxy = {
-      cookie.domain = host;
-      extraConfig.whitelist-domain = ".${host}";
-    };
-    # Tossed login cookies (./oauth2-proxy-cookie-guard.nix): the serve
-    # subdomains get the same login cookie as the dashboard.
-    hyper.oauth2ProxyCookieGuard.virtualHosts = [ certName ];
-
-    # Shared var, same definition as ./dyndns-porkbun.nix; only DNS-01
-    # reads it here.
-    clan.core.vars.generators.porkbun = {
-      share = true;
-      prompts.apikey.type = "hidden";
-      prompts.apikey.persist = true;
-      prompts.secretkey.type = "hidden";
-      prompts.secretkey.persist = true;
-    };
-    security.acme.certs.${certName} = {
-      domain = "*.${host}";
-      dnsProvider = "porkbun";
-      # Not an enableACME cert, so the nginx module leaves the group alone.
-      group = "nginx";
-      credentialFiles = {
-        PORKBUN_API_KEY_FILE = config.clan.core.vars.generators.porkbun.files.apikey.path;
-        PORKBUN_SECRET_API_KEY_FILE = config.clan.core.vars.generators.porkbun.files.secretkey.path;
+    # --- the private ports' login (the header) -----------------------------
+    clan.core.vars.generators = {
+      hermes-serve-oauth2-proxy = {
+        files.cookie_secret.restartUnits = [ "oauth2-proxy-serve.service" ];
+        runtimeInputs = [
+          pkgs.coreutils
+          pkgs.openssl
+        ];
+        # 32 hex characters are 32 raw bytes (./agent-mail/owner-page.nix
+        # says why not base64).
+        script = ''
+          openssl rand -hex 16 | tr -d '\n' > "$out"/cookie_secret
+        '';
+      };
+      "oidc-client-${clientId}".files.secret.restartUnits = [ "oauth2-proxy-serve.service" ];
+      # Shared var, same definition as ./dyndns-porkbun.nix; only DNS-01
+      # reads it here.
+      porkbun = {
+        share = true;
+        prompts.apikey.type = "hidden";
+        prompts.apikey.persist = true;
+        prompts.secretkey.type = "hidden";
+        prompts.secretkey.persist = true;
       };
     };
+
+    hyper.hermesOauth2Gate.ports = [ loginPort ];
+    systemd.services.oauth2-proxy-serve = {
+      description = "oauth2-proxy of the hermes agents' private serve ports";
+      wantedBy = [ "multi-user.target" ];
+      wants = [ "network-online.target" ];
+      # The owner gate on its port comes first.
+      requires = [ "hermes-oauth2-gate.service" ];
+      after = [
+        "network-online.target"
+        "hermes-oauth2-gate.service"
+      ];
+      # OIDC discovery needs the issuer: retry every 5s, indefinitely,
+      # until it answers (as the front door's instance).
+      unitConfig.StartLimitIntervalSec = 0;
+      serviceConfig = {
+        ExecStart = "${lib.getExe pkgs.oauth2-proxy} ${loginArgs}";
+        DynamicUser = true;
+        LoadCredential = lib.optional (client != null && client.secretFile != null) "client-secret:${client.secretFile}" ++ [
+          "cookie-secret:${vars.hermes-serve-oauth2-proxy.files.cookie_secret.path}"
+        ];
+        Restart = "always";
+        RestartSec = "5s";
+        UMask = "0077";
+        NoNewPrivileges = true;
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        PrivateTmp = true;
+        PrivateDevices = true;
+        ProtectKernelTunables = true;
+        ProtectKernelModules = true;
+        ProtectKernelLogs = true;
+        ProtectControlGroups = true;
+        ProtectClock = true;
+        ProtectHostname = true;
+        ProtectProc = "invisible";
+        ProcSubset = "pid";
+        RestrictAddressFamilies = [
+          "AF_INET"
+          "AF_INET6"
+          "AF_UNIX"
+        ];
+        RestrictNamespaces = true;
+        RestrictRealtime = true;
+        RestrictSUIDSGID = true;
+        LockPersonality = true;
+        MemoryDenyWriteExecute = true;
+        CapabilityBoundingSet = "";
+        SystemCallArchitectures = "native";
+        SystemCallFilter = [
+          "@system-service"
+          "~@privileged"
+          "~@resources"
+        ];
+      };
+    };
+
+    # Cross-origin requests on the private hosts (the header).
+    hyper.fetchMetadataGate.virtualHosts = map (name: "hermes-serve-${name}") names;
+
+    # --- DNS and TLS (the header) -----------------------------------------
+    hyper.porkbunRecords.records = lib.mkIf (dashboard.publicIPv4 != null) (
+      lib.genAttrs (map (name: "*.${name}.${domain}") names) (_: {
+        A = dashboard.publicIPv4;
+        TXT = "v=spf1 -all";
+        AAAA.ipv6OnLink = {
+          inherit (config.networking.publicIPv6) interface;
+          suffix = config.networking.publicIPv6.token;
+        };
+      })
+    );
+    security.acme.certs = lib.listToAttrs (
+      map (
+        name:
+        lib.nameValuePair (certOf name) {
+          domain = "*.${name}.${domain}";
+          dnsProvider = "porkbun";
+          # Not an enableACME cert, so the nginx module leaves the group alone.
+          group = "nginx";
+          credentialFiles = {
+            PORKBUN_API_KEY_FILE = vars.porkbun.files.apikey.path;
+            PORKBUN_SECRET_API_KEY_FILE = vars.porkbun.files.secretkey.path;
+          };
+          # As the dashboards' cert (./hermes-dashboard-public.nix).
+          dnsResolver = "1.1.1.1:53";
+        }
+      ) names
+    );
 
     services.nginx = {
       additionalModules = [ pkgs.nginxModules.njs ];
@@ -163,80 +380,121 @@ in
         js_import hermes_serve_cookies from ${./hermes-agents-serve-cookies.js};
         js_set $hermes_serve_cookie hermes_serve_cookies.appCookies;
 
-        map $hermes_serve_port $hermes_serve_public {
-          default 0;
-        ${lib.concatMapStrings (name: lib.concatMapStrings (p: "  ${toString p} 1;\n") (portsOf name).public) (
-          lib.attrNames agents
-        )}}
+        map $host $hermes_serve_port {
+          "~^(?<hermes_serve_port_label>[0-9]+)\." $hermes_serve_port_label;
+        }
 
-        map "$hermes_serve_port $hermes_serve_account" $hermes_serve_backend {
+        # Same-origin Origin -> the loopback origin the app sees (the
+        # header); anything else, an absent one included, unchanged.
+        map "$http_origin $host" $hermes_serve_origin {
+          default $http_origin;
+          "~^https://([^ ]+) \1$" "http://127.0.0.1:$hermes_serve_port";
+        }
+
+        map "$host $hermes_serve_account" $hermes_serve_backend {
           default 127.0.0.1:${toString forbiddenPort};
+        ${lib.concatMapStrings (
+          name:
+          lib.concatMapStrings (
+            port: "  \"${hostOf name port} ${accountOf name}\" 127.0.0.1:${toString port};\n"
+          ) (portsOf name).private
+        ) names}}
+      ''
+      + lib.optionalString dashboard.legacy.servePorts ''
+        map $hermes_serve_legacy_port $hermes_serve_legacy {
+          default "";
         ${lib.concatMapStrings (
           name:
           let
             p = portsOf name;
           in
-          lib.concatMapStrings (port: "  \"~^${toString port} \" 127.0.0.1:${toString port};\n") p.public
-          + lib.concatMapStrings (port: "  \"${toString port} ${accountOf name}\" 127.0.0.1:${toString port};\n") p.private
-        ) (lib.attrNames agents)}}
+          lib.concatMapStrings (port: "  ${toString port} ${hostOf name port};\n") (p.private ++ p.public)
+        ) names}}
       '';
 
-      virtualHosts = {
-        ${certName} = {
-          serverName = "~^(?<hermes_serve_port>[0-9]+)\\.${lib.escapeRegex host}$";
-          forceSSL = true;
-          useACMEHost = certName;
-          locations."= /.hermes-serve-auth".extraConfig = ''
-            internal;
-            if ($hermes_serve_public) {
-              return 204;
-            }
-            proxy_pass ${oauth2}/oauth2/auth;
-            proxy_pass_request_body off;
-            proxy_set_header Content-Length "";
-            proxy_set_header Host $host;
-            proxy_set_header X-Scheme $scheme;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_set_header X-Forwarded-Host $host;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-          '';
-          locations."@hermes-serve-login".return = "307 https://${host}/oauth2/start?rd=$scheme://$host$request_uri";
-          locations."/" = {
-            proxyPass = "http://$hermes_serve_backend";
-            proxyWebsockets = true;
-            # Loopback Host: dev servers (vite, jupyter) reject unknown
-            # hosts; the public one rides in X-Forwarded-Host.
-            recommendedProxySettings = false;
+      virtualHosts =
+        lib.listToAttrs (
+          lib.concatMap (
+            name:
+            let
+              p = portsOf name;
+            in
+            [
+              (lib.nameValuePair "hermes-serve-${name}" (
+                vhostFor name p.private
+                // {
+                  locations."${loginPrefix}/" = {
+                    proxyPass = "http://${login}";
+                    recommendedProxySettings = false;
+                    extraConfig = loginHeaders;
+                  };
+                  locations."= /.hermes-serve-auth".extraConfig = ''
+                    internal;
+                    proxy_pass http://${login}${loginPrefix}/auth;
+                    proxy_pass_request_body off;
+                    proxy_set_header Content-Length "";
+                    ${loginHeaders}
+                  '';
+                  # error_page's internal redirect: a GET, no arguments.
+                  locations."= /.hermes-serve-start".extraConfig = ''
+                    internal;
+                    proxy_pass http://${login}${loginPrefix}/start;
+                    proxy_pass_request_body off;
+                    proxy_set_header Content-Length "";
+                    proxy_set_header X-Auth-Request-Redirect $request_uri;
+                    ${loginHeaders}
+                  '';
+                  locations."/" =
+                    let
+                      app = appLocation "$hermes_serve_backend";
+                    in
+                    app
+                    // {
+                      extraConfig = ''
+                        auth_request /.hermes-serve-auth;
+                        auth_request_set $hermes_serve_account $upstream_http_x_auth_request_preferred_username;
+                        error_page 401 = /.hermes-serve-start;
+                      ''
+                      + app.extraConfig;
+                    };
+                }
+              ))
+              (lib.nameValuePair "hermes-serve-public-${name}" (
+                vhostFor name p.public
+                // {
+                  locations."/" = appLocation "127.0.0.1:$hermes_serve_port";
+                }
+              ))
+            ]
+          ) names
+        )
+        // {
+          hermes-serve-forbidden = {
+            serverName = "_";
+            listen = [
+              {
+                addr = "127.0.0.1";
+                port = forbiddenPort;
+              }
+            ];
+            locations."/".return = "403 'Not published, or not published for this account.\\n'";
+            extraConfig = "default_type text/plain;";
+          };
+        }
+        // lib.optionalAttrs dashboard.legacy.servePorts {
+          # Transition only: 301 to the new name, never a backend.
+          hermes-serve-legacy = {
+            serverName = "~^(?<hermes_serve_legacy_port>[0-9]+)\\.${lib.escapeRegex dashboard.host}$";
+            forceSSL = true;
+            useACMEHost = "hermes-subdomains";
             extraConfig = ''
-              auth_request /.hermes-serve-auth;
-              auth_request_set $hermes_serve_account $upstream_http_x_auth_request_preferred_username;
-              error_page 401 = @hermes-serve-login;
-              proxy_set_header Host 127.0.0.1:$hermes_serve_port;
-              proxy_set_header Origin "";
-              proxy_set_header Cookie $hermes_serve_cookie;
-              proxy_set_header X-Real-IP $remote_addr;
-              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-              proxy_set_header X-Forwarded-Proto $scheme;
-              proxy_set_header X-Forwarded-Host $host;
-              proxy_cookie_domain ~.+ $host;
-              proxy_read_timeout 1h;
-              proxy_send_timeout 1h;
-              client_max_body_size 256m;
+              if ($hermes_serve_legacy = "") {
+                return 404;
+              }
+              return 301 https://$hermes_serve_legacy$request_uri;
             '';
           };
         };
-        hermes-serve-forbidden = {
-          serverName = "_";
-          listen = [
-            {
-              addr = "127.0.0.1";
-              port = forbiddenPort;
-            }
-          ];
-          locations."/".return = "403 'Not published, or not published for this account.\\n'";
-          extraConfig = "default_type text/plain;";
-        };
-      };
     };
   };
 }
