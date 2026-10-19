@@ -92,10 +92,8 @@ server and keeps its own files.
 
    Browser:  https://$front/  (sign in with your passkey, then bookmark the
              page you land on)
-   Phone:    open https://$front/app on your phone. It shows your address
-             and walks you through the app:
-             Android  Hermes Mobile  https://f-droid.org/packages/com.m57.hermescontrol/
-             iPhone   Hermes Conduit https://apps.apple.com/us/app/hermes-conduit/id6790977764
+   Phone:    open https://$front/app on your phone; it walks you through
+             the app (Android and iPhone).
 EOF
 
 if [ "$(get telegram)" = true ]; then
