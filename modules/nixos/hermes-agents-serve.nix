@@ -600,7 +600,8 @@ in
       }
       # The bridges behind the sockets above, as the port's owner. stderr
       # goes to the journal, or StandardInput=socket would send a refusal
-      # to nginx.
+      # to nginx. Refused connections leave no failed unit behind
+      # (CollectMode, ./hermes-native/forwards.nix).
       {
         systemd.services = lib.listToAttrs (
           lib.concatMap (
@@ -617,6 +618,7 @@ in
                   StandardInput = "socket";
                   StandardError = "journal";
                 };
+                unitConfig.CollectMode = "inactive-or-failed";
               }
             ) ((portsOf name).private ++ (portsOf name).public)
           ) names
