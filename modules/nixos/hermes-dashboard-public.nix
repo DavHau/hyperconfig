@@ -188,12 +188,15 @@
 #
 # DNS: *.<agentDomain> A (publicIPv4: sgp's v4, forwarded here by
 # ./ipv4-forward.nix) and AAAA (this host's networking.publicIPv6), kept by
-# ./porkbun-records, plus TXT "v=spf1 -all": the wildcard makes every name
-# below agentDomain exist, and none of them sends mail; the apex gets the
-# same TXT and a DMARC p=reject. No null MX (`MX 0 .`): ./porkbun-records
-# has no MX priority. A wildcard does not shadow names that have records of
-# their own. Each dashboard name <agent>.<agentDomain> gets the same
-# records explicitly: names exist below it (*.<agent>.<agentDomain>,
+# ./porkbun-records. No TXT on the wildcards: a wildcard TXT also answers
+# _acme-challenge.<name> until lego creates that record, resolvers cache
+# that answer, and the DNS-01 propagation check then times out. Names below
+# agentDomain send no mail: the _dmarc record's sp=reject covers them, the
+# apex and the dashboard names get "v=spf1 -all". No null MX (`MX 0 .`):
+# ./porkbun-records has no MX priority. A wildcard does not shadow names
+# that have records of their own. Each dashboard name <agent>.<agentDomain>
+# gets the same records explicitly: names exist below it
+# (*.<agent>.<agentDomain>,
 # slot.<agent>.<agentDomain>), which makes it an empty non-terminal that
 # *.<agentDomain> does not answer for under RFC 4592 (porkbun answers it
 # anyway today, 2026-10; standard resolvers and servers need not). TLS: one
@@ -250,13 +253,15 @@ let
         && lib.elem (hostOf user) ([ (if v.serverName != null then v.serverName else name) ] ++ v.serverAliases)
       ) config.services.nginx.virtualHosts
     );
-  record = {
+  wildcardRecord = {
     A = cfg.publicIPv4;
-    TXT = "v=spf1 -all";
     AAAA.ipv6OnLink = {
       inherit (config.networking.publicIPv6) interface;
       suffix = config.networking.publicIPv6.token;
     };
+  };
+  record = wildcardRecord // {
+    TXT = "v=spf1 -all";
   };
   frontLocation = {
     proxyPass = "http://unix:${frontSocket}:";
@@ -569,7 +574,7 @@ in
 
     hyper.porkbunRecords.records = lib.mkIf (cfg.publicIPv4 != null) (
       {
-        "*.${cfg.agentDomain}" = record;
+        "*.${cfg.agentDomain}" = wildcardRecord;
         ${cfg.agentDomain}.TXT = "v=spf1 -all";
         "_dmarc.${cfg.agentDomain}".TXT = "v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s";
         # CAA (the header); its A/AAAA are kept by hand.
@@ -577,7 +582,7 @@ in
       }
       // lib.mapAttrs' (user: _: lib.nameValuePair (hostOf user) record) cfg.users
       // lib.optionalAttrs (cfg.legacy.agentDomain != null) {
-        "*.${cfg.legacy.agentDomain}" = record;
+        "*.${cfg.legacy.agentDomain}" = wildcardRecord;
         ${cfg.legacy.agentDomain}.CAA = dns01Only;
       }
     );
