@@ -241,6 +241,7 @@ in {
                   domi = { displayName = "Domi"; groups = [ "hermes" ]; };
                   rti = { displayName = "Rti"; groups = [ "hermes" ]; };
                   chris = { displayName = "Chris"; groups = [ "hermes" ]; };
+                  b3x = { displayName = "B3x"; groups = [ "hermes" ]; };
                   egg = { displayName = "Egg"; groups = [ "hermes" ]; };
                   momentum = { displayName = "Momentum"; groups = [ "hermes" ]; };
                   nico = { displayName = "Nico"; groups = [ "apps" ]; };
