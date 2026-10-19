@@ -31,9 +31,12 @@
 #
 # The app drives the system `ssh` with BatchMode and an `-i` at most, never
 # IdentitiesOnly, so with the default config every connect would first offer
-# every agent identity - i.e. poke the TPM agent for a confirmation. The
-# Match block fixes that client-side for exactly this user@host; other
-# accounts on hermes.davhau.com keep the normal identities. BatchMode
+# every agent identity - i.e. poke the TPM agent for a confirmation. So the
+# app dials the alias `alias` below, whose Host block pins the restricted
+# key; ssh resolves it to hermes.davhau.com. A plain
+# `ssh dave-hermes@hermes.davhau.com` keeps the normal identities and gets
+# its shell: a `Match host ... user dave-hermes` here once handed it the
+# restricted key too, and the login hung on the refused pty. BatchMode
 # cannot answer a TOFU prompt, so the host is verified as `som.d`: som
 # presents its clan sshd CA certificate (principal som.d) on every address,
 # and the sshd client role trusts that CA for `*.d` in ssh_known_hosts.
@@ -46,6 +49,8 @@
 { config, lib, pkgs, ... }:
 let
   host = "hermes.davhau.com";
+  # What the app dials; only ssh_config below knows it.
+  alias = "hermes-desktop-dave-hermes";
   user = "dave-hermes";
   key = config.clan.core.vars.generators.hermes-desktop-ssh.files.key.path;
   keyDir = "/run/hermes-desktop-ssh";
@@ -73,7 +78,8 @@ in
   '';
 
   programs.ssh.extraConfig = ''
-    Match host ${host} user ${user}
+    Host ${alias}
+      HostName ${host}
       IdentityFile ${keyDir}/%u
       IdentitiesOnly yes
       IdentityAgent none
@@ -83,6 +89,7 @@ in
   services.hermes-microvm.desktop.connections.remotes.${user} = {
     kind = "ssh";
     label = "dave-hermes";
-    inherit host user;
+    inherit user;
+    host = alias;
   };
 }
