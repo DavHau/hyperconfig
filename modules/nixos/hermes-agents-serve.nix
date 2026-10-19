@@ -101,7 +101,8 @@
 # TLS: one wildcard cert per agent, *.<agent>.<agentDomain>, via porkbun
 # DNS-01; no port number lands in the CT logs. DNS: *.<agent>.<agentDomain>
 # A (sgp's v4, forwarded by ./ipv4-forward.nix) and AAAA (this host's
-# networking.publicIPv6), TXT "v=spf1 -all", kept by ./porkbun-records; the
+# networking.publicIPv6), kept by ./porkbun-records (no wildcard TXT: it
+# would answer _acme-challenge, ../hermes-dashboard-public.nix); the
 # agent slot's name has records of its own (./agent-slots.nix). The
 # wildcard also covers the slot's name slot.<agent>.<agentDomain>, so a
 # browser may reuse a connection to one of these hosts (same v4 address)
@@ -443,7 +444,6 @@ in
     hyper.porkbunRecords.records = lib.mkIf (dashboard.publicIPv4 != null) (
       lib.genAttrs (map (name: "*.${name}.${domain}") names) (_: {
         A = dashboard.publicIPv4;
-        TXT = "v=spf1 -all";
         AAAA.ipv6OnLink = {
           inherit (config.networking.publicIPv6) interface;
           suffix = config.networking.publicIPv6.token;
