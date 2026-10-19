@@ -70,6 +70,7 @@ in
     ./git.nix
     ./jujutsu.nix
     ./alacritty.nix
+    ./nautilus.nix
     ./udiskie.nix
     ./bitwarden.nix
     ./thunderbird.nix
