@@ -1,195 +1,117 @@
-# hermes-onboard <machine> <user>
+# hermes-onboard <machine> <agent>
 #
-# Prints the welcome sheet for one hermes user on one machine, written to
-# be pasted to the person as is: first the one-time passkey setup link,
-# then the web dashboard, then optional extras (Claude subscription through
-# the agent's own OAuth flow, messengers on the dashboard's Channels page),
-# then the terminal access for those who want it.
-# Notes meant for the operator (which keys log in, where secrets live) go
-# to stderr, so stdout stays the message. Everything is read from the flake
-# (nixosConfigurations, clan inventory) and the clan vars store, so the
-# sheet matches what is deployed. Run from the repo root (or set
-# HYPERCONFIG to it).
+# Prints the welcome message for the person behind one published hermes
+# agent (hyper.hermesDashboard.users), ready to paste: a one-time link to
+# set up their passkey, then where to talk to the agent (browser, Hermes
+# Mobile, terminal). Operator notes go to stderr. Facts come from the flake
+# and the clan vars store, so the message matches what is deployed. Run
+# from the repo root (or set HYPERCONFIG).
+#
+# The message names only the front door (hermes.davhau.com): it signs the
+# person in and forwards to their dashboard on the agents' site, and its
+# /app page shows the address for the app
+# (modules/nixos/hermes-dashboard-public.nix).
 #
 # The setup link is a pocket-id one-time access token, minted through the
-# admin API with the server's static API key (clan var pocket-id/api_key of
-# the oidc server machine). Every run mints a new one; each is valid for
-# LINK_DAYS days (default 7, pocket-id caps it at 31) and signs in once.
-# The person then registers a passkey on the account page it lands on.
+# admin API with the oidc server's static API key (clan var
+# pocket-id/api_key). Each run mints a new one, valid LINK_DAYS days
+# (default 7, pocket-id caps it at 31), good for one sign-in.
 
-usage() {
-  echo "usage: hermes-onboard <machine> <user>" >&2
+[ $# -eq 2 ] || {
+  echo "usage: hermes-onboard <machine> <agent>" >&2
   exit 2
 }
-
-[ $# -eq 2 ] || usage
 machine=$1
-user=$2
+agent=$2
 repo=${HYPERCONFIG:-.}
 link_days=${LINK_DAYS:-7}
-link_ttl="$((link_days * 24))h"
 
-# pocket_id_link <issuer> <account>: prints a one-time login link, or an
-# error on stderr and nothing on stdout.
-pocket_id_link() {
-  local issuer=$1 account=$2 server key id token
-  server=$(nix eval --raw "$repo#clan.inventory.instances.oidc.roles.server.machines" \
-    --apply 'm: builtins.head (builtins.attrNames m)' 2>/dev/null) || {
-    echo "hermes-onboard: cannot find the oidc server machine in the clan inventory" >&2
-    return 1
-  }
-  key=$(clan vars get "$server" pocket-id/api_key 2>/dev/null) || {
-    echo "hermes-onboard: cannot read clan var pocket-id/api_key of $server" >&2
-    return 1
-  }
-  # The admin key rides in through a file descriptor, not argv (ps).
-  api() { curl -fsS -H @<(printf 'X-API-Key: %s\n' "$key") "$@"; }
-  # search is a substring match over name/email/username; pick the exact
-  # username.
-  id=$(api --get --data-urlencode "search=$account" "$issuer/api/users" |
-    jq -r --arg a "$account" '.data[] | select(.username == $a) | .id') || {
-    echo "hermes-onboard: pocket-id user lookup failed" >&2
-    return 1
-  }
-  if [ -z "$id" ]; then
-    echo "hermes-onboard: no pocket-id account '$account' yet (deploy $server first)" >&2
-    return 1
-  fi
-  token=$(api -H 'Content-Type: application/json' -d "{\"ttl\":\"$link_ttl\"}" \
-    "$issuer/api/users/$id/one-time-access-token" | jq -er .token) || {
-    echo "hermes-onboard: pocket-id token creation failed" >&2
-    return 1
-  }
-  echo "$issuer/lc/$token"
+die() {
+  echo "hermes-onboard: $*" >&2
+  exit 1
 }
 
-# One eval for every fact. The public dashboards are declared in
-# hyper.hermesDashboard (modules/nixos/hermes-dashboard-public.nix): each
-# agent's at users.<user>.publicUrl (on the agents' site, davhau.fyi), with
-# hermes' own pocket-id login. The front door's host (hermes.davhau.com)
-# redirects there after sign-in and lists the addresses for Hermes Mobile
-# at /app; it is also the public DNS name of the machine, so SSH uses it.
-# The user name is spliced into the expression; \${n} is Nix's, not the
-# shell's.
-expr=$(cat <<EOF
+# One eval for every fact; \${…} below is Nix's, not the shell's.
+facts=$(nix eval --json "$repo#nixosConfigurations.$machine.config" --apply "$(cat <<EOF
 c:
 let
-  u = c.users.users.$user or null;
-  hn = c.services.hermes-native.users.$user or null;
-  hv = c.services.hermes-microvm.users.$user or null;
-  h = if hn != null then hn else hv;
-  d = c.hyper.hermesDashboard.users.$user or null;
+  d = c.hyper.hermesDashboard.users.$agent or null;
   comment = k: let p = builtins.filter builtins.isString (builtins.split " " k);
     in if builtins.length p > 2 then builtins.elemAt p 2 else "(no comment)";
 in
-{
-  exists = u != null && h != null && (h.enable or true);
-  native = hn != null;
-  keys = if u == null then [ ] else map comment u.openssh.authorizedKeys.keys;
-  publicHost = if d == null then null else c.hyper.hermesDashboard.host;
-  dashboard = if d == null then null else "\${d.publicUrl}/";
-  account = if d == null then null else d.account;
-  issuer = if d == null then null else c.hyper.oidc.issuer;
-  hasTelegram = (c.hyper.hermes.users.$user.telegram.enable or false);
-  claudeAuth = c.environment.etc ? "hermes-claude-auth";
+if d == null then null else {
+  inherit (d) account;
+  front = c.hyper.hermesDashboard.host;
+  issuer = c.hyper.oidc.issuer;
+  keys = map comment c.users.users.$agent.openssh.authorizedKeys.keys;
+  telegram = c.hyper.hermes.users.$agent.telegram.enable or false;
+  claude = c.environment.etc ? "hermes-claude-auth";
 }
 EOF
-)
-facts=$(nix eval --json "$repo#nixosConfigurations.$machine.config" --apply "$expr" 2>/dev/null) || {
-  echo "hermes-onboard: cannot evaluate nixosConfigurations.$machine" >&2
-  exit 1
-}
+)" 2>/dev/null) || die "cannot evaluate nixosConfigurations.$machine"
+[ "$facts" != null ] || die "no published hermes agent '$agent' on $machine"
 
-if [ "$(jq -r .exists <<<"$facts")" != true ]; then
-  echo "hermes-onboard: no hermes user '$user' on $machine" >&2
-  exit 1
-fi
+get() { jq -r ".$1" <<<"$facts"; }
+account=$(get account)
+front=$(get front)
+issuer=$(get issuer)
 
-native=$(jq -r .native <<<"$facts")
-dashboard=$(jq -r '.dashboard // empty' <<<"$facts")
-keys=$(jq -r '.keys | join(", ")' <<<"$facts")
-host=$(jq -r '.publicHost // empty' <<<"$facts")
-host=${host:-$machine}
+# Mint the link before printing anything: without it the message is useless.
+server=$(nix eval --raw "$repo#clan.inventory.instances.oidc.roles.server.machines" \
+  --apply 'm: builtins.head (builtins.attrNames m)' 2>/dev/null) ||
+  die "no oidc server machine in the clan inventory"
+key=$(clan vars get "$server" pocket-id/api_key 2>/dev/null) ||
+  die "cannot read clan var pocket-id/api_key of $server"
+# The admin key rides in through a file descriptor, not argv (ps).
+api() { curl -fsS -H @<(printf 'X-API-Key: %s\n' "$key") "$@"; }
+# search is a substring match; pick the exact username.
+id=$(api --get --data-urlencode "search=$account" "$issuer/api/users" |
+  jq -r --arg a "$account" '.data[] | select(.username == $a) | .id') ||
+  die "pocket-id user lookup failed"
+[ -n "$id" ] || die "no pocket-id account '$account' yet (deploy $server first)"
+token=$(api -H 'Content-Type: application/json' -d "{\"ttl\":\"$((link_days * 24))h\"}" \
+  "$issuer/api/users/$id/one-time-access-token" | jq -er .token) ||
+  die "pocket-id token creation failed"
 
-note() { echo "hermes-onboard: $*" >&2; }
+echo "hermes-onboard: pocket-id account $account; SSH keys: $(jq -r '.keys | join(", ")' <<<"$facts")" >&2
 
-# Mint the setup link before printing anything: a sheet without it is
-# useless, so fail instead of printing half a message.
-if [ -n "$dashboard" ]; then
-  issuer=$(jq -r .issuer <<<"$facts")
-  account=$(jq -r .account <<<"$facts")
-  link=$(pocket_id_link "$issuer" "$account") || exit 1
-fi
+cat <<EOF
+Welcome to Hermes!
 
-[ -n "$keys" ] && note "SSH as $user accepts the keys: $keys"
+Hermes is your personal AI assistant. It runs around the clock on DavHau's
+server and keeps its own files.
 
-echo "Welcome to Hermes, $user!"
-echo
-echo "Hermes is your personal AI assistant. It runs on DavHau.com around the"
-echo "clock and keeps its own files, so you can come back to it any time."
+1. Set up your login (once, before $(date -d "+$link_days days" '+%A, %-d %B'))
 
-if [ -n "$dashboard" ]; then
+   $issuer/lc/$token
+
+   This personal link signs you in once. Add a passkey when asked (phone,
+   fingerprint or computer login; no password). Keep the link to yourself.
+
+2. Talk to your assistant
+
+   Browser:  https://$front/  (sign in with your passkey, then bookmark the
+             page you land on)
+   Phone:    open https://$front/app on your phone. It shows your address
+             and walks you through the app:
+             Android  Hermes Mobile  https://f-droid.org/packages/com.m57.hermescontrol/
+             iPhone   Hermes Conduit https://apps.apple.com/us/app/hermes-conduit/id6790977764
+EOF
+
+if [ "$(get telegram)" = true ]; then
   echo
-  echo "STEP 1 - Set up your login (do this first, only once)"
-  echo
-  echo "  Open this personal link before $(date -d "+$link_days days" '+%A, %-d %B'):"
-  echo
-  echo "    $link"
-  echo
-  echo "  It signs you in once. Then add a passkey when the page asks for it:"
-  echo "  your phone, fingerprint or computer password is enough, no new"
-  echo "  password to remember. The link works only once, keep it to yourself."
-  echo
-  echo "STEP 2 - Talk to your assistant"
-  echo
-  echo "  Open $dashboard in your browser"
-  echo "  and log in with your passkey (account name: $account)."
-  echo "  Bookmark the page: this is where you chat with Hermes from now on."
-  echo "  https://$host/ takes you there too after signing in."
-  echo
-  echo "  Hermes Mobile app: open https://$host/app in your browser, sign in,"
-  echo "  and enter the address it shows as the server in the app."
-fi
-
-claude=$(jq -r .claudeAuth <<<"$facts")
-telegram=$(jq -r .hasTelegram <<<"$facts")
-[ "$telegram" = true ] && note "telegram: the allowlisted user id is in the telegram var"
-
-if [ "$claude" = true ] || [ -n "$dashboard" ] || [ "$telegram" = true ]; then
-  echo
-  echo "OPTIONAL - Make it yours"
-  if [ "$claude" = true ]; then
-    echo
-    echo "  Have a Claude Pro or Max subscription? Your assistant can use it."
-    echo "  Write in the chat: \"Connect my Claude subscription\". It sends you a"
-    echo "  sign-in link: open it, log in to Claude, and paste the code you get"
-    echo "  back into the chat."
-  fi
-  if [ "$telegram" = true ]; then
-    echo
-    echo "  Your Telegram bot is already set up: just send it a message."
-  fi
-  if [ -n "$dashboard" ]; then
-    echo
-    echo "  Want to reach your assistant from Telegram, WhatsApp, Signal and"
-    echo "  other messengers? Connect them in the web interface on the"
-    echo "  Channels page (left menu)."
-  fi
+  echo "   Telegram: your bot is set up, just send it a message."
 fi
 
 echo
-if [ -n "$dashboard" ]; then
-  echo "OPTIONAL - For terminal users"
-  echo
-  echo "  Everything above works in the browser. If you use a terminal and SSH:"
-else
-  echo "HOW TO CONNECT (terminal)"
-  echo
-fi
+echo "3. Optional"
 echo
-echo "  Log in:            ssh $user@$host"
-echo "  Chat in terminal:  ssh -t $user@$host hermes"
-echo "  Coding agent:      ssh -t $user@$host afk --model p0/qwen"
-if [ "$native" = true ]; then
-  echo "  (you get a full shell in the account your assistant runs in)"
+if [ "$(get claude)" = true ]; then
+  echo "   Claude Pro/Max: write \"Connect my Claude subscription\" in the chat"
+  echo "   and follow the link it sends."
 fi
+cat <<EOF
+   Other messengers (Telegram, WhatsApp, Signal, ...): connect them on the
+   Channels page of your dashboard.
+   Terminal: ssh $agent@$front  (ssh -t $agent@$front hermes to chat)
+EOF

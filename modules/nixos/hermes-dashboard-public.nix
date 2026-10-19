@@ -161,10 +161,13 @@
 # oauth2-proxy (client `hermes`, group `hermes`, as the mail owner page)
 # and only redirects: an account with one agent goes to that agent's
 # dashboard, one with several gets a list of links, any other a 403.
-# https://<host>/app answers the signed-in account's dashboard addresses as
-# plain text, to paste into Hermes Mobile as the server. nginx learns the
-# account after auth_request, which an `if` in the vhost would not see, so
-# it asks a server on a unix socket that only nginx can reach. The login
+# https://<host>/app is the phone setup page: the signed-in account's
+# dashboard address(es), links to the apps (Hermes Mobile on Android, Hermes
+# Conduit on iPhone) and a conduit://connect link that fills the address in
+# Conduit. One static page per account, built here from Nix values only.
+# nginx learns the account after auth_request, which an `if` in the vhost
+# would not see, so it asks a server on a unix socket that only nginx can
+# reach. The login
 # cookie is `__Host-hermes`, host-only: no other davhau.com name can set or
 # overwrite it, and it reaches no agent-controlled host. oauth2-proxy
 # listens on a unix socket systemd (root) holds for the whole uptime
@@ -290,6 +293,58 @@ let
         ) agentsOf
       )}}
     '';
+  # The phone setup page of one account (the header). Only Nix values go
+  # in: agent names are DNS labels (asserted), so nothing needs escaping
+  # beyond the URL parameter.
+  appPage =
+    account: agents:
+    let
+      entry =
+        a:
+        let
+          url = cfg.users.${a}.publicUrl;
+          param = lib.replaceStrings [ ":" "/" ] [ "%3A" "%2F" ] url;
+        in
+        ''
+          <p class="addr">${url}</p>
+          <p><a class="btn" href="conduit://connect?url=${param}">iPhone: open in Hermes Conduit</a></p>
+        '';
+    in
+    pkgs.writeText "hermes-app-${account}.html" ''
+      <!doctype html>
+      <html lang="en"><head><meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>Hermes on your phone</title>
+      <style>
+      body{font:17px/1.5 system-ui,sans-serif;max-width:34rem;margin:2rem auto;padding:0 1rem}
+      .addr{font:600 1.1rem monospace;user-select:all;-webkit-user-select:all;padding:.6rem;border:1px solid #888;border-radius:.4rem;word-break:break-all}
+      .btn{display:inline-block;padding:.6rem 1rem;border-radius:.4rem;background:#3366cc;color:#fff;text-decoration:none}
+      li{margin:.4rem 0}
+      </style></head><body>
+      <h1>Hermes on your phone</h1>
+      <p>Your assistant's address${lib.optionalString (lib.length agents > 1) "es"}:</p>
+      ${lib.concatMapStrings entry agents}
+      <h2>Android</h2>
+      <ol>
+      <li>Install <b>Hermes Mobile</b> from <a href="https://f-droid.org/packages/com.m57.hermescontrol/">F-Droid</a>
+      or <a href="https://github.com/Hy4ri/hermes-mobile/releases/latest">GitHub</a>.</li>
+      <li>Open it, tap <b>Sign in</b> and enter the address above (tap it to select, then copy).</li>
+      <li>Tap the browser sign-in and confirm with your passkey.</li>
+      </ol>
+      <h2>iPhone</h2>
+      <ol>
+      <li>Install <a href="https://apps.apple.com/us/app/hermes-conduit/id6790977764"><b>Hermes Conduit</b></a> from the App Store.</li>
+      <li>Tap <b>iPhone: open in Hermes Conduit</b> above, then <b>Sign in</b>, and confirm with your passkey.</li>
+      </ol>
+      <p>Reading this on a computer? Open https://${cfg.host}/app on your phone instead.</p>
+      </body></html>
+    '';
+  appPages = pkgs.linkFarm "hermes-app-pages" (
+    lib.mapAttrsToList (account: agents: {
+      name = "${account}.html";
+      path = appPage account agents;
+    }) agentsOf
+  );
 in
 {
   imports = [
@@ -660,12 +715,13 @@ in
           else
             null
         )}
-        ${frontMap "$hermes_front_app" (
-          agents:
-          "Hermes Mobile: enter ${
-            if lib.length agents == 1 then "this address" else "one of these addresses"
-          } as the server.\\n${lib.concatMapStrings (a: "  ${cfg.users.${a}.publicUrl}\\n") agents}"
-        )}
+        # The account's own page file; unknown accounts map to nothing, so
+        # the header never reaches a file path.
+        map $http_x_hermes_account $hermes_front_app {
+          default "";
+        ${lib.concatMapStrings (account: ''
+          "${account}" "${account}.html";
+        '') (lib.attrNames agentsOf)}}
       ''
       + lib.optionalString (cfg.legacy.agentDomain != null) ''
         map $host $hermes_dashboard_legacy {
@@ -693,10 +749,13 @@ in
             add_header X-Content-Type-Options nosniff always;
           '';
           locations."= /app".extraConfig = ''
-            if ($hermes_front_app) {
-              return 200 $hermes_front_app;
+            if ($hermes_front_app = "") {
+              return 403 "No hermes dashboard for this account.\n";
             }
-            return 403 "No hermes dashboard for this account.\n";
+            default_type text/html;
+            add_header X-Content-Type-Options nosniff always;
+            add_header Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'" always;
+            alias ${appPages}/$hermes_front_app;
           '';
           locations."/".extraConfig = ''
             if ($hermes_front_redirect) {

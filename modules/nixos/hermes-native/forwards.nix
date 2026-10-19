@@ -28,7 +28,10 @@ in
   config = lib.mkIf cfg.enable {
     # Runs as the owner: the bridge derives the backend port from its own
     # uid. stderr goes to the journal, or StandardInput=socket would leak
-    # a refusal to the dialer.
+    # a refusal to the dialer. One instance per connection; a refusal (no
+    # backend, or another uid's) exits non-zero, and CollectMode unloads
+    # that failed instance instead of keeping it in `systemctl --failed`.
+    # The refusal stays in the journal.
     systemd.services = forEachForward (
       user: name: fwd: {
         "hermes-${name}-fwd-${user}@" = {
@@ -39,6 +42,7 @@ in
             StandardInput = "socket";
             StandardError = "journal";
           };
+          unitConfig.CollectMode = "inactive-or-failed";
         };
       }
     );

@@ -1294,10 +1294,13 @@ pkgs.testers.runNixOSTest {
         assert not any(n.startswith("_oauth2_proxy") for n in front), front
         front_value = front["__Host-hermes"][2]
 
-        # /app: the signed-in account's dashboard addresses, nothing else.
+        # /app: the phone setup page with the account's own address only.
         code, _, body = https("https://${dashHost}/app", "-b /tmp/j1")
-        assert code == "200" and body == "Hermes Mobile: enter this address as the server.\n  https://${aliceDashHost}\n", (code, body)
-        assert "content-type: text/plain" in server.succeed("curl -sk -D - -o /dev/null -b /tmp/j1 https://${dashHost}/app").lower()
+        assert code == "200" and "https://${aliceDashHost}" in body and "bob" not in body, (code, body)
+        assert "conduit://connect?url=https%3A%2F%2F${aliceDashHost}" in body, body
+        assert "com.m57.hermescontrol" in body and "hermes-conduit" in body, body
+        hdrs = server.succeed("curl -sk -D - -o /dev/null -b /tmp/j1 https://${dashHost}/app").lower()
+        assert "content-type: text/html" in hdrs and "default-src 'none'" in hdrs, hdrs
         login_as("bob-owner")
         code, _, body = https("https://${dashHost}/app", "-L -c /tmp/jb -b /tmp/jb")
         assert code == "200" and "https://bob.${fyi}" in body and "alice" not in body, (code, body)
@@ -1585,6 +1588,10 @@ pkgs.testers.runNixOSTest {
         for port in (${toString alicePrivate}, ${toString alicePublic}):
             assert squatted(port) == "", (port, squatted(port))
             server.wait_until_succeeds(f"journalctl -u 'hermes-serve-fwd-{port}@*' | grep -q 'owned by uid 1002'")
+        # A refused connection leaves no failed bridge unit behind
+        # (CollectMode); the refusal is in the journal above.
+        failed = server.succeed("systemctl list-units --failed --all --plain --no-legend 'hermes-serve-fwd-*' 'hermes-*-fwd-*'")
+        assert failed.strip() == "", failed
         server.succeed("systemctl stop squat-${toString alicePrivate} squat-${toString alicePublic}")
         server.succeed("systemctl start echo-private echo-public")
         server.wait_until_succeeds("python3 ${connect} 127.0.0.1 ${toString alicePublic}")
