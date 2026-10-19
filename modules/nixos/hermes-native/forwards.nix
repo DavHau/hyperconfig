@@ -44,13 +44,34 @@ in
     );
 
     # The iptables owner-match gates (firewall.nix) decide who may dial.
+    #
+    # nginx opens one connection per request (no upstream keepalive), so
+    # every request to a dashboard is one activation here, and anyone on
+    # the internet can send those. The trigger limit (default 200
+    # activations per 2s) would put the socket into the failed state for
+    # good on a burst; TriggerLimitIntervalSec=0 disables it (systemd.socket(5)).
+    # The poll limit (default 150 polling events per 2s) stays: it only
+    # slows a flood down, and nginx's per-client-network limits
+    # (../hermes-dashboard-public.nix) keep one client from taking it all.
+    #
+    # MaxConnections bounds the bridges running at once (one process
+    # each); above it systemd refuses new connections (502) until one
+    # ends, the socket keeps listening. A dashboard tab holds a handful of
+    # long-lived websockets and streams; nginx allows one client network
+    # at most 128 requests in flight per host, so 512 leaves room for
+    # three more such clients at the limit, while still bounding what a
+    # flood spread over many networks can spawn.
     systemd.sockets = forEachForward (
       user: name: fwd: {
         "hermes-${name}-fwd-${user}" = {
           description = "${fwd.label} forward socket for ${user}";
           wantedBy = [ "sockets.target" ];
           listenStreams = [ "127.0.0.1:${toString (fwd.portFor user)}" ];
-          socketConfig.Accept = true;
+          socketConfig = {
+            Accept = true;
+            TriggerLimitIntervalSec = 0;
+            MaxConnections = 512;
+          };
         };
       }
     );

@@ -13,7 +13,7 @@
 // connection belongs to the owner's uid. Only then does it forward a
 // single byte. TCP loopback has no SO_PEERCRED; the procfs table is the
 // kernel's own record of the peer socket's owner, and the check happens on
-// the established connection, so there is no window between check and use.
+// the connection itself, so there is no window between check and use.
 
 use std::io;
 use std::net::{Ipv4Addr, Shutdown, SocketAddrV4, TcpStream};
@@ -25,8 +25,16 @@ extern "C" {
     fn geteuid() -> u32;
 }
 
-/// uid of the ESTABLISHED socket whose local end is `local` and whose
-/// remote end is `remote`, from /proc/net/tcp. None when absent.
+/// uid of the socket whose local end is `local` and whose remote end is
+/// `remote`, from /proc/net/tcp. None when absent.
+///
+/// ESTABLISHED (01), or SYN_RECV (03): connect(2) returns once the
+/// handshake's last ACK is sent, but while the listener's accept queue is
+/// full (an app with a small backlog under a burst) the kernel drops that
+/// ACK and keeps the connection as a request socket until there is room.
+/// The kernel prints a request socket with its LISTENER's uid
+/// (get_openreq4 in net/ipv4/tcp_ipv4.c), the same uid an accepted socket
+/// inherits, so both answer who bound the port.
 fn peer_uid(local: SocketAddrV4, remote: SocketAddrV4) -> Option<u32> {
     let table = std::fs::read_to_string("/proc/net/tcp").ok()?;
     let want_local = hex_addr(local);
@@ -37,7 +45,7 @@ fn peer_uid(local: SocketAddrV4, remote: SocketAddrV4) -> Option<u32> {
         if f.len() < 8 {
             continue;
         }
-        if f[1] == want_local && f[2] == want_remote && f[3] == "01" {
+        if f[1] == want_local && f[2] == want_remote && (f[3] == "01" || f[3] == "03") {
             return f[7].parse().ok();
         }
     }
@@ -87,34 +95,51 @@ fn main() {
     };
     let backend = SocketAddrV4::new(Ipv4Addr::LOCALHOST, port as u16);
 
-    let target = match TcpStream::connect(backend) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("backend {} is down: {}", backend, e);
-            exit(1);
+    // A connection the table does not show cannot be checked, and then
+    // the bridge drops it and dials again, for a second at most. That
+    // happens under a burst: the kernel renders /proc/net/tcp a page at a
+    // time and resumes each read by position, so while many connections
+    // open and close one read can skip a line; and a listener with a
+    // short backlog answers with SYN cookies, which keep no socket at all
+    // until the backend accepts, which it never does before the client
+    // sends (and the bridge sends nothing unchecked). A socket of another
+    // uid is final.
+    let mut attempts = 0;
+    let target = loop {
+        let target = match TcpStream::connect(backend) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("backend {} is down: {}", backend, e);
+                exit(1);
+            }
+        };
+        let ours = match target.local_addr() {
+            Ok(std::net::SocketAddr::V4(a)) => a,
+            _ => {
+                eprintln!("backend connection is not IPv4");
+                exit(1);
+            }
+        };
+        match peer_uid(backend, ours) {
+            Some(owner) if owner == uid => break target,
+            Some(owner) => {
+                eprintln!(
+                    "refusing: backend {} is owned by uid {}, expected {}",
+                    backend, owner, uid
+                );
+                exit(1);
+            }
+            None if attempts < 20 => {
+                attempts += 1;
+                drop(target);
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            None => {
+                eprintln!("refusing: backend {} not found in /proc/net/tcp", backend);
+                exit(1);
+            }
         }
     };
-    let ours = match target.local_addr() {
-        Ok(std::net::SocketAddr::V4(a)) => a,
-        _ => {
-            eprintln!("backend connection is not IPv4");
-            exit(1);
-        }
-    };
-    match peer_uid(backend, ours) {
-        Some(owner) if owner == uid => {}
-        Some(owner) => {
-            eprintln!(
-                "refusing: backend {} is owned by uid {}, expected {}",
-                backend, owner, uid
-            );
-            exit(1);
-        }
-        None => {
-            eprintln!("refusing: backend {} not found in /proc/net/tcp", backend);
-            exit(1);
-        }
-    }
 
     // SAFETY: fd 0 is the accepted SOCK_STREAM connection. StandardInput=
     // socket makes fd 1 the same socket. We take ownership of fd 0 once,

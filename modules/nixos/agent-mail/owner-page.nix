@@ -162,7 +162,10 @@ in
       description = "Socket of the agent mail owner page's oauth2-proxy";
       wantedBy = [ "sockets.target" ];
       listenStreams = [ socket ];
+      # No trigger limit, as the front door's
+      # (../hermes-dashboard-public.nix says why).
       socketConfig = {
+        TriggerLimitIntervalSec = 0;
         SocketUser = "root";
         SocketGroup = config.services.nginx.group;
         SocketMode = "0660";

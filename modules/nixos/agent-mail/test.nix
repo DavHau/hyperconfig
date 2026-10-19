@@ -1,6 +1,7 @@
 # ./mail.nix and ./owner-page.nix end to end, with the real nginx config of
 # the front door and the agents' dashboards (../hermes-dashboard-public.nix,
-# hermes itself stubbed by an echo backend) and the serve ports
+# hermes itself stubbed by an echo backend behind the real owner-checking
+# forward of ../hermes-native/forwards.nix) and the serve ports
 # (../hermes-agents-serve.nix) on the agents' own domain, with the old
 # names' redirects: Stalwart as MX, mailgate, two agents (alice, bob), all
 # three oauth2-proxy instances against a stub OIDC provider, and a
@@ -14,9 +15,9 @@
 #   flood.test    nothing                              (rate limit target)
 #
 # The subtests named after a finding (F1..F9 of the first review, G1..G6
-# of the second, HIGH-1, MEDIUM-1 and LOW-2 of the third) are its
-# regression tests; those of the first two reviews each reproduced the
-# finding against the code before the fix.
+# of the second, HIGH-1, MEDIUM-1 and LOW-2 of the third, MEDIUM-N1 and
+# LOW-N2 of the fourth) are its regression tests; those of the first two
+# reviews each reproduced the finding against the code before the fix.
 { pkgs, inputs }:
 let
   inherit (pkgs) lib;
@@ -30,6 +31,8 @@ let
   # the dashboards' old one, as agents.davhau.com does.
   fyi = "fyi.test";
   aliceDashPort = hlib.dashboardPortFor "alice";
+  # hermes' own port, behind the forward (alice is uid 1001).
+  aliceDashBackend = hlib.dashboardBackendBase + 1001;
   aliceDashHost = "alice.${fyi}";
   # alice is uid 1001: serve ports 30010-30014 private, 30015-30019 public;
   # bob (1002) has 30020-30024 private.
@@ -631,6 +634,7 @@ pkgs.testers.runNixOSTest {
         ./owner-page.nix
         ../hermes-dashboard-public.nix
         ../hermes-agents-serve.nix
+        ../hermes-native/forwards.nix
         inputs.spaces.nixosModules.spaces-users
         stubs
       ];
@@ -765,9 +769,9 @@ pkgs.testers.runNixOSTest {
         };
       };
       # alice's agent backends: her dashboard and two private, one public
-      # serve port. The serve ports' bridges take only a backend alice
-      # runs.
-      systemd.services.echo-dashboard = echoService "root" aliceDashPort;
+      # serve port. The forward and the serve ports' bridges take only a
+      # backend alice runs.
+      systemd.services.echo-dashboard = echoService "alice" aliceDashBackend;
       systemd.services.echo-private = echoService "alice" alicePrivate;
       systemd.services.echo-private2 = echoService "alice" alicePrivate2;
       systemd.services.echo-public = echoService "alice" alicePublic;
@@ -1281,7 +1285,7 @@ pkgs.testers.runNixOSTest {
         # oauth2-proxy), which sends her on to her agent's dashboard on the
         # agents' own domain.
         code, eff, body = https("https://${dashHost}/", "-L -c /tmp/j1 -b /tmp/j1")
-        assert code == "200" and eff == "https://${aliceDashHost}/" and body == "backend ${toString aliceDashPort}\n", (code, eff, body)
+        assert code == "200" and eff == "https://${aliceDashHost}/" and body == "backend ${toString aliceDashBackend}\n", (code, eff, body)
         # A name under the agents' domain that is no dashboard.
         assert https("https://nobody.${fyi}/")[0] == "404"
         front = jar_cookies("/tmp/j1")
@@ -1350,7 +1354,7 @@ pkgs.testers.runNixOSTest {
                    + "__Host-hermes_serve=" + serve_value)
         secrets_ = [front_value, serve_value, "stolen"]
         for port, url, expected in (
-            (${toString aliceDashPort}, "https://${aliceDashHost}/leak", ["__Host-hermes_session_at=hs"]),
+            (${toString aliceDashBackend}, "https://${aliceDashHost}/leak", ["__Host-hermes_session_at=hs"]),
             (${toString alicePrivate}, "https://${alicePrivateHost}/leak", ["app=1; trader_dashboard=tok; _xsrf=abc"]),
             (${toString alicePublic}, "https://${alicePublicHost}/leak", ["app=1; trader_dashboard=tok; _xsrf=abc"]),
         ):
@@ -1370,7 +1374,7 @@ pkgs.testers.runNixOSTest {
                   + "; hermes_session_atx=x; __Host-hermes=" + front_value)
         code, _, _ = https("https://${aliceDashHost}/mobile", f"-H 'Cookie: {mobile}'")
         assert code == "200", code
-        got = [e for e in echo_log(${toString aliceDashPort}) if e["path"] == "/mobile"][-1]["cookie"]
+        got = [e for e in echo_log(${toString aliceDashBackend}) if e["path"] == "/mobile"][-1]["cookie"]
         assert got == ["hermes_session_at=m-at; hermes_session_rt=m-rt; hermes_session_provider=self_hosted"
                        "; __Host-hermes_session_pkce=pk; __Host-hermes_sso_attempt=1"], got
         # Backends set cookies on their own host only (the agent asked for
@@ -1433,7 +1437,7 @@ pkgs.testers.runNixOSTest {
         for host in ("alice.${domain}", "${toString alicePrivate}.${dashHost}", "${toString alicePublic}.${dashHost}"):
             for scheme in ("https", "http"):
                 assert redirect(f"{scheme}://{host}/.well-known/acme-challenge/tok") == ("404", ""), (scheme, host)
-        for port in (${toString aliceDashPort}, ${toString alicePrivate}, ${toString alicePublic}):
+        for port in (${toString aliceDashBackend}, ${toString alicePrivate}, ${toString alicePublic}):
             assert not any(e["path"].startswith(("/old", "/.well-known")) for e in echo_log(port)), port
         assert https("https://nobody.${domain}/")[0] == "404"
         assert https("https://12345.${dashHost}/")[0] == "404"
@@ -1599,6 +1603,73 @@ pkgs.testers.runNixOSTest {
         assert code == "403" and "Not published" in body, (code, body)
         assert squatted(29999) == ""
         server.succeed("systemctl stop squat-4180 squat-4181 squat-4182 squat-29999")
+
+    with subtest("MEDIUM-N1: a request flood slows a public port or a dashboard, never stops its socket"):
+        def flood(url, n, *opts):
+            """{status: count} of n requests at once (100 in flight)."""
+            out = server.succeed(
+                f"curl -sk --parallel --parallel-max 100 {' '.join(opts)} --create-dirs -o '/tmp/flood/#1' "
+                f"-w '%{{http_code}}\\n' '{url}/flood[1-{n}]'")
+            codes = {}
+            for c in out.split():
+                codes[c] = codes.get(c, 0) + 1
+            return codes
+        # nginx opens a connection to the socket per request: 300 at once
+        # are 300 activations, past systemd's default trigger limit (200
+        # per 2s) were it set.
+        for url, unit, backend in (
+            ("https://${alicePublicHost}", "hermes-serve-fwd-${toString alicePublic}.socket", ${toString alicePublic}),
+            ("https://${aliceDashHost}", "hermes-dashboard-fwd-alice.socket", ${toString aliceDashBackend}),
+        ):
+            props = server.succeed(f"systemctl show -p TriggerLimitIntervalUSec -p MaxConnections {unit}")
+            assert "TriggerLimitIntervalUSec=0\n" in props and "MaxConnections=512\n" in props, (unit, props)
+            codes = flood(url, 300)
+            assert codes == {"200": 300}, (url, codes)
+            assert sum(e["path"].startswith("/flood") for e in echo_log(backend)) == 300, url
+            assert server.succeed(f"systemctl show -p ActiveState --value {unit}").strip() == "active", unit
+            code, _, body = https(url + "/after-flood")
+            assert code == "200" and body == f"backend {backend}\n", (url, code, body)
+        # nginx's per-client-network limit: past the burst of 500 a client
+        # gets 429 (here unsigned requests on a private port, which nginx
+        # and the login answer fast), other clients do not.
+        codes = flood("https://${alicePrivateHost}", 1000, "--interface 127.0.0.3")
+        assert codes.get("429", 0) > 0 and codes.get("302", 0) >= 500, codes
+        code, loc = redirect("https://${alicePrivateHost}/")
+        assert code == "302" and loc.startswith("http://127.0.0.1:9000/authorize?"), (code, loc)
+
+    with subtest("LOW-N2: an issuer outage fails no oauth2-proxy socket; restarts back off; logins work after"):
+        def restarts(unit):
+            return int(server.succeed(f"systemctl show -p NRestarts --value {unit}").strip())
+        for u in proxies:
+            props = server.succeed(f"systemctl show -p TriggerLimitIntervalUSec {u}.socket")
+            assert props == "TriggerLimitIntervalUSec=0\n", (u, props)
+        # The proxies need the issuer to start (OIDC discovery).
+        server.succeed("systemctl stop stub-oidc")
+        server.succeed("systemctl restart " + " ".join(f"{u}.service" for u in proxies))
+        before = {u: restarts(u) for u in proxies}
+        # Requests queue up on every socket meanwhile, through nginx and
+        # directly.
+        urls = ["https://${dashHost}/", "https://${ownerHost}/", "https://${alicePrivateHost}/"]
+        urls += [f"--unix-socket {s} http://localhost/ping" for s in socks]
+        server.succeed(" ".join(f"curl -sk -o /dev/null --max-time 30 {u} >/dev/null 2>&1 &" for u in urls * 10))
+        time.sleep(15)
+        for u in proxies:
+            state = server.succeed(f"systemctl show -p ActiveState --value {u}.socket").strip()
+            assert state == "active", (u, state)
+            # RestartSec=5s still holds: two or three restarts in 15s, not
+            # one per queued request.
+            n = restarts(u) - before[u]
+            assert 1 <= n <= 4, (u, n)
+        server.succeed("systemctl start stub-oidc")
+        for sock in socks:
+            proxy_up(sock)
+        # Fresh sign-ins at all three.
+        code, eff, body = https("https://${dashHost}/", "-L -c /tmp/jo1 -b /tmp/jo1")
+        assert code == "200" and eff == "https://${aliceDashHost}/" and body == "backend ${toString aliceDashBackend}\n", (code, eff, body)
+        code, _, page = https("https://${ownerHost}/", "-L -c /tmp/jo2 -b /tmp/jo2")
+        assert code == "200" and "Agent mail: alice-owner" in page, (code, page)
+        code, eff, body = https("https://${alicePrivateHost}/after-outage", "-L -c /tmp/jo3 -b /tmp/jo3")
+        assert code == "200" and body == "backend ${toString alicePrivate}\n", (code, eff, body)
 
     with subtest("F3: a hostile stylesheet stalls nothing"):
         alice_before, bob_before = entry_ids("alice"), entry_ids("bob")
