@@ -1,6 +1,7 @@
 # Web pages the native hermes agents serve, each port on a host of its own
 # below the agent's name: https://<port>.<agent>.<agentDomain>/ (on som
-# <port>.<agent>.davhau.fyi) -> nginx -> 127.0.0.1:<port>. agentDomain is
+# <port>.<agent>.davhau.fyi) -> nginx -> the owner's bridge -> the app on
+# 127.0.0.1:<port>. agentDomain is
 # the agent-controlled site (./hermes-dashboard-public.nix says why it is
 # not davhau.com); the port sits below the agent's name so that a Public
 # Suffix List entry for davhau.fyi would make every agent a site of its own
@@ -27,12 +28,15 @@
 #   - its endpoints sit below `/.hermes-serve-login/` on the port's own
 #     host (a path apps do not use). No redirect-url: oauth2-proxy builds
 #     the callback from X-Forwarded-Host, which nginx sets to the host it
-#     matched, one of the exact private names below; the proxy trusts it
-#     from 127.0.0.1 only, and only nginx and root reach that port
-#     (./hermes-dashboard-oauth2-gate.nix). No whitelist-domain: the
-#     post-login redirect may only be a path on the same host. A request
-#     without a session is handed to /start internally, with its URI as
-#     X-Auth-Request-Redirect.
+#     matched, one of the exact private names below. The proxy listens on
+#     no TCP port but on a unix socket systemd (root) holds for the whole
+#     uptime (`http-address=fd:3`), root:nginx 0660 in /run: no agent can
+#     talk to it past nginx, nor take its address while it is down or
+#     restarting (a loopback port belongs to whoever binds it first). It
+#     trusts X-Forwarded-* from that socket's peers, which means nginx. No
+#     whitelist-domain: the post-login redirect may only be a path on the
+#     same host. A request without a session is handed to /start
+#     internally, with its URI as X-Auth-Request-Redirect.
 #   - pocket-id matches the callback against
 #     https://*.<agent>.<agentDomain>/.hermes-serve-login/callback, one
 #     pattern per agent: pocket-id takes `*` in the host as a wildcard over
@@ -45,8 +49,9 @@
 #     PKCE verifier the proxy keeps in the visitor's CSRF cookie.
 #   - authorization: a map over "<host> <account>" names the backend;
 #     each private host matches its owner's account only, everything else
-#     lands on a 403 listener. The map runs at proxy_pass time, after
-#     auth_request_set, which an `if` would not.
+#     lands on a 403 server on a unix socket in /run/nginx (0750, nginx
+#     only). The map runs at proxy_pass time, after auth_request_set,
+#     which an `if` would not.
 #   - a Fetch Metadata gate (./fetch-metadata-gate.nix): another origin
 #     (another agent's page, a public port) cannot post, fetch or open a
 #     websocket here with the visitor's login; links still work.
@@ -64,10 +69,20 @@
 #   - proxy_cookie_domain pins any Set-Cookie Domain to the serving host,
 #     so an agent cannot plant cookies on its other hosts through headers
 #     (document.cookie still can; residual, see the dashboard module),
+#   - nginx never dials an app's port itself. Another agent could bind a
+#     port while its owner's app is down (netfilter gates connect(2), never
+#     bind(2)) and would then get the owner's visitors, their app cookies,
+#     and on a public port a page under the owner's name. So nginx dials
+#     /run/hermes-serve/<port>.sock, root:nginx 0660, which systemd holds
+#     for the whole uptime, and each connection gets a bridge running as
+#     the port's owner that refuses a backend another uid bound
+#     (./hermes-native/tcp-owner-bridge.rs, as the dashboards'
+#     ./hermes-native/forwards.nix). An app that is down, or a squatter,
+#     gives 502, never someone else's page.
 #   - the ports are owner-only on loopback (iptables, the same chain
-#     ./hermes-native/firewall.nix gates the dashboard ports in): the owner,
-#     nginx and root may dial them, other agents may not. Nothing opens
-#     them in the firewall.
+#     ./hermes-native/firewall.nix gates the dashboard ports in): the owner
+#     (and so its bridge) and root may dial them, other agents may not.
+#     Nothing opens them in the firewall.
 #
 # Origin: apps get `Host: 127.0.0.1:<port>` (dev servers such as vite and
 # jupyter reject unknown hosts). A same-origin Origin (https://<the host>)
@@ -83,7 +98,12 @@
 # DNS-01; no port number lands in the CT logs. DNS: *.<agent>.<agentDomain>
 # A (sgp's v4, forwarded by ./ipv4-forward.nix) and AAAA (this host's
 # networking.publicIPv6), TXT "v=spf1 -all", kept by ./porkbun-records; the
-# agent slot's name has records of its own (./agent-slots.nix).
+# agent slot's name has records of its own (./agent-slots.nix). The
+# wildcard also covers the slot's name slot.<agent>.<agentDomain>, so a
+# browser may reuse a connection to one of these hosts (same v4 address)
+# for the slot. On such a connection nginx answers the slot's name with
+# 421 Misdirected Request, and the browser retries on a connection of its
+# own, which reaches the slot by SNI.
 #
 # The serve-ports skill (./hermes-agents-serve-skill, rendered with this
 # host's port table) teaches the agent all of this.
@@ -100,6 +120,7 @@ let
   dashboard = config.hyper.hermesDashboard;
   domain = dashboard.agentDomain;
   inherit (import ./hermes-native/lib.nix { inherit lib; }) chain;
+  tcpOwnerBridgeBin = import ./hermes-native/tcp-owner-bridge.nix { inherit pkgs; };
   vars = config.clan.core.vars.generators;
 
   servePortBase = 30000;
@@ -117,13 +138,18 @@ let
   accountOf = name: dashboard.users.${name}.account;
   hostOf = name: port: "${toString port}.${name}.${domain}";
   certOf = name: "hermes-fyi-${name}";
+  # What nginx dials for a port: a root-held socket whose connections a
+  # bridge running as the owner forwards to the app (the header).
+  backendDir = "/run/hermes-serve";
+  backendOf = port: "unix:${backendDir}/${port}.sock";
+  bridgeUnitOf = port: "hermes-serve-fwd-${toString port}";
 
   # The private ports' login (the header).
   clientId = "hermes-serve";
   client = config.hyper.oidc.clients.${clientId} or null;
   loginPrefix = "/.hermes-serve-login";
-  loginPort = 4182;
-  login = "127.0.0.1:${toString loginPort}";
+  loginSocket = "/run/oauth2-proxy-serve.sock";
+  login = "unix:${loginSocket}:";
   callbackFor = name: "https://*.${name}.${domain}${loginPrefix}/callback";
   # `--flag=value` (toCommandLineShellGNU's form): oauth2-proxy's boolean
   # flags take no separate argument.
@@ -138,11 +164,14 @@ let
     cookie-httponly = "true";
     cookie-samesite = "lax";
     proxy-prefix = loginPrefix;
-    http-address = login;
+    # The socket systemd holds (the header).
+    http-address = "fd:3";
     upstream = "static://202";
     email-domain = "*";
     set-xauthrequest = "true";
     reverse-proxy = "true";
+    # No TCP peer can reach it; peers of the unix socket (nginx) are trusted
+    # regardless. Narrow anyway, or oauth2-proxy trusts every address.
     trusted-proxy-ip = "127.0.0.1";
     # Accounts may have no email; identify them by username, as the
     # dashboards do.
@@ -161,8 +190,8 @@ let
   '';
 
   # Nothing of the agents listens here; nginx answers 403 from its own
-  # server block.
-  forbiddenPort = servePortBase - 1;
+  # server block, on a socket only nginx reaches.
+  forbiddenSocket = "/run/nginx/hermes-serve-forbidden.sock";
 
   # The app's side of every published port, private or public.
   appLocation = backend: {
@@ -218,7 +247,9 @@ let
   };
 in
 {
-  config = lib.mkIf (agents != { }) {
+  config = lib.mkIf (agents != { }) (
+    lib.mkMerge [
+      {
     assertions =
       lib.mapAttrsToList (name: _: {
         assertion =
@@ -244,7 +275,7 @@ in
     services.hermes-native.settings.skills.external_dirs = [ "${skill}/share/skills" ];
 
     # Loopback owner gate, after the module's own rules (they never name
-    # these ports).
+    # these ports). nginx dials the bridges' sockets, never these ports.
     systemd.services.hermes-firewall.script = lib.mkAfter (
       lib.concatMapStrings (
         name:
@@ -253,12 +284,48 @@ in
         in
         ''
           iptables -w -A ${chain} -p tcp --dport ${ports} -m owner --uid-owner ${name} -j RETURN
-          iptables -w -A ${chain} -p tcp --dport ${ports} -m owner --uid-owner nginx -j RETURN
           iptables -w -A ${chain} -p tcp --dport ${ports} -m owner --uid-owner 0 -j RETURN
           iptables -w -A ${chain} -p tcp --dport ${ports} -j REJECT --reject-with tcp-reset
         ''
       ) names
     );
+
+    # The sockets nginx dials, held by systemd for the whole uptime, and
+    # per connection a bridge as the port's owner (the header). The bridge
+    # dials base + 10 * its euid: this port, for the owner's uid.
+    systemd.sockets =
+      lib.listToAttrs (
+        lib.concatMap (
+          name:
+          map (
+            port:
+            lib.nameValuePair (bridgeUnitOf port) {
+              description = "Serve port ${toString port} of ${name}";
+              wantedBy = [ "sockets.target" ];
+              listenStreams = [ "${backendDir}/${toString port}.sock" ];
+              socketConfig = {
+                Accept = true;
+                SocketUser = "root";
+                SocketGroup = config.services.nginx.group;
+                SocketMode = "0660";
+              };
+            }
+          ) ((portsOf name).private ++ (portsOf name).public)
+        ) names
+      )
+      // {
+        # The private ports' login (the header).
+        oauth2-proxy-serve = {
+          description = "Socket of the hermes agents' private serve ports' oauth2-proxy";
+          wantedBy = [ "sockets.target" ];
+          listenStreams = [ loginSocket ];
+          socketConfig = {
+            SocketUser = "root";
+            SocketGroup = config.services.nginx.group;
+            SocketMode = "0660";
+          };
+        };
+      };
 
     # --- the private ports' login (the header) -----------------------------
     clan.core.vars.generators = {
@@ -286,16 +353,14 @@ in
       };
     };
 
-    hyper.hermesOauth2Gate.ports = [ loginPort ];
     systemd.services.oauth2-proxy-serve = {
       description = "oauth2-proxy of the hermes agents' private serve ports";
       wantedBy = [ "multi-user.target" ];
       wants = [ "network-online.target" ];
-      # The owner gate on its port comes first.
-      requires = [ "hermes-oauth2-gate.service" ];
+      requires = [ "oauth2-proxy-serve.socket" ];
       after = [
         "network-online.target"
-        "hermes-oauth2-gate.service"
+        "oauth2-proxy-serve.socket"
       ];
       # OIDC discovery needs the issuer: retry every 5s, indefinitely,
       # until it answers (as the front door's instance).
@@ -392,11 +457,11 @@ in
         }
 
         map "$host $hermes_serve_account" $hermes_serve_backend {
-          default 127.0.0.1:${toString forbiddenPort};
+          default unix:${forbiddenSocket};
         ${lib.concatMapStrings (
           name:
           lib.concatMapStrings (
-            port: "  \"${hostOf name port} ${accountOf name}\" 127.0.0.1:${toString port};\n"
+            port: "  \"${hostOf name port} ${accountOf name}\" ${backendOf (toString port)};\n"
           ) (portsOf name).private
         ) names}}
       ''
@@ -462,32 +527,39 @@ in
               (lib.nameValuePair "hermes-serve-public-${name}" (
                 vhostFor name p.public
                 // {
-                  locations."/" = appLocation "127.0.0.1:$hermes_serve_port";
+                  locations."/" = appLocation (backendOf "$hermes_serve_port");
                 }
               ))
+              # The slot's name on a reused connection (the header).
+              (lib.nameValuePair "hermes-serve-slot-${name}" {
+                serverName = "slot.${name}.${domain}";
+                onlySSL = true;
+                useACMEHost = certOf name;
+                locations."/".return = "421";
+              })
             ]
           ) names
         )
         // {
           hermes-serve-forbidden = {
             serverName = "_";
-            listen = [
-              {
-                addr = "127.0.0.1";
-                port = forbiddenPort;
-              }
-            ];
+            listen = [ { addr = "unix:${forbiddenSocket}"; } ];
             locations."/".return = "403 'Not published, or not published for this account.\\n'";
             extraConfig = "default_type text/plain;";
           };
         }
         // lib.optionalAttrs dashboard.legacy.servePorts {
-          # Transition only: 301 to the new name, never a backend.
+          # Transition only: 301 to the new name, never a backend, on 80 and
+          # 443 alike. Let's Encrypt follows redirects in HTTP-01, so a
+          # challenge path that redirected into an agent's page would hand
+          # the agent a certificate for a davhau.com name: 404 for those (and
+          # CAA allows DNS-01 only, ./hermes-dashboard-public.nix).
           hermes-serve-legacy = {
             serverName = "~^(?<hermes_serve_legacy_port>[0-9]+)\\.${lib.escapeRegex dashboard.host}$";
-            forceSSL = true;
+            addSSL = true;
             useACMEHost = "hermes-subdomains";
-            extraConfig = ''
+            locations."^~ /.well-known/acme-challenge/".return = "404";
+            locations."/".extraConfig = ''
               if ($hermes_serve_legacy = "") {
                 return 404;
               }
@@ -496,5 +568,31 @@ in
           };
         };
     };
-  };
+      }
+      # The bridges behind the sockets above, as the port's owner. stderr
+      # goes to the journal, or StandardInput=socket would send a refusal
+      # to nginx.
+      {
+        systemd.services = lib.listToAttrs (
+          lib.concatMap (
+            name:
+            map (
+              port:
+              lib.nameValuePair "${bridgeUnitOf port}@" {
+                description = "Serve port ${toString port} of ${name}, bridged";
+                serviceConfig = {
+                  User = name;
+                  ExecStart = "${tcpOwnerBridgeBin}/bin/hermes-tcp-owner-bridge ${
+                    toString (port - 10 * config.users.users.${name}.uid)
+                  } 10";
+                  StandardInput = "socket";
+                  StandardError = "journal";
+                };
+              }
+            ) ((portsOf name).private ++ (portsOf name).public)
+          ) names
+        );
+      }
+    ]
+  );
 }

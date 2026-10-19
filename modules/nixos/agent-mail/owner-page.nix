@@ -26,10 +26,13 @@
 # overwrites; mailgate shows that account's agents only, and checks Origin
 # plus a per-account token on every POST.
 #
-# oauth2-proxy's loopback port answers nginx and root only (an owner gate in
-# mailgate-firewall, ./mail.nix), and it trusts X-Forwarded-* from loopback
-# only, which after that gate means nginx. The front door's and the serve
-# ports' instances get the same gate in ../hermes-dashboard-oauth2-gate.nix.
+# oauth2-proxy listens on no TCP port but on a unix socket systemd (root)
+# holds for the whole uptime (`http-address=fd:3`), root:nginx 0660 in
+# /run: no agent talks to it past nginx, and none can take its address
+# while it is down or restarting, as it could a loopback port (whoever
+# binds first owns it) and then forge X-Auth-Request-* answers. It trusts
+# X-Forwarded-* from that socket's peers, which means nginx. The front
+# door's and the serve ports' instances listen the same way.
 {
   config,
   lib,
@@ -42,8 +45,8 @@ let
   dashboard = config.hyper.hermesDashboard;
   client = config.hyper.oidc.clients.${dashboard.oidcClient};
   vars = config.clan.core.vars.generators;
-  port = 4181;
-  address = "127.0.0.1:${toString port}";
+  socket = "/run/oauth2-proxy-mailgate.sock";
+  address = "unix:${socket}:";
   sessionLifetime = "30m";
   # `--flag=value` (toCommandLineShellGNU's form): oauth2-proxy's boolean
   # flags take no separate argument.
@@ -59,12 +62,15 @@ let
     cookie-samesite = "lax";
     cookie-expire = sessionLifetime;
     cookie-refresh = "0";
-    http-address = address;
+    # The socket systemd holds (the header).
+    http-address = "fd:3";
     redirect-url = "https://${host}/oauth2/callback";
     upstream = "static://202";
     email-domain = "*";
     set-xauthrequest = "true";
     reverse-proxy = "true";
+    # No TCP peer can reach it; peers of the unix socket (nginx) are trusted
+    # regardless. Narrow anyway, or oauth2-proxy trusts every address.
     trusted-proxy-ip = "127.0.0.1";
     # Accounts may have no email; identify them by username, as the
     # dashboards do.
@@ -98,11 +104,10 @@ in
       description = "oauth2-proxy of the agent mail owner page";
       wantedBy = [ "multi-user.target" ];
       wants = [ "network-online.target" ];
-      # The owner gate on its port comes first.
-      requires = [ "mailgate-firewall.service" ];
+      requires = [ "oauth2-proxy-mailgate.socket" ];
       after = [
         "network-online.target"
-        "mailgate-firewall.service"
+        "oauth2-proxy-mailgate.socket"
       ];
       # Like the dashboards' instance: OIDC discovery needs the issuer, so
       # retry every 5s, indefinitely, until it answers.
@@ -153,17 +158,16 @@ in
       };
     };
 
-    # The owner gate: only nginx and root dial the port. Rides
-    # mailgate-firewall, whose mailgate-lo chain sees every new loopback
-    # connection (IPv4 and IPv6) and is rebuilt whole on every start.
-    systemd.services.mailgate-firewall.script = lib.mkAfter ''
-      for ipt in iptables ip6tables; do
-        for u in ${config.services.nginx.user} 0; do
-          $ipt -w -A mailgate-lo -p tcp --dport ${toString port} -m owner --uid-owner "$u" -j RETURN
-        done
-        $ipt -w -A mailgate-lo -p tcp --dport ${toString port} -j REJECT --reject-with tcp-reset
-      done
-    '';
+    systemd.sockets.oauth2-proxy-mailgate = {
+      description = "Socket of the agent mail owner page's oauth2-proxy";
+      wantedBy = [ "sockets.target" ];
+      listenStreams = [ socket ];
+      socketConfig = {
+        SocketUser = "root";
+        SocketGroup = config.services.nginx.group;
+        SocketMode = "0660";
+      };
+    };
 
     hyper.fetchMetadataGate.virtualHosts = [ host ];
     services.nginx.virtualHosts.${host} = {

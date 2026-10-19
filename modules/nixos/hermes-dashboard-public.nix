@@ -149,12 +149,25 @@
 # account after auth_request, which an `if` in the vhost would not see, so
 # it asks a server on a unix socket that only nginx can reach. The login
 # cookie is `__Host-hermes`, host-only: no other davhau.com name can set or
-# overwrite it, and it reaches no agent-controlled host.
+# overwrite it, and it reaches no agent-controlled host. oauth2-proxy
+# listens on a unix socket systemd (root) holds for the whole uptime
+# (`http-address=fd:3`), root:nginx 0660: no agent talks to it past nginx
+# or takes its address while it is down, as it could a loopback port, and
+# then answer nginx's auth_request with an account of its choosing. TLS is
+# DNS-01 like every name below it (CAA, below).
 #
 # Transition (legacy.agentDomain): https://<agent>.<legacy.agentDomain>/
 # (the old agents.davhau.com names) answers 301 to the dashboard, path and
-# query kept, and serves nothing else; drop it once the old links are
-# gone. Its records and certificate stay until then.
+# query kept, on port 80 as on 443, and serves nothing else; drop it once
+# the old links are gone. Its records and certificate stay until then.
+# Let's Encrypt follows redirects in HTTP-01, so a challenge path that
+# redirected into the agent's dashboard would get the agent a certificate
+# for a davhau.com name: /.well-known/acme-challenge/ answers 404 there,
+# and CAA on legacy.agentDomain and on <host> (covering the serve ports'
+# old names, the mail owner page and the front door) lets Let's Encrypt
+# issue by DNS-01 only, which needs the porkbun key only root holds. The
+# mail domain's MX certificate below legacy.agentDomain is DNS-01 already
+# (./agent-mail/default.nix).
 #
 # DNS: *.<agentDomain> A (publicIPv4: sgp's v4, forwarded here by
 # ./ipv4-forward.nix) and AAAA (this host's networking.publicIPv6), kept by
@@ -162,9 +175,13 @@
 # below agentDomain exist, and none of them sends mail; the apex gets the
 # same TXT and a DMARC p=reject. No null MX (`MX 0 .`): ./porkbun-records
 # has no MX priority. A wildcard does not shadow names that have records of
-# their own. TLS: one wildcard cert via porkbun DNS-01, so no agent name
-# lands in the CT logs; the serve ports' per-agent wildcards are in
-# ./hermes-agents-serve.nix.
+# their own. Each dashboard name <agent>.<agentDomain> gets the same
+# records explicitly: names exist below it (*.<agent>.<agentDomain>,
+# slot.<agent>.<agentDomain>), which makes it an empty non-terminal that
+# *.<agentDomain> does not answer for under RFC 4592 (porkbun answers it
+# anyway today, 2026-10; standard resolvers and servers need not). TLS: one
+# wildcard cert via porkbun DNS-01, so no agent name lands in the CT logs;
+# the serve ports' per-agent wildcards are in ./hermes-agents-serve.nix.
 #
 # Secrets (clan vars, root-owned, LoadCredential): the `hermes` client
 # secret and each `hermes-<agent>` client secret are the shared oidc vars
@@ -184,6 +201,11 @@ let
   certName = "hermes-fyi";
   legacyCert = "hermes-dashboards";
   frontSocket = "/run/nginx/hermes-front.sock";
+  # The front door's oauth2-proxy (the header).
+  oauth2Socket = "/run/oauth2-proxy.sock";
+  # Let's Encrypt only, by DNS-01 only (the header). Without issuewild the
+  # issue property governs wildcards as well.
+  dns01Only = ''0 issue "letsencrypt.org; validationmethods=dns-01"'';
   scopes = "openid profile email offline_access";
 
   clientIdOf = user: "hermes-${user}";
@@ -344,7 +366,17 @@ in
             message = "hyper.hermesDashboard.users.${user}: all-digit labels are serve ports and `slot` is the agent slot's label; pick another name.";
           }
           {
-            assertion = !(config.hyper.porkbunRecords.records ? ${hostOf user}) && others == [ ];
+            # The name's own records are this module's (DNS, the header);
+            # another module's A or TXT there would conflict at evaluation,
+            # any other type shows up here.
+            assertion =
+              (
+                if cfg.publicIPv4 != null then
+                  lib.attrNames config.hyper.porkbunRecords.records.${hostOf user} == lib.attrNames record
+                else
+                  !(config.hyper.porkbunRecords.records ? ${hostOf user})
+              )
+              && others == [ ];
             message = "hyper.hermesDashboard.users.${user}: ${hostOf user} is taken by another service (DNS records of its own, or nginx vhosts ${toString others}).";
           }
           {
@@ -457,6 +489,11 @@ in
       email.domains = [ "*" ];
       setXauthrequest = true;
       reverseProxy = true;
+      # The socket systemd holds (the header).
+      httpAddress = "fd:3";
+      # No TCP peer can reach it; peers of the unix socket (nginx) are
+      # trusted regardless. Narrow anyway, or oauth2-proxy trusts every
+      # address.
       trustedProxyIP = [ "127.0.0.1" ];
       extraConfig = {
         # Accounts may have no email; identify them by username instead.
@@ -469,16 +506,29 @@ in
       };
       nginx = {
         domain = cfg.host;
+        proxy = "http://unix:${oauth2Socket}:";
         virtualHosts.${cfg.host} = { };
       };
     };
 
+    systemd.sockets.oauth2-proxy = {
+      description = "Socket of the hermes front door's oauth2-proxy";
+      wantedBy = [ "sockets.target" ];
+      listenStreams = [ oauth2Socket ];
+      socketConfig = {
+        SocketUser = "root";
+        SocketGroup = config.services.nginx.group;
+        SocketMode = "0660";
+      };
+    };
     # OIDC discovery needs DNS for the issuer, and network-online.target
     # promises nothing where the wait-online services are masked (som). The
     # stock Restart=always at 100ms burnt the start limit within a second of
     # boot and left the front door down; retry every 5s, indefinitely, until
-    # the issuer resolves and answers.
+    # the issuer resolves and answers. Requests wait on the socket meanwhile.
     systemd.services.oauth2-proxy = {
+      requires = [ "oauth2-proxy.socket" ];
+      after = [ "oauth2-proxy.socket" ];
       serviceConfig.RestartSec = "5s";
       unitConfig.StartLimitIntervalSec = 0;
     };
@@ -497,9 +547,13 @@ in
         "*.${cfg.agentDomain}" = record;
         ${cfg.agentDomain}.TXT = "v=spf1 -all";
         "_dmarc.${cfg.agentDomain}".TXT = "v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s";
+        # CAA (the header); its A/AAAA are kept by hand.
+        ${cfg.host}.CAA = dns01Only;
       }
+      // lib.mapAttrs' (user: _: lib.nameValuePair (hostOf user) record) cfg.users
       // lib.optionalAttrs (cfg.legacy.agentDomain != null) {
         "*.${cfg.legacy.agentDomain}" = record;
+        ${cfg.legacy.agentDomain}.CAA = dns01Only;
       }
     );
 
@@ -521,9 +575,12 @@ in
       in
       {
         ${certName} = dns01 "*.${cfg.agentDomain}";
-        # The front door's subdomains: the mail owner page
-        # (./agent-mail/owner-page.nix) and the serve ports' old names.
-        hermes-subdomains = dns01 "*.${cfg.host}";
+        # The front door and its subdomains: the mail owner page
+        # (./agent-mail/owner-page.nix) and the serve ports' old names. All
+        # DNS-01: CAA allows nothing else under <host> (the header).
+        hermes-subdomains = dns01 "*.${cfg.host}" // {
+          extraDomainNames = [ cfg.host ];
+        };
       }
       // lib.optionalAttrs (cfg.legacy.agentDomain != null) {
         ${legacyCert} = dns01 "*.${cfg.legacy.agentDomain}";
@@ -585,7 +642,7 @@ in
       virtualHosts = {
         ${cfg.host} = {
           forceSSL = true;
-          enableACME = true;
+          useACMEHost = "hermes-subdomains";
           locations."/" = frontLocation;
           locations."= /app" = frontLocation;
         };
@@ -628,12 +685,15 @@ in
         };
       }
       // lib.optionalAttrs (cfg.legacy.agentDomain != null) {
-        # Transition only: 301 to the new name, never a backend.
+        # Transition only: 301 to the new name, never a backend, on 80 and
+        # 443 alike; no ACME challenge answer that could follow it (the
+        # header).
         hermes-dashboard-legacy = {
           serverName = "*.${cfg.legacy.agentDomain}";
-          forceSSL = true;
+          addSSL = true;
           useACMEHost = legacyCert;
-          extraConfig = ''
+          locations."^~ /.well-known/acme-challenge/".return = "404";
+          locations."/".extraConfig = ''
             if ($hermes_dashboard_legacy = "") {
               return 404;
             }
