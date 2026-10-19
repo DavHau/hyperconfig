@@ -203,6 +203,17 @@ in
               assertion = lib.all isLoopback config.systemd.sockets."hermes-${name}-fwd-${user}".listenStreams;
               message = "services.hermes-native: socket hermes-${name}-fwd-${user} must listen on 127.0.0.1 only.";
             }
+            {
+              # The bridge would accept a self-connect inside the
+              # ephemeral range (lib.nix: ephemeralPortLow). An unpinned
+              # uid cannot be checked here.
+              assertion =
+                let
+                  uid = config.users.users.${user}.uid or null;
+                in
+                uid == null || fwd.backendBase + uid < hlib.ephemeralPortLow config.boot.kernel.sysctl;
+              message = "services.hermes-native: the ${name} backend of ${user} (${toString fwd.backendBase} + uid) must stay below the ephemeral port range (${toString (hlib.ephemeralPortLow config.boot.kernel.sysctl)}+); pick a lower uid or move the window in lib.nix.";
+            }
           ]) hlib.forwards
         )
       ) cfg.users

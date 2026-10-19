@@ -80,8 +80,9 @@
 #     ./hermes-native/forwards.nix). An app that is down, or a squatter,
 #     gives 502, never someone else's page. A request flood slows these
 #     sockets down but never stops them, and nginx limits requests per
-#     client network and port host, as for the dashboards (the request
-#     limits in ./hermes-dashboard-public.nix).
+#     client network and port host, and per port host alone, as for the
+#     dashboards (the request limits and their residual in
+#     ./hermes-dashboard-public.nix).
 #   - the ports are owner-only on loopback (iptables, the same chain
 #     ./hermes-native/firewall.nix gates the dashboard ports in): the owner
 #     (and so its bridge) and root may dial them, other agents may not.
@@ -122,7 +123,7 @@ let
   names = lib.attrNames agents;
   dashboard = config.hyper.hermesDashboard;
   domain = dashboard.agentDomain;
-  inherit (import ./hermes-native/lib.nix { inherit lib; }) chain;
+  inherit (import ./hermes-native/lib.nix { inherit lib; }) chain ephemeralPortLow;
   tcpOwnerBridgeBin = import ./hermes-native/tcp-owner-bridge.nix { inherit pkgs; };
   vars = config.clan.core.vars.generators;
 
@@ -229,11 +230,13 @@ let
       useACMEHost = certOf name;
       # The request limits of the dashboards, zones and all
       # (./hermes-dashboard-public.nix says why and how much), per port
-      # host and client network; on a private host they cover the
+      # host and client network, and per port host alone (below the
+      # socket's MaxConnections); on a private host they cover the
       # sign-in too.
       extraConfig = ''
         limit_req zone=hermes_agent_requests burst=500 nodelay;
         limit_conn hermes_agent_conns 128;
+        limit_conn hermes_agent_host_conns 384;
         limit_req_status 429;
         limit_conn_status 429;
       '';
@@ -265,12 +268,14 @@ in
       {
     assertions =
       lib.mapAttrsToList (name: _: {
+        # The bridge would accept a self-connect inside the ephemeral range
+        # (./hermes-native/lib.nix: ephemeralPortLow).
         assertion =
           let
             uid = config.users.users.${name}.uid;
           in
-          uid == null || (uid >= 1000 && (portsOf name).to < 32768);
-        message = "hyper.hermesAgents.${name}: uid must be in 1000..1276 so its serve ports (${toString servePortBase} + (uid - 1000) * 10) stay below the ephemeral range.";
+          uid == null || (uid >= 1000 && (portsOf name).to < ephemeralPortLow config.boot.kernel.sysctl);
+        message = "hyper.hermesAgents.${name}: its serve ports (${toString servePortBase} + (uid - 1000) * 10 .. +9) must stay below the ephemeral port range (${toString (ephemeralPortLow config.boot.kernel.sysctl)}+); uid must be 1000 or above and low enough.";
       }) agents
       ++ [
         {
@@ -306,10 +311,10 @@ in
     # The sockets nginx dials, held by systemd for the whole uptime, and
     # per connection a bridge as the port's owner (the header). The bridge
     # dials base + 10 * its euid: this port, for the owner's uid. No
-    # trigger limit and a deliberate MaxConnections, as the dashboards'
-    # (./hermes-native/forwards.nix says why): a public port takes a
-    # request flood from anyone, and nginx opens one connection per
-    # request.
+    # trigger limit, a raised poll limit and a deliberate MaxConnections,
+    # as the dashboards' (./hermes-native/forwards.nix says why): a public
+    # port takes a request flood from anyone, and nginx opens one
+    # connection per request.
     systemd.sockets =
       lib.listToAttrs (
         lib.concatMap (
@@ -323,6 +328,8 @@ in
               socketConfig = {
                 Accept = true;
                 TriggerLimitIntervalSec = 0;
+                PollLimitIntervalSec = "2s";
+                PollLimitBurst = 2000;
                 MaxConnections = 512;
                 SocketUser = "root";
                 SocketGroup = config.services.nginx.group;

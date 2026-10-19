@@ -50,17 +50,24 @@ in
     # the internet can send those. The trigger limit (default 200
     # activations per 2s) would put the socket into the failed state for
     # good on a burst; TriggerLimitIntervalSec=0 disables it (systemd.socket(5)).
-    # The poll limit (default 150 polling events per 2s) stays: it only
-    # slows a flood down, and nginx's per-client-network limits
-    # (../hermes-dashboard-public.nix) keep one client from taking it all.
+    # The poll limit (default for Accept=yes: 150 polling events per 2s,
+    # each accepted connection one) pauses accepting for the rest of the
+    # window, for every client. nginx lets one client network burst 500
+    # requests at once and then 50 a second per host
+    # (../hermes-dashboard-public.nix), so two clients at their limit
+    # would pause the socket for everyone. PollLimitBurst=2000 per 2s
+    # (1000 a second) holds the bursts of three client networks plus their
+    # steady rate; only a flood spread over many networks hits it, and then
+    # it only slows down (systemd.socket(5)).
     #
     # MaxConnections bounds the bridges running at once (one process
     # each); above it systemd refuses new connections (502) until one
     # ends, the socket keeps listening. A dashboard tab holds a handful of
     # long-lived websockets and streams; nginx allows one client network
-    # at most 128 requests in flight per host, so 512 leaves room for
-    # three more such clients at the limit, while still bounding what a
-    # flood spread over many networks can spawn.
+    # at most 128 requests in flight per host, and all of them together
+    # 384 (../hermes-dashboard-public.nix), so nginx never holds every
+    # slot: 128 stay for the owner's own dialers, while the cap still
+    # bounds what a flood spread over many networks can spawn.
     systemd.sockets = forEachForward (
       user: name: fwd: {
         "hermes-${name}-fwd-${user}" = {
@@ -70,6 +77,8 @@ in
           socketConfig = {
             Accept = true;
             TriggerLimitIntervalSec = 0;
+            PollLimitIntervalSec = "2s";
+            PollLimitBurst = 2000;
             MaxConnections = 512;
           };
         };

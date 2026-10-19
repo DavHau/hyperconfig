@@ -34,9 +34,30 @@ rec {
   dashboardPortFor = user: 22100 + lib.mod (identityHash user) 1000;
 
   # The dashboard backend the owner binds on loopback: base + uid. The
-  # window sits below the kernel's ephemeral range (32768+) for every
-  # normal uid, so an outbound connection never squats a backend.
+  # window sits below the kernel's ephemeral range for every normal uid,
+  # so an outbound connection never squats a backend (options.nix
+  # asserts it).
   dashboardBackendBase = 20000;
+
+  # Lower bound of the kernel's ephemeral port range on a machine, from
+  # its sysctl (the kernel default 32768 if unset). A backend port in that
+  # range could be the source port of the bridge's own dial while the
+  # backend is down: the kernel then connects the socket to itself
+  # (simultaneous open), owned by the owner, and the bridge's owner check
+  # passes. Every bridged backend window must stay below it (options.nix,
+  # ../hermes-agents-serve.nix assert it). An assertion rather than
+  # ip_local_reserved_ports: out of the range, a window needs no runtime
+  # state, and a uid that would push it in fails the build instead of
+  # silently relying on a sysctl applied after boot.
+  ephemeralPortLow =
+    sysctl:
+    let
+      range = sysctl."net.ipv4.ip_local_port_range" or null;
+    in
+    if range == null then
+      32768
+    else
+      lib.toInt (lib.head (lib.filter (s: s != "") (lib.splitString " " (builtins.replaceStrings [ "\t" ] [ " " ] (toString range)))));
 
   # The agent's Camofox browser server (camofox.nix), on the same scheme:
   # a root-held port per agent, bridged to a backend the owner binds at

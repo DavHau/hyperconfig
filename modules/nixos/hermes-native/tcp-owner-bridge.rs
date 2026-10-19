@@ -96,15 +96,17 @@ fn main() {
     let backend = SocketAddrV4::new(Ipv4Addr::LOCALHOST, port as u16);
 
     // A connection the table does not show cannot be checked, and then
-    // the bridge drops it and dials again, for a second at most. That
-    // happens under a burst: the kernel renders /proc/net/tcp a page at a
-    // time and resumes each read by position, so while many connections
-    // open and close one read can skip a line; and a listener with a
-    // short backlog answers with SYN cookies, which keep no socket at all
-    // until the backend accepts, which it never does before the client
-    // sends (and the bridge sends nothing unchecked). A socket of another
-    // uid is final.
-    let mut attempts = 0;
+    // the bridge drops it and dials again, 5 more times after 20, 40, 80,
+    // 160 and 320ms (some 0.6s in all). That happens under a burst: the
+    // kernel renders /proc/net/tcp a page at a time and resumes each read
+    // by position, so while many connections open and close one read can
+    // skip a line; and a listener with a short backlog answers with SYN
+    // cookies, which keep no socket at all until the backend accepts,
+    // which it never does before the client sends (and the bridge sends
+    // nothing unchecked). Backing off gives a busy backend room instead of
+    // adding dials to the burst. A socket of another uid is final.
+    let mut delay = std::time::Duration::from_millis(20);
+    let mut retries = 5;
     let target = loop {
         let target = match TcpStream::connect(backend) {
             Ok(s) => s,
@@ -129,10 +131,11 @@ fn main() {
                 );
                 exit(1);
             }
-            None if attempts < 20 => {
-                attempts += 1;
+            None if retries > 0 => {
+                retries -= 1;
                 drop(target);
-                std::thread::sleep(std::time::Duration::from_millis(50));
+                std::thread::sleep(delay);
+                delay *= 2;
             }
             None => {
                 eprintln!("refusing: backend {} not found in /proc/net/tcp", backend);
