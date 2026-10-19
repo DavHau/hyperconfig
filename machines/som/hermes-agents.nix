@@ -105,11 +105,14 @@ in
       ];
     };
 
-    # b3x: logs in with the admin keys until he has keys of his own.
     b3x = {
       uid = 1112;
       description = "b3x - hermes agent";
-      sshKeys = adminKeys;
+      sshKeys = [
+        # github.com/theanxy.keys (fetched 2026-10-19)
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIL98qbBMVca+vmDMSGYTIQVqncMSTrJZlMLXL430UFaJ theanxy"
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM4W5V2wnXVKvbablE7CM4soDYfdqA7DUbB/04VzrN1r theanxy"
+      ];
     };
 
     # egg (fabien, github.com/allouis): controlled through a Telegram DM bot.
