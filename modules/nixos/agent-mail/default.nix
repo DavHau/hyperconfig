@@ -14,11 +14,12 @@
 #   *._domainkey.agents.davhau.com TXT "v=DKIM1; p="   (no key is valid)
 # and PTR 38.89.142.76 -> mail.agents.davhau.com at sgp's provider if it
 # allows one (senders may score a missing or mismatching PTR). The owner page
-# rides the existing wildcard *.hermes.davhau.com records and certificate.
-# The agents' dashboards live under the same domain, at
-# <agent>.agents.davhau.com (../hermes-dashboard-public.nix, wildcard
-# records next to the ones above, which it does not shadow); no agent may
-# be called `mail`.
+# rides the existing wildcard *.hermes.davhau.com records and the front
+# door's *.<host> certificate (../hermes-dashboard-public.nix). The agents'
+# web pages no longer live under this domain but on davhau.fyi
+# (../hermes-dashboard-public.nix); only the old dashboard names'
+# wildcard records under agents.davhau.com stay for their redirects, and
+# they do not shadow the names above.
 #
 # Who confirms an allowlist request: the agent's owner, on
 # https://mailgate.<dashboard host>/ (./owner-page.nix) behind its own
@@ -28,10 +29,10 @@
 # connect to, no agent-controlled host ever receives that cookie, and nginx
 # forwards no login cookie to agent backends at all
 # (../hermes-dashboard-public.nix lets only hermes' own `__Host-hermes_*`
-# through, ../hermes-agents-serve.nix only the apps' own). A separate
-# origin plus an Origin check and a per-account token stop the agent's pages
-# from driving the owner's browser. Root has `mailgate-admin` for the same
-# decisions.
+# through, ../hermes-agents-serve.nix only the apps' own). A separate site
+# (the agents' pages are on davhau.fyi), a Fetch Metadata gate, an Origin
+# check and a per-account token stop the agent's pages from driving the
+# owner's browser. Root has `mailgate-admin` for the same decisions.
 {
   config,
   lib,

@@ -1,7 +1,37 @@
 # Public web dashboards for native hermes agents, one hostname per agent:
-# https://<agent>.<agentDomain>/ -> nginx -> the root-held dashboard port of
-# that agent (./hermes-native/forwards.nix), which bridges to the agent's
-# loopback backend after checking the backend's owner.
+# https://<agent>.<agentDomain>/ (on som <agent>.davhau.fyi) -> nginx -> the
+# root-held dashboard port of that agent (./hermes-native/forwards.nix),
+# which bridges to the agent's loopback backend after checking the
+# backend's owner.
+#
+# Two sites: agentDomain (davhau.fyi) carries everything an agent can make
+# a browser render, here and in ./hermes-agents-serve.nix and
+# ./agent-slots.nix; davhau.com keeps only what we serve ourselves (pocket-id,
+# the front door <host>, the mail owner page, Nextcloud, ...). Browsers
+# treat every name under one registrable domain as one site, so an agent's
+# page under davhau.com could forge requests carrying the visitor's
+# davhau.com logins, and plant or flood cookies there. Under davhau.fyi it
+# can do none of that to davhau.com.
+#
+# Between agents (all of them share the site davhau.fyi):
+#   - logins are host-only: hermes' `__Host-` session cookies here, the
+#     serve ports' `__Host-` oauth2-proxy cookie per port host; nothing of
+#     ours ever sets a cookie with Domain=<agentDomain> or
+#     Domain=<agent>.<agentDomain>,
+#   - one OIDC client per agent (ID tokens are aud-bound to it),
+#   - a Fetch Metadata gate on every dashboard and private serve port
+#     (./fetch-metadata-gate.nix): requests a browser sends from another
+#     origin are refused unless they are top-level GET navigations,
+#   - no framing (below).
+# Residual: cookie bombing within davhau.fyi (a page of one agent sets
+# enough Domain=davhau.fyi cookies to make a browser's requests to every
+# other agent's hosts too large: 400 until they expire), apps with side
+# effects on GET reached by a link, browsers without Fetch Metadata, and
+# what timing or error pages leak about the visitor's sign-in state. A
+# Public Suffix List entry for davhau.fyi would make every
+# <agent>.davhau.fyi a site of its own and close the first and the CSRF
+# exposure; nothing else here would need to change, which is why the serve
+# ports and the slot sit below the agent's name.
 #
 # The login is hermes' own: the dashboard runs gated, with its bundled
 # `self_hosted` OIDC provider against the clan's pocket-id
@@ -44,7 +74,7 @@
 # That is fine here because everything that would make its login worth
 # stealing is per agent: the client (ID tokens are aud-bound to
 # hermes-<agent>; hermes verifies signature, iss and aud), the hostname
-# (its `__Host-` session cookies reach no other site), pocket-id's group
+# (its `__Host-` session cookies reach no other host), pocket-id's group
 # restriction (only that agent's accounts get a token at all), and the
 # passkeys (bound to the issuer's origin, never to the dashboard's). The
 # agent can switch its own gate off; it could already publish itself
@@ -77,26 +107,31 @@
 # asks for, so sessions keep refreshing past the ID token's lifetime
 # either way. Hermes accepts RS256 (pocket-id's only key) and ES*.
 #
+#
 # nginx, per agent: Host and Origin unchanged; X-Forwarded-Proto, -For and
 # Real-IP set by nginx (hermes runs uvicorn with proxy_headers in gated mode
 # and trusts loopback, which is only nginx and the owner's own bridge here;
 # its rate limits read the FIRST X-Forwarded-For hop, so the client's list
 # is replaced, not appended to), X-Forwarded-Prefix and Forwarded cleared.
 # Cookies: only hermes' own go in (./hermes-dashboard-cookies.js), so no
-# other davhau.com site's login cookie reaches the agent. Set-Cookie passes
-# (hermes' login needs it), with any Domain pinned to the agent's own host.
-# The parent domain is not hermes.davhau.com on purpose: oauth2-proxy's
-# login cookie carries Domain=<host> (./hermes-agents-serve.nix), and
-# browsers would send it to an agent-controlled dashboard below it. Unknown
-# names under agentDomain get a 404 from a server of their own, never a
-# backend.
+# other agent's cookies reach this one. Set-Cookie passes (hermes' login
+# needs it), with any Domain pinned to the agent's own host. Unknown names
+# under agentDomain get a 404 from a server of their own, never a backend.
 #
-# Framing: every agent shares the registrable domain with every other
-# agent and with the serve ports, so their pages count as same-site and a
-# dashboard's Lax session cookies go along into an iframe. Each dashboard
-# answers with `frame-ancestors 'self'` and X-Frame-Options SAMEORIGIN
-# (unless hermes set its own), so no sibling can frame it and steer clicks
-# into its terminal.
+# Cross-origin requests (./fetch-metadata-gate.nix): what the dashboard
+# itself does is same-origin (the SPA's API calls, its websockets,
+# /api/files/download links); the browser sign-in comes back from
+# pocket-id as a cross-site GET navigation; the app's native sign-in runs
+# in a Custom Tab (Sec-Fetch-Site none, then navigations) and its API
+# calls come from OkHttp without Sec-Fetch-* headers. All of that passes;
+# another agent's page posting or fetching here does not.
+#
+# Framing: every agent shares the site with every other agent and with the
+# serve ports, so their pages count as same-site and a dashboard's Lax
+# session cookies would go along into an iframe. Each dashboard answers
+# with `frame-ancestors 'self'` and X-Frame-Options SAMEORIGIN (unless
+# hermes set its own), so no sibling can frame it and steer clicks into
+# its terminal.
 #
 # Sign-in rate limit: hermes keeps at most 256 pending native logins, 8 per
 # client address, for 10 minutes; an IPv6 client holds a whole /64 to
@@ -105,27 +140,31 @@
 # (./hermes-dashboard-ratelimit.js). Clients spread over many /64s still
 # get through.
 #
-# Residual, no fix here: cookie bombing. Any site under davhau.com can set
-# enough Domain=davhau.com (or agents.davhau.com) cookies to make a
-# browser's requests to a dashboard too large; nginx then answers 400 for
-# that browser until the cookies expire. Only a registrable domain of its
-# own (or a Public Suffix List entry) for the dashboards would end it.
-#
-# The old URL https://<host>/ stays behind oauth2-proxy (client `hermes`,
-# group `hermes`, as the serve ports and the mail owner page) and only
-# redirects: an account with one agent goes to that agent's dashboard,
-# one with several gets a list of links, any other a 403. nginx learns the
+# The front door https://<host>/ (hermes.davhau.com) stays behind
+# oauth2-proxy (client `hermes`, group `hermes`, as the mail owner page)
+# and only redirects: an account with one agent goes to that agent's
+# dashboard, one with several gets a list of links, any other a 403.
+# https://<host>/app answers the signed-in account's dashboard addresses as
+# plain text, to paste into Hermes Mobile as the server. nginx learns the
 # account after auth_request, which an `if` in the vhost would not see, so
-# it asks a server on a unix socket that only nginx can reach.
+# it asks a server on a unix socket that only nginx can reach. The login
+# cookie is `__Host-hermes`, host-only: no other davhau.com name can set or
+# overwrite it, and it reaches no agent-controlled host.
+#
+# Transition (legacy.agentDomain): https://<agent>.<legacy.agentDomain>/
+# (the old agents.davhau.com names) answers 301 to the dashboard, path and
+# query kept, and serves nothing else; drop it once the old links are
+# gone. Its records and certificate stay until then.
 #
 # DNS: *.<agentDomain> A (publicIPv4: sgp's v4, forwarded here by
 # ./ipv4-forward.nix) and AAAA (this host's networking.publicIPv6), kept by
 # ./porkbun-records, plus TXT "v=spf1 -all": the wildcard makes every name
-# below agentDomain exist, and none of them sends mail. No null MX
-# (`MX 0 .`): ./porkbun-records has no MX priority. A wildcard does not
-# shadow names that have records of their own (the mail names,
-# ./agent-mail). TLS: one wildcard cert via porkbun DNS-01, so no agent
-# name lands in the CT logs.
+# below agentDomain exist, and none of them sends mail; the apex gets the
+# same TXT and a DMARC p=reject. No null MX (`MX 0 .`): ./porkbun-records
+# has no MX priority. A wildcard does not shadow names that have records of
+# their own. TLS: one wildcard cert via porkbun DNS-01, so no agent name
+# lands in the CT logs; the serve ports' per-agent wildcards are in
+# ./hermes-agents-serve.nix.
 #
 # Secrets (clan vars, root-owned, LoadCredential): the `hermes` client
 # secret and each `hermes-<agent>` client secret are the shared oidc vars
@@ -142,39 +181,105 @@ let
   hlib = import ./hermes-native/lib.nix { inherit lib; };
   portOf = hlib.dashboardPortFor;
   client = config.hyper.oidc.clients.${cfg.oidcClient};
-  certName = "hermes-dashboards";
+  certName = "hermes-fyi";
+  legacyCert = "hermes-dashboards";
   frontSocket = "/run/nginx/hermes-front.sock";
   scopes = "openid profile email offline_access";
 
   clientIdOf = user: "hermes-${user}";
+  vhostOf = user: "hermes-dashboard-${user}";
+  hostOf = user: "${user}.${cfg.agentDomain}";
   # Agents per front-door account.
   agentsOf = lib.foldlAttrs (
     acc: user: u:
     acc // { ${u.account} = (acc.${u.account} or [ ]) ++ [ user ]; }
   ) { } cfg.users;
-  # Reserved names under agentDomain that have records of their own.
-  reserved = lib.optional (config.hyper.agentMail.enable or false) config.hyper.agentMail.hostname;
+  # The registrable domain, as ./porkbun-records takes the zone.
+  siteOf =
+    name:
+    let
+      labels = lib.splitString "." name;
+    in
+    lib.concatStringsSep "." (lib.sublist (lib.length labels - 2) 2 labels);
+  # nginx vhosts other than the dashboard's own that answer <user>'s name.
+  otherVhostsFor =
+    user:
+    lib.attrNames (
+      lib.filterAttrs (
+        name: v:
+        name != vhostOf user
+        && lib.elem (hostOf user) ([ (if v.serverName != null then v.serverName else name) ] ++ v.serverAliases)
+      ) config.services.nginx.virtualHosts
+    );
+  record = {
+    A = cfg.publicIPv4;
+    TXT = "v=spf1 -all";
+    AAAA.ipv6OnLink = {
+      inherit (config.networking.publicIPv6) interface;
+      suffix = config.networking.publicIPv6.token;
+    };
+  };
+  frontLocation = {
+    proxyPass = "http://unix:${frontSocket}:";
+    recommendedProxySettings = false;
+    extraConfig = ''
+      auth_request_set $hermes_account $upstream_http_x_auth_request_preferred_username;
+      proxy_set_header Host $host;
+      proxy_set_header X-Hermes-Account $hermes_account;
+      proxy_set_header Cookie "";
+    '';
+  };
+  frontMap =
+    variable: f:
+    ''
+      map $http_x_hermes_account ${variable} {
+        default "";
+      ${lib.concatStrings (
+        lib.mapAttrsToList (
+          account: agents:
+          let
+            value = f agents;
+          in
+          lib.optionalString (value != null) ''
+            "${account}" "${value}";
+          ''
+        ) agentsOf
+      )}}
+    '';
 in
 {
   imports = [
-    ./oauth2-proxy-cookie-guard.nix
+    ./fetch-metadata-gate.nix
     ./porkbun-records
   ];
 
   options.hyper.hermesDashboard = {
     host = lib.mkOption {
       type = lib.types.str;
-      description = "Front door behind oauth2-proxy: https://<host>/ redirects to the signed-in account's dashboard; the serve ports and the mail owner page hang below it.";
+      description = "Front door behind oauth2-proxy: https://<host>/ redirects to the signed-in account's dashboard, https://<host>/app lists its addresses for Hermes Mobile. Only our own pages live under its site (the mail owner page).";
     };
     agentDomain = lib.mkOption {
       type = lib.types.str;
-      description = "Parent domain of the dashboards: every agent's lives at https://<agent>.<agentDomain>/. Must not be <host> or below it.";
+      description = "Registrable domain of everything agent-controlled: every agent's dashboard at https://<agent>.<agentDomain>/, its serve ports at https://<port>.<agent>.<agentDomain>/. Must be a site of its own, not <host>'s.";
+    };
+    legacy = {
+      agentDomain = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "agents.davhau.com";
+        description = "Transition: the dashboards' old parent domain. https://<agent>.<this>/ answers 301 to the dashboard, nothing else. Keeps its wildcard records and certificate.";
+      };
+      servePorts = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Transition: https://<port>.<host>/, the serve ports' old names, answers 301 to https://<port>.<agent>.<agentDomain>/, nothing else (./hermes-agents-serve.nix).";
+      };
     };
     publicIPv4 = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       default = null;
       example = "38.89.142.76";
-      description = "Address of the *.<agentDomain> A record; its AAAA is networking.publicIPv6. Null: no DNS records are kept.";
+      description = "Address of the *.<agentDomain> (and *.<agent>.<agentDomain>) A records; their AAAA is networking.publicIPv6. Null: no DNS records are kept.";
     };
     oidcClient = lib.mkOption {
       type = lib.types.str;
@@ -214,8 +319,8 @@ in
         message = "hyper.hermesDashboard: the inventory declares no oidc client `${cfg.oidcClient}` for this machine.";
       }
       {
-        assertion = cfg.agentDomain != cfg.host && !lib.hasSuffix ".${cfg.host}" cfg.agentDomain;
-        message = "hyper.hermesDashboard.agentDomain: must not be ${cfg.host} or below it, where oauth2-proxy's login cookie is sent.";
+        assertion = siteOf cfg.agentDomain == cfg.agentDomain && siteOf cfg.agentDomain != siteOf cfg.host;
+        message = "hyper.hermesDashboard.agentDomain: must be a registrable domain of its own (two labels), not ${siteOf cfg.host}, the front door's: agent pages must be a different site.";
       }
     ]
     ++ lib.concatLists (
@@ -223,6 +328,7 @@ in
         user: u:
         let
           c = config.hyper.oidc.clients.${clientIdOf user} or null;
+          others = otherVhostsFor user;
         in
         [
           {
@@ -230,12 +336,16 @@ in
             message = "hyper.hermesDashboard.users.${user}: only an agent of hyper.hermesAgents has a host dashboard unit to publish.";
           }
           {
-            assertion = builtins.match "[a-z0-9]([a-z0-9-]*[a-z0-9])?" user != null;
-            message = "hyper.hermesDashboard.users.${user}: the name is the dashboard's DNS label; use a-z, 0-9 and inner dashes.";
+            assertion = builtins.match "[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?" user != null;
+            message = "hyper.hermesDashboard.users.${user}: the name is the dashboard's DNS label; use a-z, 0-9 and inner dashes, at most 63.";
           }
           {
-            assertion = !lib.elem "${user}.${cfg.agentDomain}" reserved;
-            message = "hyper.hermesDashboard.users.${user}: ${user}.${cfg.agentDomain} is taken by another service.";
+            assertion = builtins.match "[0-9]+" user == null && user != "slot";
+            message = "hyper.hermesDashboard.users.${user}: all-digit labels are serve ports and `slot` is the agent slot's label; pick another name.";
+          }
+          {
+            assertion = !(config.hyper.porkbunRecords.records ? ${hostOf user}) && others == [ ];
+            message = "hyper.hermesDashboard.users.${user}: ${hostOf user} is taken by another service (DNS records of its own, or nginx vhosts ${toString others}).";
           }
           {
             assertion =
@@ -295,10 +405,9 @@ in
       };
     };
 
-    # Hosts under the same registrable domain (the agent slots) can toss
-    # cookies onto this one: refuse a request carrying a login cookie name
-    # twice (./oauth2-proxy-cookie-guard.nix).
-    hyper.oauth2ProxyCookieGuard.virtualHosts = [ cfg.host ];
+    # Cross-origin requests (the header): every dashboard, and the front
+    # door, whose own flow is navigations only.
+    hyper.fetchMetadataGate.virtualHosts = [ cfg.host ] ++ map vhostOf (lib.attrNames cfg.users);
 
     clan.core.vars.generators = {
       hermes-oauth2-proxy = {
@@ -339,7 +448,11 @@ in
       oidcIssuerUrl = config.hyper.oidc.issuer;
       clientID = client.clientId;
       clientSecretFile = client.secretFile;
-      cookie.secretFile = config.clan.core.vars.generators.hermes-oauth2-proxy.files.cookie_secret.path;
+      cookie = {
+        # Host-only by browser rule: no Domain, Secure, Path=/ (the header).
+        name = "__Host-hermes";
+        secretFile = config.clan.core.vars.generators.hermes-oauth2-proxy.files.cookie_secret.path;
+      };
       redirectURL = "https://${cfg.host}/oauth2/callback";
       email.domains = [ "*" ];
       setXauthrequest = true;
@@ -351,6 +464,8 @@ in
         insecure-oidc-allow-unverified-email = true;
         code-challenge-method = "S256";
         skip-provider-button = true;
+        # Back to the page asked for after the sign-in, on this host only.
+        whitelist-domain = cfg.host;
       };
       nginx = {
         domain = cfg.host;
@@ -377,30 +492,42 @@ in
       '') (lib.attrNames cfg.users)
     );
 
-    hyper.porkbunRecords.records = lib.mkIf (cfg.publicIPv4 != null) {
-      "*.${cfg.agentDomain}" = {
-        A = cfg.publicIPv4;
-        TXT = "v=spf1 -all";
-        AAAA.ipv6OnLink = {
-          inherit (config.networking.publicIPv6) interface;
-          suffix = config.networking.publicIPv6.token;
-        };
-      };
-    };
+    hyper.porkbunRecords.records = lib.mkIf (cfg.publicIPv4 != null) (
+      {
+        "*.${cfg.agentDomain}" = record;
+        ${cfg.agentDomain}.TXT = "v=spf1 -all";
+        "_dmarc.${cfg.agentDomain}".TXT = "v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s";
+      }
+      // lib.optionalAttrs (cfg.legacy.agentDomain != null) {
+        "*.${cfg.legacy.agentDomain}" = record;
+      }
+    );
 
-    security.acme.certs.${certName} = {
-      domain = "*.${cfg.agentDomain}";
-      dnsProvider = "porkbun";
-      # Not an enableACME cert, so the nginx module leaves the group alone.
-      group = "nginx";
-      credentialFiles = {
-        PORKBUN_API_KEY_FILE = config.clan.core.vars.generators.porkbun.files.apikey.path;
-        PORKBUN_SECRET_API_KEY_FILE = config.clan.core.vars.generators.porkbun.files.secretkey.path;
+    security.acme.certs =
+      let
+        dns01 = domain: {
+          inherit domain;
+          dnsProvider = "porkbun";
+          # Not an enableACME cert, so the nginx module leaves the group alone.
+          group = "nginx";
+          credentialFiles = {
+            PORKBUN_API_KEY_FILE = config.clan.core.vars.generators.porkbun.files.apikey.path;
+            PORKBUN_SECRET_API_KEY_FILE = config.clan.core.vars.generators.porkbun.files.secretkey.path;
+          };
+          # som's upstream answers REFUSED for names that do not exist yet,
+          # which ends lego's SOA walk (./agent-mail/default.nix).
+          dnsResolver = "1.1.1.1:53";
+        };
+      in
+      {
+        ${certName} = dns01 "*.${cfg.agentDomain}";
+        # The front door's subdomains: the mail owner page
+        # (./agent-mail/owner-page.nix) and the serve ports' old names.
+        hermes-subdomains = dns01 "*.${cfg.host}";
+      }
+      // lib.optionalAttrs (cfg.legacy.agentDomain != null) {
+        ${legacyCert} = dns01 "*.${cfg.legacy.agentDomain}";
       };
-      # som's upstream answers REFUSED for names that do not exist yet,
-      # which ends lego's SOA walk (./agent-mail/default.nix).
-      dnsResolver = "1.1.1.1:53";
-    };
 
     networking.firewall.allowedTCPPorts = [
       80
@@ -429,128 +556,146 @@ in
           default "";
         }
 
-        map $http_x_hermes_account $hermes_front_redirect {
+        ${frontMap "$hermes_front_redirect" (
+          agents: if lib.length agents == 1 then "${cfg.users.${lib.head agents}.publicUrl}/" else null
+        )}
+        ${frontMap "$hermes_front_choices" (
+          agents:
+          if lib.length agents > 1 then
+            "Your hermes dashboards:\\n${lib.concatMapStrings (a: "  ${cfg.users.${a}.publicUrl}/\\n") agents}"
+          else
+            null
+        )}
+        ${frontMap "$hermes_front_app" (
+          agents:
+          "Hermes Mobile: enter ${
+            if lib.length agents == 1 then "this address" else "one of these addresses"
+          } as the server.\\n${lib.concatMapStrings (a: "  ${cfg.users.${a}.publicUrl}\\n") agents}"
+        )}
+      ''
+      + lib.optionalString (cfg.legacy.agentDomain != null) ''
+        map $host $hermes_dashboard_legacy {
           default "";
         ${lib.concatStrings (
-          lib.mapAttrsToList (
-            account: agents:
-            lib.optionalString (lib.length agents == 1) ''
-              "${account}" "${cfg.users.${lib.head agents}.publicUrl}/";
-            ''
-          ) agentsOf
-        )}}
-
-        map $http_x_hermes_account $hermes_front_choices {
-          default "";
-        ${lib.concatStrings (
-          lib.mapAttrsToList (
-            account: agents:
-            lib.optionalString (lib.length agents > 1) ''
-              "${account}" "Your hermes dashboards:\n${
-                lib.concatMapStrings (a: "  ${cfg.users.${a}.publicUrl}/\\n") agents
-              }";
-            ''
-          ) agentsOf
+          lib.mapAttrsToList (user: u: ''
+            "${user}.${cfg.legacy.agentDomain}" "${u.publicUrl}";
+          '') cfg.users
         )}}
       '';
-      virtualHosts =
-        {
-          ${cfg.host} = {
-            forceSSL = true;
-            enableACME = true;
-            locations."/" = {
-              proxyPass = "http://unix:${frontSocket}:";
-              recommendedProxySettings = false;
-              extraConfig = ''
-                auth_request_set $hermes_account $upstream_http_x_auth_request_preferred_username;
-                proxy_set_header Host $host;
-                proxy_set_header X-Hermes-Account $hermes_account;
-                proxy_set_header Cookie "";
-              '';
-            };
-          };
-          # Answers the front door with the account nginx puts in the
-          # header; nothing but nginx can connect (/run/nginx is 0750).
-          hermes-front = {
-            serverName = "_";
-            listen = [ { addr = "unix:${frontSocket}"; } ];
+      virtualHosts = {
+        ${cfg.host} = {
+          forceSSL = true;
+          enableACME = true;
+          locations."/" = frontLocation;
+          locations."= /app" = frontLocation;
+        };
+        # Answers the front door with the account nginx puts in the
+        # header; nothing but nginx can connect (/run/nginx is 0750).
+        hermes-front = {
+          serverName = "_";
+          listen = [ { addr = "unix:${frontSocket}"; } ];
+          extraConfig = ''
+            default_type text/plain;
+            add_header X-Content-Type-Options nosniff always;
+          '';
+          locations."= /app".extraConfig = ''
+            if ($hermes_front_app) {
+              return 200 $hermes_front_app;
+            }
+            return 403 "No hermes dashboard for this account.\n";
+          '';
+          locations."/".extraConfig = ''
+            if ($hermes_front_redirect) {
+              return 302 $hermes_front_redirect;
+            }
+            if ($hermes_front_choices) {
+              return 200 $hermes_front_choices;
+            }
+            return 403 "No hermes dashboard for this account.\n";
+          '';
+        };
+        # Names under agentDomain that are no dashboard (nor a serve port
+        # of ./hermes-agents-serve.nix: those are exact names, which nginx
+        # matches before this wildcard), and the default server, so a
+        # request for an unknown Host on this host never reaches a backend
+        # either.
+        hermes-dashboard = {
+          serverName = "*.${cfg.agentDomain}";
+          default = true;
+          forceSSL = true;
+          useACMEHost = certName;
+          locations."/".return = "404";
+        };
+      }
+      // lib.optionalAttrs (cfg.legacy.agentDomain != null) {
+        # Transition only: 301 to the new name, never a backend.
+        hermes-dashboard-legacy = {
+          serverName = "*.${cfg.legacy.agentDomain}";
+          forceSSL = true;
+          useACMEHost = legacyCert;
+          extraConfig = ''
+            if ($hermes_dashboard_legacy = "") {
+              return 404;
+            }
+            return 301 $hermes_dashboard_legacy$request_uri;
+          '';
+        };
+      }
+      // lib.mapAttrs' (
+        user: u:
+        let
+          location = {
+            proxyPass = "http://127.0.0.1:${toString (portOf user)}";
+            # /api/ws, /api/pty, /api/events and the kanban feed are
+            # long-lived websockets / SSE streams that sit idle far
+            # longer than 60s.
+            proxyWebsockets = true;
+            # recommendedProxySettings appends to the client's
+            # X-Forwarded-For; hermes reads its first hop.
+            recommendedProxySettings = false;
             extraConfig = ''
-              default_type text/plain;
-              if ($hermes_front_redirect) {
-                return 302 $hermes_front_redirect;
-              }
-              if ($hermes_front_choices) {
-                return 200 $hermes_front_choices;
-              }
-              return 403 "No hermes dashboard for this account.\n";
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $remote_addr;
+              proxy_set_header X-Forwarded-Proto https;
+              proxy_set_header X-Forwarded-Host $host;
+              proxy_set_header X-Forwarded-Prefix "";
+              proxy_set_header Forwarded "";
+              proxy_set_header Cookie $hermes_dashboard_cookie;
+              proxy_cookie_domain ~.+ $host;
+              proxy_read_timeout 1h;
+              proxy_send_timeout 1h;
+              client_max_body_size 256m;
             '';
           };
-          # Names under agentDomain that are no dashboard, and the default
-          # server, so a request for an unknown Host on this host never
-          # reaches a backend either.
-          hermes-dashboard = {
-            serverName = "*.${cfg.agentDomain}";
-            default = true;
-            forceSSL = true;
-            useACMEHost = certName;
-            locations."/".return = "404";
+          # The two that start a sign-in (the header).
+          signIn = location // {
+            extraConfig = location.extraConfig + ''
+              limit_req zone=hermes_dashboard_login burst=10 nodelay;
+              limit_req_status 429;
+            '';
+          };
+        in
+        lib.nameValuePair (vhostOf user) {
+          serverName = hostOf user;
+          forceSSL = true;
+          useACMEHost = certName;
+          # Server level, so every location inherits them: none adds a
+          # header of its own, which would drop these (nginx add_header).
+          extraConfig = ''
+            add_header Content-Security-Policy "frame-ancestors 'self'" always;
+            add_header X-Frame-Options $hermes_dashboard_frame_options always;
+          '';
+          locations."/" = location;
+          locations."= /auth/login" = signIn;
+          # The app's sign-in always asks for the passkey (the header).
+          locations."= /auth/native/authorize" = signIn // {
+            extraConfig = signIn.extraConfig + ''
+              proxy_redirect "~^(${lib.escapeRegex config.hyper.oidc.issuer}/authorize\?.*)$" "$1&prompt=login";
+            '';
           };
         }
-        // lib.mapAttrs' (
-          user: u:
-          let
-            location = {
-              proxyPass = "http://127.0.0.1:${toString (portOf user)}";
-              # /api/ws, /api/pty, /api/events and the kanban feed are
-              # long-lived websockets / SSE streams that sit idle far
-              # longer than 60s.
-              proxyWebsockets = true;
-              # recommendedProxySettings appends to the client's
-              # X-Forwarded-For; hermes reads its first hop.
-              recommendedProxySettings = false;
-              extraConfig = ''
-                proxy_set_header Host $host;
-                proxy_set_header X-Real-IP $remote_addr;
-                proxy_set_header X-Forwarded-For $remote_addr;
-                proxy_set_header X-Forwarded-Proto https;
-                proxy_set_header X-Forwarded-Host $host;
-                proxy_set_header X-Forwarded-Prefix "";
-                proxy_set_header Forwarded "";
-                proxy_set_header Cookie $hermes_dashboard_cookie;
-                proxy_cookie_domain ~.+ $host;
-                proxy_read_timeout 1h;
-                proxy_send_timeout 1h;
-                client_max_body_size 256m;
-              '';
-            };
-            # The two that start a sign-in (the header).
-            signIn = location // {
-              extraConfig = location.extraConfig + ''
-                limit_req zone=hermes_dashboard_login burst=10 nodelay;
-                limit_req_status 429;
-              '';
-            };
-          in
-          lib.nameValuePair "hermes-dashboard-${user}" {
-            serverName = "${user}.${cfg.agentDomain}";
-            forceSSL = true;
-            useACMEHost = certName;
-            # Server level, so every location inherits them: none adds a
-            # header of its own, which would drop these (nginx add_header).
-            extraConfig = ''
-              add_header Content-Security-Policy "frame-ancestors 'self'" always;
-              add_header X-Frame-Options $hermes_dashboard_frame_options always;
-            '';
-            locations."/" = location;
-            locations."= /auth/login" = signIn;
-            # The app's sign-in always asks for the passkey (the header).
-            locations."= /auth/native/authorize" = signIn // {
-              extraConfig = signIn.extraConfig + ''
-                proxy_redirect "~^(${lib.escapeRegex config.hyper.oidc.issuer}/authorize\?.*)$" "$1&prompt=login";
-              '';
-            };
-          }
-        ) cfg.users;
+      ) cfg.users;
     };
   };
 }

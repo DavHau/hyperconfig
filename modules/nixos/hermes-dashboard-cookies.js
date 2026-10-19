@@ -12,12 +12,12 @@
 // Hermes Mobile signs in through the native flow and keeps the tokens
 // itself; it sends them as bare `hermes_session_at`, `_rt` and `_provider`
 // (hermes-mobile CookieSerialization.kt), which hermes reads after the
-// `__Host-` names. A bare name can be tossed from a sibling site
-// (Domain=davhau.com from an agent slot, Domain=agents.davhau.com from
-// another agent's dashboard). That is harmless: hermes prefers the
-// `__Host-` cookie when both are there, and a tossed token must still
-// carry aud=hermes-<this agent>, i.e. be a login of this dashboard's own
-// members. Every other cookie, login cookies of other sites included,
+// `__Host-` names. A bare name can be tossed from a sibling host
+// (Domain=davhau.fyi or Domain=<agent>.davhau.fyi from another agent's page
+// or this agent's own serve ports and slot). That is harmless: hermes
+// prefers the `__Host-` cookie when both are there, and a tossed token must
+// still carry aud=hermes-<this agent>, i.e. be a login of this dashboard's
+// own members. Every other cookie, login cookies of other hosts included,
 // stays out, however many there are.
 var ALLOWED =
   /^(__Host-hermes_(session_(at|rt|provider|pkce)|sso_attempt)|hermes_session_(at|rt|provider))=/;

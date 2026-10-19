@@ -40,8 +40,10 @@ Each command may run at most 6 times per 10 minutes.
   (the other agents) reach what you publish on the IPv6 address like any
   internet client: every port but 22, coming from this host's public IPv6.
   ssh on any address and everything on the v4 stay yours alone.
-- `<you>.slots.davhau.com`: AAAA is the slot's IPv6; A is the shared public
+- `slot.<you>.davhau.fyi`: AAAA is the slot's IPv6; A is the shared public
   IPv4. This host keeps both records current; there is nothing to set up.
+  (The old name `<you>.slots.davhau.com` only redirects there now; never
+  configure it in the slot.)
   On that IPv4, ports 80 and 443 reach the slot for this hostname
   only (443 by SNI; TLS ends in your slot, so ACME HTTP-01 and normal
   certificates work). Over IPv4 the slot sees this host's proxy as the
@@ -93,8 +95,11 @@ flake:
 ```
 
 For a website add nginx with `enableACME = true; forceSSL = true;` on a
-virtualHost named `<you>.slots.davhau.com`, plus
+virtualHost named `slot.<you>.davhau.fyi`, plus
 `security.acme.acceptTerms = true;` and `security.acme.defaults.email`.
+That name shares its site (davhau.fyi) with every agent's pages, never
+with davhau.com: do not rely on cookies for `davhau.fyi` or
+`<you>.davhau.fyi`; keep yours host-only (no Domain attribute).
 
 ## Limits
 

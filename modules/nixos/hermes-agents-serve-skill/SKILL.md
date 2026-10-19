@@ -1,15 +1,17 @@
 ---
 name: serve-ports
-description: How to publish anything you serve over HTTP (web app, preview, file server, API, dev server, notebook, report) so a person can open it at https://<port>.@HOST@/. Every account owns 5 private ports (only its owner, after login) and 5 public ports (anyone with the link). Use it every time you start a listening server that someone else should open.
+description: How to publish anything you serve over HTTP (web app, preview, file server, API, dev server, notebook, report) so a person can open it at https://<port>.<your account>.@DOMAIN@/. Every account owns 5 private ports (only its owner, after login) and 5 public ports (anyone with the link). Use it every time you start a listening server that someone else should open.
 ---
 
-# Publishing pages at https://<port>.@HOST@/
+# Publishing pages at https://<port>.<account>.@DOMAIN@/
 
 Nothing you listen on is reachable from outside directly. A reverse proxy
-publishes your own ports, with TLS, at `https://<port>.@HOST@/`. Which port
-you pick decides who can open the page:
+publishes your own ports, with TLS, at `https://<port>.<account>.@DOMAIN@/`
+(your account name, then the port). Which port you pick decides who can
+open the page:
 
-- **private port**: the visitor logs in and only your owner's account gets
+- **private port**: the visitor logs in (once per port; after the first
+  login it is usually automatic) and only your owner's account gets
   through; everyone else gets 403. Use this by default.
 - **public port**: anyone with the link can open it, no login. Use it only
   when your owner asks you to share something publicly.
@@ -30,18 +32,27 @@ Your account name is `id -un`. Your ports:
    - `vite --host 127.0.0.1 --port <port> --strictPort`
    - `uvicorn app:app --host 127.0.0.1 --port <port> --proxy-headers`
    - `jupyter lab --ip 127.0.0.1 --port <port> --no-browser`
-3. Give the person the link `https://<port>.@HOST@/` and say whether it is
-   private or public.
+3. Give the person the link `https://<port>.<account>.@DOMAIN@/` and say
+   whether it is private or public.
 
 The page sits at the root of its own host, so apps need no base path. The
 proxy sends `Host: 127.0.0.1:<port>`, `X-Forwarded-Proto: https` and
-`X-Forwarded-Host: <port>.@HOST@`; apps that build absolute URLs should
-trust those headers. Websockets work.
+`X-Forwarded-Host: <port>.<account>.@DOMAIN@`; apps that build absolute URLs
+should trust those headers. Websockets work. A browser's `Origin` from the
+page itself arrives as `http://127.0.0.1:<port>`, matching that Host, so an
+app's own same-origin check passes; other origins arrive unchanged.
 
 ## Rules
 
-- Only your own ports. Other agents' ports and every port outside the table
-  are not published; other accounts cannot even connect to yours locally.
+- Only your own ports, under your own name: a port under another account's
+  name, and every port outside the table, is not published; other accounts
+  cannot even connect to yours locally.
+- The paths below `/.hermes-serve-login/` belong to the login of private
+  ports; your app never sees them there.
+- Private ports refuse what a page of any other origin (another port,
+  another agent, any other site) makes the visitor's browser send there:
+  form posts, fetch, websockets, iframes. Links to them still work, and the
+  port's own pages are not affected.
 - Never `--port 0` / a random port for something a person should open.
 - On a public port, assume the whole internet reads it. Never put secrets,
   your home directory or `/vault` there; serve a dedicated directory.

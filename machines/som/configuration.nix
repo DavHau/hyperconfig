@@ -98,16 +98,25 @@ in
   hyper.coolerLcd.usbPort = "1-0:1.0/usb1-port8";
 
   # Public hermes dashboards, one per agent in ./hermes-agents.nix:
-  # https://<agent>.agents.davhau.com/ with hermes' own pocket-id login
-  # (../../modules/nixos/hermes-dashboard-public.nix). *.agents.davhau.com
-  # A -> sgp (forwarded here), AAAA -> the token address below, kept by
+  # https://<agent>.davhau.fyi/ with hermes' own pocket-id login, and their
+  # serve ports at https://<port>.<agent>.davhau.fyi/
+  # (../../modules/nixos/hermes-dashboard-public.nix,
+  # ../../modules/nixos/hermes-agents-serve.nix). davhau.fyi is the agents'
+  # site, apart from davhau.com. *.davhau.fyi and *.<agent>.davhau.fyi A ->
+  # sgp (forwarded here), AAAA -> the token address below, kept by
   # porkbun-records. https://hermes.davhau.com/ (oauth2-proxy) redirects the
-  # signed-in account to its dashboard and carries the serve ports and the
-  # mail owner page.
+  # signed-in account to its dashboard, /app lists its addresses for Hermes
+  # Mobile; the mail owner page sits next to it. The old names
+  # <agent>.agents.davhau.com and <port>.hermes.davhau.com only answer 301
+  # to the new ones during the transition (`legacy`).
   hyper.hermesDashboard = {
     host = "hermes.davhau.com";
     agentDomain = (import ./hermes-dashboards.nix).domain;
     publicIPv4 = "38.89.142.76";
+    legacy = {
+      agentDomain = "agents.davhau.com";
+      servePorts = true;
+    };
   };
 
   # Receive-only mail for every agent in ./hermes-agents.nix at
@@ -199,7 +208,10 @@ in
   # the router rules derive from them, so never renumber or reuse one; a new
   # agent takes the next free id. The deploy key is the agent's own clan
   # key (hermes-agent-ssh-<name>, ../../modules/nixos/hermes-agents.nix), the
-  # one vit's GPU accounts also trust.
+  # one vit's GPU accounts also trust. Hostname slot.<agent>.davhau.fyi, on
+  # the agents' site; the old <agent>.slots.davhau.com only redirects there
+  # during the transition. The other container slots above have no public
+  # hostname, so nothing of theirs moves.
   hyper.agentSlots =
     let
       slotIds = {
@@ -218,7 +230,8 @@ in
       key = name: config.clan.core.vars.generators."hermes-agent-ssh-${name}".files;
     in
     {
-      domain = "slots.davhau.com";
+      domain = (import ./hermes-dashboards.nix).domain;
+      legacyDomain = "slots.davhau.com";
       publicIPv4 = "38.89.142.76";
       agents = lib.genAttrs agents (name: {
         id =

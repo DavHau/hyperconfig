@@ -9,13 +9,14 @@
 #     state under /var/lib/hermes/<name>/state), brain p0's
 #     Qwen (the seed-once initialModel in ./hermes-common.nix), no
 #     OpenRouter,
-#   - the web dashboard at https://<name>.<agentDomain>/ with hermes' own
-#     pocket-id login (./hermes-dashboard-public.nix; the account that signs
-#     in is hyper.hermesDashboard.users.<name>.account, the agent name by
+#   - the web dashboard at https://<name>.<agentDomain>/ (davhau.fyi, the
+#     agents' own site) with hermes' own pocket-id login
+#     (./hermes-dashboard-public.nix; the account that signs in is
+#     hyper.hermesDashboard.users.<name>.account, the agent name by
 #     default; passkey, enrolled through the login link hermes-onboard
 #     prints),
-#   - 10 loopback ports published at https://<port>.<dashboard host>/, five
-#     private (that account's pocket-id login) and five public
+#   - 10 loopback ports published at https://<port>.<name>.<agentDomain>/,
+#     five private (that account's pocket-id login) and five public
 #     (./hermes-agents-serve.nix, taught by the serve-ports skill),
 #   - oh-my-pi on p0 through a per-user token copy (./inference-api-key.nix),
 #   - bash as login shell, not the site default fish: hermes-desktop's SSH

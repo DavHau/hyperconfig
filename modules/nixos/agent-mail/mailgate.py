@@ -1293,9 +1293,9 @@ async def owner_page(request: web.Request) -> web.Response:
 async def owner_action(request: web.Request) -> web.Response:
     account = request.headers.get("X-Mailgate-Account", "")
     # A browser always sends Origin on a POST. Pages on other origins (an
-    # agent's dashboard or serve port, same site) can make the owner's browser
-    # POST here with the session cookie, but cannot fake Origin or read the
-    # CSRF token.
+    # agent's dashboard or serve port, another site since they moved to
+    # davhau.fyi) can make the owner's browser POST here, but cannot fake
+    # Origin or read the CSRF token.
     if request.headers.get("Origin") != CFG.get("ownerOrigin") or request.headers.get(
         "Sec-Fetch-Site", "same-origin"
     ) != "same-origin":
