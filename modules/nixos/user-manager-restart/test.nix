@@ -14,6 +14,8 @@ pkgs.testers.runNixOSTest {
   };
 
   testScript = ''
+    import datetime
+
     machine.wait_for_unit("user@1000.service")
 
     def main_pid():
@@ -25,13 +27,15 @@ pkgs.testers.runNixOSTest {
         machine.wait_until_succeeds(
             f"pid=$(systemctl show -P MainPID user@1000.service); "
             f"[ \"$pid\" != 0 ] && [ \"$pid\" != {old} ] && systemctl is-active user@1000.service",
-            timeout=60,
+            timeout=datetime.timedelta(seconds=60),
         )
-        machine.wait_until_succeeds("systemctl --user -M alice@ show-environment", timeout=60)
+        machine.wait_until_succeeds(
+            "systemctl --user -M alice@ show-environment", timeout=datetime.timedelta(seconds=60)
+        )
 
     with subtest("a clean stop stays stopped"):
         machine.succeed("systemctl stop user@1000.service")
-        machine.sleep(10)
+        machine.sleep(duration=datetime.timedelta(seconds=10))
         machine.fail("systemctl is-active user@1000.service")
   '';
 }
