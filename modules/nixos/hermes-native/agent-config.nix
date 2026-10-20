@@ -87,6 +87,7 @@ rec {
   hermesWheelPatches = [
     ./patches/hermes-auth-bare-named-provider.patch
     ./patches/hermes-gateway-restart-foreign-unit.patch
+    ./patches/hermes-gateway-no-home-shutdown-broadcast.patch
     ./patches/hermes-camofox-browser-downloads.patch
     ./patches/hermes-camofox-solve-captcha.patch
   ];
