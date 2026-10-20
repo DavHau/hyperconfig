@@ -31,6 +31,7 @@ in
     ../../modules/nixos/hermes-claude-auth.nix
     ../../modules/nixos/public-ipv6-token.nix
     ../../modules/nixos/linger-normal-users.nix
+    ../../modules/nixos/user-manager-restart
     ../../modules/nixos/rgb-off.nix
     ../../modules/nixos/cooler-lcd
     ../../modules/nixos/ipv4-forward.nix
