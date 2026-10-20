@@ -112,6 +112,7 @@ in
         # github.com/theanxy.keys (fetched 2026-10-19)
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIL98qbBMVca+vmDMSGYTIQVqncMSTrJZlMLXL430UFaJ theanxy"
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM4W5V2wnXVKvbablE7CM4soDYfdqA7DUbB/04VzrN1r theanxy"
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAlGX2PY0MKopFzB280bqIXo7SpNKntS0aLbWgLivCKJ wojtek@wojtek14-2.local"
       ];
     };
 
