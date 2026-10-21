@@ -274,6 +274,10 @@
           import ./modules/nixos/user-manager-restart/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
+        zfs-keylocation-sync =
+          import ./modules/nixos/zfs-keylocation-sync/test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          };
         noctalia-anthropic-usage =
           import ./modules/nixos/noctalia-anthropic-usage/test.nix {
             # amy's pkgs carry the spaces overlay (noctalia-shell,
