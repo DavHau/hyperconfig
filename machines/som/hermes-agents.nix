@@ -4,6 +4,7 @@
 {
   config,
   lib,
+  pkgs,
   ...
 }:
 let
@@ -140,6 +141,15 @@ in
       ];
     };
 
+    # joe: dave's former amy microVM agent (hermes-grmpf), its state and
+    # workspace copied over when amy's microVM was retired. Untrusted like
+    # dave-hermes, so its own account; dave signs in to its dashboard.
+    joe = {
+      uid = 1113;
+      description = "joe - dave's hermes agent (ex amy microVM)";
+      sshKeys = adminKeys;
+    };
+
     # momentum: OpenRouter brain + a Telegram bot in ONE group chat where
     # several allow-listed people prompt it. Identity (uid 1100, vault-ro)
     # in ../../modules/nixos/vault-ids.nix; logs in with the admin keys
@@ -173,6 +183,10 @@ in
       };
     };
   };
+
+  # The daily Open LLM brief cron job (moved from amy's microVM) scans its
+  # blog feeds with blogwatcher-cli; the feed db sits in the account home.
+  users.users.dave-hermes.packages = [ (pkgs.callPackage ../../pkgs/blogwatcher-cli { }) ];
 
   # Each agent's dashboard account; the inventory reads the same file for
   # the pocket-id clients and groups.
