@@ -12,13 +12,15 @@ let
   # The clan sshd instance fills root's list; accounts without keys of their
   # own reuse it.
   adminKeys = config.users.users.root.openssh.authorizedKeys.keys;
-  # hermes-desktop on the dave machines dials dave-hermes over ssh with a
-  # shared restricted key (../../modules/nixos/hermes-desktop-dave-hermes.nix
-  # owns the key and the rationale; dave.nix imports it here too). Its
-  # bootstrap needs command execution plus one loopback -L forward to the
-  # port `hermes serve --port 0` picks, nothing else: no pty, no agent/X11
+  # hermes-desktop on the dave machines dials dave-hermes and joe over ssh
+  # with a shared restricted key (../../modules/nixos/hermes-desktop owns the
+  # key and the rationale; dave.nix imports it here too). Its bootstrap needs
+  # command execution plus one loopback -L forward to the port
+  # `hermes serve --port 0` picks, nothing else: no pty, no agent/X11
   # forwarding.
-  desktopKey = config.clan.core.vars.generators.hermes-desktop-ssh.files."key.pub".value;
+  desktopKey = ''restrict,port-forwarding,permitopen="127.0.0.1:*" ${
+    config.clan.core.vars.generators.hermes-desktop-ssh.files."key.pub".value
+  }'';
 in
 {
   imports = [
@@ -136,9 +138,7 @@ in
     dave-hermes = {
       uid = 1005;
       description = "dave's hermes agent";
-      sshKeys = adminKeys ++ [
-        ''restrict,port-forwarding,permitopen="127.0.0.1:*" ${desktopKey}''
-      ];
+      sshKeys = adminKeys ++ [ desktopKey ];
     };
 
     # joe: dave's former amy microVM agent (hermes-grmpf), its state and
@@ -147,7 +147,7 @@ in
     joe = {
       uid = 1113;
       description = "joe - dave's hermes agent (ex amy microVM)";
-      sshKeys = adminKeys;
+      sshKeys = adminKeys ++ [ desktopKey ];
     };
 
     # momentum: OpenRouter brain + a Telegram bot in ONE group chat where
