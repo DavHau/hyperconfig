@@ -30,6 +30,7 @@
     b3x = "b3x";
     egg = "egg";
     dave-hermes = "dave";
+    joe = "dave";
     momentum = "momentum";
   };
 }
