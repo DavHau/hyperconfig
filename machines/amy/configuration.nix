@@ -22,8 +22,6 @@
     ../../modules/nixos/amd-powersave-limits.nix
     ../../modules/nixos/powersave-panel-refresh.nix
     ../../modules/nixos/chores-on-ac.nix
-    ../../modules/nixos/hermes/site.nix
-    ../../modules/nixos/hermes-claude-auth.nix
     ../../modules/nixos/spaces-kiwix.nix
     ../../modules/nixos/vibepn.nix
     ../../modules/nixos/storagebox.nix
@@ -82,11 +80,17 @@
     services.spaces.niri.modKey = "Alt";
   };
 
+  # No hermes microVM here: grmpf's agent moved to som (hermes agent joe,
+  # machines/som/hermes-agents.nix). The spaces desktop profile defaults it
+  # on; its state vault under /var/lib/hermes-microvm stays on disk.
+  services.hermes-microvm.enable = false;
+
   # dave (clan users role) has no declared uid and on-disk got 1001 (grmpf
-  # took 1000 first). Pin it so any tool that rebuilds the user DB from the
+  # took 1000 first). Pin both so any tool that rebuilds the user DB from the
   # declarative config (userborn, fresh install) can never hand dave 1000
-  # and collide with grmpf's static uid (hermes requires grmpf = 1000).
+  # and collide with grmpf's 1000, which owns grmpf's files on disk.
   # amy-specific: on other machines dave may legitimately be 1000.
+  users.users.grmpf.uid = 1000;
   users.users.dave.uid = 1001;
   # Consequence for the vault NFS export (sec=sys): uid 1000 from amy is
   # `dave` on bam, so grmpf - not amy's dave - is the principal that owns
