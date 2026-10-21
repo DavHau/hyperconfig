@@ -1,21 +1,25 @@
 # TeamClaude: pooled Claude subscription gateway at
-# https://teamclaude.davhau.com/, a copy of project-zero's pubproxy01 setup
+# https://teamclaude.davhau.com/, after project-zero's pubproxy01 setup
 # (../geninf/project-zero: modules/nixos/teamclaude-gateway.nix,
-# docs/teamclaude-gateway.md), with its own key and its own accounts.
+# docs/teamclaude-gateway.md), with its own keys and its own accounts.
 #
-# TeamClaude stays on loopback. nginx owns public TLS and is the gate the
-# public sees: it checks the gateway key in either header clients use (omp
-# sends `Authorization: Bearer <key>`, Claude Code x-api-key or a bearer).
-# TeamClaude (>= 1.1.20) also checks the key itself on every request that
-# carries a forwarding header, so nginx presents the same key to it as
-# x-api-key on each request it lets through, and proxy.trustLoopback is off
-# so a loopback caller cannot skip the second gate. Two gates, one key.
+# TeamClaude stays on loopback behind nginx, which owns public TLS. The key
+# check is TeamClaude's own: it authenticates every request against the
+# operator key (proxy.apiKey, the clan var below) and every runtime client
+# key (proxy.clientKeys), and proxy.trustLoopback is off so a loopback
+# caller -- nginx included -- is never exempt. It reads the key from
+# x-api-key only, while omp sends `Authorization: Bearer <key>` and Claude
+# Code either, so nginx hands a bearer over as x-api-key when the request
+# carries none. Unlike project-zero, nginx holds no key of its own: a key
+# minted at runtime works without a deploy.
 #
+# Client keys, one per person or machine, minted and revoked at runtime
+# (as root on som; usage is booked per name in `teamclaude status`):
+#   teamclaude-keys add <name>      prints the new key once
+#   teamclaude-keys list | show <name> | revoke <name>
 # Add an account (as root on som; open the printed URL, sign in with the
 # Claude account being contributed, paste the callback back):
 #   sudo -u teamclaude -H env TEAMCLAUDE_CONFIG=/var/lib/teamclaude/teamclaude.json teamclaude login
-# The key clients present:
-#   clan vars get som teamclaude-gateway-key/key
 {
   config,
   lib,
@@ -25,7 +29,7 @@
 }:
 let
   domain = "teamclaude.davhau.com";
-  apiKeyFile = config.clan.core.vars.generators.teamclaude-gateway-key.files.key.path;
+  stateFile = "/var/lib/teamclaude/teamclaude.json";
   configFile = config.clan.core.vars.generators.teamclaude-config.files."config.json".path;
   # Everything but the proxy key, which is the only secret in the config. A
   # change here reaches the service on its next restart via preStart.
@@ -43,18 +47,28 @@ let
       distributeSessions = true;
     }
   );
-  tokenMapDir = "/run/nginx-teamclaude-auth";
+  teamclaudeKeys = pkgs.writeShellScriptBin "teamclaude-keys" ''
+    if [ "$(${pkgs.coreutils}/bin/id -u)" -ne 0 ]; then
+      echo "teamclaude-keys: run as root" >&2
+      exit 1
+    fi
+    exec ${pkgs.util-linux}/bin/runuser -u teamclaude -- \
+      ${pkgs.coreutils}/bin/env TEAMCLAUDE_CONFIG=${stateFile} \
+      ${pkgs.nodejs}/bin/node ${./keys.mjs} \
+      ${config.services.teamclaude.package}/share/teamclaude/src "$@"
+  '';
 in
 {
   imports = [ inputs.teamclaude.nixosModules.default ];
 
   clan.core.vars.generators = {
-    # Shared, so a fleet machine can present it as a client without a second
-    # copy of the secret drifting on rotation. The `sk-ant-oat01-` prefix is
-    # load-bearing: Anthropic accepts subscription OAuth only on requests
-    # that present as Claude Code, and omp/Pi emulate Claude Code only when
-    # their key looks like a subscription token. A plain hex key turns every
-    # omp request into a 429.
+    # The operator key (proxy.apiKey): the control plane on loopback and
+    # teamclaude-keys' reload call. Clients get their own runtime keys.
+    # Shared, so a fleet machine can still present it as a client. The
+    # `sk-ant-oat01-` prefix is load-bearing: Anthropic accepts subscription
+    # OAuth only on requests that present as Claude Code, and omp/Pi
+    # emulate Claude Code only when their key looks like a subscription
+    # token. A plain hex key turns every omp request into a 429.
     teamclaude-gateway-key = {
       share = true;
       files.key.secret = true;
@@ -115,64 +129,63 @@ in
   # file, except `accounts`, which is runtime state and stays as the service
   # left it. Runs as root (PermissionsStartOnly), after the module's own
   # copy-if-missing.
+  #
+  # Every start, and with no account enrolled the service restarts every
+  # 5 s, so the merge must not disturb a concurrent writer (teamclaude-keys,
+  # a `teamclaude login`): it takes TeamClaude's own advisory lock
+  # (src/config.js: <config>.lock, O_EXCL, {"pid","at"}, give up after 2 s)
+  # and replaces the file by rename of a copy that is already
+  # teamclaude-owned 0600, so no reader ever sees a root-owned file.
   systemd.services.teamclaude.preStart = lib.mkAfter ''
-    live=/var/lib/teamclaude/teamclaude.json
+    live=${stateFile}
     src=${lib.escapeShellArg config.services.teamclaude.configSource}
     if [ -e "$live" ]; then
+      lock="$live.lock"
+      held=
+      for _ in $(seq 80); do
+        if (set -C; printf '{"pid":%d,"at":%d}' "$$" "$(date +%s%3N)" > "$lock") 2>/dev/null; then
+          chown teamclaude:teamclaude "$lock"
+          held=1
+          break
+        fi
+        sleep 0.025
+      done
+      tmp=$(mktemp "$live.merged.XXXXXX")
       ${pkgs.jq}/bin/jq -s '.[0] * .[1] * (.[2] | del(.accounts)) | .accounts //= []' \
-        "$live" ${settingsFile} "$src" > "$live.merged"
-      ${pkgs.coreutils}/bin/install -m 0600 -o teamclaude -g teamclaude "$live.merged" "$live"
-      ${pkgs.coreutils}/bin/rm -f "$live.merged"
+        "$live" ${settingsFile} "$src" > "$tmp"
+      chown teamclaude:teamclaude "$tmp"
+      chmod 0600 "$tmp"
+      mv -f "$tmp" "$live"
+      [ -z "$held" ] || rm -f "$lock"
     fi
   '';
 
+  environment.systemPackages = [ teamclaudeKeys ];
+
   services.nginx = {
-    # `Bearer sk-ant-oat01-<64 hex>` is 84 characters; with nginx's hash
-    # metadata it does not fit the default 64-byte bucket.
-    mapHashBucketSize = 128;
-    # Two maps and a third over their concatenation, because nginx `if`
-    # cannot AND two variables: each header map yields 1 for "no match", so
-    # only "11" -- neither header carried the key -- is a rejection.
+    # The key a request presents: x-api-key, else the bearer.
     appendHttpConfig = ''
-      map $http_x_api_key $teamclaude_bad_api_key {
-        default 1;
-        include ${tokenMapDir}/api-key.conf;
+      map $http_authorization $teamclaude_bearer {
+        default "";
+        "~^Bearer\s+(?<key>\S+)$" $key;
       }
 
-      map $http_authorization $teamclaude_bad_bearer {
-        default 1;
-        include ${tokenMapDir}/bearer.conf;
-      }
-
-      map "$teamclaude_bad_api_key$teamclaude_bad_bearer" $teamclaude_bad_key {
-        default 0;
-        "11" 1;
+      map $http_x_api_key $teamclaude_key {
+        "" $teamclaude_bearer;
+        default $http_x_api_key;
       }
     '';
 
     virtualHosts.${domain} = {
       forceSSL = true;
       useACMEHost = domain;
-      # TeamClaude's status and steering API stays off the shared data-plane
-      # credential: administrators use it on loopback, presenting the key as
-      # x-api-key; the public gets no control-plane access.
-      locations."^~ /teamclaude/".extraConfig = ''
-        if ($teamclaude_bad_key) {
-          return 401;
-        }
-        return 404;
-      '';
+      # TeamClaude's status and steering API stays off the public name:
+      # the operator uses it on loopback with the operator key.
+      locations."^~ /teamclaude/".return = "404";
       locations."/" = {
         proxyPass = "http://127.0.0.1:3456";
         proxyWebsockets = true;
-        # key.conf is `set $teamclaude_key "<key>";`, written by the auth
-        # oneshot next to the maps; `set` is location-scope, so it is
-        # included here. TeamClaude reads the proxy key from x-api-key only.
         extraConfig = ''
-          if ($teamclaude_bad_key) {
-            return 401;
-          }
-          include ${tokenMapDir}/key.conf;
           proxy_set_header x-api-key $teamclaude_key;
           proxy_buffering off;
           proxy_request_buffering off;
@@ -183,33 +196,6 @@ in
         '';
       };
     };
-  };
-
-  systemd.services.nginx-teamclaude-auth = {
-    description = "API-key map for the TeamClaude gateway";
-    requiredBy = [ "nginx.service" ];
-    before = [ "nginx.service" ];
-    unitConfig.DefaultDependencies = false;
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-      User = "nginx";
-      Group = "nginx";
-      RuntimeDirectory = "nginx-teamclaude-auth";
-      RuntimeDirectoryMode = "0700";
-      RuntimeDirectoryPreserve = true;
-      LoadCredential = [ "api-key:${apiKeyFile}" ];
-    };
-    script = ''
-      umask 077
-      key=$(cat "$CREDENTIALS_DIRECTORY/api-key")
-      [ -n "$key" ] || { echo "gateway key is empty; not writing a map" >&2; exit 1; }
-      printf '"%s" 0;\n' "$key" > "$RUNTIME_DIRECTORY/api-key.conf"
-      printf '"Bearer %s" 0;\n' "$key" > "$RUNTIME_DIRECTORY/bearer.conf"
-      # nginx's `$var` is literal here; spelled as a %s so shellcheck (SC2016)
-      # does not read it as an unexpanded shell variable.
-      printf 'set $%s "%s";\n' teamclaude_key "$key" > "$RUNTIME_DIRECTORY/key.conf"
-    '';
   };
 
   # DNS-01 like som's other certificates: som's IPv4 arrives forwarded from
