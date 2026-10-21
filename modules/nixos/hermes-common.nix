@@ -60,6 +60,10 @@ let
     # premium beats re-warming the whole context; under the Claude
     # subscription (hermes-claude-auth.nix) it is flat-rate anyway.
     settings.prompt_caching.cache_ttl = "1h";
+    # hermes 0.21 defaults sessions.auto_prune on (retention_days 90): the
+    # gateway deletes ended sessions at startup and daily. We keep all
+    # history.
+    settings.sessions.auto_prune = false;
     # Session titles come from p0's Qwen regardless of the chat model.
     # hermes 0.20.2 title_generator.py passes extra_body.response_format
     # through auxiliary_client into the native Anthropic request body,
