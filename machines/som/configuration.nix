@@ -42,6 +42,8 @@ in
     ../../modules/nixos/zfs-ephemeral-tmp.nix
     ../../modules/nixos/per-user-tmp
     ../../modules/nixos/agent-mail
+    # Pooled Claude subscription gateway, https://teamclaude.davhau.com/.
+    ../../modules/nixos/teamclaude-gateway.nix
   ];
 
   # Public IPv4 38.89.142.76, borrowed from sgp through a WireGuard tunnel

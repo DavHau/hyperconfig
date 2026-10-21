@@ -1856,6 +1856,7 @@
         "srvos": "srvos",
         "stylix": "stylix",
         "systems": "systems_9",
+        "teamclaude": "teamclaude",
         "vibepn": "vibepn",
         "wrappers": "wrappers_2"
       }
@@ -2143,6 +2144,26 @@
         "type": "path"
       },
       "parent": []
+    },
+    "teamclaude": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1791823946,
+        "narHash": "sha256-QoGKuS9pMYoPpBTS8yKbY2S39K946R+K7MxdDVBjZkU=",
+        "owner": "KarpelesLab",
+        "repo": "teamclaude",
+        "rev": "88fe9b37862c40fefa459a90cd3dbd2c31db98ce",
+        "type": "github"
+      },
+      "original": {
+        "owner": "KarpelesLab",
+        "repo": "teamclaude",
+        "type": "github"
+      }
     },
     "tinted-foot": {
       "flake": false,

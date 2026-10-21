@@ -163,6 +163,12 @@
     wrappers.url = "github:lassulus/wrappers";
     wrappers.inputs.nixpkgs.follows = "nixpkgs";
 
+    # TeamClaude: pooled Claude subscription gateway on som
+    # (modules/nixos/teamclaude-gateway.nix), the setup project-zero runs on
+    # pubproxy01. Locked to project-zero's revision.
+    teamclaude.url = "github:KarpelesLab/teamclaude";
+    teamclaude.inputs.nixpkgs.follows = "nixpkgs";
+
     spaces.url = "git+https://git.geninf.io/spaces/spaces-os";
 
     # hermes-agent for the native agents (modules/nixos/hermes-native) and
