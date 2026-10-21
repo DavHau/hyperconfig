@@ -29,6 +29,8 @@
 #     trigger independent of that heuristic.
 { config, ... }:
 {
+  imports = [ ../../modules/nixos/zfs-keylocation-sync ];
+
   boot.supportedFilesystems.zfs = true;
 
   boot.zfs.extraPools = [ "vault" ];
@@ -44,6 +46,11 @@
   # keylocation is a file, so the `* )` branch of the import script runs
   # `zfs load-key` directly and systemd-ask-password is never reached.
   boot.zfs.requestEncryptionCredentials = [ "vault" ];
+
+  # The pool stores its keylocation; follow the vars path wherever clan puts
+  # it (it moved to per-machine/bam/ in 2026-10 and the next boot left every
+  # dataset locked).
+  zfsKeylocationSync.vault = config.clan.core.vars.generators.vault-key.files.key.path;
 
   # The host is not this machine's owner: machines/bam/inference-host.nix pins
   # 108 of 125 GiB into 1G hugepages for the inference VM and confines
