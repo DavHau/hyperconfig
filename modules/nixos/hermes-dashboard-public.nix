@@ -88,8 +88,8 @@
 # plugins/dashboard_auth register from their env keys, and
 # HERMES_MANAGED_DIR would move the managed scope), and the config keys
 # that register the basic or nous provider are pinned empty. Not pinned in
-# the managed .env: hermes-desktop's `hermes serve` for dave-hermes
-# (./hermes-desktop-dave-hermes.nix) gets HERMES_DESKTOP=1 in its process
+# the managed .env: hermes-desktop's `hermes serve` for an agent
+# (./hermes-desktop) gets HERMES_DESKTOP=1 in its process
 # env, and the managed .env would override it. What remains is the
 # residual above: an agent process can rewrite the files between the drop
 # and hermes reading them, and config.yaml edits can still plant and
