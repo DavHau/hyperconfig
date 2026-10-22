@@ -24,6 +24,11 @@
     # Lock: llama-cpp 0.4.1 (b10964); ling needs >= 0.4.1 for its
     # vendored parser patch.
     nixpkgs-llama-cpp.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    # PHP ONLY for bam's Nextcloud: php2shell (CVE-2026-109618/109619,
+    # unauthenticated RCE) is fixed in php84 8.4.27, which reached
+    # nixos-unstable-small before the fleet nixpkgs. Consumer:
+    # machines/bam/nextcloud.nix. Drop once the fleet pkgs.php84 >= 8.4.27.
+    nixpkgs-php.url = "github:NixOS/nixpkgs/nixos-unstable-small";
 
     home-manager.url = "github:nix-community/home-manager";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";

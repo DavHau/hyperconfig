@@ -24,6 +24,11 @@ in {
     # Nextcloud upgrades one major version at a time: bump this by one
     # and deploy before the next.
     package = pkgs.nextcloud33;
+    # php2shell fix (8.4.27) from inputs.nixpkgs-php; see flake.nix. The
+    # assertion fails once the fleet php84 catches up: then drop both.
+    phpPackage =
+      assert lib.versionOlder pkgs.php84.version "8.4.27";
+      inputs.nixpkgs-php.legacyPackages.${pkgs.stdenv.hostPlatform.system}.php84;
     hostName = "nextcloud";
     config.adminpassFile = config.clan.core.vars.generators.nextcloud.files.admin-password.path;
     config.dbtype = "pgsql";
