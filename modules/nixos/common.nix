@@ -8,6 +8,7 @@
     ./all-hardware.nix
     ./timedated-ntp.nix
     ./fast-nix-gc.nix
+    ./kernel-pin.nix
   ];
   users.mutableUsers = false;
 
