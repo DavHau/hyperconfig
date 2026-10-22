@@ -31,6 +31,7 @@ in
     # additions layer on the /etc/niri/config-laptop.kdl wrapper (see
     # ./niri-monitor-binds.nix).
     ./niri-spaces/desktop-profile.nix
+    ./noctalia-qs-qt612.nix
     ./niri-monitor-binds.nix
     ./niri-terminal-cwd.nix
     ./niri-float-rules.nix

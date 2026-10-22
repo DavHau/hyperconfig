@@ -2,6 +2,9 @@
 {
   imports = [
     inputs.nixos-hardware.nixosModules.framework-amd-ai-300-series
+    # Mainline drives the Framework EC since 6.14; the out-of-tree kmod also
+    # breaks aggregateModules (no .ko.cer, nixpkgs#575192).
+    { hardware.framework.enableKmod = false; }
     inputs.home-manager.nixosModules.home-manager
     # inputs.nixos-hardware.nixosModules.framework-13-7040-amd
     # inputs.nixos-hardware.nixosModules.lenovo-yoga-7-14ARH7-amdgpu
