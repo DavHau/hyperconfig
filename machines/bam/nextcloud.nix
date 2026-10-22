@@ -30,7 +30,6 @@ in {
       assert lib.versionOlder pkgs.php84.version "8.4.27";
       inputs.nixpkgs-php.legacyPackages.${pkgs.stdenv.hostPlatform.system}.php84;
     hostName = "nextcloud";
-    config.adminpassFile = config.clan.core.vars.generators.nextcloud.files.admin-password.path;
     config.dbtype = "pgsql";
     database.createLocally = true;
     extraAppsEnable = true;

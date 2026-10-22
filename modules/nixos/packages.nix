@@ -109,7 +109,6 @@
   hardware.ledger.enable = true;
   services.fwupd.enable = true;
   # services.smokeping.enable = true;
-  programs.sysdig.enable = true;
   services.usbmuxd.enable = true;
   services.udisks2.enable = true;
   services.localtimed.enable = true;

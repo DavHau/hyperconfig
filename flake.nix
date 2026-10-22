@@ -10,13 +10,14 @@
       url = "github:edolstra/flake-compat";
       flake = false;
     };
-    nixpkgs.follows = "spaces/nixpkgs";
-    # nixpkgs.url = "git+https://github.com/nixos/nixpkgs?ref=nixpkgs-unstable&shallow=1";
+    # Our own nixpkgs, not spaces': fleet updates (security fixes) land on
+    # our schedule. spaces keeps its own pin for its own outputs.
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     # nixpkgs.url = "git+https://github.com/DavHau/nixpkgs?&ref=dave&shallow=1";
     # nixpkgs-riscv.url = "git+https://github.com/davhau/nixpkgs?&ref=riscv&shallow=1";
     # nixpkgs-riscv.url = "git+https://github.com/DavHau/nixpkgs?&ref=dave&shallow=1";
     nixpkgs-riscv.follows = "nixpkgs";
-    # Newer nixpkgs ONLY for llama-cpp: the fleet nixpkgs (via spaces) lags
+    # Newer nixpkgs ONLY for llama-cpp: the fleet nixpkgs lags
     # the llama.cpp release train, and inference modules that need a recent
     # arch/spec-decode fix pull their engine from here instead of forcing a
     # fleet-wide bump. Consumers: llama-swap-nanbeige42-amy.nix,
@@ -29,10 +30,6 @@
     # nixos-unstable-small before the fleet nixpkgs. Consumer:
     # machines/bam/nextcloud.nix. Drop once the fleet pkgs.php84 >= 8.4.27.
     nixpkgs-php.url = "github:NixOS/nixpkgs/nixos-unstable-small";
-    # Kernels ONLY (overlay in modules/flake-parts/nixosConfigurations.nix):
-    # PwnEscape (CVE-2026-99999) is fixed in 6.18.57 / 7.2.11; the fleet
-    # nixpkgs has 6.18.54 / 7.2.8. Drop once the fleet nixpkgs has them.
-    nixpkgs-kernel.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
     home-manager.url = "github:nix-community/home-manager";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
@@ -167,7 +164,6 @@
 
     mics-skills.url = "github:Mic92/mics-skills";
     mics-skills.inputs.nixpkgs.follows = "nixpkgs";
-    mics-skills.inputs.flake-parts.follows = "flake-parts";
 
     wrappers.url = "github:lassulus/wrappers";
     wrappers.inputs.nixpkgs.follows = "nixpkgs";

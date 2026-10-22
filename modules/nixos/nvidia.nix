@@ -4,6 +4,8 @@ let
   isVM = config.services.qemuGuest.enable;
 in
 {
+  imports = [ ./nvidia-patchelf-split.nix ];
+
   # Override desktop.nix's modesetting-only default; NVIDIA prime offload
   # needs the nvidia driver registered.
   services.xserver.videoDrivers = lib.mkForce [ "nvidia" ];

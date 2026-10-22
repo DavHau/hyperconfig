@@ -7,7 +7,7 @@
   series lands before ZFS supports it, this stays on the previous one instead
   of failing the build.
 */
-{ config, lib, kernelPkgs, ... }:
+{ config, lib, pkgs, ... }:
 let
   zfsModuleAttr = config.boot.zfs.package.kernelModuleAttribute;
 
@@ -22,7 +22,7 @@ let
       && usable.value ? ${zfsModuleAttr}
       && broken.success
       && !broken.value)
-    kernelPkgs.linuxKernel.packages;
+    pkgs.linuxKernel.packages;
 
   latest = lib.last (lib.sort
     (a: b: lib.versionOlder a.kernel.version b.kernel.version)

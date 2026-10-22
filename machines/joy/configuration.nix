@@ -1,6 +1,9 @@
 {pkgs, inputs, ...}: {
   imports = [
     inputs.nixos-hardware.nixosModules.framework-12-13th-gen-intel
+    # Mainline drives the Framework EC since 6.14; the out-of-tree kmod also
+    # breaks aggregateModules (no .ko.cer, nixpkgs#575192).
+    { hardware.framework.enableKmod = false; }
     ../../modules/nixos/common.nix
     ../../modules/nixos/common-tools.nix
     ../../modules/nixos/sbox.nix
