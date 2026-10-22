@@ -29,6 +29,10 @@
     # nixos-unstable-small before the fleet nixpkgs. Consumer:
     # machines/bam/nextcloud.nix. Drop once the fleet pkgs.php84 >= 8.4.27.
     nixpkgs-php.url = "github:NixOS/nixpkgs/nixos-unstable-small";
+    # Kernels ONLY (overlay in modules/flake-parts/nixosConfigurations.nix):
+    # PwnEscape (CVE-2026-99999) is fixed in 6.18.57 / 7.2.11; the fleet
+    # nixpkgs has 6.18.54 / 7.2.8. Drop once the fleet nixpkgs has them.
+    nixpkgs-kernel.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
     home-manager.url = "github:nix-community/home-manager";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
