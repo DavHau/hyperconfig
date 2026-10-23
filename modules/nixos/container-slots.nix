@@ -370,6 +370,17 @@ let
         example = "4G";
         description = "MemoryMax= of container@<slot> (the slot's processes; not its nix builds).";
       };
+      memoryLow = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = "6G";
+        description = ''
+          MemoryLow= of container@<slot>: memory the kernel reclaims from
+          the slot only after everything unprotected. It protects only as
+          far as every ancestor cgroup allows, so machine.slice needs a
+          MemoryLow= of its own (systemd.slices.machine).
+        '';
+      };
       cpuQuota = mkOption {
         type = types.nullOr types.str;
         default = null;
@@ -696,6 +707,7 @@ in
             BindReadOnlyPaths = [ "${resolvConf}:/etc/resolv.conf" ];
           }
           // lib.optionalAttrs (slot.memoryMax != null) { MemoryMax = slot.memoryMax; }
+          // lib.optionalAttrs (slot.memoryLow != null) { MemoryLow = slot.memoryLow; }
           // lib.optionalAttrs (slot.cpuQuota != null) { CPUQuota = slot.cpuQuota; };
           # The veth's host side is the slot's v6 gateway, not an address
           # this host should speak from: the kernel prefers a source on the
