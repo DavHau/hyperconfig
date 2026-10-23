@@ -1063,27 +1063,6 @@
         "type": "github"
       }
     },
-    "mics-skills": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ],
-        "treefmt-nix": "treefmt-nix_7"
-      },
-      "locked": {
-        "lastModified": 1792655179,
-        "narHash": "sha256-4BwVZVGirkBz79r5RaQoqgn0NndmlP2+w/m2UlpaDro=",
-        "owner": "Mic92",
-        "repo": "mics-skills",
-        "rev": "2628f05791da98c9e8a014c277a0bc1d91065e68",
-        "type": "github"
-      },
-      "original": {
-        "owner": "Mic92",
-        "repo": "mics-skills",
-        "type": "github"
-      }
-    },
     "ncps": {
       "flake": false,
       "locked": {
@@ -1681,7 +1660,7 @@
           "stylix",
           "nixpkgs"
         ],
-        "treefmt-nix": "treefmt-nix_9"
+        "treefmt-nix": "treefmt-nix_8"
       },
       "locked": {
         "lastModified": 1748730660,
@@ -1856,7 +1835,6 @@
         "home-manager": "home-manager",
         "hyprspace": "hyprspace",
         "llm-agents": "llm-agents",
-        "mics-skills": "mics-skills",
         "ncps": "ncps",
         "ncro": "ncro",
         "nil": "nil",
@@ -1932,7 +1910,7 @@
         "microvm": "microvm",
         "nixpkgs": "nixpkgs_5",
         "systems": "systems_7",
-        "treefmt-nix": "treefmt-nix_8",
+        "treefmt-nix": "treefmt-nix_7",
         "voxtype": "voxtype"
       },
       "locked": {
@@ -2402,27 +2380,6 @@
     "treefmt-nix_7": {
       "inputs": {
         "nixpkgs": [
-          "mics-skills",
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1791885023,
-        "narHash": "sha256-C3alQ2MEt0zVrUSho5NUDo3jmhbff72++bfwoqT9Omo=",
-        "owner": "numtide",
-        "repo": "treefmt-nix",
-        "rev": "0d6d739a833ba9a9c93034862e4a7b061a062a1c",
-        "type": "github"
-      },
-      "original": {
-        "owner": "numtide",
-        "repo": "treefmt-nix",
-        "type": "github"
-      }
-    },
-    "treefmt-nix_8": {
-      "inputs": {
-        "nixpkgs": [
           "spaces",
           "nixpkgs"
         ]
@@ -2441,7 +2398,7 @@
         "type": "github"
       }
     },
-    "treefmt-nix_9": {
+    "treefmt-nix_8": {
       "inputs": {
         "nixpkgs": [
           "stylix",
