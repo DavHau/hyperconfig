@@ -1,0 +1,68 @@
+# Voice indicator - live voxtype status in the bar. Polls voxtype's state file
+# ($XDG_RUNTIME_DIR/voxtype/state: idle|recording|transcribing|streaming; a
+# missing file means the daemon is down). The mic turns red and breathes while
+# recording, an amber loader breathes while transcribing, and a caution-toned mic
+# flags a take that voxtype's VAD rejected (recording -> idle without
+# transcribing). Click toggles recording.
+#
+# Settings are plugin-level ([[setting]] at the root), shared by every widget
+# instance and edited from Settings -> Plugins.
+#
+# plugin_api 23: noctalia.readFileAsync (async-file-read). Everything else used
+# (barWidget.render with role/alpha colors, runAsync shell strings, getenv,
+# nowMs @12) is at or below that level.
+
+id = "hyperconfig/voice-indicator"
+name = "Voice Indicator"
+version = "1.0.0"
+plugin_api = 23
+author = "hyperconfig"
+license = "MIT"
+icon = "microphone"
+description = "Live voice-to-text status from voxtype's state file: red mic while recording, amber loader while transcribing, caution mic when a take had no speech. Click to toggle recording."
+tags = ["voice", "dictation"]
+dependencies = ["voxtype"]
+
+[[setting]]
+key = "toggle_command"
+type = "string"
+label_key = "settings.toggle_command.label"
+description_key = "settings.toggle_command.description"
+default = "spaces-voice-record-toggle"
+
+[[setting]]
+key = "hide_when_idle"
+type = "bool"
+label_key = "settings.hide_when_idle.label"
+description_key = "settings.hide_when_idle.description"
+default = false
+
+[[setting]]
+key = "no_speech_warning_ms"
+type = "int"
+label_key = "settings.no_speech_warning_ms.label"
+description_key = "settings.no_speech_warning_ms.description"
+default = 4000
+min = 1
+max = 600000
+
+[[setting]]
+key = "pulse"
+type = "bool"
+label_key = "settings.pulse.label"
+description_key = "settings.pulse.description"
+default = true
+
+[[setting]]
+key = "pulse_intensity"
+type = "double"
+label_key = "settings.pulse_intensity.label"
+description_key = "settings.pulse_intensity.description"
+default = 0.55
+min = 0.0
+max = 1.0
+visible_when = { key = "pulse", values = ["true"] }
+
+[[widget]]
+id = "indicator"
+entry = "widget.luau"

@@ -1,0 +1,8 @@
+{
+  "voice": {
+    "tooltip-idle": "语音转文字 — 按 Mod+S 录音",
+    "tooltip-recording": "录音中 — 按 Mod+S 停止并转写",
+    "tooltip-transcribing": "转写中…",
+    "tooltip-no-speech": "未检测到语音 — 请检查麦克风或大声说话"
+  }
+}

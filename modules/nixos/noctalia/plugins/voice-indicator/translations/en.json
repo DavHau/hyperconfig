@@ -1,0 +1,30 @@
+{
+  "voice": {
+    "tooltip-idle": "Voice to text — press Mod+S to record",
+    "tooltip-recording": "Recording — press Mod+S to stop and transcribe",
+    "tooltip-transcribing": "Transcribing…",
+    "tooltip-no-speech": "No speech detected — check your mic or speak up"
+  },
+  "settings": {
+    "toggle_command": {
+      "label": "Toggle command",
+      "description": "Shell command run on click to start or stop a recording."
+    },
+    "hide_when_idle": {
+      "label": "Hide when idle",
+      "description": "Hide the indicator while voxtype is idle. It still appears to flag a take with no speech."
+    },
+    "no_speech_warning_ms": {
+      "label": "No-speech warning (ms)",
+      "description": "How long the caution-toned mic stays after a recording ends without being transcribed."
+    },
+    "pulse": {
+      "label": "Recording pulse",
+      "description": "Breathe a red glow behind the mic while recording."
+    },
+    "pulse_intensity": {
+      "label": "Pulse intensity",
+      "description": "Peak opacity of the recording glow, from 0 to 1."
+    }
+  }
+}

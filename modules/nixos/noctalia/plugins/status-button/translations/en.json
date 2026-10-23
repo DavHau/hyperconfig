@@ -1,0 +1,20 @@
+{
+  "settings": {
+    "status_command": {
+      "label": "Status command",
+      "description": "Shell command printing one JSON line: {\"icon\", \"iconColor\", \"tooltip\"}"
+    },
+    "toggle_command": {
+      "label": "Toggle command",
+      "description": "Shell command run on left click; the status is refreshed when it finishes"
+    },
+    "interval_ms": {
+      "label": "Poll interval (ms)",
+      "description": "How often the status command runs"
+    },
+    "glyph": {
+      "label": "Initial glyph",
+      "description": "Glyph shown until the status command first reports one"
+    }
+  }
+}

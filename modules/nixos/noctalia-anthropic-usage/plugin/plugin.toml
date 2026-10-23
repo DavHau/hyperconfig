@@ -1,0 +1,16 @@
+# One thin gauge per Anthropic account overlaying weekly all-model usage and
+# weekly Fable usage. Fed by the anthropic-usage-poll user timer, which
+# publishes $XDG_STATE_HOME/anthropic-usage.json.
+id = "hyperconfig/anthropic-usage"
+name = "Anthropic Weekly Usage"
+version = "3.0.0"
+plugin_api = 3
+author = "hyperconfig"
+license = "MIT"
+icon = "gauge"
+tags = ["bar", "system"]
+description = "One mini bar per Anthropic account overlaying weekly all-model and weekly Fable usage. Fed by the anthropic-usage-poll user timer."
+
+[[widget]]
+id = "usage"
+entry = "usage.luau"

@@ -6,11 +6,9 @@
 # and the first click registers the client if needed, so there is no
 # manual setup step.
 #
-# Bar: noctalia's built-in CustomButton polls `warp-toggle status`
-# (JSON: icon/tooltip/iconColor) and runs `warp-toggle toggle` on click.
-#
-# merge.sh seeds the widget into ~/.config/noctalia/settings.json as an
-# extra noctalia-shell ExecStartPre (same contract as noctalia-remote-build).
+# Bar: a hyperconfig/status-button widget (../noctalia/plugins) polls
+# `warp-toggle status` (JSON: icon/tooltip/iconColor) and runs
+# `warp-toggle toggle` on click.
 #
 # Coexisting with the overlay VPNs (zerotier, yggdrasil, wireguard,
 # retiolum, hyprspace, tailscale):
@@ -59,15 +57,6 @@ let
           ;;
       esac
     '';
-  };
-
-  mergeConfig = pkgs.writeShellApplication {
-    name = "noctalia-warp-merge";
-    runtimeInputs = [
-      pkgs.jq
-      pkgs.coreutils
-    ];
-    text = builtins.readFile ./merge.sh;
   };
 
   nftWrap = pkgs.writeShellApplication {
@@ -120,12 +109,13 @@ in
     '';
   };
 
-  systemd.user.services.noctalia-shell = {
-    # After the spaces bundle's noctalia-config-merge (mkAfter), so the
-    # managed settings.json is already seeded.
-    serviceConfig.ExecStartPre = lib.mkAfter [
-      "${mergeConfig}/bin/noctalia-warp-merge"
-    ];
-    restartTriggers = [ mergeConfig ];
+  services.noctalia.settings = {
+    bar.default.end = [ "warp" ];
+    widget.warp = {
+      type = "hyperconfig/status-button:button";
+      glyph = "shield";
+      status_command = "${lib.getExe toggle} status";
+      toggle_command = "${lib.getExe toggle} toggle";
+    };
   };
 }

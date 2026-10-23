@@ -19,7 +19,6 @@
     ../../modules/nixos/llama-swap-nanbeige42-amy.nix
     ../../modules/nixos/llama-swap-ling30-tiny-amy.nix
     ../../modules/nixos/bluetooth-resume-fix.nix
-    ../../modules/nixos/noctalia-resume-fix.nix
     ../../modules/nixos/noctalia-anthropic-usage
     ../../modules/nixos/fw-fanctrl.nix
     ../../modules/nixos/amd-powersave-limits.nix

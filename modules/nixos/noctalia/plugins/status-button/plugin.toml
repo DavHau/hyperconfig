@@ -1,0 +1,45 @@
+# Generic status/toggle bar button: polls a status command that prints one
+# JSON line {"icon": "<tabler glyph>", "iconColor": "<palette role>",
+# "tooltip": "..."} and runs a toggle command on left click.
+id = "hyperconfig/status-button"
+name = "Status Button"
+version = "1.0.0"
+plugin_api = 3
+author = "hyperconfig"
+license = "MIT"
+icon = "toggle-right"
+description = "Bar button whose glyph, color and tooltip come from a polled status command; left click runs a toggle command."
+
+[[widget]]
+id = "button"
+entry = "button.luau"
+
+  [[widget.setting]]
+  key = "status_command"
+  type = "string"
+  label_key = "settings.status_command.label"
+  description_key = "settings.status_command.description"
+  default = ""
+
+  [[widget.setting]]
+  key = "toggle_command"
+  type = "string"
+  label_key = "settings.toggle_command.label"
+  description_key = "settings.toggle_command.description"
+  default = ""
+
+  [[widget.setting]]
+  key = "interval_ms"
+  type = "int"
+  label_key = "settings.interval_ms.label"
+  description_key = "settings.interval_ms.description"
+  default = 5000
+  min = 250
+  max = 3600000
+
+  [[widget.setting]]
+  key = "glyph"
+  type = "glyph"
+  label_key = "settings.glyph.label"
+  description_key = "settings.glyph.description"
+  default = "circle"

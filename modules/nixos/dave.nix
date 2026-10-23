@@ -25,13 +25,12 @@ in
     ./nrb
     ./clan-unlock
     ./nix-caches.nix
-    # niri compositor + noctalia shell are vendored from spaces (upstream moved
-    # to COSMIC in 0434912e); ./niri-spaces/desktop-profile.nix re-creates the
-    # desktop wiring spaces.nix used to do and keeps cosmic off. Host-local
+    # niri compositor is vendored from spaces (upstream moved to COSMIC in
+    # 0434912e), the noctalia v5 bar is our own (./noctalia);
+    # ./niri-spaces/desktop-profile.nix wires both and keeps cosmic off. Host-local
     # additions layer on the /etc/niri/config-laptop.kdl wrapper (see
     # ./niri-monitor-binds.nix).
     ./niri-spaces/desktop-profile.nix
-    ./noctalia-qs-qt612.nix
     ./niri-monitor-binds.nix
     ./niri-terminal-cwd.nix
     ./niri-float-rules.nix

@@ -1,0 +1,8 @@
+{
+  "voice": {
+    "tooltip-idle": "音声入力 — Mod+S で録音",
+    "tooltip-recording": "録音中 — Mod+S で停止して文字起こし",
+    "tooltip-transcribing": "文字起こし中…",
+    "tooltip-no-speech": "音声が検出されません — マイクを確認するか、もっと大きな声で話してください"
+  }
+}

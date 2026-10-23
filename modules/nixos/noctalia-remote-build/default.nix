@@ -1,16 +1,10 @@
 # Noctalia bar icon toggling remote-builders.service (remote nix builds).
 #
-# No QML: noctalia's built-in CustomButton widget polls
+# A hyperconfig/status-button widget (../noctalia/plugins) polls
 # `remote-build-toggle status` (JSON: icon/tooltip/iconColor) and runs
-# `remote-build-toggle toggle` on click; leftClickUpdateText refreshes the
-# icon immediately after the click. Toggling needs no password: the
-# remote-building client role ships a polkit rule for wheel on exactly
-# this unit.
-#
-# merge.sh seeds the widget into ~/.config/noctalia/settings.json as an
-# extra noctalia-shell ExecStartPre AFTER the spaces bundle's
-# noctalia-config-merge — append-only and idempotent, the user's own
-# layout survives (same contract as noctalia-anthropic-usage).
+# `remote-build-toggle toggle` on click, refreshing right after. Toggling
+# needs no password: the remote-building client role ships a polkit rule
+# for wheel on exactly this unit.
 { lib, pkgs, ... }:
 let
   toggle = pkgs.writeShellApplication {
@@ -40,25 +34,17 @@ let
       esac
     '';
   };
-
-  mergeConfig = pkgs.writeShellApplication {
-    name = "noctalia-remote-build-merge";
-    runtimeInputs = [
-      pkgs.jq
-      pkgs.coreutils
-    ];
-    text = builtins.readFile ./merge.sh;
-  };
 in
 {
   environment.systemPackages = [ toggle ];
 
-  systemd.user.services.noctalia-shell = {
-    # After the spaces bundle's noctalia-config-merge (mkAfter), so the
-    # managed settings.json is already seeded.
-    serviceConfig.ExecStartPre = lib.mkAfter [
-      "${mergeConfig}/bin/noctalia-remote-build-merge"
-    ];
-    restartTriggers = [ mergeConfig ];
+  services.noctalia.settings = {
+    bar.default.end = [ "remote-build" ];
+    widget.remote-build = {
+      type = "hyperconfig/status-button:button";
+      glyph = "cloud-upload";
+      status_command = "${lib.getExe toggle} status";
+      toggle_command = "${lib.getExe toggle} toggle";
+    };
   };
 }
