@@ -17,7 +17,7 @@ pkgs.python3Packages.buildPythonApplication {
   build-system = [ pkgs.python3Packages.setuptools ];
 
   # The router only offers password auth (dropbear); sshpass feeds it from $SSHPASS.
-  makeWrapperArgs = [ "--prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.sshpass pkgs.openssh ]}" ];
+  makeWrapperArgs = [ "--prefix" "PATH" ":" (pkgs.lib.makeBinPath [ pkgs.sshpass pkgs.openssh ]) ];
 
   pythonImportsCheck = [ "router_cm_beryl.cli" ];
 
