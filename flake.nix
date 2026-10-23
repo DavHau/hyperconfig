@@ -223,10 +223,6 @@
         import ./modules/nixos/ssh-tpm-confirm-dialog.nix {
           pkgs = nixpkgs.legacyPackages.x86_64-linux;
         };
-      flake.packages.x86_64-linux.fabro =
-        import ./modules/nixos/fabro/package.nix {
-          pkgs = nixpkgs.legacyPackages.x86_64-linux;
-        };
 
       flake.checks.x86_64-linux = (genAttrs
         [
