@@ -40,6 +40,7 @@ in
     ../../modules/nixos/mullvad-egress
     ../../modules/nixos/web-bench-mullvad.nix
     ../../modules/nixos/zfs-ephemeral-tmp.nix
+    ../../modules/nixos/zfs-arc-max.nix
     ../../modules/nixos/per-user-tmp
     ../../modules/nixos/agent-mail
     # Pooled Claude subscription gateway, https://teamclaude.davhau.com/.
@@ -58,6 +59,13 @@ in
   # The 1 GiB ESP holds one ~80 MiB initrd per distinct generation; with no
   # cap ~100 entries kept 13 of them and filled it.
   boot.loader.systemd-boot.configurationLimit = 20;
+
+  # The ARC had grown to ~19 GiB of the 64 GiB, more than any slot.
+  hyper.zfsArcMax = 8 * 1024 * 1024 * 1024;
+
+  # Room the kernel reclaims from last; see slots.asof.memoryLow below.
+  # MemoryLow= protects only as far as every ancestor cgroup has it.
+  systemd.slices.machine.sliceConfig.MemoryLow = "6G";
 
   # /tmp on disk (zroot/root/nobackup/tmp, ./disko.nix), emptied at boot,
   # and a private /tmp and /var/tmp per user: users with ssh access must
@@ -179,6 +187,9 @@ in
     slots.asof = {
       id = 1;
       mode = "lan";
+      # asofd and trader-live inside reserve memory with MemoryLow=; that
+      # only holds if this unit and machine.slice (above) reserve it too.
+      memoryLow = "6G";
       # Writes land on bam as slot-asof:vault-parquet-rw, which bam's ACLs
       # admit on /vault/parquet only (../../modules/nixos/vault-ids.nix).
       shares."/vault/parquet" = {
