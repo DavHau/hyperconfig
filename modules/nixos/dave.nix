@@ -48,9 +48,9 @@ in
     # Bearer token for the fleet inference endpoint; `p0-api-key` hands it
     # to every harness's models.yml.
     ./inference-api-key.nix
-    # TeamClaude gateway key (anthropic provider override in models.yml):
-    # disabled with the provider block, see ./omp-common.nix.
-    # ./teamclaude-api-key.nix
+    # TeamClaude gateway key; `teamclaude-api-key` hands it to the anthropic
+    # provider override in every harness's models.yml (./omp-common.nix).
+    ./teamclaude-api-key.nix
     ./amd-pstate-resume-fix.nix
     ./omr.nix
     ./ntop.nix

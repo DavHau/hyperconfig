@@ -77,6 +77,10 @@
       # Guarded: joy imports this file without inference-api-key.nix.
       "${config.clan.core.vars.generators.inference-api-key.files.token.path}" = {};
       "${config.hyper.inferenceApiKey.userTokenPath "$USER"}" = {};
+    } // lib.optionalAttrs (config.clan.core.vars.generators ? teamclaude-api-key) {
+      # TeamClaude key, read by `teamclaude-api-key` inside the sandbox
+      # (models.yml anthropic apiKey: "!teamclaude-api-key").
+      "${config.clan.core.vars.generators.teamclaude-api-key.files.key.path}" = {};
     };
   };
 }
