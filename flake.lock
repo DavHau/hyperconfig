@@ -2498,7 +2498,6 @@
       "inputs": {
         "flake-utils": "flake-utils_4",
         "nixpkgs": [
-          "spaces",
           "nixpkgs"
         ]
       },

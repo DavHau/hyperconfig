@@ -172,6 +172,11 @@
     teamclaude.inputs.nixpkgs.follows = "nixpkgs";
 
     spaces.url = "git+https://git.geninf.io/spaces/spaces-os";
+    # voxtype loads the system's Vulkan ICD (mesa via /run/opengl-driver),
+    # which is built against OUR glibc. Built against spaces' older glibc,
+    # mesa's libLLVM fails to load (`GLIBC_2.44' not found), ggml-vulkan
+    # finds no GPU and whisper falls back to CPU (~90 s per utterance).
+    spaces.inputs.voxtype.inputs.nixpkgs.follows = "nixpkgs";
 
     # hermes-agent for the native agents (modules/nixos/hermes-native) and
     # anything built from its source. Same tag as spaces' own pin, which
