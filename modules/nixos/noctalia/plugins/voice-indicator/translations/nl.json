@@ -1,0 +1,8 @@
+{
+  "voice": {
+    "tooltip-idle": "Spraak naar tekst — druk op Mod+S om op te nemen",
+    "tooltip-recording": "Opnemen — druk op Mod+S om te stoppen en transcriberen",
+    "tooltip-transcribing": "Transcriberen…",
+    "tooltip-no-speech": "Geen spraak gedetecteerd — controleer je microfoon of spreek luider"
+  }
+}

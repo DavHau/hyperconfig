@@ -13,40 +13,18 @@
 #      shared agent.db), so no single profile is trusted. Accounts with
 #      no unexpired token are not queried; they, like failed fetches,
 #      keep their last published values, marked stale.
-#   2. an `anthropic-usage` noctalia plugin (plugin/) rendering one thin
-#      gauge per account. merge.sh seeds it as an extra noctalia-shell
-#      ExecStartPre AFTER the spaces bundle's noctalia-config-merge:
-#      materialises the QML as per-file symlinks (same pattern as the
-#      spaces plugins, so the stale-plugin purge leaves it alone),
-#      enables it in plugins.json and APPENDS the widget to
-#      bar.widgets.right — the user's own layout survives.
+#   2. a `hyperconfig/anthropic-usage` noctalia plugin (plugin/, Luau)
+#      rendering one thin gauge per account, placed in the bar's end
+#      section just before the toggle buttons.
 #
-# Behavior tests: test-poller.py / test-merge.sh, wired as the
-# `noctalia-anthropic-usage` flake check.
+# Behavior tests: test-poller.py, wired as the `noctalia-anthropic-usage`
+# flake check.
 { lib, pkgs, ... }:
 let
   poller = pkgs.writeShellApplication {
     name = "anthropic-usage-poll";
     text = ''
       exec ${pkgs.python3}/bin/python3 ${./poller.py} "$@"
-    '';
-  };
-
-  # merge.sh symlinks every file in here into noctalia's plugin dir.
-  pluginSrc = lib.fileset.toSource {
-    root = ./plugin;
-    fileset = lib.fileset.fileFilter (f: f.hasExt "qml" || f.name == "manifest.json") ./plugin;
-  };
-
-  mergeConfig = pkgs.writeShellApplication {
-    name = "noctalia-anthropic-usage-merge";
-    runtimeInputs = [
-      pkgs.jq
-      pkgs.coreutils
-    ];
-    text = ''
-      export ANTHROPIC_USAGE_PLUGIN_SRC=${pluginSrc}
-      ${builtins.readFile ./merge.sh}
     '';
   };
 in
@@ -69,12 +47,12 @@ in
     };
   };
 
-  systemd.user.services.noctalia-shell = {
-    # Runs after the spaces bundle's noctalia-config-merge (mkAfter), so
-    # its managed settings.json/plugins.json are already seeded.
-    serviceConfig.ExecStartPre = lib.mkAfter [
-      "${mergeConfig}/bin/noctalia-anthropic-usage-merge"
-    ];
-    restartTriggers = [ mergeConfig ];
+  services.noctalia = {
+    plugins.anthropic-usage = ./plugin;
+    settings = {
+      # Before the default-priority toggle buttons, after the base widgets.
+      bar.default.end = lib.mkOrder 900 [ "anthropic-usage" ];
+      widget.anthropic-usage.type = "hyperconfig/anthropic-usage:usage";
+    };
   };
 }

@@ -7,8 +7,8 @@
 # from modules/nixos/spaces-commands.nix. The locked spaces rev now defaults the
 # desktop profile onto COSMIC (`services.spaces.cosmic.enable = mkDefault true`);
 # this module overrides that back to niri. Only niri itself is vendored
-# (./niri.nix): upstream restored noctalia as an a-la-carte module
-# (nixosModules.noctalia, a7d9a2ff) identical to the pre-cosmic one.
+# (./niri.nix). The bar is our own noctalia v5 module (../noctalia); spaces'
+# nixosModules.noctalia is v4-only.
 { config, lib, pkgs, inputs, ... }:
 let
   # The locked spaces repo's own wrapper builder, so the replacements below are
@@ -18,7 +18,8 @@ in
 {
   imports = [
     ./niri.nix
-    inputs.spaces.nixosModules.noctalia
+    ../noctalia
+    ../noctalia/layout.nix
   ];
 
   # The locked spaces bundle turns COSMIC on for the desktop profile. These
@@ -61,19 +62,4 @@ in
         text = "swaylock";
       }))
     ];
-
-  # Point noctalia at its notification-history file. The old
-  # spaces-integrations module set this whenever the `notifications`
-  # integration existed (d413f1f5 modules/nixos/spaces-integrations/default.nix:925
-  # and the tmpfiles seed at :918). Upstream deleted that whole integration with
-  # the cosmic migration; without the redirect noctalia silently moves its history
-  # to ~/.cache/noctalia/, so the bar's behaviour would drift from the deployed
-  # hosts. The tmpfiles rule is the directory seed that made the Landlock grant
-  # work; the file itself may appear later (noctalia creates it on first save).
-  systemd.user.services.noctalia-shell.environment.NOCTALIA_NOTIF_HISTORY_FILE =
-    lib.mkIf (config.services.noctalia.enable or false)
-      "%h/.local/state/spaces/notifications/notifications.json";
-  systemd.user.tmpfiles.rules = lib.mkIf (config.services.noctalia.enable or false) [
-    "d %h/.local/state/spaces/notifications 0700 - - -"
-  ];
 }
