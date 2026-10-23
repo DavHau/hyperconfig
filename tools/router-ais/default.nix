@@ -21,7 +21,7 @@ pkgs.python3Packages.buildPythonApplication {
   ];
 
   # pytesseract shells out to `tesseract`; the captcha needs only its English data.
-  makeWrapperArgs = [ "--prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.tesseract ]}" ];
+  makeWrapperArgs = [ "--prefix" "PATH" ":" (pkgs.lib.makeBinPath [ pkgs.tesseract ]) ];
 
   pythonImportsCheck = [ "router_ais.cli" ];
 
