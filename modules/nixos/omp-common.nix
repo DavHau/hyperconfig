@@ -205,6 +205,8 @@ in rec {
 
     ## Parallel work with subagents
 
+    The main session is an orchestrator: delegate all significant implementation to subagents and only make few-line fixes, merge edits, or very small changes yourself.
+
     For independent sub-tasks touching disjoint files, or when the user asks
     to parallelize: `task` tool, `isolated: true` per file-editing task.
     Subagents run no version control.
