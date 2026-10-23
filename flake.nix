@@ -162,9 +162,6 @@
     ntop.url = "git+file:///home/grmpf/synced/projects/ntop";
     ntop.inputs.nixpkgs.follows = "nixpkgs";
 
-    mics-skills.url = "github:Mic92/mics-skills";
-    mics-skills.inputs.nixpkgs.follows = "nixpkgs";
-
     wrappers.url = "github:lassulus/wrappers";
     wrappers.inputs.nixpkgs.follows = "nixpkgs";
 
