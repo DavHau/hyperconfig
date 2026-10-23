@@ -28,7 +28,6 @@
     ../../modules/nixos/spaces-kiwix.nix
     ../../modules/nixos/vibepn.nix
     ../../modules/nixos/storagebox.nix
-    ../../modules/nixos/fabro
     ../../modules/nixos/vault-nfs-client.nix
     ../../modules/nixos/router-ais.nix
     ../../modules/nixos/router-cm-beryl.nix
