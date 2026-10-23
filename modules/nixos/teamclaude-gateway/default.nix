@@ -31,6 +31,19 @@ let
   domain = "teamclaude.davhau.com";
   stateFile = "/var/lib/teamclaude/teamclaude.json";
   configFile = config.clan.core.vars.generators.teamclaude-config.files."config.json".path;
+  # Each enrolled account serves up to 98% of every quota bucket (5h, 7d,
+  # per-model 7d), as a ratio, like TeamClaude itself spells it. Two settings
+  # carry it (docs/quota.md):
+  #   - switchThreshold, fleet-wide: rotation prefers another account at this
+  #     level, but it is only a preference; when every account is over it the
+  #     proxy still sends a revalidating request.
+  #   - accounts[].maxUsage, per account: the hard cap. At it (`>=`) the
+  #     account gets nothing, the revalidation probe included, so no account
+  #     ever goes past 98% (barring a request already in flight).
+  # maxUsage lives on each account entry, which is runtime state, so preStart
+  # stamps it onto every account; one enrolled by `teamclaude login` gets it
+  # on the next service restart (switchThreshold covers it until then).
+  usageCap = 0.98;
   # Everything but the proxy key, which is the only secret in the config. A
   # change here reaches the service on its next restart via preStart.
   settingsFile = pkgs.writeText "teamclaude-settings.json" (
@@ -41,8 +54,7 @@ let
         trustLoopback = false;
       };
       upstream = "https://api.anthropic.com";
-      # Owners keep the last 40% of their quota (project-zero decision 0126).
-      switchThreshold = 0.6;
+      switchThreshold = usageCap;
       warmupSeconds = 0;
       distributeSessions = true;
     }
@@ -127,8 +139,8 @@ in
   # generated config (a rotated key) would ever reach the service. So merge
   # on every start: the Nix settings, then the secret, win over the live
   # file, except `accounts`, which is runtime state and stays as the service
-  # left it. Runs as root (PermissionsStartOnly), after the module's own
-  # copy-if-missing.
+  # left it but for its maxUsage, which is set to usageCap. Runs as root
+  # (PermissionsStartOnly), after the module's own copy-if-missing.
   #
   # Every start, and with no account enrolled the service restarts every
   # 5 s, so the merge must not disturb a concurrent writer (teamclaude-keys,
@@ -151,7 +163,8 @@ in
         sleep 0.025
       done
       tmp=$(mktemp "$live.merged.XXXXXX")
-      ${pkgs.jq}/bin/jq -s '.[0] * .[1] * (.[2] | del(.accounts)) | .accounts //= []' \
+      ${pkgs.jq}/bin/jq -s --argjson cap ${builtins.toJSON usageCap} \
+        '.[0] * .[1] * (.[2] | del(.accounts)) | .accounts = ((.accounts // []) | map(.maxUsage = $cap))' \
         "$live" ${settingsFile} "$src" > "$tmp"
       chown teamclaude:teamclaude "$tmp"
       chmod 0600 "$tmp"

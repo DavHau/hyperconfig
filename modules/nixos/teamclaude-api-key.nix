@@ -1,30 +1,47 @@
-# Gateway key for the TeamClaude shared Claude subscription gateway
-# (https://teamclaude.p0.contact, project-zero
-# modules/nixos/teamclaude-gateway.nix).
+# Client key for the TeamClaude pooled Claude subscription gateway
+# (https://teamclaude.davhau.com, ./teamclaude-gateway on som).
 #
-# This is the client half: a clan var holding the bare gateway key, exported
-# into the omp wrappers as TEAMCLAUDE_API_KEY, which is the env var name the
-# anthropic provider override in models.yml points at (see omp-common.nix).
+# This is the client half: a clan var holding a runtime client key the
+# gateway minted, which `teamclaude-api-key` prints. The anthropic provider
+# override in models.yml names it as `apiKey: "!teamclaude-api-key"` (see
+# omp-common.nix), so every harness resolves the key by running it and no
+# wrapper has to export anything. Exit 1 when the var file is unreadable.
 #
-# `share = true`: one key for the whole clan — the gateway is a single shared
-# service. The value lives in project-zero; paste the output of:
+# `share = true`: one key for the whole clan, booked under one name in
+# `teamclaude status`. Mint it on som and paste it here:
 #
-#   clan vars get pubproxy01 teamclaude-api-key/key   (in project-zero)
-#   clan vars generate <machine> --generator teamclaude-api-key
-{ config, ... }:
+#   teamclaude-keys add grmpf                       (as root on som)
+#   clan vars generate amy --generator teamclaude-api-key --regenerate
+{ config, pkgs, ... }:
+let
+  key = config.clan.core.vars.generators.teamclaude-api-key.files.key;
+in
 {
+  environment.systemPackages = [
+    (pkgs.writeShellApplication {
+      runtimeInputs = [ pkgs.coreutils ];
+      name = "teamclaude-api-key";
+      text = ''
+        [ -r ${key.path} ] && exec cat ${key.path}
+        echo "teamclaude-api-key: ${key.path} is not readable for $(id -un)" >&2
+        exit 1
+      '';
+    })
+  ];
+
   clan.core.vars.generators.teamclaude-api-key = {
     share = true;
     # A persisted prompt IS the file — no generator script, so the var holds
     # exactly the key and nothing else.
     prompts.key = {
-      description = "TeamClaude gateway key (project-zero: clan vars get pubproxy01 teamclaude-api-key/key)";
+      description = "TeamClaude client key for https://teamclaude.davhau.com (as root on som: teamclaude-keys add <name>)";
       type = "hidden";
       persist = true;
     };
-    # Readable by the desktop user: the omp wrappers run unprivileged and read
-    # this at launch. An owner the machine doesn't declare makes
-    # sops-install-secrets abort every secret on the host (sops-nix#972).
+    # Readable by the desktop user: the omp harnesses run unprivileged and
+    # read this through `teamclaude-api-key`. An owner the machine doesn't
+    # declare makes sops-install-secrets abort every secret on the host
+    # (sops-nix#972).
     files.key = {
       owner = if config.users.users ? grmpf then "grmpf" else "dave";
       mode = "0400";
