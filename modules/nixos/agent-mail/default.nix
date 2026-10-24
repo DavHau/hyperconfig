@@ -52,7 +52,10 @@ let
   skill = inputs.spaces.lib.mkAgentSkill pkgs {
     name = "mailgate";
     src = pkgs.writeTextDir "SKILL.md" (
-      builtins.replaceStrings [ "@DOMAIN@" ] [ cfg.domain ] (builtins.readFile ./skill/SKILL.md)
+      builtins.replaceStrings
+        [ "@DOMAIN@" "@INBOX_DAYS@" ]
+        [ cfg.domain (toString cfg.limits.inboxDays) ]
+        (builtins.readFile ./skill/SKILL.md)
     );
   };
 in

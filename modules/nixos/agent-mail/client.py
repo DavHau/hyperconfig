@@ -44,10 +44,14 @@ def show(result) -> None:
 def agent_main(argv: list[str]) -> None:
     p = argparse.ArgumentParser(
         prog="mailgate",
-        description="Your mailbox's quarantine, allowlist and aliases. Read the INBOX with the spaces mail tools (profile 'mailgate').",
+        description="Your mailbox: read the INBOX, the quarantine, the allowlist, aliases and attachments.",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("status", help="address, quarantine count, pending requests")
+    sub.add_parser("status", help="address, INBOX and quarantine counts, pending requests")
+    ip = sub.add_parser("inbox", help="list INBOX mail, newest first: id, from, to, subject, date")
+    ip.add_argument("--limit", type=int, default=20)
+    rp = sub.add_parser("read", help="one INBOX message: full text (HTML as text) and every link")
+    rp.add_argument("id", help="the id from `mailgate inbox` (X-Mailgate-Id)")
     qp = sub.add_parser("quarantine", help="restricted view of quarantined mail")
     qp.add_argument("action", nargs="?", choices=["list", "show", "summarize", "open-link"], default="list")
     qp.add_argument("id", nargs="?")
@@ -74,6 +78,10 @@ def agent_main(argv: list[str]) -> None:
 
     if a.cmd == "status":
         show(call(AGENT_SOCK, {"op": "status"}))
+    elif a.cmd == "inbox":
+        show(call(AGENT_SOCK, {"op": "inbox.list", "limit": a.limit}))
+    elif a.cmd == "read":
+        show(call(AGENT_SOCK, {"op": "inbox.read", "id": a.id}))
     elif a.cmd == "quarantine":
         if a.action != "list" and not a.id:
             p.error("quarantine show/summarize/open-link needs an id")
