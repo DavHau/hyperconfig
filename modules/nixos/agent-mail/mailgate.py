@@ -1194,7 +1194,11 @@ def json_server(admin: bool):
 PAGE_HEADERS = {
     "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
     "X-Frame-Options": "DENY",
-    "Referrer-Policy": "no-referrer",
+    # Not no-referrer: under that policy a browser sends `Origin: null` on
+    # the page's own form posts (Fetch, "append a request Origin header"),
+    # and owner_action's Origin check refuses every one. same-origin still
+    # sends no Referer to any other origin.
+    "Referrer-Policy": "same-origin",
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
 }
