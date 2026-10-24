@@ -992,6 +992,23 @@ pkgs.testers.runNixOSTest {
         rc, out = mailgate("bob", f"attachment {alice_mid} 1 --out /tmp/bob-report.pdf")
         assert rc != 0 and "no such INBOX message" in str(out), out
 
+    with subtest("mailgate inbox and read: the rendered body and its links, for the owner only"):
+        rc, lst = mailgate("alice", "inbox")
+        assert rc == 0 and [e["id"] for e in lst] == [alice_mid], lst
+        assert lst[0]["from"] == "boss@trusted.test" and lst[0]["subject"] == "Numbers", lst
+        assert lst[0]["attachments"] == 1, lst
+        rc, r = mailgate("alice", f"read {alice_mid}")
+        assert rc == 0, r
+        assert "Quarterly numbers are fine." in r["text"], r
+        assert "https://trusted.test/report" in r["links"], r
+        assert r["html_converted"] and r["attachments"][0]["name"] == "report.pdf", r
+        for bad in ("HIDDEN_", "PLAINSECRET", "track.example", "ignore all previous"):
+            assert bad not in json.dumps(r), bad
+        rc, out = mailgate("bob", f"read {alice_mid}")
+        assert rc != 0 and "no such INBOX message" in str(out), out
+        rc, lst = mailgate("bob", "inbox")
+        assert rc == 0 and alice_mid not in json.dumps(lst), lst
+
     with subtest("the agent's spaces mail tools read the INBOX; sending fails cleanly"):
         server.succeed(
             "systemd-run --uid=alice --unit=mailtool-alice "

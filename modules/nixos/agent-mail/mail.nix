@@ -19,9 +19,11 @@
 #     state directory. Originals stay there, once per content; attachments
 #     are fetched one by one. Every parse runs in a killable worker
 #     (./analyze.py).
-#   agent: reads its INBOX over IMAP on 127.0.0.1:143 (spaces mail tools,
-#     profile "mailgate") with its own password, and everything else through
-#     /run/mailgate/agent.sock, where the peer uid picks the mailbox.
+#   agent: reads its INBOX with `mailgate inbox` / `mailgate read <id>`
+#     (rendered from the original here) and everything else through
+#     /run/mailgate/agent.sock, where the peer uid picks the mailbox. The
+#     IMAP copy on 127.0.0.1:143 (spaces mail tools, profile "mailgate", its
+#     own password) holds the same sanitized text.
 #
 # Why the agent cannot reach the raw mail: its IMAP account only ever holds
 # the sanitized copies (Stalwart delivers nothing itself), the originals and

@@ -297,17 +297,60 @@ def _hides(style: dict[str, str]) -> bool:
     return False
 
 
-# A stylesheet rule that sets any of these hides what it selects. Colour,
-# background and size are only judged on inline styles, where the
-# background and the parent are known; from a stylesheet (`.c{color:#fff}`
-# on a white body, `.d{background:#000}` under black text) they could hide
-# text in ways this renderer does not model, so it over-hides instead. Many
-# HTML mails therefore lose more than a human would; that is the safe
-# direction.
-_SHEET_HIDING = {
-    "color", "background", "background-color", "font", "font-size", "width", "height", "clip",
-    "clip-path", "transform", "position",
-}
+# A stylesheet rule hides what it selects when its values would hide it
+# inline (_hides), and also on what a single rule cannot be judged by:
+# colour and background (the background and the parent are unknown here:
+# `.c{color:#fff}` on a white body, `.d{background:#000}` under black text),
+# a tiny box or a clipping overflow (the other half may come from another
+# rule or the inline style), and positioning. Neutral values (inherit,
+# currentcolor, a transparent background, auto sizes, a 36px heading) hide
+# nothing: templates set them on every tag, and counting them hid whole
+# mails. Many HTML mails still lose more than a human would see; that is
+# the safe direction.
+_NEUTRAL_PAINT = {"", "inherit", "currentcolor"}
+_NEUTRAL_BACKGROUND = _NEUTRAL_PAINT | {"transparent", "none", "initial", "unset"}
+
+
+def _sheet_hides(style: dict[str, str]) -> bool:
+    if _hides(style):
+        return True
+    if style.get("color", "") not in _NEUTRAL_PAINT:
+        return True
+    if any(style.get(p, "") not in _NEUTRAL_BACKGROUND for p in ("background", "background-color")):
+        return True
+    if any(_tiny(_length(style.get(p, ""))) for p in ("height", "max-height", "width", "max-width", "line-height")):
+        return True
+    if any(style.get(p, "").split()[:1] in (["hidden"], ["clip"]) for p in ("overflow", "overflow-x", "overflow-y")):
+        return True
+    return style.get("position", "static") not in ("static", "relative", "inherit")
+
+
+# Pseudo-classes that apply only while the reader interacts; text such a
+# rule hides is visible at rest.
+_INTERACTIVE = re.compile(r":(?:hover|active|focus|focus-within|focus-visible)\b")
+# The tokens of a selector's last compound: class, id, tag, a bare `*`, and
+# attributes: `[a=v]` (an exact value) or `[a` (any other test, read as
+# presence: over-hides).
+_SELECTOR_TOKEN = re.compile(
+    r"""[.#][-\w]+|\[\s*([-\w]+)\s*(?:=\s*(?:"([^"]*)"|'([^']*)'|([-\w]+))\s*(?:[is]\s*)?\])?|^[a-z][a-z0-9]*"""
+)
+
+
+def _selector_tokens(compound: str) -> set[str]:
+    if compound == "*":
+        return {"*"}
+    tokens = set()
+    for m in _SELECTOR_TOKEN.finditer(compound):
+        if m.group(1) is None:
+            tokens.add(m.group(0))
+        elif m.group(0).endswith("]"):
+            value = next(v for v in m.group(2, 3, 4) if v is not None)
+            tokens.add(f"[{m.group(1)}={value}]")
+        else:
+            tokens.add("[" + m.group(1))
+    return tokens
+
+
 
 # Caps that keep rendering linear in practice: more CSS than this hides
 # the whole body; more HTML than this is not rendered at all.
@@ -332,26 +375,27 @@ def _css_rules(css: str):
 
 
 def _css_hidden_selectors(css: str) -> set[str]:
-    """Class (.x), id (#x), attribute ([x]) and tag tokens that some <style>
-    rule hides. Every rule counts, inside any @media too, and only the last
-    compound of a selector matters: this over-hides, which is the safe side.
-    Stylesheets above MAX_CSS hide everything ("*").
+    """Class (.x), id (#x), attribute ([x], [x=v]) and tag tokens that some
+    <style> rule hides. Every rule counts, inside any @media too (except
+    :hover and similar), and only the last compound of a selector matters:
+    this over-hides, which is the safe side. Stylesheets above MAX_CSS hide
+    everything ("*").
     """
     if len(css) > MAX_CSS:
         return {"*"}
     css = _css_unescape(_strip_css_comments(css))
     tokens: set[str] = set()
     for selectors, body in _css_rules(css):
-        decls = _style(body)
-        if not (_hides(decls) or _SHEET_HIDING & decls.keys()):
+        if not _sheet_hides(_style(body)):
             continue
         for sel in selectors.split(","):
             sel = sel.strip().lower()
             if not sel or sel.startswith("@"):
                 continue
             last = re.split(r"[\s>+~]+", sel)[-1]
-            for t in re.findall(r"[.#][-\w]+|\[[-\w]+|^[a-z][a-z0-9]*|^\*", last):
-                tokens.add(t.rstrip("]"))
+            if _INTERACTIVE.search(last):
+                continue
+            tokens |= _selector_tokens(last)
     return tokens
 
 
@@ -389,7 +433,7 @@ class _Renderer(html.parser.HTMLParser):
                 return True
         if attrs.get("id") and "#" + attrs["id"].lower() in self.sel:
             return True
-        return any("[" + a in self.sel for a in attrs)
+        return any("[" + a in self.sel or f"[{a}={v.lower()}]" in self.sel for a, v in attrs.items())
 
     def handle_starttag(self, tag, attrs_list):
         tag = tag.lower()
@@ -1143,6 +1187,13 @@ def remote_net(raw: bytes, authserv_id: str) -> str:
     return str(ipaddress.ip_network(f"{ip}/{24 if ip.version == 4 else 64}", strict=False))
 
 
+def _date(msg) -> str | None:
+    try:
+        return email.utils.format_datetime(email.utils.parsedate_to_datetime(_header(msg, "Date")))
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def analyze(msg, raw: bytes, authserv_id: str, psl: Psl) -> dict:
     """Everything mailgate needs from one message, computed in its worker
     process. Keys starting with "_" hold sender-chosen text and never reach
@@ -1152,10 +1203,7 @@ def analyze(msg, raw: bytes, authserv_id: str, psl: Psl) -> dict:
     v = verdict(msg, raw, authserv_id)
     r = render(msg)
     subject = _header(msg, "Subject")
-    try:
-        date = email.utils.format_datetime(email.utils.parsedate_to_datetime(_header(msg, "Date")))
-    except Exception:  # noqa: BLE001
-        date = None
+    date = _date(msg)
     org = psl.org_domain(v["from_domain"]) if v["aligned"] else None
     source = f"domain:{org}" if org else "net:" + remote_net(raw, authserv_id)
     links = safe_links(r["hrefs"], r["text"], org)
@@ -1175,4 +1223,36 @@ def analyze(msg, raw: bytes, authserv_id: str, psl: Psl) -> dict:
         "_links": links,
         "_attachments": public_attachments(r["attachments"]),
         "_source": source,
+    }
+
+
+MAX_LINKS = 200
+
+
+def all_links(hrefs: list[str], text: str) -> list[str]:
+    """Every http(s) link of a rendered body once, in order: the targets of
+    visible anchors, then URLs written out in the text."""
+    out: list[str] = []
+    for raw in list(hrefs) + _URL.findall(text or ""):
+        raw = raw.strip().rstrip(".,;:!?")
+        if raw and raw not in out:
+            out.append(raw)
+            if len(out) == MAX_LINKS:
+                break
+    return out
+
+
+def reading(msg) -> dict:
+    """An INBOX message as `mailgate read` shows it: the same rendering as
+    the sanitized copy, with every link listed."""
+    r = render(msg)
+    return {
+        "subject": clean_line(_header(msg, "Subject"), 200),
+        "date": _date(msg),
+        "text": r["text"],
+        "links": all_links(r["hrefs"], r["text"]),
+        "html": r["html"],
+        "hidden": r["hidden"],
+        "images": r["images"],
+        "too_large": r["too_large"],
     }

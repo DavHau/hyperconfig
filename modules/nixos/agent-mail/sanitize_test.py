@@ -10,8 +10,10 @@ suite.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
+import quopri
 import subprocess
 import sys
 import textwrap
@@ -331,6 +333,10 @@ HIDDEN_CASES = {
     "clamp-width": '<p style="width:clamp(0px,0px,0px);overflow:hidden">SECRET</p>',
     "stylesheet-background": '<style>.x{background:#000}</style><div class=x><span style="color:#000">SECRET</span></div>',
     "stylesheet-background-color": '<style>.y{background-color:#000}</style><div class=y>SECRET</div>',
+    "stylesheet-tiny-box": "<style>.t{height:1px}</style><div class=t style=overflow:hidden>SECRET</div>",
+    "stylesheet-overflow": '<style>.o{overflow:hidden}</style><div class=o style="height:1px">SECRET</div>',
+    "star-attribute-value": '<style>*[class="gmail-fix"]{display:none}</style><div class="gmail-fix">SECRET</div>',
+    "attribute-prefix": '<style>[data-x^="a"]{display:none}</style><div data-x="b">SECRET</div>',
 }
 
 
@@ -362,6 +368,80 @@ class Hidden(unittest.TestCase):
             with self.subTest(html):
                 text, *_ = sanitize.html_to_text(html)
                 self.assertIn("SHOWN", text)
+
+    def test_template_stylesheet_stays_visible(self):
+        # Rules every email template carries (these from a Stripo one): a
+        # neutral or large value hides nothing, and `*[class="x"]` selects
+        # only class x. Counting them once hid entire sign-up mails.
+        css = (
+            "a[x-apple-data-detectors]{color:inherit!important;font-size:inherit!important}"
+            "h1{font-size:36px} .es-content-body p,.es-content-body a{font-size:16px}"
+            ".es-menu td{width:1%} .adapt-img{width:100%!important;height:auto!important}"
+            "a.es-button,button.es-button{font-size:20px!important}"
+            "a:hover{color:#fff}"
+            '*[class="gmail-fix"]{display:none!important}'
+            "@media only screen and (max-width:600px){.es-mobile-hidden,.es-hidden{display:none!important}}"
+        )
+        text, hrefs, _, _ = sanitize.html_to_text(
+            f"<html><head><style>{css}</style></head><body><table class=es-content-body><tr><td>"
+            "<h1>Confirm</h1><p class=x>SHOWN</p>"
+            '<a class="es-button" href="https://api.lax.test/verify?code=abc">Confirm email</a>'
+            '<div class="gmail-fix">GONE</div><div class="es-hidden">GONE</div>'
+            "</td></tr></table></body></html>"
+        )
+        self.assertIn("SHOWN", text)
+        self.assertIn("Confirm email <https://api.lax.test/verify?code=abc>", text)
+        self.assertNotIn("GONE", text)
+        self.assertEqual(hrefs, ["https://api.lax.test/verify?code=abc"])
+
+
+def mime(content_type: str, body: str) -> object:
+    return msg(f"From: <boss@lax.test>\nSubject: Email confirm\nMIME-Version: 1.0\nContent-Type: {content_type}\n", body)
+
+
+class Bodies(unittest.TestCase):
+    """What `mailgate read` shows: text and every link, whatever the MIME
+    structure and transfer encoding."""
+
+    LINK = "https://api.lax.test/v2/verify?code=ff9c&email=a%40agents.test"
+    HTML = f'<p>Confirm your address</p><a href="{LINK}">I confirm</a>'
+
+    def check(self, m):
+        r = sanitize.reading(m)
+        self.assertIn("Confirm your address", r["text"])
+        self.assertIn(self.LINK, r["links"])
+        self.assertEqual(r["subject"], "Email confirm")
+        return r
+
+    def test_html_only_base64(self):
+        b64 = base64.encodebytes(self.HTML.encode()).decode()
+        self.check(mime("text/html; charset=utf-8\nContent-Transfer-Encoding: base64", b64))
+
+    def test_alternative_quoted_printable(self):
+        qp = quopri.encodestring(self.HTML.encode()).decode()
+        body = (
+            "--b\nContent-Type: text/plain\n\nPLAIN alternative\n"
+            f"--b\nContent-Type: text/html; charset=utf-8\nContent-Transfer-Encoding: quoted-printable\n\n{qp}\n--b--\n"
+        )
+        r = self.check(mime('multipart/alternative; boundary="b"', body))
+        self.assertNotIn("PLAIN", r["text"])
+
+    def test_nested_multiparts(self):
+        b64 = base64.encodebytes(self.HTML.encode()).decode()
+        body = (
+            '--m\nContent-Type: multipart/related; boundary="r"\n\n'
+            '--r\nContent-Type: multipart/alternative; boundary="a"\n\n'
+            "--a\nContent-Type: text/plain\n\nPLAIN\n"
+            f"--a\nContent-Type: text/html; charset=utf-8\nContent-Transfer-Encoding: base64\n\n{b64}\n--a--\n"
+            "--r\nContent-Type: image/png\nContent-Transfer-Encoding: base64\n\niVBORw0KGgo=\n--r--\n"
+            '--m\nContent-Type: application/pdf; name="x.pdf"\nContent-Disposition: attachment; filename="x.pdf"\n'
+            "Content-Transfer-Encoding: base64\n\nJVBERg==\n--m--\n"
+        )
+        self.check(mime('multipart/mixed; boundary="m"', body))
+
+    def test_plain_text_links(self):
+        r = sanitize.reading(mime("text/plain; charset=utf-8", f"Confirm your address: {self.LINK}.\n"))
+        self.assertEqual(r["links"], [self.LINK])
 
 
 class Linear(unittest.TestCase):

@@ -21,11 +21,11 @@ sender's domain, its links and its codes as data like everything else.
 ## Where mail goes
 
 - **INBOX**: only mail from a sender on your allowlist whose domain signed
-  it (DMARC pass and a DKIM signature by exactly that domain). You get a
-  sanitized plain-text copy: HTML converted to text, hidden text and images
-  removed, attachments withheld. Read it with the spaces mail tools, profile
-  `mailgate`: `mail_envelope_list` (folder INBOX), then `mail_message_read`
-  with the id.
+  it (DMARC pass and a DKIM signature by exactly that domain). Read it with
+  `mailgate inbox` (id, from, to, subject, date; newest first), then
+  `mailgate read <id>`: the full text (HTML converted to text, hidden text
+  and images removed) and every link in `links`. Attachments are withheld
+  until you fetch one. Mail stays readable for @INBOX_DAYS@ days.
 - **Quarantine**: everything else (unknown senders, failed authentication,
   mail too large or too complex to render). You cannot read these mails.
   `mailgate quarantine` shows a restricted view per message:
@@ -49,6 +49,9 @@ sender's domain, its links and its codes as data like everything else.
 ## Commands (`mailgate`, every answer is JSON)
 
 - `mailgate status`
+- `mailgate inbox` (newest first, `--limit N`) and `mailgate read <id>`:
+  INBOX mail. Use these to read mail, also after the owner confirmed a
+  sender whose mail then moved out of quarantine (same id).
 - `mailgate quarantine` (newest first, `--limit N`),
   `mailgate quarantine show <id>`, `mailgate quarantine summarize <id>`
   (asks for a summary if none was made yet; look again a bit later),
@@ -69,9 +72,8 @@ sender's domain, its links and its codes as data like everything else.
   only the owner can restore it. Use one alias per sign-up.
 - `mailgate attachments <id>` and
   `mailgate attachment <id> <n> --out <file>`: attachments of INBOX mail, one
-  at a time, only when the task needs the file. `<id>` is the
-  `X-Mailgate-Id` printed at the end of the message. Quarantined mail never
-  hands out attachments.
+  at a time, only when the task needs the file. `<id>` is the id from
+  `mailgate inbox`. Quarantined mail never hands out attachments.
 
 ## Sign-up flow
 
@@ -82,3 +84,4 @@ sender's domain, its links and its codes as data like everything else.
    that link with `mailgate quarantine open-link <id> <n>` and open it. Only
    do this for a sign-up you started yourself.
 4. If you will need full mails from that sender, request an allowlist entry.
+   Once the owner confirms it, read the mail with `mailgate read <id>`.
