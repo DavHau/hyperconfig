@@ -56,6 +56,8 @@ let
   };
 in
 {
+  imports = [ ./phoenixd-patchelf.nix ];
+
   options.hyper.lightningWallet = {
     enable = lib.mkEnableOption "the shared phoenixd Lightning wallet for the native hermes agents";
     autoLiquidity = lib.mkOption {
