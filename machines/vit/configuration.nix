@@ -11,6 +11,7 @@
     ../../modules/nixos/vault-nfs-client.nix
     ../../modules/nixos/hermes-agents-gpu-host.nix
     ../../modules/nixos/captchakraken-server.nix
+    ../../modules/nixos/ocr-server
     ../../modules/nixos/users/stefan-vault.nix
     ../../modules/nixos/tang-server.nix
     ../../modules/nixos/luks-unlock

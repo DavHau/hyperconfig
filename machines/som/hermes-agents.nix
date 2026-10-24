@@ -202,6 +202,10 @@ in
   # yggdrasil address). The agents' uids leave through Mullvad, whose kill
   # switch passes yggdrasil (200::/7).
   services.hermes-native.captchaSolver.baseUrl = "http://vit.d:8096/v1";
+  # read_file's scanned-PDF OCR and the agents' `ocr` CLI: Typhoon OCR on
+  # vit (../../modules/nixos/ocr-server), same yggdrasil path and
+  # admission as the captcha model.
+  services.hermes-native.ocr.baseUrl = "http://vit.d:8098";
   services.hermes-microvm.enable = false;
   services.spaces-searxng.enable = false;
 

@@ -91,6 +91,7 @@ rec {
     ./patches/hermes-camofox-browser-downloads.patch
     ./patches/hermes-camofox-solve-captcha.patch
     ./patches/hermes-camofox-vault.patch
+    ./patches/hermes-hosted-ocr-url.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {
