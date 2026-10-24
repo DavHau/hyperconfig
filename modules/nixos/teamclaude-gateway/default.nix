@@ -13,8 +13,14 @@
 # carries none. Unlike project-zero, nginx holds no key of its own: a key
 # minted at runtime works without a deploy.
 #
-# Client keys, one per person or machine, minted and revoked at runtime
-# (as root on som; usage is booked per name in `teamclaude status`):
+# One client key is static: our own infrastructure's, the shared clan var
+# teamclaude-api-key (../teamclaude-api-key.nix), which the config var
+# carries and preStart keeps in proxy.clientKeys as `hyperconfig` on every
+# start. `teamclaude-keys revoke hyperconfig` therefore lasts only until the
+# next restart; rotate it with the var instead.
+#
+# Every other client key, one per person or machine, is minted and revoked
+# at runtime (as root on som; usage is booked per name in `teamclaude status`):
 #   teamclaude-keys add <name>      prints the new key once
 #   teamclaude-keys list | show <name> | revoke <name>
 # Add an account (as root on som; open the printed URL, sign in with the
@@ -71,7 +77,10 @@ let
   '';
 in
 {
-  imports = [ inputs.teamclaude.nixosModules.default ];
+  imports = [
+    inputs.teamclaude.nixosModules.default
+    ../teamclaude-api-key.nix
+  ];
 
   clan.core.vars.generators = {
     # The operator key (proxy.apiKey): the control plane on loopback and
@@ -90,12 +99,23 @@ in
       '';
     };
     teamclaude-config = {
-      dependencies = [ "teamclaude-gateway-key" ];
-      files."config.json".secret = true;
+      dependencies = [
+        "teamclaude-gateway-key"
+        "teamclaude-api-key"
+      ];
+      files."config.json" = {
+        secret = true;
+        restartUnits = [ "teamclaude.service" ];
+      };
       runtimeInputs = [ pkgs.jq ];
       script = ''
-        api_key=$(cat "$in/teamclaude-gateway-key/key")
-        jq -n --arg apiKey "$api_key" '{ proxy: { apiKey: $apiKey } }' > "$out/config.json"
+        jq -n \
+          --rawfile apiKey "$in/teamclaude-gateway-key/key" \
+          --rawfile staticKey "$in/teamclaude-api-key/key" \
+          '{ proxy: {
+              apiKey: ($apiKey | rtrimstr("\n")),
+              clientKeys: [ { name: "hyperconfig", key: ($staticKey | rtrimstr("\n")) } ]
+            } }' > "$out/config.json"
       '';
     };
   };
@@ -138,9 +158,11 @@ in
   # accounts and their refreshed OAuth tokens; no later change to the
   # generated config (a rotated key) would ever reach the service. So merge
   # on every start: the Nix settings, then the secret, win over the live
-  # file, except `accounts`, which is runtime state and stays as the service
-  # left it but for its maxUsage, which is set to usageCap. Runs as root
-  # (PermissionsStartOnly), after the module's own copy-if-missing.
+  # file, except two runtime lists. `accounts` stays as the service left it
+  # but for its maxUsage, which is set to usageCap. `proxy.clientKeys` keeps
+  # every runtime-minted entry and gets the secret's static entries on top,
+  # replacing a live entry of the same name (a rotated static key). Runs as
+  # root (PermissionsStartOnly), after the module's own copy-if-missing.
   #
   # Every start, and with no account enrolled the service restarts every
   # 5 s, so the merge must not disturb a concurrent writer (teamclaude-keys,
@@ -163,9 +185,15 @@ in
         sleep 0.025
       done
       tmp=$(mktemp "$live.merged.XXXXXX")
-      ${pkgs.jq}/bin/jq -s --argjson cap ${builtins.toJSON usageCap} \
-        '.[0] * .[1] * (.[2] | del(.accounts)) | .accounts = ((.accounts // []) | map(.maxUsage = $cap))' \
-        "$live" ${settingsFile} "$src" > "$tmp"
+      ${pkgs.jq}/bin/jq -s --argjson cap ${builtins.toJSON usageCap} '
+        .[0] as $live
+        | (.[2].proxy.clientKeys // []) as $static
+        | $live * .[1] * (.[2] | del(.accounts) | del(.proxy.clientKeys))
+        | .accounts = ((.accounts // []) | map(.maxUsage = $cap))
+        | .proxy.clientKeys = (
+            [ ($live.proxy.clientKeys // [])[] | select(.name as $n | $static | all(.name != $n)) ]
+            + $static)
+      ' "$live" ${settingsFile} "$src" > "$tmp"
       chown teamclaude:teamclaude "$tmp"
       chmod 0600 "$tmp"
       mv -f "$tmp" "$live"

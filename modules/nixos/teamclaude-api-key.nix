@@ -1,20 +1,25 @@
 # Client key for the TeamClaude pooled Claude subscription gateway
 # (https://teamclaude.davhau.com, ./teamclaude-gateway on som).
 #
-# This is the client half: a clan var holding a runtime client key the
-# gateway minted, which `teamclaude-api-key` prints. The anthropic provider
-# override in models.yml names it as `apiKey: "!teamclaude-api-key"` (see
+# One static key for all of our own infrastructure: a generated shared clan
+# var, which `teamclaude-api-key` prints. The anthropic provider override in
+# models.yml names it as `apiKey: "!teamclaude-api-key"` (see
 # omp-common.nix), so every harness resolves the key by running it and no
 # wrapper has to export anything. Exit 1 when the var file is unreadable.
 #
-# `share = true`: one key for the whole clan, booked under one name in
-# `teamclaude status`. Mint it on som and paste it here:
+# The gateway accepts it declaratively: ./teamclaude-gateway imports this
+# module and its preStart keeps the key in TeamClaude's `proxy.clientKeys`
+# under the name `hyperconfig` (usage is booked under that name in
+# `teamclaude status`). Other people's keys stay runtime-minted there
+# (`teamclaude-keys add <name>`). Rotate with
 #
-#   teamclaude-keys add grmpf                       (as root on som)
-#   clan vars generate amy --generator teamclaude-api-key --regenerate
-{ config, pkgs, ... }:
+#   clan vars generate som --generator teamclaude-api-key --regenerate
+#
+# and deploy som plus every machine importing this module.
+{ config, lib, pkgs, ... }:
 let
   key = config.clan.core.vars.generators.teamclaude-api-key.files.key;
+  owner = if config.users.users ? grmpf then "grmpf" else "dave";
 in
 {
   environment.systemPackages = [
@@ -29,22 +34,27 @@ in
     })
   ];
 
+  # Every account that runs a harness reads the key through this group: the
+  # desktop user and, where it exists, the fleet `agent` account
+  # (./agent-user.nix), which gets afk's models.yml too.
+  users.groups.teamclaude-api-key.members = [ owner ] ++ lib.optional (config.users.users ? agent) "agent";
+
   clan.core.vars.generators.teamclaude-api-key = {
     share = true;
-    # A persisted prompt IS the file — no generator script, so the var holds
-    # exactly the key and nothing else.
-    prompts.key = {
-      description = "TeamClaude client key for https://teamclaude.davhau.com (as root on som: teamclaude-keys add <name>)";
-      type = "hidden";
-      persist = true;
-    };
-    # Readable by the desktop user: the omp harnesses run unprivileged and
-    # read this through `teamclaude-api-key`. An owner the machine doesn't
-    # declare makes sops-install-secrets abort every secret on the host
-    # (sops-nix#972).
+    runtimeInputs = [ pkgs.openssl ];
+    # `sk-ant-oat01-` is load-bearing, as for the gateway's operator key:
+    # omp presents as Claude Code (the only shape Anthropic accepts
+    # subscription OAuth in) only when its key looks like a subscription
+    # token, and sends it as `Authorization: Bearer`.
+    script = ''
+      printf 'sk-ant-oat01-%s' "$(openssl rand -hex 32)" > "$out/key"
+    '';
+    # An owner or group the machine doesn't declare makes sops-install-secrets
+    # abort every secret on the host (sops-nix#972).
     files.key = {
-      owner = if config.users.users ? grmpf then "grmpf" else "dave";
-      mode = "0400";
+      inherit owner;
+      group = "teamclaude-api-key";
+      mode = "0440";
     };
   };
 }
