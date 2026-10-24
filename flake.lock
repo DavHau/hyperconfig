@@ -1156,10 +1156,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1790845217,
-        "narHash": "sha256-DbrIAqZyL6lK4xuWw3SvTw01Z0BV+7Y01FTUeDw62pw=",
+        "lastModified": 1792838583,
+        "narHash": "sha256-THfe/COoP8PBqLIZacwHNFORJpkoVcvy+1fbqS9TvXM=",
         "ref": "parallel-downloads",
-        "rev": "f45d0bdbdb718e80b12b82c036fe780822b69c41",
+        "rev": "44758a56d804fddab1c997e6ffba6621f853bf5c",
         "shallow": true,
         "type": "git",
         "url": "file:///home/grmpf/projects/nix"
