@@ -29,5 +29,6 @@
     ./web-extract.nix
     ./camofox.nix
     ./web-access-skill.nix
+    ./ocr.nix
   ];
 }

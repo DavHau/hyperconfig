@@ -1,0 +1,31 @@
+--- a/tools/read_extract.py
++++ b/tools/read_extract.py
+@@ -147,16 +147,24 @@
+     is a direct ``FIRECRAWL_API_KEY`` (anydoc defaults api_url); the Nous gateway's Parse proxy
+     live-probed broken, so it is NOT used. ``file_tools.hosted_ocr: false`` disables even with a
+     key. The key is a profile credential: read through the secret scope so a multiplexed
+-    secondary never spends (or reveals its documents to) the default profile's Firecrawl key."""
++    secondary never spends (or reveals its documents to) the default profile's Firecrawl key.
++    ``file_tools.hosted_ocr_url`` points the same Parse request at a self-hosted, Parse-compatible
++    endpoint instead; the Firecrawl key is then never sent (a placeholder bearer keeps anydoc from
++    falling back to ``FIRECRAWL_API_KEY``)."""
+     from agent.secret_scope import get_secret
+     api_key = get_secret("FIRECRAWL_API_KEY") or None
+     enabled = api_key is not None
++    api_url = None
+     with contextlib.suppress(Exception):
+         from hermes_cli.config import load_config_readonly
+         section = load_config_readonly().get("file_tools")
+-        if isinstance(section, dict) and section.get("hosted_ocr") is False:
+-            enabled = False
+-    return enabled, api_key, None
++        if isinstance(section, dict):
++            url = section.get("hosted_ocr_url")
++            if isinstance(url, str) and url.strip():
++                enabled, api_key, api_url = True, "self-hosted", url.strip()
++            if section.get("hosted_ocr") is False:
++                enabled = False
++    return enabled, api_key, api_url
+ 
+ 
+ def hosted_ocr_available() -> bool:
