@@ -1,7 +1,8 @@
 """Download site for camofox-test.nix: pages that start downloads by a link, a form
 POST answered with an attachment, a form POST answered with a 302 to a file on
 another origin (APKSum's shape), and a script-built blob; plus a fetch() re-POST
-of the redirecting form and a file over browser_downloads' 50 MiB limit.
+of the redirecting form and a file over browser_downloads' 50 MiB limit. /login is
+a login form for the vault test.
 
 Files are deterministic bytes; `site.py --sha <name>` prints a file's sha256.
 """
@@ -66,6 +67,14 @@ async function refetch() {
 </script>
 </body></html>"""
 
+LOGIN = b"""<!doctype html><html><head><title>login</title></head><body>
+<form method="post" action="/login">
+  <label>Username <input id="user" name="username" autocomplete="username"></label>
+  <label>Password <input id="pw" name="password" type="password" autocomplete="current-password"></label>
+  <button type="submit">Sign in</button>
+</form>
+</body></html>"""
+
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
@@ -87,6 +96,12 @@ class H(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(INDEX)))
             self.end_headers()
             self.wfile.write(INDEX)
+        elif self.path == "/login":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(LOGIN)))
+            self.end_headers()
+            self.wfile.write(LOGIN)
         elif self.path == "/files/big.bin":
             self._file("big.bin", payload("big.bin", BIG))
         elif self.path.startswith("/files/") and self.path[7:] in FILES:

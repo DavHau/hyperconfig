@@ -90,6 +90,7 @@ rec {
     ./patches/hermes-gateway-no-home-shutdown-broadcast.patch
     ./patches/hermes-camofox-browser-downloads.patch
     ./patches/hermes-camofox-solve-captcha.patch
+    ./patches/hermes-camofox-vault.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {
