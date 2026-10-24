@@ -20,6 +20,11 @@
 # request carrying an image and no tools: the browser clicks the right tiles
 # and Verify, and the tool reports solved; on a page without a captcha it
 # reports no_captcha. Another camofox userId cannot solve on her tab.
+#
+# Vault: hermes' browser_vault_save_login and browser_vault_fill
+# (patches/hermes-camofox-vault.patch) read the origin of alice's tab and
+# fill a saved password into the site's login form through her server;
+# on another origin the fill refuses and writes nothing.
 { pkgs, inputs }:
 let
   inherit (pkgs) lib;
@@ -49,6 +54,7 @@ let
     + "exec ${hermes.hermesVenv}/bin/python3 ${script} ${args}' 2>&1";
   driver = driverScript ./camofox-test-downloads.py;
   captchaDriver = driverScript ./camofox-test-captcha.py;
+  vaultDriver = driverScript ./camofox-test-vault.py;
   privateTmp = "/tmp/systemd-private-*-hermes-camofox-alice.service-*/tmp";
 in
 pkgs.testers.runNixOSTest {
@@ -178,6 +184,11 @@ pkgs.testers.runNixOSTest {
     with subtest("browser_solve_captcha solves alice's grid captcha in her browser"):
         machine.wait_for_unit("captcha-site.service")
         out = machine.succeed("${captchaDriver "alice" "captcha http://127.0.0.1:8766"}")
+        print(out)
+        assert "ALL PASSED" in out
+
+    with subtest("the vault fills alice's saved password in her browser, only on its origin"):
+        out = machine.succeed("${vaultDriver "alice" "vault http://127.0.0.1:8765"}")
         print(out)
         assert "ALL PASSED" in out
 

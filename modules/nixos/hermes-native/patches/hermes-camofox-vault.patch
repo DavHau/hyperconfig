@@ -1,0 +1,240 @@
+hermes v2026.9.14 (0.21.3): with the Camofox backend the vault tools never
+reach the page, so the agent cannot save or fill a login.
+
+Symptom: on any login page (GitHub, IPRoyal, GISTDA) browser_vault_save_login
+answers "Open the site's login page first; the login is saved for that page's
+origin." and browser_vault_fill answers "Could not determine the current page
+origin. Navigate to the login page first."
+
+Cause: the vault reads the page origin, inspects the form and writes the
+password through tools/browser_vault_tool.py's _eval_js/_eval_js_secret, which
+know only the CDP supervisor and the agent-browser CLI `eval`. Camofox
+(Firefox over Juggler) has neither: no supervisor is ever attached, and the
+CLI is not installed ("agent-browser CLI not found"), so the origin read fails
+and both tools stop there. browser_console works because browser_tool routes
+it to Camofox's POST /tabs/<id>/evaluate.
+
+Upstream: NousResearch/hermes-agent#135204 (open) routes the vault's eval
+through that same Camofox route; the maintainer keeps it open waiting for a
+core seam since Camofox moved out of core into hermes-official-plugins
+(#143146). Nothing is merged.
+
+Fix: in Camofox mode, _eval_js and _eval_js_secret evaluate on the task's
+Camofox tab through POST /tabs/<id>/evaluate; _focus_bound_origin (CDP tab
+focusing) is skipped, the task has one tracked tab. The password travels in
+the JSON body of an authenticated request to the agent's own owner-only
+server, never in argv; camofox-browser logs only the result's type. Without a
+tab nothing is opened; a tab the server closed (404/410) is forgotten so the
+next browser_navigate opens a new one. Origin checks (pre-check and the
+in-page assert of the fill script) are unchanged.
+
+The new test fails before this change: the origin read goes to the
+agent-browser CLI.
+
+diff --git a/tests/tools/test_browser_vault_camofox.py b/tests/tools/test_browser_vault_camofox.py
+new file mode 100644
+--- /dev/null
++++ b/tests/tools/test_browser_vault_camofox.py
+@@ -0,0 +1,116 @@
++"""Vault tools on the Camofox backend: page reads and the fill go to the task's Camofox tab.
++
++A fake camofox-browser answers POST /tabs/<id>/evaluate for one tab on https://example.com/login
++holding an email and a password field, the way the real server does (the JS value as ``result``).
++"""
++
++import json
++from unittest.mock import patch
++
++import pytest
++
++import tools.browser_camofox as bc
++from agent.vault_store import VaultStore
++from tools import browser_vault_tool as bv
++
++PASSWORD = "s3cret-camofox-pw"
++CONTROLS = [
++    {"autocomplete": "email", "formIndex": 0, "index": 0, "label": "", "name": "email", "type": "email"},
++    {"autocomplete": "current-password", "formIndex": 0, "index": 1, "label": "", "name": "pw", "type": "password"},
++]
++
++
++class FakeCamofox:
++    def __init__(self):
++        self.calls = []
++        self.href = "https://example.com/login"
++        self.gone = False
++
++    def post(self, path, body, timeout=None):
++        self.calls.append((path, body))
++        if path != "/tabs/tab-a/evaluate" or body.get("userId") != "user-a":
++            raise AssertionError(f"unexpected camofox call {path}")
++        if self.gone:
++            resp = bc.requests.Response()
++            resp.status_code = 404
++            raise bc.requests.HTTPError("404 Client Error: Not Found", response=resp)
++        expr = body["expression"]
++        if expr == "window.location.href":
++            return {"ok": True, "result": self.href}
++        if "const fills" in expr:
++            return {"ok": True, "result": json.dumps({"filled": 1})}
++        if "data-hermes-vault-slot" in expr:
++            return {"ok": True, "result": json.dumps(CONTROLS)}
++        return {"ok": True, "result": None}
++
++
++@pytest.fixture
++def camofox(monkeypatch, tmp_path):
++    fake = FakeCamofox()
++    monkeypatch.setattr(bc, "_post", fake.post)
++    monkeypatch.setattr(bc, "is_camofox_mode", lambda: True)
++    store = VaultStore(base_dir=tmp_path / "vault")
++
++    def no_cli(*args, **kwargs):
++        raise AssertionError(f"agent-browser CLI called in Camofox mode: {args}")
++
++    with bc._sessions_lock:
++        bc._sessions.clear()
++        bc._sessions["a"] = {"user_id": "user-a", "tab_id": "tab-a", "session_key": "task_a",
++                             "managed": True, "adopt_existing_tab": False}
++    with patch("agent.vault_store.get_vault_store", return_value=store), \
++         patch("tools.browser_tool_session._run_browser_command", side_effect=no_cli), \
++         patch("tools.browser_supervisor.SUPERVISOR_REGISTRY") as reg:
++        reg.get.side_effect = AssertionError("CDP supervisor consulted in Camofox mode")
++        yield fake, store
++    with bc._sessions_lock:
++        bc._sessions.clear()
++
++
++def _add(store, origin="https://example.com"):
++    return store.add_item(kind="login", label="Example", origin=origin,
++                          secret={"identifier_type": "email", "identifier": "user@example.com", "password": PASSWORD})
++
++
++def test_origin_is_read_from_the_camofox_tab(camofox):
++    assert bv._current_page_origin("a") == "https://example.com"
++
++
++def test_fill_writes_the_password_through_the_camofox_tab(camofox):
++    fake, store = camofox
++    meta = _add(store)
++    raw = bv.browser_vault_fill(meta.id, task_id="a")
++    out = json.loads(raw)
++    assert out["success"] is True and out["filled_fields"] == 1 and out["origin"] == "https://example.com"
++    assert PASSWORD not in raw
++    carrying = [body["expression"] for _, body in fake.calls if PASSWORD in body["expression"]]
++    assert len(carrying) == 1 and "window.location.origin" in carrying[0]
++
++
++def test_fill_refuses_another_origin(camofox):
++    fake, store = camofox
++    fake.href = "https://evil.test/login"
++    raw = bv.browser_vault_fill(_add(store).id, task_id="a")
++    assert json.loads(raw)["error_type"] == "origin_mismatch"
++    assert not any(PASSWORD in body["expression"] for _, body in fake.calls)
++
++
++def test_save_login_reads_the_origin_then_asks_the_user(camofox):
++    out = json.loads(bv.browser_vault_save_login(label="x", task_id="a"))
++    # Headless here: the origin was found, so the refusal names it instead of "open the login page".
++    assert out["error_type"] == "prompt_unavailable" and "https://example.com" in out["error"]
++
++
++def test_no_tab_opens_none(camofox):
++    fake, store = camofox
++    out = json.loads(bv.browser_vault_fill(_add(store).id, task_id="other"))
++    assert out["success"] is False and "navigate" in out["error"].lower()
++    assert fake.calls == []
++
++
++def test_gone_tab_is_forgotten_and_nothing_written(camofox):
++    fake, store = camofox
++    fake.gone = True
++    out = json.loads(bv.browser_vault_fill(_add(store).id, task_id="a"))
++    assert out["success"] is False
++    assert bc._sessions["a"]["tab_id"] is None
+diff --git a/tools/browser_vault_tool.py b/tools/browser_vault_tool.py
+--- a/tools/browser_vault_tool.py
++++ b/tools/browser_vault_tool.py
+@@ -53,14 +53,51 @@
+ # JS evaluation plumbing (server-side; results never carry secret values)
+ # ---------------------------------------------------------------------------
+ 
++def _camofox_active() -> bool:
++    """True when the browser_* tools drive Camofox: its tab sits behind the server's REST API, with no
++    CDP supervisor and no agent-browser CLI to evaluate on."""
++    try:
++        from tools.browser_camofox import is_camofox_mode
++    except ImportError:
++        return False
++    return bool(is_camofox_mode())
++
++
++def _camofox_eval(task_id: str, expression: str) -> Dict[str, Any]:
++    """Evaluate on the task's Camofox tab (POST /tabs/<id>/evaluate, the route browser_console uses).
++
++    The expression rides in the JSON body of an authenticated request to the agent's own server, never in
++    argv, and camofox-browser logs only the result's type, so this path carries secrets as well. It never
++    opens a tab: without one there is no page to read or fill. A tab the server has closed is forgotten,
++    so the next browser_navigate opens a new one."""
++    from tools import browser_camofox as bc
++
++    session = bc._get_session(task_id)
++    if not session.get("tab_id"):
++        return {"success": False, "error": bc._NO_SESSION_ERROR}
++    try:
++        resp = bc._post(bc._tab_path(session, "evaluate"), {"expression": expression, "userId": session["user_id"]})
++    except bc.requests.HTTPError as exc:
++        if exc.response is not None and exc.response.status_code in (404, 410):
++            session["tab_id"] = None
++            return {"success": False, "error": "The browser tab is gone. Call browser_navigate to open the page again."}
++        return {"success": False, "error": f"Camofox evaluate failed: {exc}"}
++    except Exception as exc:
++        return {"success": False, "error": f"Camofox evaluate failed: {exc}"}
++    return {"success": True, "result": resp.get("result") if isinstance(resp, dict) else resp}
++
++
+ def _eval_js(task_id: str, expression: str) -> Dict[str, Any]:
+     """Evaluate NON-SECRET JS on the current page (inspection, origin reads).
+ 
+-    Prefers the supervisor's persistent CDP WebSocket, falls back to the
+-    agent-browser CLI ``eval`` command. Never use this for expressions that
+-    embed secret values — the fallback places the expression in subprocess
+-    argv. Use :func:`_eval_js_secret` for secret-bearing expressions.
++    Camofox mode evaluates on the task's Camofox tab. Otherwise this prefers the
++    supervisor's persistent CDP WebSocket and falls back to the agent-browser CLI
++    ``eval`` command. Never use this for expressions that embed secret values —
++    the fallback places the expression in subprocess argv. Use
++    :func:`_eval_js_secret` for secret-bearing expressions.
+     """
++    if _camofox_active():
++        return _camofox_eval(task_id, expression)
+     try:
+         from tools.browser_supervisor import SUPERVISOR_REGISTRY
+ 
+@@ -117,7 +154,7 @@
+ 
+ 
+ def _eval_js_secret(task_id: str, expression: str) -> Dict[str, Any]:
+-    """Evaluate a SECRET-BEARING JS expression. Supervisor CDP-WS only.
++    """Evaluate a SECRET-BEARING JS expression. Camofox tab or supervisor CDP-WS only.
+ 
+     Fails closed: there is deliberately NO fallback to the agent-browser CLI
+     ``eval`` path, because that places the expression — and therefore the
+@@ -125,6 +162,8 @@
+     When no supervisor session is available the caller gets a typed refusal
+     (``error_type='supervisor_required'``) and nothing is written.
+     """
++    if _camofox_active():
++        return _camofox_eval(task_id, expression)
+     try:
+         supervisor = _ensure_supervisor(task_id)
+     except Exception as exc:
+@@ -192,6 +231,8 @@
+     """Point the supervisor's page session at the open tab on ``origin`` that holds a ``kind`` form
+     (browser_exec sessions open their own tabs, so the tab the supervisor attached to first is rarely the
+     login page). Returns the origin when a tab was focused, else None (caller falls back to the current page)."""
++    if _camofox_active():  # one tracked tab per task, the one the agent drives
++        return None
+     try:
+         supervisor = _ensure_supervisor(task_id)
+     except Exception:
