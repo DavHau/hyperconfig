@@ -113,7 +113,10 @@ in
       serviceConfig = {
         ExecStartPre = "${linkConfig}/bin/noctalia-link-config";
         ExecStart = lib.getExe cfg.package;
-        Restart = "on-failure";
+        # noctalia exits 0 when the compositor drops its connection (e.g. a
+        # refused session lock), so on-failure would leave the bar dead.
+        Restart = "always";
+        RestartSec = 2;
         Slice = "session.slice";
         # Widgets and plugins spawn helpers by bare name.
         Environment = "PATH=/run/wrappers/bin:/etc/profiles/per-user/%u/bin:/run/current-system/sw/bin";
