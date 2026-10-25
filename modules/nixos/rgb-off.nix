@@ -1,9 +1,10 @@
-# Keep every RGB LED of the machine dark. The LEDs forget their state on
-# a power cycle and come back in their rainbow default, so this re-applies
-# "off" at every boot and after every resume.
+# Control the machine's RGB LEDs. They forget their state on a power cycle
+# and come back in their rainbow default, so this re-applies the chosen
+# state at every boot and after every resume.
 #
-# - DRAM (ENE SMBus controllers, e.g. Kingston Fury): OpenRGB, mode Off.
-#   Needs the AMD SMBus (i2c-piix4) and i2c-dev.
+# - DRAM (ENE SMBus controllers, e.g. Kingston Fury): OpenRGB, mode
+#   hyper.rgbOff.dramMode (default off). Needs the AMD SMBus (i2c-piix4)
+#   and i2c-dev.
 # - Colorful motherboard ARGB headers (USB 2f4c:1013): not supported by
 #   OpenRGB, so a black direct frame is written to the FF01 HID interface.
 #   Protocol: https://github.com/czw63/colorful-2f4c-openrgb
@@ -44,6 +45,17 @@ in
     switching off the ARGB headers of a Colorful motherboard (USB 2f4c:1013),
     where fans and water blocks plug in'';
 
+  options.hyper.rgbOff.dramMode = lib.mkOption {
+    type = lib.types.str;
+    default = "off";
+    example = "rainbow";
+    description = ''
+      OpenRGB mode applied to the DRAM LEDs at every boot and resume
+      ("off", "rainbow", "static", ...). Devices without that mode are
+      skipped.
+    '';
+  };
+
   config = lib.mkMerge [
     {
       boot.kernelModules = [
@@ -52,7 +64,7 @@ in
       ];
 
       systemd.services.rgb-off = {
-        description = "Switch off DRAM RGB LEDs";
+        description = "Set DRAM RGB LEDs to mode ${cfg.dramMode}";
         after = [ "systemd-modules-load.service" ];
         wantedBy = [
           "multi-user.target"
@@ -69,7 +81,7 @@ in
             "--config"
             "/var/lib/rgb-off"
             "--mode"
-            "off"
+            cfg.dramMode
           ];
         };
       };

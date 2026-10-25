@@ -101,8 +101,9 @@ in
   # wlan0 network unit just never matches.
   boot.blacklistedKernelModules = [ "iwlwifi" ];
 
-  # RAM and the cooler's fans/water block (on the board's ARGB headers) dark.
+  # Fans/water block (on the board's ARGB headers) dark; RAM LEDs on.
   hyper.rgbOff.colorfulArgb = true;
+  hyper.rgbOff.dramMode = "rainbow";
 
   # Thermalright AIO LCD (0416:5302); its port is cut 22:00-07:00
   # (../../modules/nixos/cooler-lcd).
