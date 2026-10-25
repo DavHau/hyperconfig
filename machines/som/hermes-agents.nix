@@ -28,6 +28,8 @@ in
     ../../modules/nixos/lightning-wallet.nix
     # stefan's account (uid, vault-ro) is shared with vit.
     ../../modules/nixos/users/stefan-vault.nix
+    # Agents with `hermes.teamclaude` reach Claude through som's TeamClaude.
+    ../../modules/nixos/hermes-teamclaude.nix
   ];
 
   hyper.hermesAgentsGpuHost = "vit.d";
@@ -139,6 +141,8 @@ in
       uid = 1005;
       description = "dave's hermes agent";
       sshKeys = adminKeys ++ [ desktopKey ];
+      # Claude through the TeamClaude gateway, not a login of its own.
+      hermes.teamclaude = true;
     };
 
     # joe: dave's former amy microVM agent (hermes-grmpf), its state and
