@@ -8,8 +8,8 @@
 # wrapper has to export anything. Exit 1 when the var file is unreadable.
 #
 # The gateway accepts it declaratively: ./teamclaude-gateway imports this
-# module and its preStart keeps the key in TeamClaude's `proxy.clientKeys`
-# under the name `hyperconfig` (usage is booked under that name in
+# module and declares it as the static client key `hyperconfig`
+# (hyper.teamclaudeGateway.clientKeys; usage is booked under that name in
 # `teamclaude status`). Other people's keys stay runtime-minted there
 # (`teamclaude-keys add <name>`). Rotate with
 #
