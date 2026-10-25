@@ -18,6 +18,10 @@ in
       # v4 had no wallpapers (its directory never existed); niri's own
       # background stays visible.
       wallpaper.enabled = false;
+      # swaylock (spaces-screen-lock) is the locker. noctalia's own
+      # lock-before-suspend raced it: niri refuses a second session lock and
+      # dropped noctalia's connection, which then exited cleanly (bar gone).
+      lockscreen.lock_before_suspend = false;
 
       theme = {
         mode = "dark";
