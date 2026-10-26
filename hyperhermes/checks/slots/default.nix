@@ -1,136 +1,60 @@
-# Agent slots (../agent-slots.nix) on a som-like host with two agents,
-# alice (slot 4) and bob (slot 5), behind a simulated sgp: `gateway` runs
-# the real ../ipv4-forward.nix gateway on 38.89.142.76 and `client` plays
-# the internet, and on a second link (vlan 2) a Mullvad relay: the stand-in
-# for wg-mullvad, which accepts only the tunnel's own source addresses, as
-# a relay does. Covered: each agent starts, stops and resets only its own
-# slot, through the control socket and never through systemd itself (no
-# --job-mode=flush); only its key gets in, only its uid (and root, nginx)
-# reaches the slot's ssh, internal v4 and veth, every packet of a flow,
-# while the other agent reaches the public v6 like the internet does (TCP
-# and UDP, from the uplink address, never the proxy hop or the veth's host
-# side), and its ssh pins the slot's host key; the
-# slots reach the internet only through the egress link (kill switch),
-# never the host, each other or the blocked destinations, while inbound v6
-# and forwarded v4 answer the way they came; a slot cannot steer the
-# host's start script through symlinks in its root; stopped slots' addresses
-# are unreachable; the desired state survives a reboot; a reset brings back
-# a slot whose deploy dropped sshd, a hard reset also drops its gc roots;
-# the slots run in agent-slots.slice; the public IPv4 reaches the right slot
-# by port, by Host (80) and by SNI (443) under slot.<agent>.<domain>, with
-# the host's own https site keeping the client address; the old names
+# Agent slots (../../modules/slots) on a som-like host with two agents,
+# alice (slot 4) and bob (slot 5), in public exposure mode. `client` plays
+# the internet: on vlan 3 it reaches the host's public IPv4 (the link
+# services.containerSlots.publicIPv4Interface names), on vlan 1 the slots'
+# public v6, and on a second link (vlan 2) it is a VPN relay: the stand-in
+# for an egress tunnel, which accepts only the tunnel's own source
+# addresses, as a relay does. Covered: each agent starts, stops and resets
+# only its own slot, through the control socket and never through systemd
+# itself (no --job-mode=flush); only its key gets in, only its uid (and
+# root, nginx) reaches the slot's ssh, internal v4 and veth, every packet
+# of a flow, while the other agent reaches the public v6 like the internet
+# does (TCP and UDP, from the uplink address, never the proxy hop or the
+# veth's host side), and its ssh pins the slot's host key; the slots reach
+# the internet only through the egress link (kill switch), never the host,
+# each other or the blocked destinations, while inbound v6 and forwarded
+# v4 answer the way they came; a slot cannot steer the host's start script
+# through symlinks in its root; stopped slots' addresses are unreachable;
+# the desired state survives a reboot; a reset brings back a slot whose
+# deploy dropped sshd, a hard reset also drops its gc roots; the slots run
+# in agent-slots.slice; the public IPv4 reaches the right slot by port, by
+# Host (80) and by SNI (443) under slot.<agent>.<domain>, with the host's
+# own https site keeping the client address; the old names
 # <agent>.<legacyDomain> only answer this host's 301 to the new one, path
-# kept, and never reach a slot; the return mark leaves the Mullvad app's
-# mark alone; each slot's hostname gets its A and AAAA, each old name its
-# A, at a stub of porkbun's API.
-{
-  pkgs,
-  spaces,
-  hyperhermes,
-}:
+# kept, and never reach a slot; each slot's hostname gets its A and AAAA,
+# each old name its A, in exposure.dnsRecords.
+#
+# The agent registry is a stub (agentsStub): what slots reads of core
+# (uid, sshKeyFile, the PATH and skill collection points), without running
+# hermes in the VM.
+{ pkgs, self }:
 let
   inherit (pkgs) lib;
-
-  # Test-only keys.
-  wgKeys = {
-    sgp = "UGJQE4KIqVRoTnfJ4X6YiJNvMt1Vcock2T3t+Vu2vkg=";
-    som = "iI9wf7ORSTshbaYsdF62m0yhoi3wRA7v8CpAIWaRxHk=";
-  };
-  sshKeys = {
-    alice = {
-      pub = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC48uSUhvbKLmlJkJ7/GN6oqJsnCfwS1I+G/4EN45Dpq alice@test";
-      priv = ''
-        -----BEGIN OPENSSH PRIVATE KEY-----
-        b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-        QyNTUxOQAAACAuPLklIb2yi5pSZCe/xjeqKibJwn8EtSPhv+BDeOQ6agAAAJDYDATc2AwE
-        3AAAAAtzc2gtZWQyNTUxOQAAACAuPLklIb2yi5pSZCe/xjeqKibJwn8EtSPhv+BDeOQ6ag
-        AAAECoo8ej+H46tA9S9hBEfAzwYk87SiqBE5o6cg4062uGnC48uSUhvbKLmlJkJ7/GN6oq
-        JsnCfwS1I+G/4EN45DpqAAAACmFsaWNlQHRlc3QBAgM=
-        -----END OPENSSH PRIVATE KEY-----
-      '';
-    };
-    bob = {
-      pub = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJFXatIXf1FCzdfJMe5d58yYJ8adZmrmL6ls7AcqrIVF bob@test";
-      priv = ''
-        -----BEGIN OPENSSH PRIVATE KEY-----
-        b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-        QyNTUxOQAAACCRV2rSF39RQs3XyTHuXefMmCfGnWZq5i+pbOwHKqyFRQAAAJDNhluazYZb
-        mgAAAAtzc2gtZWQyNTUxOQAAACCRV2rSF39RQs3XyTHuXefMmCfGnWZq5i+pbOwHKqyFRQ
-        AAAECjOpnJjIFCoi8WnQd31Kjs6MgkjMvmJWvJXG+8AYNfaJFXatIXf1FCzdfJMe5d58yY
-        J8adZmrmL6ls7AcqrIVFAAAACGJvYkB0ZXN0AQIDBAU=
-        -----END OPENSSH PRIVATE KEY-----
-      '';
-    };
-  };
-  adminKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM7ptVA/R16UvtWJD3VfJUWdEL2nzonoFRz2Na6lg+UU admin@test";
+  common = import ./common.nix { inherit pkgs; };
+  inherit (common)
+    sshKeys
+    adminKey
+    agentsStub
+    responder
+    ;
 
   publicIPv4 = "38.89.142.76";
   clientIPv4 = "38.89.142.10";
-  somIPv4 = "38.89.142.2";
+  # the LAN (som's br0)
+  somIPv4 = "192.0.2.2";
+  lanIPv4 = "192.0.2.0/24";
   prefix = "2001:db8:1:2";
   # "the internet" over v6, and the stand-ins for the routers' WAN side
   clientIPv6 = "2001:db8:ffff::10";
   routerWanIPv4 = "198.51.100.1";
   routerWanIPv6 = "2001:db8:fffe::1";
-  # the egress link (wg-mullvad on som): som's end, the relay's end
+  # the egress link (a VPN tunnel): som's end, the relay's end
   tunnelIPv4 = "10.64.0.2";
   tunnelIPv6 = "fd00:64::2";
   relayIPv4 = "10.64.0.1";
   relayIPv6 = "fd00:64::1";
   egressTable = 51830;
-
-  # What clan provides to ../ipv4-forward.nix: the generator declarations
-  # (ignored here), each file's deployed path, and the repo directory the
-  # peer's public key is read from.
-  clanStub =
-    { lib, ... }:
-    {
-      options.clan.core.settings.directory = lib.mkOption { type = lib.types.path; };
-      options.clan.core.vars.generators = lib.mkOption {
-        type = lib.types.attrsOf (
-          lib.types.submodule (
-            { name, ... }:
-            let
-              generator = name;
-            in
-            {
-              freeformType = lib.types.attrsOf lib.types.anything;
-              options.files = lib.mkOption {
-                default = { };
-                type = lib.types.attrsOf (
-                  lib.types.submodule (
-                    { name, ... }:
-                    {
-                      freeformType = lib.types.attrsOf lib.types.anything;
-                      options.path = lib.mkOption {
-                        type = lib.types.str;
-                        default = "/etc/test-vars/${generator}/${name}";
-                      };
-                    }
-                  )
-                );
-              };
-            }
-          )
-        );
-      };
-      config.clan.core.settings.directory = ./.;
-    };
-
-  wgNode = machine: {
-    imports = [
-      clanStub
-      ../ipv4-forward.nix
-    ];
-    environment.etc."test-vars/ipv4-forward-wg/privateKey" = {
-      text = wgKeys.${machine};
-      mode = "0640";
-      group = "systemd-network";
-    };
-    networking.useNetworkd = true;
-    networking.useDHCP = false;
-    systemd.network.wait-online.enable = false;
-  };
+  caa = ''0 issue "letsencrypt.org; validationmethods=dns-01"'';
 
   # One self-signed certificate for every name in the test.
   cert = pkgs.runCommand "agent-slots-test-cert" { nativeBuildInputs = [ pkgs.openssl ]; } ''
@@ -140,32 +64,6 @@ let
       -keyout $out/key.pem -out $out/cert.pem
   '';
 
-  # Answers one HTTP request with its tag, the peer it saw and the
-  # X-Forwarded-For it got (socat sets SOCAT_PEERADDR).
-  responder = pkgs.writeShellScript "responder" ''
-    xff=""
-    while IFS= read -r line; do
-      line=''${line%$'\r'}
-      [ -z "$line" ] && break
-      case "$line" in [Xx]-[Ff]orwarded-[Ff]or:*) xff=''${line#*: } ;; esac
-    done
-    printf 'HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\n%s peer=%s xff=%s\n' "$1" "$SOCAT_PEERADDR" "$xff"
-  '';
-
-  # `nix-env -p <profile> --set <path>` as symlinks: <profile>-<n>-link to
-  # the path, <profile> to the newest link (see nix.package below).
-  profileSet = pkgs.writeShellScript "nix-env" ''
-    if [ "$#" -ne 4 ] || [ "$1" != -p ] || [ "$3" != --set ]; then
-      echo "nix-env stand-in: only -p <profile> --set <path>" >&2
-      exit 1
-    fi
-    p=$2
-    n=1
-    while [ -e "$p-$n-link" ] || [ -L "$p-$n-link" ]; do n=$((n + 1)); done
-    ${pkgs.coreutils}/bin/ln -s "$4" "$p-$n-link"
-    ${pkgs.coreutils}/bin/ln -sfn "$(${pkgs.coreutils}/bin/basename "$p")-$n-link" "$p"
-  '';
-
   # A deploy that drops sshd: what locks an agent out of its slot.
   broken =
     (pkgs.nixos {
@@ -173,21 +71,20 @@ let
       networking.hostName = "";
       system.stateVersion = lib.trivial.release;
     }).toplevel;
-
-  porkbunStub = pkgs.writers.writePython3 "porkbun-stub" { flakeIgnore = [ "E501" ]; } (
-    builtins.readFile ../porkbun-records/stub.py
-  );
 in
 pkgs.testers.runNixOSTest {
-  name = "agent-slots";
+  name = "hyperhermes-slots";
   globalTimeout = 1800;
 
   nodes.client = {
     virtualisation.vlans = [
       1
       2
+      3
     ];
-    networking.interfaces.eth1.ipv4.addresses = lib.mkForce [
+    networking.interfaces.eth1.ipv4.addresses = lib.mkForce [ ];
+    # the host's public IPv4 is on-link on vlan 3
+    networking.interfaces.eth3.ipv4.addresses = lib.mkForce [
       {
         address = clientIPv4;
         prefixLength = 24;
@@ -259,38 +156,34 @@ pkgs.testers.runNixOSTest {
     environment.systemPackages = [ pkgs.curl ];
   };
 
-  nodes.gateway = {
-    imports = [ (wgNode "sgp") ];
-    hyper.ipv4Forward.role = "gateway";
-    networking.interfaces.eth1.ipv4.addresses = lib.mkForce [
-      {
-        address = publicIPv4;
-        prefixLength = 24;
-      }
-    ];
-  };
-
   nodes.som =
     { config, ... }:
     {
       imports = [
-        (wgNode "som")
-        ../container-slots.nix
-        ../agent-slots.nix
-        hyperhermes.nixosModules.core
+        agentsStub
+        common.slotHost
+        self.nixosModules.exposure
+        self.nixosModules.slots
       ];
-      _module.args.inputs = { inherit spaces; };
       virtualisation.memorySize = 3072;
       virtualisation.cores = 2;
       virtualisation.vlans = [
         1
         2
+        3
       ];
 
-      hyper.ipv4Forward.role = "backend";
+      # The public IPv4, on a link of its own (on som it comes through a
+      # tunnel from another host).
+      networking.interfaces.eth3.ipv4.addresses = lib.mkForce [
+        {
+          address = publicIPv4;
+          prefixLength = 24;
+        }
+      ];
 
-      # The egress link, as ../mullvad-egress/egress.nix sets up wg-mullvad:
-      # its own table with default routes, loose reverse-path checks.
+      # The egress link, as a VPN tunnel would be set up: its own table
+      # with default routes, loose reverse-path checks.
       networking.interfaces.eth2.ipv4.addresses = lib.mkForce [
         {
           address = tunnelIPv4;
@@ -317,29 +210,8 @@ pkgs.testers.runNixOSTest {
       networking.firewall.extraReversePathFilterRules = ''
         iifname "eth2" accept
       '';
-      # As on som (../vpn.nix): isolatedEgress needs a loose rpfilter.
+      # isolatedEgress needs a loose rpfilter.
       networking.firewall.checkReversePath = "loose";
-
-      # nspawn idmaps /nix/store into a slot with its own user namespace;
-      # neither the host's virtiofs share nor the writable overlay on it
-      # allows that, a read-only store image (erofs) does (on som: zfs).
-      virtualisation.useNixStoreImage = true;
-      virtualisation.writableStore = false;
-      # nix cannot open that store at all (LocalStore creates
-      # /nix/store/.links even in read-only mode), so the seed's
-      # `nix-env -p <profile> --set <system>` gets a stand-in that writes
-      # the same generation symlinks; on som the real one runs.
-      nix.package = pkgs.symlinkJoin {
-        inherit (pkgs.nix) pname version;
-        passthru = pkgs.nix.passthru;
-        paths = [ pkgs.nix ];
-        postBuild = ''
-          rm $out/bin/nix-env
-          cp ${profileSet} $out/bin/nix-env
-        '';
-      };
-      # nspawn binds the db into every slot; nothing here ever opens it.
-      systemd.tmpfiles.rules = [ "d /nix/var/nix/db 0755 root root -" ];
 
       # The uplink becomes a port of br0, which carries the address.
       networking.interfaces.eth1.ipv4.addresses = lib.mkForce [ ];
@@ -350,14 +222,14 @@ pkgs.testers.runNixOSTest {
       ];
       # the v6 "internet" client, on-link here (it reaches the slots by NDP)
       systemd.network.networks."40-br0".routes = [ { Destination = "2001:db8:ffff::/64"; } ];
-      hyper.containerSlots = {
+      services.containerSlots = {
         enable = true;
         uplink = "eth1";
-        # the test driver's MAC for this node on vlan 1
-        uplinkMac = "52:54:00:12:01:${lib.fixedWidthString 2 "0" (lib.toHexString config.virtualisation.test.nodeNumber)}";
+        uplinkMac = common.uplinkMacOf config;
+        inherit lanIPv4;
         ipv6Prefix = prefix;
         deployKeys = [ adminKey ];
-        publicIPv4Interface = "wg-v4fwd";
+        publicIPv4Interface = "eth3";
         isolatedEgress = {
           interface = "eth2";
           table = egressTable;
@@ -368,28 +240,30 @@ pkgs.testers.runNixOSTest {
         ];
       };
 
-      hyper.agentSlots = {
-        domain = "fyi.test";
-        legacyDomain = "slots.test";
-        inherit publicIPv4;
+      services.hyperhermes = {
+        exposure = {
+          enable = true;
+          mode = "public";
+          domain = "fyi.test";
+          inherit publicIPv4;
+          # No ACME server here (defaults.server below): the self-signed
+          # placeholders stay and the renewals fail fast.
+          acme = {
+            dnsProvider = "exec";
+            email = "test@example.org";
+            inherit caa;
+          };
+        };
+        slots.legacyDomain = "slots.test";
         agents = lib.mapAttrs (name: id: {
-          inherit id;
-          deployKey = sshKeys.${name}.pub;
-          identityFile = "/etc/agent-keys/${name}";
+          uid = config.users.users.${name}.uid;
+          sshKeyFile = "/etc/agent-keys/${name}";
+          slot = {
+            enable = true;
+            inherit id;
+            deployKey = sshKeys.${name}.pub;
+          };
         }) { alice = 4; bob = 5; };
-      };
-
-      # DNS for the slots (../porkbun-records), against its test's stub of
-      # porkbun's API; the test runs the unit itself.
-      hyper.porkbunRecords = {
-        apiBase = "http://127.0.0.1:8053/api/json/v3";
-        apiKeyFile = "${pkgs.writeText "apikey" "test-key"}";
-        secretKeyFile = "${pkgs.writeText "secretkey" "test-secret"}";
-      };
-      systemd.timers.porkbun-records.timerConfig.OnBootSec = lib.mkForce "1d";
-      systemd.services.porkbun-stub = {
-        wantedBy = [ "multi-user.target" ];
-        serviceConfig.ExecStart = "${porkbunStub} 8053 ${pkgs.writeText "seed.json" "[]"}";
       };
 
       users.users.alice = {
@@ -408,12 +282,7 @@ pkgs.testers.runNixOSTest {
             mode = "0600";
             user = name;
           }
-        ) sshKeys
-        # the porkbun var the old names' DNS-01 certificate names
-        // {
-          "test-vars/porkbun/apikey".text = "unused";
-          "test-vars/porkbun/secretkey".text = "unused";
-        };
+        ) sshKeys;
 
       # This host's own https site (as hermes.davhau.com on som); it sorts
       # before the slot vhosts, as som's own do.
@@ -425,18 +294,7 @@ pkgs.testers.runNixOSTest {
         locations."/".return = "200 'som $remote_addr\\n'";
         extraConfig = "default_type text/plain;";
       };
-      # The old names' DNS-01 certificate: no ACME server here, so the
-      # self-signed placeholder stays and the renewals fail fast.
-      security.acme = {
-        acceptTerms = true;
-        defaults.email = "test@example.org";
-        defaults.server = "https://127.0.0.1:1/directory";
-      };
-      # clan turns persisted prompts into files; the stub does not.
-      clan.core.vars.generators.porkbun.files = {
-        apikey = { };
-        secretkey = { };
-      };
+      security.acme.defaults.server = "https://127.0.0.1:1/directory";
 
       system.extraDependencies = [ broken ];
       # the agents' tools (hyperhermes puts them on the agents' PATH;
@@ -447,7 +305,9 @@ pkgs.testers.runNixOSTest {
       ];
     };
 
-  testScript = ''
+  testScript =
+    { nodes, ... }:
+    ''
     import ipaddress
     import json
 
@@ -473,7 +333,7 @@ pkgs.testers.runNixOSTest {
     som.wait_for_unit("multi-user.target")
     som.wait_for_unit("nginx.service")
     client.wait_for_unit("web.service")
-    som.wait_until_succeeds("ping -c1 -W1 10.99.0.1", timeout=60)
+    som.wait_until_succeeds("ping -c1 -W1 ${clientIPv4}", timeout=60)
 
     with subtest("slots exist but are off by default"):
         som.succeed("systemctl cat container@alice.service >/dev/null")
@@ -510,16 +370,15 @@ pkgs.testers.runNixOSTest {
         for want in ["14040-14049", "slot.alice.fyi.test", alice6, "root@" + alice4, "${publicIPv4}"]:
             assert want in info, info
 
-    with subtest("the slots' hostnames are published"):
-        som.wait_for_unit("porkbun-stub.service")
-        som.wait_until_succeeds("curl -sf http://127.0.0.1:8053/_records", timeout=30)
-        som.succeed("systemctl start porkbun-records")
-        zone = {(r["name"], r["type"]): r["content"] for r in json.loads(som.succeed("curl -sf http://127.0.0.1:8053/_records"))}
+    with subtest("the slots' hostnames are in exposure.dnsRecords"):
+        records = json.load(open("${pkgs.writeText "dns-records.json" (builtins.toJSON nodes.som.services.hyperhermes.exposure.dnsRecords)}"))
+        zone = {(r["name"], r["type"]): r["value"] for r in records if "slot" in r["name"]}
+        on_link = lambda id: {"ipv6OnLink": {"interface": "br0", "suffix": f"::5107:{id}", "expectedPrefix": "${prefix}"}}
         assert zone == {
             ("slot.alice.fyi.test", "A"): "${publicIPv4}",
-            ("slot.alice.fyi.test", "AAAA"): alice6,
+            ("slot.alice.fyi.test", "AAAA"): on_link(4),
             ("slot.bob.fyi.test", "A"): "${publicIPv4}",
-            ("slot.bob.fyi.test", "AAAA"): bob6,
+            ("slot.bob.fyi.test", "AAAA"): on_link(5),
             # the old names: this host only (no publicIPv6 here, so no AAAA)
             ("alice.slots.test", "A"): "${publicIPv4}",
             ("bob.slots.test", "A"): "${publicIPv4}",
@@ -671,7 +530,7 @@ pkgs.testers.runNixOSTest {
         assert "dev eth2" in out, out
         # Inbound keeps answering the way it came: v6 straight back over
         # br0 (down the tunnel the relay would drop it), forwarded v4 back
-        # through wg-v4fwd.
+        # over the public IPv4's link (eth3).
         out = client.succeed("curl -g -s -m 10 'http://[" + alice6 + "]:8086/'")
         assert peer(out) == "${clientIPv6}", out
         out = client.succeed("curl -s -m 10 http://${publicIPv4}:14043/")
@@ -696,11 +555,6 @@ pkgs.testers.runNixOSTest {
         som.succeed(nc + "${clientIPv4} 8081")
         som.fail(nc + "${routerWanIPv4} 8081")
         som.fail(nc + "${routerWanIPv6} 8081")
-
-    with subtest("the return mark leaves the Mullvad app's mark alone"):
-        som.succeed("ip rule | grep -q 'fwmark 0x10000000/0x10000000 lookup 51820'")
-        out = som.succeed("ip route get ${clientIPv4} mark 0x6d6f6c65")
-        assert "wg-v4fwd" not in out, out
 
     with subtest("the slots run in agent-slots.slice, under its limits"):
         assert som.succeed("systemctl show container@alice.service -p Slice --value").strip() == "agent-slots.slice"

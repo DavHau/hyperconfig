@@ -87,6 +87,8 @@ in
   imports = [
     inputs.teamclaude.nixosModules.default
     ../teamclaude-api-key.nix
+    # Its A/AAAA record (hyper.porkbunRecords below).
+    ../porkbun-records
   ];
 
   options.hyper.teamclaudeGateway.clientKeys = lib.mkOption {

@@ -15,7 +15,7 @@
 #   through the tunnel; som's own traffic keeps using the home uplink. som's
 #   firewall still decides which ports are reachable.
 #   Connections som forwards on (DNAT to a container slot,
-#   ./container-slots.nix) answer from the container's own address, which
+#   hyperhermes' container-slots) answer from the container's own address, which
 #   the source rule does not match, and their un-DNAT back to the tunnel
 #   address happens only after routing. So a connection that arrives through
 #   the tunnel is marked (ct mark), its packets from elsewhere carry the mark
@@ -47,7 +47,8 @@ let
   # app's 0x6d6f6c65 (services.mullvad-vpn, ./vpn.nix; matched with a mask
   # by the priority-101 rule below, any shared bit would send the app's
   # tunnel packets into wg-v4fwd) and the container slots' egress mark
-  # (./container-slots.nix). Asserted below.
+  # (hyperhermes' container-slots, which asserts that side: machines/som
+  # lists this mark in its foreignMarks). The others are asserted below.
   returnMarkInt = 268435456;
   returnMark = toString returnMarkInt;
   foreignMarks = {

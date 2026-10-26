@@ -2,9 +2,8 @@
 # another repo. This host declares only the shell of each slot (network,
 # limits, isolation); what runs inside is whatever system the slot's
 # deployer last switched to. Nothing here ever rewrites a slot's system.
-#
-# Handing a slot to its deployer: `slot-onboard <machine> <slot>` (tools/)
-# prints the handoff below, filled in for that slot.
+# Generic, not tied to hermes: `services.containerSlots`. The agents' own
+# slots (./slots) are slots of this module.
 #
 # Deploying into a slot, from the other repo (builds run on this host's
 # nix-daemon through the slot, so nothing unsigned has to be pushed; only
@@ -55,7 +54,7 @@
 #     clients that pin it refuse the slot.
 #   - start: `autoStart` (default on) starts the slot at boot; off, the
 #     unit container@<slot> exists and something else starts it
-#     (./agent-slots.nix).
+#     (./slots).
 #   - the root tree: the slot's root owns /var/lib/nixos-containers/<slot>
 #     (user namespace, ownership auto), but nixpkgs' container start script
 #     runs as host root on it (mkdir -p, chmod, touch, cp) and follows
@@ -97,9 +96,10 @@
 # it swaps in: give `user` rights on `source` only, never broader groups.
 #
 # Shares come and go without the slot noticing more than an empty directory
-# meanwhile: the slot never waits for them (bam down at boot does not keep
-# the slot down), and they reach it by mount propagation, not by the bind
-# taken at slot start. The slot binds the (still empty) share directory
+# meanwhile: the slot never waits for them (a share's NFS server down at
+# boot does not keep the slot down), and they reach it by mount
+# propagation, not by the bind taken at slot start. The slot binds the
+# (still empty) share directory
 # under /run/container-slots/<slot> at start; each share unit mounts bindfs
 # there afterwards (ordered after the slot). /run is a shared mount
 # (systemd's default), and the slot's bind of a directory inside it is a
@@ -114,39 +114,33 @@
 #             slots and this host itself are dropped; inbound is open to the
 #             /128 (the guest's firewall decides). v4 inbound only on
 #             `publicIPv4Ports`: TCP arriving on `publicIPv4Interface` (the
-#             borrowed public IPv4, ./ipv4-forward.nix) at one of those ports
-#             is DNATed to the same port at 10.43.<id>.2, client address
-#             kept. With `isolatedEgress`, every connection the slot opens
-#             leaves through that interface (on som: Mullvad), masqueraded
-#             to its addresses, v6 included; connections that came in (v6
+#             link a public IPv4 arrives on) at one of those ports is DNATed
+#             to the same port at 10.43.<id>.2, client address kept. With
+#             `isolatedEgress`, every connection the slot opens leaves
+#             through that interface (e.g. a VPN tunnel), masqueraded to
+#             its addresses, v6 included; connections that came in (v6
 #             from the internet, forwarded v4) answer the way they came. A
 #             forward-chain kill switch drops the slot's own connections on
 #             any other interface, so a dead tunnel means no egress, not the
-#             home uplink. It needs a loose reverse-path filter (asserted;
-#             som's ./vpn.nix sets one). While a slot is stopped, unreachable
-#             routes for 10.43.0.0/16 and its /128 keep its addresses from
-#             falling back to the LAN (where any peer could claim the v6 by
-#             NDP). The veth's host side fd43:5107::<id>:1 (the slot's v6
-#             gateway) is deprecated, so this host's own connections to the
-#             /128 come from its uplink address, not from the gateway.
+#             home uplink. It needs a loose reverse-path filter (asserted).
+#             While a slot is stopped, unreachable routes for 10.43.0.0/16
+#             and its /128 keep its addresses from falling back to the LAN
+#             (where any peer could claim the v6 by NDP). The veth's host
+#             side fd43:5107::<id>:1 (the slot's v6 gateway) is deprecated,
+#             so this host's own connections to the /128 come from its
+#             uplink address, not from the gateway.
 #   lan       veth on the LAN bridge: a LAN peer like any other, unfiltered.
-# Either way inbound from the internet additionally needs an allow rule for
-# the slot's v6 address on both routers in front of the LAN, the AIS ZTE
-# first, then the Beryl behind it:
-#   router-ais ipv6-rules add --address <v6> --name <slot>
-#   router-cm-beryl -J root@som.d ipv6-rules add --address <v6> --name <slot>
-# router-ais needs the LAN (192.168.1.1, Host header must be that IP): run
-# it on som when away, with ROUTER_AIS_PASSWORD from
-# `clan vars get amy router-ais/password`.
+# Either way inbound from the internet may additionally need an allow rule
+# for the slot's v6 address on the routers in front of the LAN (the
+# deployment's business).
 #
 # Enabling this turns the uplink NIC into a port of the bridge; the bridge
-# keeps the NIC's MAC and takes over its DHCP/RA config. Point
-# networking.publicIPv6.interface at the bridge.
+# keeps the NIC's MAC and takes over its DHCP/RA config.
 #
 # Rescue (admin only): reseed a slot with its bootstrap system:
 #   rm /nix/var/nix/profiles/per-container/<slot>/system
 #   systemctl restart container@<slot>
-# (agent slots: `systemctl start agent-slot-reset@<slot>`, ./agent-slots.nix)
+# (agent slots: `systemctl start agent-slot-reset@<slot>`, ./slots)
 {
   config,
   lib,
@@ -154,14 +148,14 @@
   ...
 }:
 let
-  cfg = config.hyper.containerSlots;
+  cfg = config.services.containerSlots;
   inherit (lib) mkOption types;
 
   hex = id: lib.toLower (lib.toHexString id);
   hex2 = id: lib.fixedWidthString 2 "0" (hex id);
   ipv6Of = slot: "${cfg.ipv6Prefix}::5107:${hex slot.id}";
   # The host side of an isolated slot's veth: the slot's v6 gateway.
-  # ./agent-slots.nix refuses other agents' packets from fd43:5107::/64.
+  # ./slots refuses other agents' packets from fd43:5107::/64.
   hostIPv6Of = slot: "fd43:5107::${hex slot.id}:1";
 
   isolated = lib.filterAttrs (_: s: s.mode == "isolated") cfg.slots;
@@ -179,17 +173,15 @@ let
   outIf = if egress != null then egress.interface else cfg.bridge;
   # fwmark of the packets of connections an isolated slot opened, which the
   # egress rule routes into egress.table. 0x02000000: outside every other
-  # mark on som (checked by an assertion below): the Mullvad app's
-  # 0x6d6f6c65 (services.mullvad-vpn, ./vpn.nix), tailscale's 0xff0000 mask
-  # and ./ipv4-forward.nix's returnMark. Decimal, which networkd and nft read.
+  # mark on the host (checked by an assertion below): the Mullvad app's
+  # 0x6d6f6c65, tailscale's 0xff0000 mask and `foreignMarks`. Decimal,
+  # which networkd and nft read.
   egressMark = 33554432;
-  foreignMarks = {
+  otherMarks = {
     mullvad-app = 1836018789;
     tailscale = 16711680;
   }
-  // lib.optionalAttrs (config.hyper ? ipv4Forward) {
-    ipv4-forward = config.hyper.ipv4Forward.returnMark;
-  };
+  // cfg.foreignMarks;
   # ", "-prefixed, appended to the always-dropped ranges in isolated-out
   blockedOf = ds: lib.concatMapStrings (d: ", ${d}") ds;
   blocked4 = blockedOf (lib.filter (d: !lib.hasInfix ":" d) cfg.isolatedBlockedDestinations);
@@ -260,7 +252,7 @@ let
   hostKeysDir = "/var/lib/container-slots/host-keys";
   hostKeyDir = name: "${hostKeysDir}/${name}";
   # The slot's /tmp: a host directory instead of nspawn's tmpfs, so it lives
-  # wherever the host's /tmp does (on som: disk, emptied at boot) and not in
+  # wherever the host's /tmp does (e.g. disk, emptied at boot) and not in
   # RAM. Owned by the slot's root; the 0700 parent keeps host users out.
   slotTmp = name: "/tmp/.slots/${name}";
   shareUnit = name: path: "container-slot-${name}-${shareName path}";
@@ -390,7 +382,7 @@ let
       deployKeys = mkOption {
         type = types.listOf types.str;
         default = cfg.deployKeys;
-        defaultText = lib.literalExpression "config.hyper.containerSlots.deployKeys";
+        defaultText = lib.literalExpression "config.services.containerSlots.deployKeys";
         description = "SSH keys for root in this slot's bootstrap system (the bind-mounted authorized_keys, see the module header).";
       };
       autoStart = mkOption {
@@ -422,7 +414,7 @@ let
   };
 in
 {
-  options.hyper.containerSlots = {
+  options.services.containerSlots = {
     enable = lib.mkEnableOption "container slots (bridges the uplink)";
     uplink = mkOption {
       type = types.str;
@@ -482,7 +474,15 @@ in
       type = types.nullOr types.str;
       default = null;
       example = "wg-v4fwd";
-      description = "Link the public IPv4 arrives on (./ipv4-forward.nix); slots' `publicIPv4Ports` are forwarded from it.";
+      description = "Link the public IPv4 arrives on; slots' `publicIPv4Ports` are forwarded from it. Whatever brings the address there must route the forwarded connections' replies back the way they came.";
+    };
+    foreignMarks = mkOption {
+      type = types.attrsOf types.int;
+      default = { };
+      example = {
+        ipv4-forward = 268435456;
+      };
+      description = "Further fwmarks (and masks) in use on this host, by owner, beyond the Mullvad app's and tailscale's; the slots' egress mark 0x02000000 must share no bit with any of them (asserted).";
     };
     bridge = mkOption {
       type = types.str;
@@ -491,12 +491,12 @@ in
     };
     lanIPv4 = mkOption {
       type = types.str;
-      default = "192.168.8.0/24";
+      example = "192.168.8.0/24";
       description = "The LAN's v4 subnet (isolated slots must not reach it).";
     };
     ipv6Prefix = mkOption {
       type = types.str;
-      default = "2405:9800:b901:94e3";
+      example = "2001:db8:1:2";
       description = "First four groups of the LAN /64 the router advertises; slot addresses live in it.";
     };
     slots = mkOption {
@@ -510,15 +510,15 @@ in
     assertions =
       lib.mapAttrsToList (name: _: {
         assertion = builtins.stringLength name <= 11;
-        message = "hyper.containerSlots.slots.${name}: slot names must be <= 11 chars";
+        message = "services.containerSlots.slots.${name}: slot names must be <= 11 chars";
       }) cfg.slots
       ++ lib.mapAttrsToList (name: slot: {
         assertion = lib.count (s: s.id == slot.id) (lib.attrValues cfg.slots) == 1;
-        message = "hyper.containerSlots.slots.${name}: id ${toString slot.id} is not unique";
+        message = "services.containerSlots.slots.${name}: id ${toString slot.id} is not unique";
       }) cfg.slots
       ++ lib.mapAttrsToList (name: slot: {
         assertion = slot.publicIPv4Ports == [ ] || (slot.mode == "isolated" && cfg.publicIPv4Interface != null);
-        message = "hyper.containerSlots.slots.${name}: publicIPv4Ports need mode isolated and publicIPv4Interface";
+        message = "services.containerSlots.slots.${name}: publicIPv4Ports need mode isolated and publicIPv4Interface";
       }) cfg.slots
       ++ (
         let
@@ -527,14 +527,14 @@ in
         [
           {
             assertion = lib.length all == lib.length (lib.unique all);
-            message = "hyper.containerSlots: a publicIPv4Ports port is claimed by more than one slot";
+            message = "services.containerSlots: a publicIPv4Ports port is claimed by more than one slot";
           }
         ]
       )
       ++ lib.mapAttrsToList (owner: mark: {
         assertion = builtins.bitAnd egressMark mark == 0;
-        message = "hyper.containerSlots: the slots' egress mark overlaps ${owner}'s fwmark";
-      }) foreignMarks
+        message = "services.containerSlots: the slots' egress mark overlaps ${owner}'s fwmark";
+      }) otherMarks
       ++ [
         {
           # see isolatedEgress: a strict rpfilter cuts off all slot egress
@@ -546,7 +546,7 @@ in
               true
               "strict"
             ]);
-          message = "hyper.containerSlots: isolatedEgress needs networking.firewall.checkReversePath = \"loose\" (a strict check drops every packet an isolated slot opens)";
+          message = "services.containerSlots: isolatedEgress needs networking.firewall.checkReversePath = \"loose\" (a strict check drops every packet an isolated slot opens)";
         }
       ];
 
@@ -593,10 +593,10 @@ in
           }) isolated
         );
         # The slots' own connections (marked in the container-slots nft
-        # table) use the egress table. Ahead of the meshes' rules
-        # (tailscale 5210+, ./mullvad-egress 5999+), after
-        # ./ipv4-forward.nix's (100, 101). An empty table (tunnel down)
-        # falls through to main, where the kill switch drops them.
+        # table) use the egress table. Priority 5000: ahead of the usual
+        # meshes' rules (tailscale 5210+), after a deployment's early
+        # source rules (e.g. 100, 101). An empty table (tunnel down) falls
+        # through to main, where the kill switch drops them.
         routingPolicyRules = lib.optional (egress != null && isolated != { }) {
           FirewallMark = "${toString egressMark}/${toString egressMark}";
           Table = egress.table;
@@ -629,7 +629,7 @@ in
       "interface-name:${cfg.bridge}"
     ];
 
-    # mkDefault: other modules may set the same value (see bam).
+    # mkDefault: other modules may set the same value.
     boot.kernel.sysctl."net.ipv6.conf.all.forwarding" = lib.mkDefault 1;
     boot.kernel.sysctl."net.ipv4.conf.all.forwarding" = lib.mkDefault 1;
 
@@ -713,7 +713,7 @@ in
           # this host should speak from: the kernel prefers a source on the
           # outgoing interface, so every connection from here to the /128
           # would carry it, and the slot could not tell this host's admin
-          # path from anyone else on it (./agent-slots.nix lets other agents
+          # path from anyone else on it (./slots lets other agents
           # reach the /128). Deprecated (preferred_lft 0) it still answers
           # as the gateway, but source selection takes the uplink's global
           # address instead, as for any internet client.
@@ -850,7 +850,7 @@ in
         }
 
         # public IPv4 -> slot, same port; the client's address stays as the
-        # source (replies find their way back by ./ipv4-forward.nix's mark)
+        # source (replies must find their way back, see publicIPv4Interface)
         chain prerouting {
           type nat hook prerouting priority dstnat; policy accept;
           ${lib.concatStrings (lib.mapAttrsToList (name: slot: ''

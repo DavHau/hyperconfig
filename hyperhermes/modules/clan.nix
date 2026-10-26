@@ -10,7 +10,8 @@
 # core, per agent the per-machine generator hermes-agent-ssh-<agent>: the
 # agent's own ssh key, `key` readable by the agent only, `key.pub` public
 # (clanLib.getPublicValue hands it to the hosts that authorize it). Its
-# path becomes agents.<agent>.sshKeyFile.
+# path becomes agents.<agent>.sshKeyFile, and with slots its public half
+# agents.<agent>.slot.deployKey (the one key the agent's slot admits).
 #
 # teamclaude, per agent with teamclaude.enable the per-machine generator
 # teamclaude-hermes-<agent>: the agent's gateway client key, root-only
@@ -72,6 +73,7 @@ let
   mailOn = hasMail && cfg.mail.enable;
   mailboxes = lib.filterAttrs (_: a: a.mail.enable) cfg.agents;
   random = len: ''openssl rand -hex ${toString len} | tr -d '\n' '';
+  hasSlots = options ? services.hyperhermes.slots;
   walletOn = hasWallet && cfg.wallet.enable;
   generatorFor = name: "hermes-agent-ssh-${name}";
   teamclaudeGeneratorFor = name: "teamclaude-hermes-${name}";
@@ -101,6 +103,11 @@ in
           // lib.optionalAttrs hasMail {
             mail.passwordFile = lib.mkIf hasClan (
               lib.mkDefault config.clan.core.vars.generators."mailgate-imap-${name}".files.password.path
+            );
+          }
+          // lib.optionalAttrs hasSlots {
+            slot.deployKey = lib.mkIf hasClan (
+              lib.mkDefault config.clan.core.vars.generators.${generatorFor name}.files."key.pub".value
             );
           };
         }

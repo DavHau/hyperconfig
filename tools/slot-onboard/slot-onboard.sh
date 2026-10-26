@@ -1,7 +1,7 @@
 # slot-onboard <machine> <slot>
 #
 # Prints the handoff for the agent (or person) adopting one container slot
-# (modules/nixos/container-slots.nix), written to be pasted as is: where the
+# (hyperhermes' nixosModules.container-slots), written to be pasted as is: where the
 # slot is, how to deploy into it, what the guest config must and need not
 # contain, and which host directories it gets. Notes meant for the operator
 # (router allow rules, keys that reach the bootstrap system) go to stderr,
@@ -27,7 +27,7 @@ note() { echo "slot-onboard: $*" >&2; }
 expr=$(cat <<EOF
 c:
 let
-  cs = c.hyper.containerSlots;
+  cs = c.services.containerSlots;
   s = cs.slots."$slot" or null;
   comment = k: let p = builtins.filter builtins.isString (builtins.split " " k);
     in if builtins.length p > 2 then builtins.elemAt p 2 else "(no comment)";
