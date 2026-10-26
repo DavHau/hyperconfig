@@ -12,7 +12,8 @@
 #     one dex password per account (and its bcrypt hash, which dex reads),
 #     and each agent's ssh key pair (its sshKeyFile and, for slots, the key
 #     its slot admits). Nothing is regenerated once it exists; delete a
-#     file and restart the unit to rotate it.
+#     file (for a dex account: its .password or .hash) and restart the
+#     unit to rotate it.
 #   - network: systemd-networkd with resolved (the host's resolv.conf may
 #     name a stub listener on the host's loopback, which this network
 #     namespace cannot reach), the container's address on eth0 as the
@@ -64,7 +65,7 @@ let
     [ -s "$d/publish-cookie" ] || openssl rand -hex 16 | tr -d '\n' >"$d/publish-cookie"
 
     for account in ${lib.escapeShellArgs (lib.attrNames hh.sso.dex.users)}; do
-      if [ ! -s "$d/dex/$account.hash" ]; then
+      if [ ! -s "$d/dex/$account.hash" ] || [ ! -s "$d/dex/$account.password" ]; then
         openssl rand -base64 18 | tr '+/' '-_' | tr -d '\n' >"$d/dex/$account.password"
         mkpasswd --method=bcrypt --rounds=10 --stdin <"$d/dex/$account.password" \
           | tr -d '\n' >"$d/dex/$account.hash.new"
@@ -72,14 +73,19 @@ let
       fi
     done
 
+    # The agent's directory is root's: an agent owning it could swap a file
+    # for a link that the chown and chmod here, or a slot start reading
+    # key.pub, would follow as root. Only the private key is the agent's.
     for agent in ${lib.escapeShellArgs (lib.attrNames agents)}; do
       k="$d/agents/$agent"
-      install -d -m 0700 -o "$agent" "$k"
-      if [ ! -s "$k/key" ] || [ ! -s "$k/key.pub" ]; then
+      install -d -m 0755 -o root -g root "$k"
+      if [ -L "$k/key" ] || [ -L "$k/key.pub" ] || [ ! -f "$k/key" ] || [ ! -f "$k/key.pub" ] \
+        || [ ! -s "$k/key" ] || [ ! -s "$k/key.pub" ]; then
         rm -f "$k/key" "$k/key.pub"
         ssh-keygen -q -t ed25519 -N "" -C "$agent@hyperhermes" -f "$k/key"
       fi
-      chown "$agent" "$k/key" "$k/key.pub"
+      chown root:root "$k/key.pub"
+      chown "$agent" "$k/key"
       chmod 0400 "$k/key"
       chmod 0444 "$k/key.pub"
     done
@@ -140,7 +146,13 @@ in
           }
         ];
       };
-      networking.firewall.allowedTCPPorts = [ hh.exposure.port ];
+      # The host's forward is the only client, always from hostAddress; the
+      # host forwards IPv4 for its NAT, so anyone routing to the container's
+      # subnet through it would reach an open port.
+      networking.firewall.extraInputRules = "ip saddr ${hostAddress} tcp dport ${toString hh.exposure.port} accept";
+      networking.firewall.extraCommands =
+        lib.mkIf (config.networking.firewall.backend == "iptables")
+          "iptables -A nixos-fw -p tcp -s ${hostAddress} --dport ${toString hh.exposure.port} -j nixos-fw-accept";
 
       services.hyperhermes = {
         exposure = {
@@ -221,7 +233,10 @@ in
           table = egressTable;
         };
       };
-      services.hyperhermes.slots.egress = "the workstation's own connection (NAT through the container's host)";
+      services.hyperhermes.slots = {
+        egress = "the workstation's own connection (NAT through the container's host)";
+        publicIPv6 = false;
+      };
     })
   ];
 }

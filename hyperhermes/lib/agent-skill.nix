@@ -1,6 +1,6 @@
 # Copied from spaces (git+https://git.geninf.io/spaces/spaces-os, rev
 # 6d744780ad0a850969a89cf045a11871d489ec19, lib/agent-skill.nix) so this flake
-# does not depend on spaces. The consumers named below are spaces' own.
+# does not depend on spaces.
 #
 # Package one Agent Skill in the layout every harness reads:
 #
@@ -8,12 +8,13 @@
 #
 # That path is the interchange format between skill producers and agent
 # harnesses. github.com/Mic92/mics-skills publishes the same layout, so a
-# spaces skill and a third-party skill package are interchangeable.
+# hyperhermes skill and a third-party skill package are interchangeable.
 #
-# Two consumers in this repo read it. modules/home/agent-skills.nix links each
-# skill into the skill root of every harness the user runs.
-# modules/nixos/hermes/guest.nix hands the joined root to the hermes agent as
-# skills.external_dirs.
+# In this flake the feature modules (browser, mail, publish, slots, wallet)
+# package their skills with it and add each skill root to skillDirs (the
+# host-wide services.hyperhermes.skillDirs or an agent's own), which
+# ../modules/core/agent-config.nix hands to the agent as hermes'
+# skills.external_dirs. Consumers outside reach it as lib.mkAgentSkill.
 #
 # `packages` holds the CLIs the SKILL.md tells the agent to run. They travel
 # with the skill, so a harness cannot offer a skill whose tools it never

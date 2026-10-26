@@ -2,8 +2,8 @@
   description = "hyperhermes: NixOS modules that run hermes-agent for several agents on one host";
 
   inputs = {
-    # Pinned to the same nixpkgs rev as hyperconfig's, so a consumer that
-    # makes this follow its own nixpkgs changes nothing.
+    # A consumer that makes this follow its own nixpkgs builds against
+    # that one instead.
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
     hermes-agent.url = "github:NousResearch/hermes-agent/v2026.9.14";

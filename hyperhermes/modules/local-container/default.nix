@@ -24,9 +24,12 @@
 #   sudo nixos-container run <name> -- cat /var/lib/hyperhermes-local/dex/<account>.password
 #
 # Host side beyond the container and the forward: NAT for the container's
-# veth (networking.nat), the agents' and the slots' only way out. Agent
-# slots are containers inside the container (a NixOS container's default
-# privileges suffice for nested systemd-nspawn); each slot idmaps
+# veth (networking.nat), the agents' and the slots' only way out. NAT turns
+# on IPv4 forwarding host-wide, so the container's web front accepts only
+# hostAddress (./guest.nix): a LAN peer routing to localAddress through
+# this host gets no answer. Agent slots are containers inside the
+# container (a NixOS container's default privileges suffice for nested
+# systemd-nspawn); each slot idmaps
 # /nix/store, so the host's store must be on a file system that supports
 # idmapped mounts (ext4, btrfs, xfs, zfs, tmpfs, erofs; not NFS, 9p or
 # overlayfs).
@@ -97,6 +100,26 @@ in
         system.stateVersion = lib.mkDefault config.system.stateVersion;
       };
     };
+
+    # The container's web front admits hostAddress only (./guest.nix), so
+    # the host's own connections must reach it from that address.
+    # systemd-networkd would configure ve-* by its 80-container-ve.network:
+    # a link-local and a /28 address, and masquerading of every address on
+    # the link, which rewrites the forward's source to the /28. Here it
+    # only brings the link up (the container's start waits for its
+    # carrier); the containers module sets the address and the route.
+    systemd.network.networks."10-ve-${cfg.name}" = lib.mkIf config.systemd.network.enable {
+      matchConfig.Name = "ve-${cfg.name}";
+      networkConfig = {
+        LinkLocalAddressing = "no";
+        KeepConfiguration = "yes";
+      };
+      linkConfig.RequiredForOnline = "no";
+    };
+    # Any other address on the veth stays out of the source selection.
+    systemd.services."container@${cfg.name}".postStart = lib.mkAfter ''
+      ip route replace ${cfg.localAddress} dev ve-${cfg.name} src ${cfg.hostAddress}
+    '';
 
     # The host's loopback port, connection by connection into the container.
     systemd.sockets."hyperhermes-forward-${cfg.name}" = {
