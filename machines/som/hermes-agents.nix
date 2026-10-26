@@ -58,18 +58,19 @@ in
     inputs.hyperhermes.nixosModules.browser
     ../../modules/nixos/hermes-dashboard-public.nix
     ../../modules/nixos/hermes-agents-serve.nix
-    ../../modules/nixos/lightning-wallet.nix
+    inputs.hyperhermes.nixosModules.wallet
     # stefan's account (uid, vault-ro) is shared with vit.
     ../../modules/nixos/users/stefan-vault.nix
     # Agents with `teamclaude` reach Claude through som's TeamClaude.
     ../../modules/nixos/hermes-teamclaude.nix
   ];
 
-  # One shared phoenixd Lightning wallet for every agent below.
-  hyper.lightningWallet.enable = true;
+  # One shared phoenixd Lightning wallet; every agent below has access.
+  services.hyperhermes.wallet.enable = true;
 
   services.hyperhermes.agents = lib.mkMerge [
     data
+    (lib.mapAttrs (_: _: { wallet.enable = true; }) data)
     {
       # Account and description from users/stefan-vault.nix.
       stefan = { };
