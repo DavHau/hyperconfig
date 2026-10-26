@@ -221,7 +221,7 @@ in
       ];
       networking.firewall.checkReversePath = "loose";
 
-      services.containerSlots = {
+      services.container-slots = {
         enable = true;
         inherit uplink;
         uplinkMac = "02:68:68:00:00:01";

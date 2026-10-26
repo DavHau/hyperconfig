@@ -6,7 +6,7 @@
 # into it, switches it on and off, and resets it when it locked itself
 # out. The how-to the agents read is ./SKILL.md; `slot info` prints the
 # per-agent facts. What the slot itself connects to leaves the way the
-# host's services.containerSlots.isolatedEgress says (`egress` names it to
+# host's services.container-slots.isolatedEgress says (`egress` names it to
 # the agents), never the home uplink.
 #
 # Nothing here is hermes-specific beyond the agent registry: a slot needs an
@@ -89,7 +89,7 @@
 #            kernel's ephemeral range (32768+).
 #
 # Public mode: the public IPv4 on 80/443 (it arrives on
-# services.containerSlots.publicIPv4Interface): by hostname,
+# services.container-slots.publicIPv4Interface): by hostname,
 # slot.<agent>.<domain> goes to that agent's slot, everything else stays
 # with this host's nginx.
 #   80   nginx proxies a vhost per agent to 10.43.<id>.2:80 (Host kept,
@@ -157,7 +157,7 @@
 let
   cfg = config.services.hyperhermes.slots;
   agents = lib.filterAttrs (_: a: a.slot.enable) config.services.hyperhermes.agents;
-  slotsCfg = config.services.containerSlots;
+  slotsCfg = config.services.container-slots;
   nginxCfg = config.services.nginx;
   inherit (lib) mkOption types;
 
@@ -565,7 +565,7 @@ in
         type = types.str;
         default = "this host's uplink";
         example = "Mullvad (its outbound address is a Mullvad one, not its own IPv6 or the public IPv4)";
-        description = "Where the slots' own connections leave, as the agents' skill words it (services.containerSlots.isolatedEgress decides).";
+        description = "Where the slots' own connections leave, as the agents' skill words it (services.container-slots.isolatedEgress decides).";
       };
       publicIPv6 = mkOption {
         type = types.bool;
@@ -610,7 +610,7 @@ in
               enable = lib.mkEnableOption "the agent's own isolated container slot";
               id = mkOption {
                 type = types.ints.between 1 254;
-                description = "The slot id (services.containerSlots); fixed forever, addresses and ports derive from it. Unique among all container slots of the host.";
+                description = "The slot id (services.container-slots); fixed forever, addresses and ports derive from it. Unique among all container slots of the host.";
               };
               deployKey = mkOption {
                 type = types.nullOr types.str;
@@ -652,7 +652,7 @@ in
         assertions = [
           {
             assertion = slotsCfg.enable;
-            message = "services.hyperhermes.agents.<name>.slot needs services.containerSlots.enable (uplink, bridge, ipv6Prefix).";
+            message = "services.hyperhermes.agents.<name>.slot needs services.container-slots.enable (uplink, bridge, ipv6Prefix).";
           }
           {
             assertion = lib.all (a: (a.slot.deployKey == null) != (a.slot.deployKeyFile == null)) (
@@ -666,7 +666,7 @@ in
           }
         ];
 
-        services.containerSlots.slots = lib.mapAttrs (_: a: {
+        services.container-slots.slots = lib.mapAttrs (_: a: {
           inherit (a.slot) id memoryMax cpuQuota;
           mode = "isolated";
           autoStart = false;
@@ -859,7 +859,7 @@ in
         assertions = [
           {
             assertion = iface != null && publicIPv4 != null;
-            message = "services.hyperhermes slots in public mode need services.containerSlots.publicIPv4Interface and exposure.publicIPv4.";
+            message = "services.hyperhermes slots in public mode need services.container-slots.publicIPv4Interface and exposure.publicIPv4.";
           }
         ];
 

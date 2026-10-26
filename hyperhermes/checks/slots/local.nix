@@ -38,7 +38,7 @@ pkgs.testers.runNixOSTest {
         "192.0.2.2/24"
         "${prefix}::2/64"
       ];
-      services.containerSlots = {
+      services.container-slots = {
         enable = true;
         uplink = "eth1";
         uplinkMac = common.uplinkMacOf config;
