@@ -36,7 +36,8 @@
 #     has none yet. After that the profile belongs to the deployer. Its sshd
 #     lets in root with the slot's `deployKeys` (default: the host-wide
 #     list) and the keys in its `deployKeyFiles` (runtime files, read
-#     then), from a file this host bind-mounts read-only at
+#     then; each must be a regular file owned by root, read without
+#     following a link), from a file this host bind-mounts read-only at
 #     /var/lib/container-slot/authorized_keys at every start. The keys live
 #     in that file, not in the bootstrap system, so one bootstrap serves
 #     slots with different deployers. The file is owned by the slot's root
@@ -305,9 +306,18 @@ let
       install -d -m 0711 /run/container-slots ${slotRun name}
       install -m 0444 -o ${owner} -g ${owner} \
         ${pkgs.writeText "container-slot-${name}-keys" (lib.concatLines slot.deployKeys)} \
-        ${slotKeys name}${
-          lib.optionalString (slot.deployKeyFiles != [ ]) "\ncat ${lib.escapeShellArgs slot.deployKeyFiles} >>${slotKeys name}"
-        }
+        ${slotKeys name}${lib.optionalString (slot.deployKeyFiles != [ ]) ''
+
+          # Read as root into a file the slot's root reads: only a regular
+          # file owned by root, opened without following a link (whoever
+          # can write its directory cannot point it at another file).
+          for f in ${lib.escapeShellArgs slot.deployKeyFiles}; do
+            if [ -L "$f" ] || [ ! -f "$f" ] || [ "$(stat -c %u -- "$f")" != 0 ]; then
+              echo "container-slots: ${name}: $f is not a regular file owned by root, not starting" >&2
+              exit 1
+            fi
+            dd if="$f" iflag=nofollow status=none >>${slotKeys name}
+          done''}
 
       install -d -m 0755 /var/lib/container-slots ${hostKeysDir} ${keyDir}
       if [ ! -s ${keyDir}/ssh_host_ed25519_key ] || [ ! -s ${keyDir}/ssh_host_ed25519_key.pub ]; then
@@ -391,7 +401,7 @@ let
       deployKeyFiles = mkOption {
         type = types.listOf types.str;
         default = [ ];
-        description = "Runtime paths of further authorized_keys files for root in this slot's bootstrap system (keys made at runtime), appended to deployKeys at every start.";
+        description = "Runtime paths of further authorized_keys files for root in this slot's bootstrap system (keys made at runtime), appended to deployKeys at every start. Each must be a regular file owned by root (not a symlink), or the slot does not start.";
       };
       autoStart = mkOption {
         type = types.bool;

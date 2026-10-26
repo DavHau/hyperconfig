@@ -106,7 +106,7 @@ pkgs.testers.runNixOSTest {
           skill = host.succeed("cat ${skillDir}/container-slot/SKILL.md")
           assert "slot.<you>.hermes.localhost:8473" in skill, skill
           assert "public IPv4 (`slot info`)" not in skill, skill
-          for placeholder in ["@summary@", "@egress@", "@reach@", "@website@"]:
+          for placeholder in ["@summary@", "@egress@", "@v6reach@", "@reach@", "@website@"]:
               assert placeholder not in skill, skill
 
       with subtest("the local web front reaches the slot's port 80"):

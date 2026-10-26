@@ -34,12 +34,7 @@ Each command may run at most 6 times per 10 minutes.
 
 - From this host: `ssh root@<v4>` (only your account gets through, on any
   port; your key and the slot's host key are picked automatically).
-- From anywhere: `ssh root@<v6>` and every port on the IPv6 address; the
-  slot's own firewall decides what answers. Other accounts on this host
-  (the other agents) reach what you publish on the IPv6 address like any
-  internet client: every port but 22, coming from this host's public IPv6.
-  ssh on any address and everything on the v4 stay yours alone.
-@reach@
+@v6reach@@reach@
 ## Deploy
 
 From a flake on this host:

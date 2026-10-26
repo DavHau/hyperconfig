@@ -369,6 +369,21 @@ let
     + lib.optionalString public "  ports=${portRange a}\n"
     + "  ;;\n";
 
+  # `slot info`'s ssh and IPv6 lines: public or private IPv6.
+  infoV6 =
+    if cfg.publicIPv6 then
+      ''
+        ssh:       root@$v4 (from this host; only you and root get through)
+                   root@[$v6] (anywhere)
+        ipv6:      $v6 (public, all ports; the slot's firewall decides;
+                   other agents here reach all but 22, like the internet)
+      ''
+    else
+      ''
+        ssh:       root@$v4 (from this host; only you and root get through)
+        ipv6:      $v6 (private: not reachable from outside this host)
+      '';
+
   # `slot info`'s lines about the hostname and the public IPv4, by mode.
   infoWeb =
     if public then
@@ -428,11 +443,7 @@ let
       info() {
         cat <<EOF
       slot:      $me (off by default; slot start|stop|reset [--hard]|status)
-      ssh:       root@$v4 (from this host; only you and root get through)
-                 root@[$v6] (anywhere)
-      ipv6:      $v6 (public, all ports; the slot's firewall decides;
-                 other agents here reach all but 22, like the internet)
-      ${infoWeb}deploy:    nixos-rebuild switch --flake .#<cfg> \\
+      ${infoV6}${infoWeb}deploy:    nixos-rebuild switch --flake .#<cfg> \\
                    --target-host root@$v4 --build-host root@$v4
       EOF
       }
@@ -459,17 +470,35 @@ let
   you = "slot.<you>.${exposure.domain}";
   skillText =
     lib.replaceStrings
-      [ "@summary@" "@egress@" "@reach@" "@website@" ]
+      [ "@summary@" "@egress@" "@v6reach@" "@reach@" "@website@" ]
       [
         (
           if public then
             "a public IPv6, a hostname and 10 public IPv4 TCP ports"
           else if local then
-            "a public IPv6 and a hostname on this host's web front"
-          else
+            (if cfg.publicIPv6 then "a public IPv6 and a hostname" else "a hostname")
+            + " on this host's web front"
+          else if cfg.publicIPv6 then
             "a public IPv6"
+          else
+            "a private address"
         )
         cfg.egress
+        (
+          if cfg.publicIPv6 then
+            ''
+              - From anywhere: `ssh root@<v6>` and every port on the IPv6 address; the
+                slot's own firewall decides what answers. Other accounts on this host
+                (the other agents) reach what you publish on the IPv6 address like any
+                internet client: every port but 22, coming from this host's public IPv6.
+                ssh on any address and everything on the v4 stay yours alone.
+            ''
+          else
+            ''
+              - Its IPv6 address is private: nothing outside this host reaches it.
+                ssh on any address and everything on the v4 stay yours alone.
+            ''
+        )
         (
           if public then
             ''
@@ -538,6 +567,11 @@ in
         example = "Mullvad (its outbound address is a Mullvad one, not its own IPv6 or the public IPv4)";
         description = "Where the slots' own connections leave, as the agents' skill words it (services.containerSlots.isolatedEgress decides).";
       };
+      publicIPv6 = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Whether the slots' IPv6 addresses are public (routed from the internet). Off: `slot info` and the agents' skill call them private and drop the reach-from-anywhere lines.";
+      };
       limits = {
         memoryHigh = mkOption {
           type = types.str;
@@ -587,7 +621,7 @@ in
                 type = types.nullOr types.str;
                 default = null;
                 example = "/var/lib/agent-keys/alice/key.pub";
-                description = "Runtime path of the agent's ssh public key, for a key that only exists at runtime (read at every slot start). Either this or deployKey.";
+                description = "Runtime path of the agent's ssh public key, for a key that only exists at runtime (read at every slot start). It must be a regular file owned by root, not a symlink, in a directory the agent cannot write; else the slot does not start. Either this or deployKey.";
               };
               identityFile = mkOption {
                 type = types.nullOr types.str;

@@ -59,13 +59,17 @@ names) and the Python venv helpers.
   its slot with the `slot` command (skill `container-slot`)
 
 The container holds every secret below `/var/lib/hyperhermes-local`
-(OIDC client secrets, dex password hashes, the published ports' cookie
-secret, each agent's ssh key); delete a file and restart
-`hyperhermes-local-secrets` to rotate it. The agent's model provider is
-configured in hermes itself, or handed in as a runtime file through
-`agents.<name>.secretEnv`. The host gets NAT for the container's veth;
-slots nest containers, so the host's `/nix/store` must support idmapped
-mounts (ext4, btrfs, xfs, zfs).
+(OIDC client secrets, dex passwords and their hashes, the published ports'
+cookie secret, each agent's ssh key); delete a file (for a dex account its
+`.password` or `.hash`) and restart `hyperhermes-local-secrets` to rotate
+it. The agent's model provider is configured in hermes itself, or handed
+in as a runtime file through `agents.<name>.secretEnv`. The host gets NAT
+for the container's veth, which turns on IPv4 forwarding host-wide
+(`networking.nat`); the container's web front accepts only the host's
+veth address, so a LAN peer routing to the container's subnet through
+the host gets no answer. The slots' IPv6 addresses are private there
+(`slots.publicIPv6 = false`). Slots nest containers, so the host's
+`/nix/store` must support idmapped mounts (ext4, btrfs, xfs, zfs).
 
 ## Public deployment
 
