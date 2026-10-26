@@ -179,6 +179,15 @@ in rec {
 
     When a bug is in third-party software, first check its newer releases, issues and PRs for a report or fix of it, and prefer adopting that (version bump, upstream patch) over writing a patch yourself.
 
+    ## NixOS configurations
+
+    Never make one machine's NixOS configuration read another machine's
+    evaluated configuration (e.g. `self.nixosConfigurations.<other>.config`,
+    `inputs.self.nixosConfigurations.*`): it forces a second full machine
+    evaluation and adds a large eval-performance penalty. Share the data
+    instead: a plain Nix data file both machines import, a shared module
+    option, or clan vars / inventory.
+
     ## Parallel work with subagents
 
     The main session is an orchestrator: delegate all significant implementation to subagents and only make few-line fixes, merge edits, or very small changes yourself.
