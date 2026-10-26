@@ -106,6 +106,9 @@
         # Evaluation only: teamclaude, claude-auth and desktop on a system
         # without clan, secrets as runtime paths.
         client-features = import ./checks/client-features { inherit pkgs self; };
+        # Evaluation only: nixosModules.clan's generator names and the
+        # secret paths they fill, against a stub clan.core.vars.
+        clan-eval = import ./checks/clan-eval { inherit pkgs self; };
       };
     };
 }
