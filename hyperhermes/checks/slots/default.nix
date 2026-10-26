@@ -60,7 +60,7 @@ let
   cert = pkgs.runCommand "agent-slots-test-cert" { nativeBuildInputs = [ pkgs.openssl ]; } ''
     mkdir $out
     openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj /CN=test \
-      -addext "subjectAltName=DNS:server.test,DNS:slot.alice.fyi.test,DNS:slot.bob.fyi.test" \
+      -addext "subjectAltName=DNS:server.test,DNS:slot.alice.example.test,DNS:slot.bob.example.test" \
       -keyout $out/key.pem -out $out/cert.pem
   '';
 
@@ -244,7 +244,7 @@ pkgs.testers.runNixOSTest {
         exposure = {
           enable = true;
           mode = "public";
-          domain = "fyi.test";
+          domain = "example.test";
           inherit publicIPv4;
           # No ACME server here (defaults.server below): the self-signed
           # placeholders stay and the renewals fail fast.
@@ -367,7 +367,7 @@ pkgs.testers.runNixOSTest {
 
     with subtest("slot info names the ports, addresses and hostname"):
         info = server.succeed("runuser -u alice -- slot info")
-        for want in ["14040-14049", "slot.alice.fyi.test", alice6, "root@" + alice4, "${publicIPv4}"]:
+        for want in ["14040-14049", "slot.alice.example.test", alice6, "root@" + alice4, "${publicIPv4}"]:
             assert want in info, info
 
     with subtest("the slots' hostnames are in exposure.dnsRecords"):
@@ -375,10 +375,10 @@ pkgs.testers.runNixOSTest {
         zone = {(r["name"], r["type"]): r["value"] for r in records if "slot" in r["name"]}
         on_link = lambda id: {"ipv6OnLink": {"interface": "br0", "suffix": f"::5107:{id}", "expectedPrefix": "${prefix}"}}
         assert zone == {
-            ("slot.alice.fyi.test", "A"): "${publicIPv4}",
-            ("slot.alice.fyi.test", "AAAA"): on_link(4),
-            ("slot.bob.fyi.test", "A"): "${publicIPv4}",
-            ("slot.bob.fyi.test", "AAAA"): on_link(5),
+            ("slot.alice.example.test", "A"): "${publicIPv4}",
+            ("slot.alice.example.test", "AAAA"): on_link(4),
+            ("slot.bob.example.test", "A"): "${publicIPv4}",
+            ("slot.bob.example.test", "AAAA"): on_link(5),
             # the old names: this host only (no publicIPv6 here, so no AAAA)
             ("alice.slots.test", "A"): "${publicIPv4}",
             ("bob.slots.test", "A"): "${publicIPv4}",
@@ -441,19 +441,19 @@ pkgs.testers.runNixOSTest {
         client.succeed(get + "http://${publicIPv4}:14050/ | grep -qx 'bob-port peer=${clientIPv4} xff='")
         # a port of alice's range that her slot does not serve is not bob's
         client.fail(get + "http://${publicIPv4}:14044/")
-        out = client.succeed(get + "-H 'Host: slot.alice.fyi.test' http://${publicIPv4}/")
+        out = client.succeed(get + "-H 'Host: slot.alice.example.test' http://${publicIPv4}/")
         assert out.strip() == "alice-http peer=10.43.4.1 xff=${clientIPv4}", out
-        out = client.succeed(get + "-H 'Host: slot.bob.fyi.test' http://${publicIPv4}/")
+        out = client.succeed(get + "-H 'Host: slot.bob.example.test' http://${publicIPv4}/")
         assert out.startswith("bob-http"), out
-        out = client.succeed(get + "-k --resolve slot.alice.fyi.test:443:${publicIPv4} https://slot.alice.fyi.test/")
+        out = client.succeed(get + "-k --resolve slot.alice.example.test:443:${publicIPv4} https://slot.alice.example.test/")
         assert out.strip() == "alice-tls peer=10.43.4.1 xff=", out
-        out = client.succeed(get + "-k --resolve slot.bob.fyi.test:443:${publicIPv4} https://slot.bob.fyi.test/")
+        out = client.succeed(get + "-k --resolve slot.bob.example.test:443:${publicIPv4} https://slot.bob.example.test/")
         assert out.startswith("bob-tls"), out
         # the old names: this host answers, with a 301 to the new name (path
         # and query kept), over both ports; nothing reaches a slot
         where = "-o /dev/null -w '%{http_code} %{redirect_url}' "
         out = client.succeed(get + where + "-H 'Host: alice.slots.test' 'http://${publicIPv4}/a?b=1'")
-        assert out == "301 https://slot.alice.fyi.test/a?b=1", out
+        assert out == "301 https://slot.alice.example.test/a?b=1", out
         # no ACME HTTP-01 challenge for an old name follows that 301 into
         # the slot, on either port
         out = client.succeed(get + where + "-H 'Host: alice.slots.test' 'http://${publicIPv4}/.well-known/acme-challenge/tok'")
@@ -462,11 +462,11 @@ pkgs.testers.runNixOSTest {
         assert out == "404 ", out
         old = "-k --resolve alice.slots.test:443:${publicIPv4} 'https://alice.slots.test/a?b=1'"
         out = client.succeed(get + where + old)
-        assert out == "301 https://slot.alice.fyi.test/a?b=1", out
+        assert out == "301 https://slot.alice.example.test/a?b=1", out
         out = client.succeed(get + old)
         assert "alice-tls" not in out and "alice-http" not in out, out
         out = client.succeed(get + where + "-k --resolve bob.slots.test:443:${publicIPv4} https://bob.slots.test/")
-        assert out == "301 https://slot.bob.fyi.test/", out
+        assert out == "301 https://slot.bob.example.test/", out
         out = client.succeed(get + "-o /dev/null -w '%{http_code}' -k --resolve carol.slots.test:443:${publicIPv4} https://carol.slots.test/")
         assert out == "404", out
         # this host's own sites: unchanged, client address intact

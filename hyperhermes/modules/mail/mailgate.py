@@ -92,7 +92,7 @@ MASTER_SECRET = cred("master")
 HOOK_SECRET = cred("hook")
 LMTP_SECRET = cred("lmtp")
 CSRF_KEY = cred("csrf").encode()
-P0_KEY = cred("p0")
+SUMMARIZER_KEY = cred("summarizer")
 
 TAG_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,31}")
 ENTRY_RE = re.compile(r"(?:[a-z0-9._%+-]{1,64})?@[a-z0-9-]+(?:\.[a-z0-9-]+)+")
@@ -1073,7 +1073,7 @@ async def summarise(session: ClientSession, mid: str, on_demand: bool) -> None:
     row = one("SELECT * FROM messages WHERE id = ? AND folder = 'quarantine'", mid)
     if row is None:
         return
-    if not s or not P0_KEY:
+    if not s or not SUMMARIZER_KEY:
         DB.execute("UPDATE messages SET summary_state = 'disabled' WHERE id = ?", (mid,))
         return
     if not summary_allowed(row["agent"], on_demand):
@@ -1101,7 +1101,7 @@ async def summarise(session: ClientSession, mid: str, on_demand: bool) -> None:
         async with session.post(
             s["url"].rstrip("/") + "/chat/completions",
             json=payload,
-            headers={"Authorization": f"Bearer {P0_KEY}"},
+            headers={"Authorization": f"Bearer {SUMMARIZER_KEY}"},
             timeout=ClientTimeout(total=120),
         ) as resp:
             data = await resp.json(content_type=None)
@@ -1396,9 +1396,8 @@ async def owner_page(request: web.Request) -> web.Response:
 async def owner_action(request: web.Request) -> web.Response:
     account = request.headers.get("X-Mailgate-Account", "")
     # A browser always sends Origin on a POST. Pages on other origins (an
-    # agent's dashboard or serve port, another site since they moved to
-    # davhau.fyi) can make the owner's browser POST here, but cannot fake
-    # Origin or read the CSRF token.
+    # agent's dashboard or serve port, another site) can make the owner's
+    # browser POST here, but cannot fake Origin or read the CSRF token.
     if request.headers.get("Origin") != CFG.get("ownerOrigin") or request.headers.get(
         "Sec-Fetch-Site", "same-origin"
     ) != "same-origin":

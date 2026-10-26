@@ -567,7 +567,7 @@ in
           };
           settings = {
             server.hostname = cfg.hostname;
-            # IPv4 only (the public address is sgp's, forwarded); IMAP on
+            # IPv4 only (the public address is a router's, forwarded); IMAP on
             # loopback. No submission and no HTTP listener: no relay for
             # anyone and no management API or JMAP at all.
             server.listener = {
@@ -785,7 +785,7 @@ in
             ]
             ++ lib.optional (
               cfg.summarizer.enable && cfg.summarizer.keyFile != null
-            ) "p0:${cfg.summarizer.keyFile}";
+            ) "summarizer:${cfg.summarizer.keyFile}";
             Restart = "always";
             RestartSec = 5;
             # The daemon plus at most three parse workers (./analyze.py, two

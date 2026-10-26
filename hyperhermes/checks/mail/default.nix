@@ -27,10 +27,10 @@ let
   ownerHost = "mailgate.${dashHost}";
   # The agents' own site; the mail domain doubles as the dashboards' old
   # one.
-  fyi = "fyi.test";
+  siteDomain = "site.test";
   # hermes' own port, behind the forward (alice is uid 1001).
   aliceDashBackend = hlib.dashboardBackendBase + 1001;
-  aliceDashHost = "alice.${fyi}";
+  aliceDashHost = "alice.${siteDomain}";
 
   limits = {
     messageBytes = 4194304;
@@ -365,7 +365,7 @@ let
                 return
             out = f"backend {port}\n".encode()
             self.send_response(200)
-            self.send_header("Set-Cookie", "planted=1; Domain=${fyi}; Path=/")
+            self.send_header("Set-Cookie", "planted=1; Domain=${siteDomain}; Path=/")
             self.send_header("Content-Length", str(len(out)))
             self.end_headers()
             self.wfile.write(out)
@@ -579,8 +579,8 @@ pkgs.testers.runNixOSTest {
         dashHost
         ownerHost
         aliceDashHost
-        "bob.${fyi}"
-        "nobody.${fyi}"
+        "bob.${siteDomain}"
+        "nobody.${siteDomain}"
         # the old names
         "alice.${domain}"
         "nobody.${domain}"
@@ -591,7 +591,7 @@ pkgs.testers.runNixOSTest {
         (secret "hook" "test-hook-secret")
         (secret "lmtp" "test-lmtp-secret")
         (secret "csrf" "test-csrf-key")
-        (secret "p0" "test-p0-key")
+        (secret "summarizer" "test-summarizer-key")
         (secret "imap-alice" "alice-imap-password")
         (secret "imap-bob" "bob-imap-password")
         (secret "oidc-hermes" "test-oidc-client-secret")
@@ -630,7 +630,7 @@ pkgs.testers.runNixOSTest {
         exposure = {
           enable = true;
           mode = "public";
-          domain = fyi;
+          domain = siteDomain;
           acme = {
             dnsProvider = "porkbun";
             credentialFiles = {
@@ -674,7 +674,7 @@ pkgs.testers.runNixOSTest {
             enable = true;
             url = "http://192.168.1.1:8080/v1";
             model = "qwen";
-            keyFile = "/etc/mailtest/p0";
+            keyFile = "/etc/mailtest/summarizer";
             egressPort = 8080;
           };
           ownerPage.cookieSecretFile = "/etc/mailtest/owner-page-cookie";
@@ -959,7 +959,7 @@ pkgs.testers.runNixOSTest {
         reqs = [json.loads(l) for l in client.succeed("cat /var/lib/stub/requests.jsonl").splitlines()]
         r = [x for x in reqs if "482913" in json.dumps(x)][0]
         assert "tools" not in r and "tool_choice" not in r and "functions" not in r, r
-        assert r["_auth"] == "Bearer test-p0-key" and r["_path"] == "/v1/chat/completions" and r["model"] == "qwen", r
+        assert r["_auth"] == "Bearer test-summarizer-key" and r["_path"] == "/v1/chat/completions" and r["model"] == "qwen", r
         assert "IGNORE PREVIOUS" in r["messages"][1]["content"]
 
     with subtest("DMARC failure from an allowlisted From: rejected (p=reject) or quarantined, domain hidden (F5)"):
@@ -1044,7 +1044,7 @@ pkgs.testers.runNixOSTest {
         rc, out = himalaya("alice", "--json envelope list", config="${himalayaAsBob}")
         assert rc != 0 and "for-bob-only" not in out, out
         for f in ("/run/mailgate-imap/bob/password", "/etc/mailtest/imap-bob",
-                  "/etc/mailtest/master", "/etc/mailtest/p0"):
+                  "/etc/mailtest/master", "/etc/mailtest/summarizer"):
             server.fail(f"runuser -u alice -- cat {f}")
         server.fail("runuser -u alice -- ls /var/lib/mailgate")
         server.fail("runuser -u alice -- ls /var/lib/stalwart")
@@ -1074,7 +1074,7 @@ pkgs.testers.runNixOSTest {
         server.wait_until_succeeds("python3 ${connect} ::1 587")
         server.fail("runuser -u alice -- python3 ${connect} ::1 587")
         server.fail("runuser -u mallory -- python3 ${connect} ::1 587")
-        # 192.168.1.1 stands in for sgp's public address: agents may not
+        # 192.168.1.1 stands in for the forwarded public address: agents may not
         # dial its port 25, everyone else may.
         server.fail("runuser -u alice -- python3 ${connect} 192.168.1.1 25")
         server.fail("runuser -u bob -- python3 ${connect} 192.168.1.1 25")
@@ -1171,7 +1171,7 @@ pkgs.testers.runNixOSTest {
         code, eff, body = https("https://${dashHost}/", "-L -c /tmp/j1 -b /tmp/j1")
         assert code == "200" and eff == "https://${aliceDashHost}/" and body == "backend ${toString aliceDashBackend}\n", (code, eff, body)
         # A name under the agents' domain that is no dashboard.
-        assert https("https://nobody.${fyi}/")[0] == "404"
+        assert https("https://nobody.${siteDomain}/")[0] == "404"
         front = jar_cookies("/tmp/j1")
         assert "__Host-hermes" in front, front
         assert front["__Host-hermes"][:2] == ("${dashHost}", "FALSE"), front
@@ -1187,7 +1187,7 @@ pkgs.testers.runNixOSTest {
         assert "content-type: text/html" in hdrs and "default-src 'none'" in hdrs, hdrs
         login_as("bob-owner")
         code, _, body = https("https://${dashHost}/app", "-L -c /tmp/jb -b /tmp/jb")
-        assert code == "200" and "https://bob.${fyi}" in body and "alice" not in body, (code, body)
+        assert code == "200" and "https://bob.${siteDomain}" in body and "alice" not in body, (code, body)
         login_as("nobody-owner")
         code, _, body = https("https://${dashHost}/app", "-L -c /tmp/jn -b /tmp/jn")
         assert code == "403", (code, body)
@@ -1221,7 +1221,7 @@ pkgs.testers.runNixOSTest {
         # the whole agents' domain), and no other site may frame a
         # dashboard.
         hdrs = server.succeed("curl -sk -D - -o /dev/null https://${aliceDashHost}/")
-        assert "planted=1; Domain=${aliceDashHost};" in hdrs and "Domain=${fyi};" not in hdrs, hdrs
+        assert "planted=1; Domain=${aliceDashHost};" in hdrs and "Domain=${siteDomain};" not in hdrs, hdrs
         assert "content-security-policy: frame-ancestors 'self'" in hdrs.lower(), hdrs
         assert "x-frame-options: sameorigin" in hdrs.lower(), hdrs
 

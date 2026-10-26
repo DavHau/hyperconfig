@@ -218,7 +218,7 @@ in
     certName = lib.mkOption {
       type = lib.types.str;
       readOnly = true;
-      default = "hermes-fyi";
+      default = "hermes-domain";
       description = "Public mode: the security.acme cert of *.<domain>.";
     };
 
