@@ -44,6 +44,14 @@
 # cookie secret, root-only, path into publish.cookieSecretFile; and the
 # client secret oidc-client-hermes-serve (declared by whatever runs the
 # clan's identity provider) restarts that proxy.
+#
+# mail, with services.hyperhermes.mail on (./mail): mailgate (`master`,
+# `hook`, `lmtp`, `csrf`, root-only; Stalwart's and mailgate's internal
+# secrets) fills mail.secrets, per mailbox agent mailgate-imap-<agent>
+# (`password`, root-only; Stalwart reads it, the agent gets its own copy)
+# fills agents.<agent>.mail.passwordFile, and with an owner page
+# mailgate-oauth2-proxy (`cookie_secret`) fills
+# mail.ownerPage.cookieSecretFile.
 {
   config,
   lib,
@@ -60,6 +68,10 @@ let
   hasTeamclaude = options ? services.hyperhermes.teamclaude;
   hasDesktop = options ? services.hyperhermes.desktop;
   hasWallet = options ? services.hyperhermes.wallet;
+  hasMail = options ? services.hyperhermes.mail;
+  mailOn = hasMail && cfg.mail.enable;
+  mailboxes = lib.filterAttrs (_: a: a.mail.enable) cfg.agents;
+  random = len: ''openssl rand -hex ${toString len} | tr -d '\n' '';
   walletOn = hasWallet && cfg.wallet.enable;
   generatorFor = name: "hermes-agent-ssh-${name}";
   teamclaudeGeneratorFor = name: "teamclaude-hermes-${name}";
@@ -84,6 +96,11 @@ in
           // lib.optionalAttrs hasTeamclaude {
             teamclaude.keyFile = lib.mkIf hasClan (
               lib.mkDefault config.clan.core.vars.generators.${teamclaudeGeneratorFor name}.files.key.path
+            );
+          }
+          // lib.optionalAttrs hasMail {
+            mail.passwordFile = lib.mkIf hasClan (
+              lib.mkDefault config.clan.core.vars.generators."mailgate-imap-${name}".files.password.path
             );
           };
         }
@@ -234,6 +251,72 @@ in
             '';
           };
         };
+      })
+
+      (lib.optionalAttrs hasMail {
+        services.hyperhermes.mail = lib.mkIf mailOn {
+          secrets = lib.genAttrs [ "master" "hook" "lmtp" "csrf" ] (
+            n: lib.mkDefault generators.mailgate.files.${n}.path
+          );
+          ownerPage.cookieSecretFile = lib.mkIf (cfg.mail.ownerPage.host != null) (
+            lib.mkDefault generators.mailgate-oauth2-proxy.files.cookie_secret.path
+          );
+        };
+
+        clan.core.vars.generators = lib.mkIf mailOn (
+          {
+            mailgate = {
+              files = lib.genAttrs [ "master" "hook" "lmtp" "csrf" ] (_: {
+                restartUnits = [
+                  "stalwart.service"
+                  "mailgate.service"
+                ];
+              });
+              runtimeInputs = [
+                pkgs.openssl
+                pkgs.coreutils
+              ];
+              script = ''
+                for f in master hook lmtp csrf; do
+                  ${random 32} > "$out/$f"
+                done
+              '';
+            };
+          }
+          // lib.optionalAttrs (cfg.mail.ownerPage.host != null) {
+            mailgate-oauth2-proxy = {
+              files.cookie_secret.restartUnits = [ "oauth2-proxy-mailgate.service" ];
+              runtimeInputs = [
+                pkgs.coreutils
+                pkgs.openssl
+              ];
+              # oauth2-proxy decodes a cookie secret only as URL-safe base64
+              # and otherwise takes the raw bytes, which must then be 16, 24
+              # or 32 long: standard base64 with a '+' or '/' is 44 raw bytes
+              # and the proxy refuses to start. 32 hex characters are 32 raw
+              # bytes.
+              script = ''
+                openssl rand -hex 16 | tr -d '\n' > "$out"/cookie_secret
+              '';
+            };
+          }
+          // lib.mapAttrs' (
+            name: _:
+            lib.nameValuePair "mailgate-imap-${name}" {
+              files.password.restartUnits = [
+                "stalwart.service"
+                "mailgate-imap-passwords.service"
+              ];
+              runtimeInputs = [
+                pkgs.openssl
+                pkgs.coreutils
+              ];
+              script = ''
+                ${random 24} > "$out/password"
+              '';
+            }
+          ) mailboxes
+        );
       })
     ]
   );

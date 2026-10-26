@@ -279,7 +279,7 @@ in
         PORKBUN_SECRET_API_KEY_FILE = config.clan.core.vars.generators.porkbun.files.secretkey.path;
       };
       # som's upstream answers REFUSED for names that do not exist yet, which
-      # ends lego's SOA walk (./agent-mail/default.nix).
+      # ends lego's SOA walk (as for som's exposure.acme).
       dnsResolver = "1.1.1.1:53";
     };
 

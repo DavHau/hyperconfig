@@ -43,7 +43,7 @@ in
     ../../modules/nixos/zfs-ephemeral-tmp.nix
     ../../modules/nixos/zfs-arc-max.nix
     ../../modules/nixos/per-user-tmp
-    ../../modules/nixos/agent-mail
+    inputs.hyperhermes.nixosModules.mail
     # Pooled Claude subscription gateway, https://teamclaude.davhau.com/.
     ../../modules/nixos/teamclaude-gateway
   ];
@@ -140,7 +140,7 @@ in
       };
       email = "info@davhau.com";
       # som's upstream answers REFUSED for names that do not exist yet,
-      # which ends lego's SOA walk (../../modules/nixos/agent-mail).
+      # which ends lego's SOA walk (the mail module's MX certificate uses it too).
       dnsResolver = "1.1.1.1:53";
       # Let's Encrypt only, by DNS-01 only. Without issuewild the issue
       # property governs wildcards as well.
@@ -154,13 +154,28 @@ in
   );
 
   # Receive-only mail for every agent in ./hermes-agents.nix at
-  # <agent>@agents.davhau.com (../../modules/nixos/agent-mail, DNS records
-  # listed there). Inbound SMTP arrives only as IPv4 forwarded from sgp, on
-  # the tunnel interface of ../../modules/nixos/ipv4-forward.nix; 25 is open
-  # there and nowhere else.
-  hyper.agentMail = {
+  # <agent>@agents.davhau.com (hyperhermes' mail module, which lists the DNS
+  # records the davhau.com zone holds for it: mail.agents.davhau.com A
+  # 38.89.142.76, MX, SPF, DMARC, empty DKIM). Inbound SMTP arrives only as
+  # IPv4 forwarded from sgp, on the tunnel interface of
+  # ../../modules/nixos/ipv4-forward.nix; 25 is open there and nowhere
+  # else. The owner page is https://mailgate.hermes.davhau.com/, next to
+  # the front door.
+  services.hyperhermes.mail = {
     enable = true;
+    domain = "agents.davhau.com";
     smtpInterfaces = [ "wg-v4fwd" ];
+    # sgp's address, forwarded here: agents must not reach the MX through
+    # it as internet senders.
+    mxAddresses = [ "38.89.142.76" ];
+    # p0, as the agents' own brain (./hermes-inference.nix); the token is
+    # the shared inference var, read as a credential.
+    summarizer = {
+      enable = true;
+      url = "https://inference.p0.contact/v1";
+      model = "qwen";
+      keyFile = config.clan.core.vars.generators.inference-api-key.files.token.path;
+    };
   };
 
   # Public address 2405:9800:b901:94e3::c0de:ba5e on the LAN bridge (prefix

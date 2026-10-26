@@ -261,8 +261,8 @@ in {
               };
               # som's oauth2-proxy front door `hermes`: hermes.davhau.com
               # (redirects to the account's dashboard), whose client the agent
-              # mail owner page shares (modules/nixos/agent-mail/owner-page.nix,
-              # its own oauth2-proxy, its own callback), the private serve
+              # mail owner page shares (hyperhermes' mail module, its own
+              # oauth2-proxy, its own callback), the private serve
               # ports' oauth2-proxy (hermes-serve), plus one client per agent
               # dashboard.
               roles.client.machines.som.settings.clients = somHermesClients // {

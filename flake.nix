@@ -256,11 +256,6 @@
           import ./modules/nixos/mullvad-egress/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
-        agent-mail =
-          import ./modules/nixos/agent-mail/test.nix {
-            pkgs = nixpkgs.legacyPackages.x86_64-linux;
-            inherit inputs;
-          };
         agent-slots =
           import ./modules/nixos/agent-slots-test {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
