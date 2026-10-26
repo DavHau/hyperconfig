@@ -29,6 +29,15 @@
 # `clan vars get <machine> phoenixd-seed/seed`) and phoenixd-api
 # (`phoenix.conf`, the API password, group lightning-wallet) fill its
 # seedFile and apiConfigFile.
+#
+# sso, with a front door (sso.frontDoor.host) the per-machine generator
+# hermes-oauth2-proxy: its oauth2-proxy's cookie secret, root-only, path
+# into sso.frontDoor.cookieSecretFile.
+#
+# dashboards, each agent's client secret oidc-client-hermes-<agent>
+# (declared by whatever runs the clan's identity provider) restarts the
+# agent and its dashboard: the secret reaches the .env when the agent
+# restarts, and the dashboard reads it when it restarts after the agent.
 {
   config,
   lib,
@@ -49,6 +58,9 @@ let
   generatorFor = name: "hermes-agent-ssh-${name}";
   teamclaudeGeneratorFor = name: "teamclaude-hermes-${name}";
   generators = config.clan.core.vars.generators;
+  ssoLib = import ../lib/sso.nix { inherit lib; };
+  hasSso = options ? services.hyperhermes.sso.frontDoor;
+  frontDoor = hasSso && cfg.sso.enable && cfg.sso.frontDoor.host != null;
 in
 {
   options.services.hyperhermes.agents = lib.mkOption {
@@ -118,8 +130,39 @@ in
               '';
             };
           })
+
+          (lib.mkIf frontDoor {
+            hermes-oauth2-proxy = {
+              files.cookie_secret = { };
+              runtimeInputs = [
+                pkgs.coreutils
+                pkgs.openssl
+              ];
+              script = ''
+                openssl rand -base64 32 | tr -d '\n' > "$out"/cookie_secret
+              '';
+            };
+          })
+
+          (lib.mkIf (cfg.dashboards.enable or false) (
+            lib.mapAttrs' (
+              name: _:
+              lib.nameValuePair "oidc-client-${ssoLib.clientIdOf name}" {
+                files.secret.restartUnits = [
+                  "hermes-agent-${name}.service"
+                  "hermes-dashboard-${name}.service"
+                ];
+              }
+            ) cfg.agents
+          ))
         ];
       }
+
+      (lib.optionalAttrs hasSso {
+        services.hyperhermes.sso.frontDoor.cookieSecretFile = lib.mkIf frontDoor (
+          lib.mkDefault generators.hermes-oauth2-proxy.files.cookie_secret.path
+        );
+      })
 
       (lib.optionalAttrs hasDesktop {
         services.hyperhermes.desktop.sshKeyFile = lib.mkDefault generators.hermes-desktop-ssh.files.key.path;

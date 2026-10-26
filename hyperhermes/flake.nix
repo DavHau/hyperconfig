@@ -30,6 +30,11 @@
       inherit (nixpkgs) lib;
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
+      # core's default package (upstream with the wheel patches), which the
+      # checks run: the dashboards' group check is one of the patches.
+      hermesPackage = import ./modules/core/package.nix {
+        inherit lib system hermes-agent;
+      };
     in
     {
       # One module per feature; `default` imports all of them, each off
@@ -43,6 +48,7 @@
         teamclaude = ./modules/teamclaude.nix;
         claude-auth = import ./modules/hermes-claude-auth.nix { inherit llm-agents; };
         desktop = import ./modules/desktop { inherit hermes-agent; };
+        dashboards = ./modules/dashboards;
         default = {
           imports = [
             self.nixosModules.core
@@ -53,6 +59,7 @@
             self.nixosModules.teamclaude
             self.nixosModules.claude-auth
             self.nixosModules.desktop
+            self.nixosModules.dashboards
           ];
         };
         # Not a feature, so not in `default`: fills core's and the
@@ -97,8 +104,11 @@
         core = import ./checks/core { inherit pkgs self; };
 
         local-sso = import ./checks/local-sso {
-          inherit pkgs self;
-          hermesPackage = hermes-agent.packages.${system}.minimal;
+          inherit pkgs self hermesPackage;
+        };
+
+        public = import ./checks/public {
+          inherit pkgs self hermesPackage;
         };
 
         browser = import ./checks/browser { inherit pkgs self; };

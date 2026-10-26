@@ -1,9 +1,11 @@
 # Local mode end to end: a NixOS container (private network) runs the
-# exposure + sso modules and one agent's upstream hermes dashboard; the
+# exposure + sso + dashboards modules and one agent's hermes dashboard; the
 # host forwards its loopback port 8473 into the container, the way a
 # workstation runs the local deployment. From the host, a scripted browser
 # (./login.py) signs in at dex's password form and ends on an
-# authenticated dashboard API call.
+# authenticated dashboard API call; a second dex account that owns no
+# agent is refused at the same dashboard (dex itself admits it: the group
+# check is hermes', core's allowed-groups patch).
 #
 # It also pins the facts the modules rely on:
 # - *.localhost resolves to loopback through nss-myhostname, on the host
@@ -21,8 +23,6 @@ let
   port = 8473;
   containerAddress = "10.233.1.2";
   secrets = "/var/lib/local-sso-secrets";
-  # alice's root-held dashboard port (core's forward to her backend).
-  dashboardPort = self.lib.dashboardPortFor "alice";
   python = pkgs.python3.withPackages (ps: [
     ps.bcrypt
     ps.requests
@@ -57,87 +57,67 @@ pkgs.testers.runNixOSTest {
       privateNetwork = true;
       hostAddress = "10.233.1.1";
       localAddress = containerAddress;
-      config =
-        { config, lib, ... }:
-        {
-          imports = [ self.nixosModules.default ];
-          system.stateVersion = "26.05";
-          networking.firewall.allowedTCPPorts = [ port ];
-          environment.systemPackages = [
-            hermesPackage
-            pkgs.curl
-          ];
+      config = {
+        imports = [ self.nixosModules.default ];
+        system.stateVersion = "26.05";
+        networking.firewall.allowedTCPPorts = [ port ];
+        environment.systemPackages = [
+          hermesPackage
+          pkgs.curl
+        ];
 
-          services.hyperhermes = {
-            package = hermesPackage;
-            pythonPackages = _: [ ];
-            # alice's agent on core's units, with hermes' OIDC gate on as
-            # upstream documents it (env); the dashboards feature will
-            # derive these.
-            agents.alice = {
-              uid = 1001;
-              environment = {
-                HERMES_DASHBOARD_PUBLIC_URL = config.services.hyperhermes.exposure.urlOf "alice.${domain}";
-                HERMES_DASHBOARD_OIDC_ISSUER = config.services.hyperhermes.sso.issuer;
-                HERMES_DASHBOARD_OIDC_CLIENT_ID = "hermes-alice";
-                HERMES_DASHBOARD_OIDC_SCOPES = "openid profile email groups offline_access";
-              };
-              secretEnv.HERMES_DASHBOARD_OIDC_CLIENT_SECRET = "${secrets}/hermes-alice";
-            };
-            exposure = {
-              enable = true;
-              listenAddresses = [
-                "0.0.0.0"
-                "[::]"
-              ];
-            };
-            sso = {
-              enable = true;
-              accounts.alice = "alice";
-              clients.hermes-alice.secretFile = "${secrets}/hermes-alice";
-              dex.users.alice.passwordHashFile = "${secrets}/alice.hash";
-            };
-          };
-
-          # Stand-ins for the deployment's secrets, created at runtime.
-          systemd.services.local-sso-secrets = {
-            wantedBy = [ "multi-user.target" ];
-            before = [
-              "dex.service"
-              "hermes-agent-alice.service"
+        services.hyperhermes = {
+          package = hermesPackage;
+          pythonPackages = _: [ ];
+          agents.alice.uid = 1001;
+          exposure = {
+            enable = true;
+            listenAddresses = [
+              "0.0.0.0"
+              "[::]"
             ];
-            requiredBy = [
-              "dex.service"
-              "hermes-agent-alice.service"
-            ];
-            serviceConfig = {
-              Type = "oneshot";
-              RemainAfterExit = true;
-            };
-            script = ''
-              install -d -m 700 ${secrets}
-              echo client-secret-alice > ${secrets}/hermes-alice
-              ${python}/bin/python3 -c 'import bcrypt; print(bcrypt.hashpw(b"alice-password", bcrypt.gensalt(10)).decode())' \
-                > ${secrets}/alice.hash
-            '';
           };
-
-          systemd.services.hermes-dashboard-alice.after = [
-            "dex.service"
-            "nginx.service"
-          ];
-          # alice's virtual host, on her root-held dashboard port, which
-          # core's firewall opens to her and root only; nginx gets its own
-          # exception, as the dashboards feature will add.
-          systemd.services.hermes-firewall.script = lib.mkAfter ''
-            iptables -w -I ${self.lib.chain} 1 -p tcp --dport ${toString dashboardPort} -m owner --uid-owner nginx -j RETURN
-          '';
-          services.nginx.virtualHosts.local-sso-dashboard-alice = {
-            serverName = "alice.${domain}";
-            listen = config.services.hyperhermes.exposure.nginxListen;
-            locations."/".proxyPass = "http://127.0.0.1:${toString dashboardPort}";
+          sso = {
+            enable = true;
+            accounts.alice = "alice";
+            clients.hermes-alice.secretFile = "${secrets}/hermes-alice";
+            dex.users.alice.passwordHashFile = "${secrets}/alice.hash";
+            # Owns no agent: dex signs it in to any client.
+            dex.users.bob.passwordHashFile = "${secrets}/bob.hash";
           };
+          dashboards.enable = true;
         };
+
+        # Stand-ins for the deployment's secrets, created at runtime.
+        systemd.services.local-sso-secrets = {
+          wantedBy = [ "multi-user.target" ];
+          before = [
+            "dex.service"
+            "hermes-agent-alice.service"
+          ];
+          requiredBy = [
+            "dex.service"
+            "hermes-agent-alice.service"
+          ];
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+          };
+          script = ''
+            install -d -m 700 ${secrets}
+            echo client-secret-alice > ${secrets}/hermes-alice
+            for user in alice bob; do
+              ${python}/bin/python3 -c "import bcrypt; print(bcrypt.hashpw(b'$user-password', bcrypt.gensalt(10)).decode())" \
+                > ${secrets}/$user.hash
+            done
+          '';
+        };
+
+        systemd.services.hermes-dashboard-alice.after = [
+          "dex.service"
+          "nginx.service"
+        ];
+      };
     };
   };
 
@@ -217,6 +197,12 @@ pkgs.testers.runNixOSTest {
         print(machine.succeed(
             "${python}/bin/python3 ${./login.py} http://alice.${domain}:${toString port} "
             "alice@${domain} alice-password hermes-alice"
+        ))
+
+    with subtest("an account outside hermes-alice is refused at alice's dashboard"):
+        print(machine.succeed(
+            "${python}/bin/python3 ${./login.py} --refused http://alice.${domain}:${toString port} "
+            "bob@${domain} bob-password hermes-alice"
         ))
   '';
 }

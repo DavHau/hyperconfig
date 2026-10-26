@@ -1,7 +1,7 @@
 # hermes-onboard <machine> <agent>
 #
 # Prints the welcome message for the person behind one published hermes
-# agent (hyper.hermesDashboard.users), ready to paste: a one-time link to
+# agent (services.hyperhermes.dashboards), ready to paste: a one-time link to
 # set up their passkey, then where to talk to the agent (browser, Hermes
 # Mobile, terminal). Operator notes go to stderr. Facts come from the flake
 # and the clan vars store, so the message matches what is deployed. Run
@@ -10,7 +10,7 @@
 # The message names only the front door (hermes.davhau.com): it signs the
 # person in and forwards to their dashboard on the agents' site, and its
 # /app page shows the address for the app
-# (modules/nixos/hermes-dashboard-public.nix).
+# (hyperhermes' dashboards module).
 #
 # The setup link is a pocket-id one-time access token, minted through the
 # admin API with the oidc server's static API key (clan var
@@ -35,13 +35,14 @@ die() {
 facts=$(nix eval --json "$repo#nixosConfigurations.$machine.config" --apply "$(cat <<EOF
 c:
 let
-  d = c.hyper.hermesDashboard.users.$agent or null;
+  h = c.services.hyperhermes;
+  published = h.dashboards.enable && h.agents ? $agent;
   comment = k: let p = builtins.filter builtins.isString (builtins.split " " k);
     in if builtins.length p > 2 then builtins.elemAt p 2 else "(no comment)";
 in
-if d == null then null else {
-  inherit (d) account;
-  front = c.hyper.hermesDashboard.host;
+if !published then null else {
+  account = h.sso.accounts.$agent;
+  front = h.sso.frontDoor.host;
   issuer = c.hyper.oidc.issuer;
   keys = map comment c.users.users.$agent.openssh.authorizedKeys.keys;
   claude = c.environment.etc ? "hermes-claude-auth";

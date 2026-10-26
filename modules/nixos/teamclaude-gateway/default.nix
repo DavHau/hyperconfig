@@ -286,7 +286,7 @@ in
     # A: sgp's IPv4, forwarded here like the hermes dashboards'; AAAA: som's
     # own public address.
     hyper.porkbunRecords.records.${domain} = {
-      A = config.hyper.hermesDashboard.publicIPv4;
+      A = config.services.hyperhermes.exposure.publicIPv4;
       AAAA.ipv6OnLink = {
         inherit (config.networking.publicIPv6) interface;
         suffix = config.networking.publicIPv6.token;

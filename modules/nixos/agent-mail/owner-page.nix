@@ -2,8 +2,8 @@
 # allowlist requests. It has its own login, separate from the front door's.
 #
 # It lives under davhau.com, a site apart from the agent-controlled
-# davhau.fyi (../hermes-dashboard-public.nix), and nginx forwards no login
-# cookie to agents (../hermes-dashboard-public.nix,
+# davhau.fyi (hyperhermes' dashboards module), and nginx forwards no login
+# cookie to agents (hyperhermes' dashboards module,
 # ../hermes-agents-serve.nix), but a page an agent controls must never hold
 # the key to this one anyway, nor the front door's session. So this page
 # runs an oauth2-proxy of its own:
@@ -19,7 +19,8 @@
 # Same OIDC client as the front door (pocket-id's `hermes` client, which
 # lists this host's callback; modules/flake-parts/nixosConfigurations.nix).
 # Requests a browser sends from another origin are refused unless they are
-# top-level GET navigations (../fetch-metadata-gate.nix); the sign-in is
+# top-level GET navigations (hyperhermes' exposure: Fetch Metadata gate);
+# the sign-in is
 # navigations only, the confirmations are same-origin posts.
 #
 # nginx passes the signed-in account to mailgate in a header it always
@@ -37,13 +38,14 @@
   config,
   lib,
   pkgs,
+  inputs,
   ...
 }:
 let
   cfg = config.hyper.agentMail;
   host = cfg.ownerPage.host;
-  dashboard = config.hyper.hermesDashboard;
-  client = config.hyper.oidc.clients.${dashboard.oidcClient};
+  # The front door's client (hyperhermes' lib.sso).
+  client = config.hyper.oidc.clients.${inputs.hyperhermes.lib.sso.frontDoorClientId};
   vars = config.clan.core.vars.generators;
   socket = "/run/oauth2-proxy-mailgate.sock";
   address = "unix:${socket}:";
@@ -82,8 +84,6 @@ let
   };
 in
 {
-  imports = [ ../fetch-metadata-gate.nix ];
-
   config = lib.mkIf (cfg.enable && host != null) {
     clan.core.vars.generators.mailgate-oauth2-proxy = {
       files.cookie_secret.restartUnits = [ "oauth2-proxy-mailgate.service" ];
@@ -163,7 +163,7 @@ in
       wantedBy = [ "sockets.target" ];
       listenStreams = [ socket ];
       # No trigger limit, as the front door's
-      # (../hermes-dashboard-public.nix says why).
+      # (hyperhermes' sso module says why).
       socketConfig = {
         TriggerLimitIntervalSec = 0;
         SocketUser = "root";
@@ -172,10 +172,10 @@ in
       };
     };
 
-    hyper.fetchMetadataGate.virtualHosts = [ host ];
+    services.hyperhermes.exposure.fetchMetadataGate.virtualHosts = [ host ];
     services.nginx.virtualHosts.${host} = {
       forceSSL = true;
-      # *.<front door host> (../hermes-dashboard-public.nix)
+      # *.<front door host> (hyperhermes' sso module)
       useACMEHost = "hermes-subdomains";
       locations."/oauth2/" = {
         proxyPass = "http://${address}";

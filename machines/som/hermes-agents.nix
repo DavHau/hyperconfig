@@ -2,8 +2,9 @@
 # flake): one login account per agent, the gateway and dashboard natively
 # as that account, state under /var/lib/hermes/<agent>/state. Entries here
 # carry what differs per agent; the uids are in ./hermes-agents-data.nix,
-# which vit's GPU host reads too. Who signs in to which agent's dashboard:
-# ./hermes-dashboards.nix. The brain: ./hermes-inference.nix.
+# which vit's GPU host reads too. Who signs in to which agent's dashboard,
+# and the front door: ./hermes-dashboards.nix. The brain:
+# ./hermes-inference.nix.
 #
 # Site shape on top of hyperhermes, per agent:
 #   - reader on /vault/parquet (`vault-ro`, ../../modules/nixos/vault-ids.nix),
@@ -11,9 +12,9 @@
 #     hyperhermes.nixosModules.clan) for vit, the GPU host, where it has an
 #     account of the same uid (../../modules/nixos/hermes-agents-gpu-host.nix)
 #     and which the gpu-host skill teaches,
-#   - the web dashboard at https://<agent>.<agentDomain>/
-#     (../../modules/nixos/hermes-dashboard-public.nix) and 10 published
-#     loopback ports (../../modules/nixos/hermes-agents-serve.nix),
+#   - the web dashboard at https://<agent>.<domain>/ (hyperhermes'
+#     dashboards, behind the clan's pocket-id: hyper.oidc) and 10
+#     published loopback ports (../../modules/nixos/hermes-agents-serve.nix),
 #   - the web tools (hyperhermes.nixosModules.browser).
 #
 # Messengers (Telegram, ...) are not declared here: each agent's owner
@@ -54,10 +55,12 @@ in
 {
   imports = [
     inputs.hyperhermes.nixosModules.core
+    inputs.hyperhermes.nixosModules.exposure
+    inputs.hyperhermes.nixosModules.sso
+    inputs.hyperhermes.nixosModules.dashboards
     inputs.hyperhermes.nixosModules.clan
     ./hermes-inference.nix
     inputs.hyperhermes.nixosModules.browser
-    ../../modules/nixos/hermes-dashboard-public.nix
     ../../modules/nixos/hermes-agents-serve.nix
     inputs.hyperhermes.nixosModules.wallet
     # stefan's account (uid, vault-ro) is shared with vit.
@@ -213,11 +216,20 @@ in
     }
   ];
 
-  # Each agent's dashboard account; the inventory reads the same file for
-  # the pocket-id clients and groups. Every agent is published.
-  hyper.hermesDashboard.users =
-    lib.mapAttrs (_: _: { }) data
-    // lib.mapAttrs (_: account: { inherit account; }) dashboards.accounts;
+  # Every agent's dashboard, signed in through the clan's pocket-id: the
+  # inventory declares exactly the clients sso.oidcClients lists (from the
+  # same ./hermes-dashboards.nix), and their secrets come from there. The
+  # exposure (domain, DNS, ACME) is in ./configuration.nix.
+  services.hyperhermes.sso = {
+    enable = true;
+    inherit (config.hyper.oidc) issuer;
+    accounts = lib.mapAttrs (name: _: name) data // dashboards.accounts;
+    frontDoor.host = dashboards.frontDoor;
+    clients = lib.mapAttrs (id: _: {
+      secretFile = toString config.hyper.oidc.clients.${id}.secretFile;
+    }) config.services.hyperhermes.sso.oidcClients;
+  };
+  services.hyperhermes.dashboards.enable = true;
 
   # ssh.nix sets ControlPath ~/.ssh/control/%C fleet-wide; without the
   # directory every ssh fails. hermes runs with HOME = the account home, so

@@ -1,4 +1,4 @@
-// The sign-in rate limit's client key (./hermes-dashboard-public.nix): the
+// The sign-in rate limit's client key (./default.nix): the
 // IPv4 address, or the /64 of an IPv6 address. One subscriber usually holds
 // a whole /64, so keying on the full address would hand it 2^64 budgets.
 // A failure falls back to the full address: an empty key would put every
