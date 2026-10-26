@@ -13,13 +13,6 @@ let
 in
 {
   config = lib.mkIf cfg.browser.enable {
-    assertions = [
-      {
-        assertion = !(config.services.spaces-searxng.enable or false);
-        message = "services.hyperhermes.browser and spaces' services.spaces-searxng both run services.searx; set services.spaces-searxng.enable = false.";
-      }
-    ];
-
     services.searx = {
       enable = true;
       # Patches, so the build fails once upstream changes the code they touch.

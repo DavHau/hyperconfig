@@ -256,11 +256,6 @@
           import ./modules/nixos/mullvad-egress/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
-        hermes-camofox-isolation =
-          import ./modules/nixos/hermes-browser/camofox-test.nix {
-            pkgs = nixpkgs.legacyPackages.x86_64-linux;
-            inherit inputs;
-          };
         agent-mail =
           import ./modules/nixos/agent-mail/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;

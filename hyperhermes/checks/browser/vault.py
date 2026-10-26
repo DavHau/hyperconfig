@@ -1,6 +1,6 @@
-"""Vault driver for camofox-test.nix (patches/hermes-camofox-vault.patch), run as alice with hermes'
-own interpreter, through hermes' tool registry like the agent loop, against her real camofox-browser
-and the login page of camofox-test-site.py.
+"""Vault driver for the browser check (default.nix; patches/hermes-camofox-vault.patch), run as
+alice with hermes' own interpreter, through hermes' tool registry like the agent loop, against her
+real camofox-browser and the login page of site.py.
 
   vault <site>   the vault tools read the page's origin and fill a saved password into the page's
                  password field; on another origin the fill refuses and writes nothing.

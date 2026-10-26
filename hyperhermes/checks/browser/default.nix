@@ -1,4 +1,5 @@
-# Isolation of the per-agent Camofox servers (camofox.nix): two agents,
+# The browser feature (nixosModules.browser). Isolation of the per-agent
+# Camofox servers (modules/browser/camofox.nix): two agents,
 # alice and bob. alice's first connection to her root-held port starts
 # her server; her access key gates its routes. bob reaches neither her
 # root-held port nor her backend, cannot read her key or profile store,
@@ -6,7 +7,7 @@
 # never receives her traffic.
 #
 # Downloads: hermes' browser_downloads tool (the patched hermes package,
-# patches/hermes-camofox-browser-downloads.patch), called through hermes'
+# ../../modules/core/patches/hermes-camofox-browser-downloads.patch), called through hermes'
 # tool registry against alice's real server and a local site, saves the
 # files that a link, a form POST, a form POST redirected to another origin
 # and a script start, and reports their sha256. It refuses paths outside
@@ -14,7 +15,7 @@
 # another camofox userId on her server nor bob sees her downloads, and
 # closing the session deletes the server's copies.
 #
-# Captchas: hermes' browser_solve_captcha (patches/hermes-camofox-solve-captcha.patch)
+# Captchas: hermes' browser_solve_captcha (hermes-camofox-solve-captcha.patch)
 # drives the captcha plugin of alice's server (pkgs/camofox-browser) against a
 # local 3x3 grid captcha, with a stand-in for the model that answers only a
 # request carrying an image and no tools: the browser clicks the right tiles
@@ -22,20 +23,20 @@
 # reports no_captcha. Another camofox userId cannot solve on her tab.
 #
 # Vault: hermes' browser_vault_save_login and browser_vault_fill
-# (patches/hermes-camofox-vault.patch) read the origin of alice's tab and
+# (hermes-camofox-vault.patch) read the origin of alice's tab and
 # fill a saved password into the site's login form through her server;
 # on another origin the fill refuses and writes nothing.
-{ pkgs, inputs }:
+{ pkgs, self }:
 let
   inherit (pkgs) lib;
-  hlib = inputs.hyperhermes.lib;
+  hlib = self.lib;
   aliceUid = 1000;
   port = toString (hlib.camofoxPortFor "alice");
   backend = toString (hlib.camofoxBackendBase + aliceUid);
   dir = hlib.camofoxDir "alice";
 
-  site = ./camofox-test-site.py;
-  captchaSite = ./camofox-test-captcha-site.py;
+  site = ./site.py;
+  captchaSite = ./captcha-site.py;
 
   # Runs the driver as an agent with hermes' own interpreter, the agent's
   # camofox URL and key from its .env (as hermes reads them) and its
@@ -52,15 +53,13 @@ let
   ];
 in
 pkgs.testers.runNixOSTest {
-  name = "hermes-camofox-isolation";
+  name = "hyperhermes-browser";
 
   nodes.machine = {
     imports = [
-      inputs.hyperhermes.nixosModules.core
-      ./options.nix
-      ./camofox.nix
+      self.nixosModules.core
+      self.nixosModules.browser
     ];
-    _module.args.inputs = inputs;
     virtualisation.memorySize = 3072;
 
     services.hyperhermes = {
@@ -117,9 +116,9 @@ pkgs.testers.runNixOSTest {
     let
       hermes = nodes.machine.services.hyperhermes.package;
       driverOf = driverScript hermes;
-      driver = driverOf ./camofox-test-downloads.py;
-      captchaDriver = driverOf ./camofox-test-captcha.py;
-      vaultDriver = driverOf ./camofox-test-vault.py;
+      driver = driverOf ./downloads.py;
+      captchaDriver = driverOf ./captcha.py;
+      vaultDriver = driverOf ./vault.py;
     in
     ''
     import json
@@ -164,7 +163,7 @@ pkgs.testers.runNixOSTest {
         out = machine.succeed("${driver "bob" "other http://127.0.0.1:8765 /tmp/alice-ids.json"}")
         print(out)
         assert "ALL PASSED" in out
-        out = machine.succeed("runuser -u bob -- env CAMOFOX_URL=http://127.0.0.1:${port} CAMOFOX_API_KEY=x HERMES_HOME=/home/bob/hermes-test2 TERMINAL_CWD=/home/bob/ws ${hermes.hermesVenv}/bin/python3 ${./camofox-test-downloads.py} unreachable 2>&1")
+        out = machine.succeed("runuser -u bob -- env CAMOFOX_URL=http://127.0.0.1:${port} CAMOFOX_API_KEY=x HERMES_HOME=/home/bob/hermes-test2 TERMINAL_CWD=/home/bob/ws ${hermes.hermesVenv}/bin/python3 ${./downloads.py} unreachable 2>&1")
         print(out)
         assert "ALL PASSED" in out
 

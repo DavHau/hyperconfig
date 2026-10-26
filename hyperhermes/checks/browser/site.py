@@ -1,4 +1,4 @@
-"""Download site for camofox-test.nix: pages that start downloads by a link, a form
+"""Download site for the browser check (default.nix): pages that start downloads by a link, a form
 POST answered with an attachment, a form POST answered with a 302 to a file on
 another origin (APKSum's shape), and a script-built blob; plus a fetch() re-POST
 of the redirecting form and a file over browser_downloads' 50 MiB limit. /login is

@@ -1,4 +1,4 @@
-"""browser_downloads driver for camofox-test.nix, run with hermes' own interpreter as
+"""browser_downloads driver for the browser check (default.nix), run with hermes' own interpreter as
 the agent user, through hermes' tool registry like the agent loop.
 
   owner <site> <sha-helper>   alice: downloads by link, form, redirecting form and

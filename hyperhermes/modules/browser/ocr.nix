@@ -1,5 +1,5 @@
-# OCR for the agents on our own GPU (browser.ocr.baseUrl, served by
-# ../ocr-server on vit):
+# OCR for the agents on the deployment's own hardware (browser.ocr.baseUrl,
+# a Firecrawl-Parse-compatible server the site runs):
 #   - read_file: a fully scanned PDF raises anydoc's NeedsOcrError, and
 #     hermes then sends the PDF through anydoc's Firecrawl Parse client.
 #     file_tools.hosted_ocr_url (hyperhermes' hermes-hosted-ocr-url.patch)
@@ -15,7 +15,6 @@
   config,
   lib,
   pkgs,
-  inputs,
   ...
 }:
 let
@@ -25,7 +24,7 @@ let
     OCR_URL=${lib.escapeShellArg cfg.browser.ocr.baseUrl} exec ${lib.getExe pkgs.python3} ${./ocr-cli.py} "$@"
   '';
 
-  skill = inputs.hyperhermes.lib.mkAgentSkill pkgs {
+  skill = import ../../lib/agent-skill.nix pkgs {
     name = "ocr";
     src = lib.fileset.toSource {
       root = ./ocr-skill;

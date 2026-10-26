@@ -17,13 +17,12 @@
   config,
   lib,
   pkgs,
-  inputs,
   ...
 }:
 let
   cfg = config.services.hyperhermes;
 
-  skill = inputs.hyperhermes.lib.mkAgentSkill pkgs {
+  skill = import ../../lib/agent-skill.nix pkgs {
     name = "web-access";
     src = lib.fileset.toSource {
       root = ./web-access-skill;

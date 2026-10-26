@@ -1,9 +1,13 @@
-{ python3Packages, lib, callPackage, chromium, xvfb-run }:
-let
-  camoufox-browser = callPackage ../../pkgs/camoufox/browser.nix { };
-  camoufox = python3Packages.callPackage ../../pkgs/camoufox/python.nix { };
-  captchakraken = python3Packages.callPackage ../../pkgs/captchakraken/python.nix { };
-in
+{
+  python3Packages,
+  lib,
+  chromium,
+  xvfb-run,
+  # hyperhermes' builds (modules/flake-parts/web-bench.nix).
+  camoufox,
+  camoufox-python,
+  captchakraken-python,
+}:
 python3Packages.buildPythonApplication {
   pname = "web-bench";
   version = "0.1.0";
@@ -23,8 +27,8 @@ python3Packages.buildPythonApplication {
     requests
     curl-cffi
     playwright
-    camoufox
-    captchakraken
+    camoufox-python
+    captchakraken-python
   ];
 
   # Browsers come from Nix, never from a Playwright/Camoufox download.
@@ -35,7 +39,7 @@ python3Packages.buildPythonApplication {
   # not word-split.
   makeWrapperArgs = [
     "--set" "WEB_BENCH_CHROMIUM" (lib.getExe chromium)
-    "--set" "WEB_BENCH_CAMOUFOX" "${camoufox-browser}/lib/camoufox/camoufox"
+    "--set" "WEB_BENCH_CAMOUFOX" "${camoufox}/lib/camoufox/camoufox"
     "--set" "WEB_BENCH_BIN" "${placeholder "out"}/bin/web-bench"
     "--set" "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD" "1"
     "--set-default" "VLLM_BASE_URL" "http://vit.d:8096/v1"

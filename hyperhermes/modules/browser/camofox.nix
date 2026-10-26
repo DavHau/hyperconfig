@@ -24,12 +24,11 @@
   config,
   lib,
   pkgs,
-  inputs,
   ...
 }:
 let
   cfg = config.services.hyperhermes;
-  hlib = inputs.hyperhermes.lib;
+  hlib = import ../../lib/core.nix { inherit lib; };
 
   # The default build (pkgs/camoufox/browser.nix), as web-extract uses.
   # camofox-browser 1.18.1 downloads 152.0.4-beta.30 for itself
@@ -37,8 +36,8 @@ let
   # well, and 152 can drop a humanized mouse event on the content's top
   # row and then hold every later mouse event of the browser behind it
   # (Camoufox #751/#752, fixed in 156.0.1-beta.36).
-  camoufox = pkgs.callPackage ../../../pkgs/camoufox/browser.nix { };
-  camofox = pkgs.callPackage ../../../pkgs/camofox-browser { };
+  camoufox = pkgs.callPackage ../../pkgs/camoufox/browser.nix { };
+  camofox = pkgs.callPackage ../../pkgs/camofox-browser { };
 
   # Seconds a navigation waits for a challenge interstitial to clear,
   # ticking Cloudflare's Turnstile box when it draws one; non-zero also
