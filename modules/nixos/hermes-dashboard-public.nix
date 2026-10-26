@@ -1,6 +1,6 @@
 # Public web dashboards for native hermes agents, one hostname per agent:
 # https://<agent>.<agentDomain>/ (on som <agent>.davhau.fyi) -> nginx -> the
-# root-held dashboard port of that agent (./hermes-native/forwards.nix),
+# root-held dashboard port of that agent (hyperhermes' core forwards),
 # which bridges to the agent's loopback backend after checking the
 # backend's owner.
 #
@@ -47,7 +47,7 @@
 # oidc service's shared clan var `oidc-client-hermes-<agent>` (generated,
 # no prompt; on the pocket-id server and here). It rides a systemd
 # credential into the agent's unit and lands in the owner's 0600 .env as
-# HERMES_DASHBOARD_OIDC_CLIENT_SECRET (services.hermes-native secretEnv),
+# HERMES_DASHBOARD_OIDC_CLIENT_SECRET (services.hyperhermes secretEnv),
 # never in the store or the managed dir; hermes sends it with HTTP Basic,
 # which pocket-id's discovery offers.
 #
@@ -98,7 +98,7 @@
 # legitimately changes, so they stay unpinned.
 #
 # The settings are pinned through hermes' managed scope
-# (./hermes-native/agents.nix, managedDirFor), so neither the dashboard nor
+# (hyperhermes' core, managedDirFor), so neither the dashboard nor
 # the CLI can change them: dashboard.public_url (a non-loopback public URL
 # turns the gate on even on the loopback bind, and is the only Host and WS
 # Origin hermes accepts), the issuer and the client id. Scopes include
@@ -141,7 +141,7 @@
 # get through.
 #
 # Request limits: nginx opens a connection to the agent's socket per
-# request, and each one runs a bridge process (./hermes-native/forwards.nix,
+# request, and each one runs a bridge process (hyperhermes' core forwards,
 # whose sockets carry no trigger limit, so a flood never stops them). Per
 # agent host (dashboards here, serve ports in ./hermes-agents-serve.nix)
 # and client network as above, nginx passes 50 requests a second after a
@@ -214,11 +214,12 @@
   config,
   lib,
   pkgs,
+  inputs,
   ...
 }:
 let
   cfg = config.hyper.hermesDashboard;
-  hlib = import ./hermes-native/lib.nix { inherit lib; };
+  hlib = inputs.hyperhermes.lib;
   portOf = hlib.dashboardPortFor;
   client = config.hyper.oidc.clients.${cfg.oidcClient};
   certName = "hermes-fyi";
@@ -431,8 +432,8 @@ in
         in
         [
           {
-            assertion = config.hyper.hermesAgents ? ${user};
-            message = "hyper.hermesDashboard.users.${user}: only an agent of hyper.hermesAgents has a host dashboard unit to publish.";
+            assertion = config.services.hyperhermes.agents ? ${user};
+            message = "hyper.hermesDashboard.users.${user}: only an agent of services.hyperhermes.agents has a host dashboard unit to publish.";
           }
           {
             assertion = builtins.match "[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?" user != null;
@@ -475,7 +476,7 @@ in
     # the managed dir is world-readable. The keys that would turn the gate
     # off or add another provider leave the .env before every dashboard
     # start (see the header).
-    services.hermes-native.users = lib.mapAttrs (
+    services.hyperhermes.agents = lib.mapAttrs (
       user: u:
       let
         secretFile = config.hyper.oidc.clients.${clientIdOf user}.secretFile or null;
@@ -505,7 +506,7 @@ in
     # above). The drain provider has no config switch: its secret is
     # env-only. Neither the gateway nor hermes-desktop's `hermes serve`
     # reads them.
-    services.hermes-native.settings.dashboard = {
+    services.hyperhermes.settings.dashboard = {
       oauth.client_id = "";
       basic_auth = {
         username = "";
@@ -619,7 +620,7 @@ in
     };
 
     # nginx may dial the owner-gated root-held dashboard ports. -I puts
-    # them before the REJECT ./hermes-native/firewall.nix appends for each
+    # them before the REJECT hyperhermes' core firewall appends for each
     # port.
     systemd.services.hermes-firewall.script = lib.mkAfter (
       lib.concatMapStrings (user: ''

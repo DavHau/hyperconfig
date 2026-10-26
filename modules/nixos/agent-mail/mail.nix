@@ -627,7 +627,7 @@ in
           };
         };
 
-        # Rides its own unit like hermes-firewall (../hermes-native/firewall.nix),
+        # Rides its own unit like hermes-firewall (hyperhermes' core firewall),
         # with the same ordering: both firewall backends flush at start.
         systemd.services.mailgate-firewall = {
           description = "Owner-match and egress firewall of the agents' mail";

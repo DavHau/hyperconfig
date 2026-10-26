@@ -1,7 +1,7 @@
 # ./mail.nix and ./owner-page.nix end to end, with the real nginx config of
 # the front door and the agents' dashboards (../hermes-dashboard-public.nix,
 # hermes itself stubbed by an echo backend behind the real owner-checking
-# forward of ../hermes-native/forwards.nix) and the serve ports
+# forward of hyperhermes' core) and the serve ports
 # (../hermes-agents-serve.nix) on the agents' own domain, with the old
 # names' redirects: Stalwart as MX, mailgate, two agents (alice, bob), all
 # three oauth2-proxy instances against a stub OIDC provider, and a
@@ -23,7 +23,7 @@ let
   inherit (pkgs) lib;
   system = pkgs.stdenv.hostPlatform.system;
   integrationMail = inputs.spaces.packages.${system}.integration-mail;
-  hlib = import ../hermes-native/lib.nix { inherit lib; };
+  hlib = inputs.hyperhermes.lib;
   domain = "agents.test";
   dashHost = "hermes.test";
   ownerHost = "mailgate.${dashHost}";
@@ -480,8 +480,8 @@ let
     };
   };
 
-  # What the modules under test read from clan, the oidc service and
-  # hermes-native, as plain options.
+  # What the modules under test read from clan and the oidc service, as
+  # plain options.
   stubs =
     { lib, ... }:
     let
@@ -490,32 +490,6 @@ let
     in
     {
       options = {
-        hyper.hermesAgents = mkOption {
-          type = types.attrsOf types.attrs;
-          default = { };
-        };
-        services.hermes-native = {
-          enable = mkOption {
-            type = types.bool;
-            default = false;
-          };
-          users = mkOption {
-            type = types.attrsOf types.attrs;
-            default = { };
-          };
-          extraPackages = mkOption {
-            type = types.listOf types.package;
-            default = [ ];
-          };
-          settings.skills.external_dirs = mkOption {
-            type = types.listOf types.str;
-            default = [ ];
-          };
-          settings.dashboard = mkOption {
-            type = freeform;
-            default = { };
-          };
-        };
         hyper.oidc = {
           issuer = mkOption { type = types.str; };
           clients = mkOption { type = types.attrsOf types.attrs; };
@@ -634,7 +608,7 @@ pkgs.testers.runNixOSTest {
         ./owner-page.nix
         ../hermes-dashboard-public.nix
         ../hermes-agents-serve.nix
-        ../hermes-native/forwards.nix
+        inputs.hyperhermes.nixosModules.core
         inputs.spaces.nixosModules.spaces-users
         stubs
       ];
@@ -663,15 +637,6 @@ pkgs.testers.runNixOSTest {
         "12345.${dashHost}"
       ];
 
-      users.users.alice = {
-        isNormalUser = true;
-        uid = 1001;
-      };
-      users.users.bob = {
-        isNormalUser = true;
-        uid = 1002;
-      };
-
       environment.etc = lib.mkMerge [
         (secret "master" "test-master-secret")
         (secret "hook" "test-hook-secret")
@@ -689,18 +654,19 @@ pkgs.testers.runNixOSTest {
         (var "porkbun" "secretkey" "unused")
       ];
 
-      # The dashboards and serve ports, as on som, minus hermes itself.
-      hyper.hermesAgents = {
-        alice = { };
-        bob = { };
+      # The dashboards and serve ports, as on som, minus hermes itself:
+      # core's accounts, forwards and firewall, but none of its agent
+      # units (the echo backends below stand in for the dashboard).
+      services.hyperhermes.agents = {
+        alice.uid = 1001;
+        bob.uid = 1002;
       };
-      services.hermes-native = {
-        enable = true;
-        users = {
-          alice = { };
-          bob = { };
-        };
-      };
+      systemd.services.hermes-agent-alice.enable = false;
+      systemd.services.hermes-dashboard-alice.enable = false;
+      systemd.services.hermes-python-venv-alice.enable = false;
+      systemd.services.hermes-agent-bob.enable = false;
+      systemd.services.hermes-dashboard-bob.enable = false;
+      systemd.services.hermes-python-venv-bob.enable = false;
       hyper.hermesDashboard = {
         host = dashHost;
         agentDomain = fyi;

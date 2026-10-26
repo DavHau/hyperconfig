@@ -1,6 +1,6 @@
 # hermes-claude-auth (github.com/kristianvast/hermes-claude-auth) for every
-# hermes agent on this host, microVM or native: a runtime patch of
-# hermes-agent's anthropic adapter that makes OAuth (Claude Pro/Max
+# hermes agent on this host (services.hyperhermes.agents): a runtime patch
+# of hermes-agent's anthropic adapter that makes OAuth (Claude Pro/Max
 # subscription) requests pass Anthropic's Claude-Code billing validator.
 # Vendored copy + provenance in ./hermes-claude-auth/.
 #
@@ -25,41 +25,35 @@
 # the writable venv, survives restarts and rebuilds, updates with the
 # vendored file. PYTHONPATH is inherited by the TUI's python worker.
 #
-# Injection points, VM user (guest config, microvm.vms."hermes-<user>"):
-#   - hermes-agent.service      (gateway)
-#   - hermes-dashboard.service  (web dashboard backend)
-#   - /run/current-system/sw/bin/hermes  (what the host `hermes` shim execs
-#     over vsock ssh), shadowed by a hiPrio wrapper.
-# Native user (./hermes-native/agents.nix, host units as the owner):
+# Injection points (hyperhermes' core, host units as the owner):
 #   - hermes-agent-<user>.service, hermes-dashboard-<user>.service: unit
-#     environment. (Not the .env file: agent-config.nix strips PYTHONPATH
-#     from it before every start, on purpose.)
-#   - the host `hermes` shim (./hermes-native/agents.nix) execs the sealed
-#     package directly. It is not addressable from here (recursion through
+#     environment. (Not the .env file: core strips PYTHONPATH from it
+#     before every start, on purpose.)
+#   - the host `hermes` shim (core) execs the sealed package directly. It
+#     is not addressable from here (recursion through
 #     environment.systemPackages), and users.users.<u>.packages would tie
 #     the account to the agent list. So a wrapper that exports PYTHONPATH
 #     and execs the shim by its runtime path is put on PATH through
 #     environment.profiles: a plain entry precedes /run/current-system/sw
 #     (mkAfter in programs/environment.nix). Only bin/hermes lives there.
 #
-# The Claude Code CLI is on the agent's PATH (extraPackages feeds both the
-# guest and the native runtime): the patch signs headers with
-# `claude --version`, and Anthropic rejects versions below a moving
-# minimum ("Claude Code 2.1.238 does not support this model; version
-# 2.1.251 or newer is required"). Hence the llm-agents.nix package, the
-# one packages.nix ships system-wide, not nixpkgs' lagging one: the
-# agent's PATH puts extraPackages ahead of /run/current-system/sw, so a
-# stale pin here beats a fresh system profile. Bump llm-agents when it
-# hits again. The OAuth login (`claude` -> /login) must write
-# ~/.claude/.credentials.json into the AGENT's HOME: inside the guest that
-# is just $HOME; a native agent's HOME is the account home, so the owner
-# runs plain `claude` on the host (claude-code is in systemPackages for
-# that). Hermes itself already knows Claude Code credentials:
-# once anthropic is the configured provider, agent/credential_pool.py
-# seeds a `claude_code` entry into $HERMES_HOME/auth.json from that file.
-# The patch adds what hermes lacks on the wire (billing-header signature,
-# Claude Code identity/system-prompt layout, Stainless headers, tool-name
-# namespacing, thinking-replay and 429 handling).
+# The Claude Code CLI is on the agent's PATH (services.hyperhermes
+# extraPackages): the patch signs headers with `claude --version`, and
+# Anthropic rejects versions below a moving minimum ("Claude Code 2.1.238
+# does not support this model; version 2.1.251 or newer is required").
+# Hence the llm-agents.nix package, the one packages.nix ships
+# system-wide, not nixpkgs' lagging one: the agent's PATH puts
+# extraPackages ahead of /run/current-system/sw, so a stale pin here beats
+# a fresh system profile. Bump llm-agents when it hits again. The OAuth
+# login (`claude` -> /login) must write ~/.claude/.credentials.json into
+# the AGENT's HOME, the account home, so the owner runs plain `claude` on
+# the host (claude-code is in systemPackages for that). Hermes itself
+# already knows Claude Code credentials: once anthropic is the configured
+# provider, agent/credential_pool.py seeds a `claude_code` entry into
+# $HERMES_HOME/auth.json from that file. The patch adds what hermes lacks
+# on the wire (billing-header signature, Claude Code identity/system-prompt
+# layout, Stainless headers, tool-name namespacing, thinking-replay and
+# 429 handling).
 {
   config,
   inputs,
@@ -69,8 +63,7 @@
 }:
 let
   claude-code = inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.claude-code;
-  vmCfg = config.services.hermes-microvm;
-  nativeCfg = config.services.hermes-native;
+  agents = config.services.hyperhermes.agents;
 
   site = pkgs.runCommand "hermes-claude-auth-site" { } ''
     mkdir -p $out
@@ -79,68 +72,30 @@ let
     cp ${./hermes-claude-auth/anthropic_billing_bypass.py} $out/anthropic_billing_bypass.py
   '';
 
-  guestModule =
-    {
-      config,
-      lib,
-      pkgs,
-      ...
-    }:
-    let
-      hermes = config.services.hermes-agent.package;
-      # Shadows the plain package's bin/hermes in systemPackages
-      # (guest.nix's addToSystemPackages); hermes-agent's wrapper only
-      # touches PYTHONPATH when extraPythonPackages is set, so ours passes
-      # through to the console script.
-      hookedCli = lib.hiPrio (
-        pkgs.writeShellScriptBin "hermes" ''
-          export PYTHONPATH=${site}''${PYTHONPATH:+:$PYTHONPATH}
-          exec ${hermes}/bin/hermes "$@"
-        ''
-      );
-    in
-    {
-      systemd.services.hermes-agent.environment.PYTHONPATH = "${site}";
-      systemd.services.hermes-dashboard.environment.PYTHONPATH = "${site}";
-      environment.systemPackages = [ hookedCli ];
-      # Discoverable path for humans/`install.sh --check`-style probes.
-      environment.etc."hermes-claude-auth".source = site;
-    };
-
-  # Native: same PYTHONPATH ahead of the hermes-native shim. The shim keeps
-  # the caller's PYTHONPATH (it only exports the runtime's own keys), and the
-  # sealed package's wrapper passes it through as in the guest.
+  # The same PYTHONPATH ahead of core's shim. The shim keeps the caller's
+  # PYTHONPATH (it only exports the runtime's own keys), and the sealed
+  # package's wrapper passes it through.
   hookedShim = pkgs.writeShellScriptBin "hermes" ''
     export PYTHONPATH=${site}''${PYTHONPATH:+:$PYTHONPATH}
     exec /run/current-system/sw/bin/hermes "$@"
   '';
-  # Static top-level keys only (see ./hermes-native/agents.nix): a
+  # Static top-level keys only (see hyperhermes' core agents.nix): a
   # config-dependent list at the config root would recurse through
-  # nativeCfg.users.
-  forEachNative = f: lib.mkMerge (lib.mapAttrsToList f nativeCfg.users);
-  anyNative = nativeCfg.users != { };
+  # the agent list.
+  forEachAgent = f: lib.mkMerge (lib.mapAttrsToList f agents);
 in
 {
-  imports = [ ./hermes-native ];
-
-  config = lib.mkMerge [
-    (lib.mkIf vmCfg.enable {
-      services.hermes-microvm.extraPackages = [ claude-code ];
-      # VM name = hlib.vmName in the spaces hermes module ("hermes-<user>").
-      microvm.vms = lib.mapAttrs' (
-        user: _: lib.nameValuePair "hermes-${user}" { config = guestModule; }
-      ) vmCfg.vmUsers;
-    })
-    (lib.mkIf nativeCfg.enable {
-      services.hermes-native.extraPackages = [ claude-code ];
-      systemd.services = forEachNative (user: _: {
+  config = lib.mkIf (agents != { }) {
+    services.hyperhermes.extraPackages = [ claude-code ];
+    systemd.services = forEachAgent (
+      user: _: {
         "hermes-agent-${user}".environment.PYTHONPATH = "${site}";
         "hermes-dashboard-${user}".environment.PYTHONPATH = "${site}";
-      });
-      environment.profiles = lib.mkIf anyNative [ "${hookedShim}" ];
-      # For the owner's OAuth login on the host (plain `claude`).
-      environment.systemPackages = lib.mkIf anyNative [ claude-code ];
-      environment.etc."hermes-claude-auth" = lib.mkIf anyNative { source = site; };
-    })
-  ];
+      }
+    );
+    environment.profiles = [ "${hookedShim}" ];
+    # For the owner's OAuth login on the host (plain `claude`).
+    environment.systemPackages = [ claude-code ];
+    environment.etc."hermes-claude-auth".source = site;
+  };
 }

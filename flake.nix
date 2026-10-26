@@ -178,14 +178,14 @@
     # finds no GPU and whisper falls back to CPU (~90 s per utterance).
     spaces.inputs.voxtype.inputs.nixpkgs.follows = "nixpkgs";
 
-    # hermes-agent for the native agents (modules/nixos/hermes-native) and
-    # anything built from its source. Same tag as spaces' own pin, which
-    # still builds amy's microVM guest; bump the two together unless a
-    # native-only change needs otherwise. The hermes package builds against
-    # this nixpkgs (agent-config.nix), so it must follow ours.
-    hermes-agent.url = "github:NousResearch/hermes-agent/v2026.9.14";
-    hermes-agent.inputs.nixpkgs.follows = "nixpkgs";
-    hermes-agent.inputs.home-manager.follows = "home-manager";
+    # The hermes agents (NousResearch hermes-agent) as a library flake of
+    # their own (./hyperhermes); som supplies the site data and secrets.
+    # Its hermes-agent input builds the agents' package against our
+    # nixpkgs. Anything else built from hermes' source takes that same
+    # input (inputs.hyperhermes.inputs.hermes-agent).
+    hyperhermes.url = "path:./hyperhermes";
+    hyperhermes.inputs.nixpkgs.follows = "nixpkgs";
+    hyperhermes.inputs.llm-agents.follows = "llm-agents";
 
     cctl.url = "github:allouis/cctl";
     cctl.inputs.nixpkgs.follows = "nixpkgs";
@@ -257,7 +257,7 @@
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
         hermes-camofox-isolation =
-          import ./modules/nixos/hermes-native/camofox-test.nix {
+          import ./modules/nixos/hermes-browser/camofox-test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
             inherit inputs;
           };
@@ -269,7 +269,7 @@
         agent-slots =
           import ./modules/nixos/agent-slots-test {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
-            spaces = inputs.spaces;
+            inherit (inputs) spaces hyperhermes;
           };
         porkbun-records =
           import ./modules/nixos/porkbun-records/test.nix {

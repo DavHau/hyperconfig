@@ -1,6 +1,6 @@
-# The root-held ports of every agent (hlib.forwards: the dashboard, the
-# Camofox browser server) and their per-connection owner-checking
-# forwards to the owner's backends.
+# The root-held ports of every agent (services.hyperhermes.forwards: the
+# dashboard, and what features add) and their per-connection
+# owner-checking forwards to the owner's backends.
 #
 # A loopback port belongs to whoever binds it first, and netfilter gates
 # connect(2), never bind(2). While an owner's backend is down, another
@@ -11,21 +11,20 @@
 {
   config,
   lib,
-  pkgs,
   ...
 }:
 let
-  cfg = config.services.hermes-native;
-  hlib = import ./lib.nix { inherit lib; };
-
-  tcpOwnerBridgeBin = import ./tcp-owner-bridge.nix { inherit pkgs; };
+  cfg = config.services.hyperhermes;
 
   # Static top-level option keys only (see agents.nix).
   forEachForward =
-    f: lib.mkMerge (lib.concatLists (lib.mapAttrsToList (user: _: lib.mapAttrsToList (f user) hlib.forwards) cfg.users));
+    f:
+    lib.mkMerge (
+      lib.concatLists (lib.mapAttrsToList (user: _: lib.mapAttrsToList (f user) cfg.forwards) cfg.agents)
+    );
 in
 {
-  config = lib.mkIf cfg.enable {
+  config = lib.mkIf (cfg.agents != { }) {
     # Runs as the owner: the bridge derives the backend port from its own
     # uid. stderr goes to the journal, or StandardInput=socket would leak
     # a refusal to the dialer. One instance per connection; a refusal (no
@@ -38,7 +37,7 @@ in
           description = "${fwd.label} forward for ${user}";
           serviceConfig = {
             User = user;
-            ExecStart = "${tcpOwnerBridgeBin}/bin/hermes-tcp-owner-bridge ${toString fwd.backendBase}";
+            ExecStart = "${cfg.tcpOwnerBridge}/bin/hermes-tcp-owner-bridge ${toString fwd.backendBase}";
             StandardInput = "socket";
             StandardError = "journal";
           };
@@ -58,7 +57,7 @@ in
     # each accepted connection one) pauses accepting for the rest of the
     # window, for every client. nginx lets one client network burst 500
     # requests at once and then 50 a second per host
-    # (../hermes-dashboard-public.nix), so two clients at their limit
+    # (the public dashboards), so two clients at their limit
     # would pause the socket for everyone. PollLimitBurst=2000 per 2s
     # (1000 a second) holds the bursts of three client networks plus their
     # steady rate; only a flood spread over many networks hits it, and then
@@ -69,7 +68,7 @@ in
     # ends, the socket keeps listening. A dashboard tab holds a handful of
     # long-lived websockets and streams; nginx allows one client network
     # at most 128 requests in flight per host, and all of them together
-    # 384 (../hermes-dashboard-public.nix), so nginx never holds every
+    # 384 (the public dashboards), so nginx never holds every
     # slot: 128 stay for the owner's own dialers, while the cap still
     # bounds what a flood spread over many networks can spawn.
     systemd.sockets = forEachForward (

@@ -9,11 +9,12 @@
   config,
   lib,
   pkgs,
+  inputs,
   ...
 }:
 let
-  cfg = config.services.hermes-native;
-  hlib = import ./lib.nix { inherit lib; };
+  cfg = config.services.hyperhermes;
+  hlib = inputs.hyperhermes.lib;
 
   camoufox = pkgs.callPackage ../../../pkgs/camoufox/browser.nix { };
   python = pkgs.python3.withPackages (ps: [
@@ -40,8 +41,8 @@ let
   '';
 in
 {
-  config = lib.mkIf cfg.enable {
-    services.hermes-native.settings = {
+  config = lib.mkIf cfg.browser.enable {
+    services.hyperhermes.settings = {
       # User plugins load only when listed; the list concatenates with
       # an operator's entries.
       plugins.enabled = [ "web-local-extract" ];
@@ -53,14 +54,14 @@ in
     };
 
     # Hermes discovers user plugins only under $HERMES_HOME/plugins. The
-    # link is renewed before every start, after agents.nix created the
-    # directory.
+    # link is renewed before every start, after core's preStart created
+    # the directory.
     systemd.services = lib.mkMerge (
       lib.mapAttrsToList (user: _: {
         "hermes-agent-${user}".preStart = lib.mkAfter ''
           ln -sfn ${plugin} ${hlib.stateDir user}/.hermes/plugins/web-local-extract
         '';
-      }) cfg.users
+      }) cfg.agents
     );
   };
 }

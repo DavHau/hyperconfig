@@ -14,7 +14,7 @@
 # in front of it: from this host, ssh on any slot address, every port of
 # the internal v4 10.43.<id>.2 and anything else over the veth answer only
 # the agent's uid, root and nginx (the proxies below) (the `agent-slots`
-# nft table; like the owner-only gates in ./hermes-native/firewall.nix, but
+# nft table; like the owner-only gates of hyperhermes' core firewall, but
 # nft's own socket-uid match). Otherwise another agent could reach the
 # slot from 10.43.<id>.1, the address the proxies use, and pass for them;
 # a slot may trust X-Real-IP (or the last X-Forwarded-For entry) from that
@@ -844,10 +844,10 @@ virtualHosts =
     };
 
     # --- what the agents get ----------------------------------------------
-    services.hermes-native.extraPackages = [
+    services.hyperhermes.extraPackages = [
       slotCli
       config.system.build.nixos-rebuild
     ];
-    services.hermes-native.settings.skills.external_dirs = [ "${skill}/share/skills" ];
+    services.hyperhermes.skillDirs = [ "${skill}/share/skills" ];
   };
 }

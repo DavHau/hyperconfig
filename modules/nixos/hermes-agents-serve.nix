@@ -76,15 +76,15 @@
 #     /run/hermes-serve/<port>.sock, root:nginx 0660, which systemd holds
 #     for the whole uptime, and each connection gets a bridge running as
 #     the port's owner that refuses a backend another uid bound
-#     (./hermes-native/tcp-owner-bridge.rs, as the dashboards'
-#     ./hermes-native/forwards.nix). An app that is down, or a squatter,
+#     (hyperhermes' tcp-owner-bridge, as the dashboards' forwards in
+#     hyperhermes' core). An app that is down, or a squatter,
 #     gives 502, never someone else's page. A request flood slows these
 #     sockets down but never stops them, and nginx limits requests per
 #     client network and port host, and per port host alone, as for the
 #     dashboards (the request limits and their residual in
 #     ./hermes-dashboard-public.nix).
 #   - the ports are owner-only on loopback (iptables, the same chain
-#     ./hermes-native/firewall.nix gates the dashboard ports in): the owner
+#     hyperhermes' core firewall gates the dashboard ports in): the owner
 #     (and so its bridge) and root may dial them, other agents may not.
 #     Nothing opens them in the firewall.
 #
@@ -120,12 +120,12 @@
   ...
 }:
 let
-  agents = config.hyper.hermesAgents;
+  agents = config.services.hyperhermes.agents;
   names = lib.attrNames agents;
   dashboard = config.hyper.hermesDashboard;
   domain = dashboard.agentDomain;
-  inherit (import ./hermes-native/lib.nix { inherit lib; }) chain ephemeralPortLow;
-  tcpOwnerBridgeBin = import ./hermes-native/tcp-owner-bridge.nix { inherit pkgs; };
+  inherit (inputs.hyperhermes.lib) chain ephemeralPortLow;
+  tcpOwnerBridgeBin = config.services.hyperhermes.tcpOwnerBridge;
   vars = config.clan.core.vars.generators;
 
   servePortBase = 30000;
@@ -244,7 +244,7 @@ let
     };
 
   portList = ps: lib.concatMapStringsSep ", " toString ps;
-  skill = inputs.spaces.lib.mkAgentSkill pkgs {
+  skill = inputs.hyperhermes.lib.mkAgentSkill pkgs {
     name = "serve-ports";
     src = pkgs.writeTextDir "SKILL.md" (
       builtins.replaceStrings
@@ -270,13 +270,13 @@ in
     assertions =
       lib.mapAttrsToList (name: _: {
         # The bridge would accept a self-connect inside the ephemeral range
-        # (./hermes-native/lib.nix: ephemeralPortLow).
+        # (hyperhermes.lib.ephemeralPortLow).
         assertion =
           let
             uid = config.users.users.${name}.uid;
           in
           uid == null || (uid >= 1000 && (portsOf name).to < ephemeralPortLow config.boot.kernel.sysctl);
-        message = "hyper.hermesAgents.${name}: its serve ports (${toString servePortBase} + (uid - 1000) * 10 .. +9) must stay below the ephemeral port range (${toString (ephemeralPortLow config.boot.kernel.sysctl)}+); uid must be 1000 or above and low enough.";
+        message = "services.hyperhermes.agents.${name}: its serve ports (${toString servePortBase} + (uid - 1000) * 10 .. +9) must stay below the ephemeral port range (${toString (ephemeralPortLow config.boot.kernel.sysctl)}+); uid must be 1000 or above and low enough.";
       }) agents
       ++ [
         {
@@ -291,7 +291,7 @@ in
         }
       ];
 
-    services.hermes-native.settings.skills.external_dirs = [ "${skill}/share/skills" ];
+    services.hyperhermes.skillDirs = [ "${skill}/share/skills" ];
 
     # Loopback owner gate, after the module's own rules (they never name
     # these ports). nginx dials the bridges' sockets, never these ports.
@@ -313,7 +313,7 @@ in
     # per connection a bridge as the port's owner (the header). The bridge
     # dials base + 10 * its euid: this port, for the owner's uid. No
     # trigger limit, a raised poll limit and a deliberate MaxConnections,
-    # as the dashboards' (./hermes-native/forwards.nix says why): a public
+    # as the dashboards' (hyperhermes' core forwards say why): a public
     # port takes a request flood from anyone, and nginx opens one
     # connection per request.
     systemd.sockets =
@@ -601,7 +601,7 @@ in
       # The bridges behind the sockets above, as the port's owner. stderr
       # goes to the journal, or StandardInput=socket would send a refusal
       # to nginx. Refused connections leave no failed unit behind
-      # (CollectMode, ./hermes-native/forwards.nix).
+      # (CollectMode, as hyperhermes' core forwards).
       {
         systemd.services = lib.listToAttrs (
           lib.concatMap (

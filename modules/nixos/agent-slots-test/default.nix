@@ -23,7 +23,11 @@
 # kept, and never reach a slot; the return mark leaves the Mullvad app's
 # mark alone; each slot's hostname gets its A and AAAA, each old name its
 # A, at a stub of porkbun's API.
-{ pkgs, spaces }:
+{
+  pkgs,
+  spaces,
+  hyperhermes,
+}:
 let
   inherit (pkgs) lib;
 
@@ -273,7 +277,7 @@ pkgs.testers.runNixOSTest {
         (wgNode "som")
         ../container-slots.nix
         ../agent-slots.nix
-        ../hermes-native/options.nix
+        hyperhermes.nixosModules.core
       ];
       _module.args.inputs = { inherit spaces; };
       virtualisation.memorySize = 3072;
@@ -435,9 +439,9 @@ pkgs.testers.runNixOSTest {
       };
 
       system.extraDependencies = [ broken ];
-      # the agents' tools (hermes-native puts them on the agents' PATH;
+      # the agents' tools (hyperhermes puts them on the agents' PATH;
       # here system-wide, so runuser finds them)
-      environment.systemPackages = config.services.hermes-native.extraPackages ++ [
+      environment.systemPackages = config.services.hyperhermes.extraPackages ++ [
         pkgs.curl
         pkgs.netcat-openbsd
       ];

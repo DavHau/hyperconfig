@@ -44,7 +44,6 @@ if d == null then null else {
   front = c.hyper.hermesDashboard.host;
   issuer = c.hyper.oidc.issuer;
   keys = map comment c.users.users.$agent.openssh.authorizedKeys.keys;
-  telegram = c.hyper.hermes.users.$agent.telegram.enable or false;
   claude = c.environment.etc ? "hermes-claude-auth";
 }
 EOF
@@ -95,11 +94,6 @@ server and keeps its own files.
    Phone:    open https://$front/app on your phone; it walks you through
              the app (Android and iPhone).
 EOF
-
-if [ "$(get telegram)" = true ]; then
-  echo
-  echo "   Telegram: your bot is set up, just send it a message."
-fi
 
 echo
 echo "3. Optional"

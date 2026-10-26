@@ -9,8 +9,8 @@ let
   # Mullvad egress rollout (../../modules/nixos/mullvad-egress): 1 = only
   # the benchmark user, 2 = also every hermes agent and SearXNG.
   mullvadStage = 2;
-  agents = lib.attrNames config.hyper.hermesAgents;
-  hermesLib = import ../../modules/nixos/hermes-native/lib.nix { inherit lib; };
+  agents = lib.attrNames config.services.hyperhermes.agents;
+  hermesLib = inputs.hyperhermes.lib;
 in
 {
   imports = [
@@ -222,7 +222,7 @@ in
   # off until the agent starts it. The ids are fixed: addresses, ports and
   # the router rules derive from them, so never renumber or reuse one; a new
   # agent takes the next free id. The deploy key is the agent's own clan
-  # key (hermes-agent-ssh-<name>, ../../modules/nixos/hermes-agents.nix), the
+  # key (hermes-agent-ssh-<name>, hyperhermes.nixosModules.clan), the
   # one vit's GPU accounts also trust. Hostname slot.<agent>.davhau.fyi, on
   # the agents' site; the old <agent>.slots.davhau.com only redirects there
   # during the transition. The other container slots above have no public
@@ -275,7 +275,7 @@ in
   # The spaces desktop profile defaults llama-swap on, which registers a
   # local provider in every harness's models.yml (omp-common.nix) and in the
   # hermes settings, and omp picks it as the first-run default. som's iGPU
-  # is not a brain; p0 is (hermes-common.nix). Off, as on vit.
+  # is not a brain; p0 is (./hermes-inference.nix). Off, as on vit.
   services.llama-swap.enable = false;
 
   # These users reach the internet only through Mullvad in Singapore, and

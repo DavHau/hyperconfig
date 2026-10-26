@@ -1,4 +1,4 @@
-# Receive-only email for the native hermes agents (hyper.hermesAgents):
+# Receive-only email for the native hermes agents (services.hyperhermes.agents):
 # <agent>@agents.davhau.com. ./mail.nix is the mechanism (Stalwart as MX,
 # mailgate as sanitizer, quarantine, allowlist and alias registry); this file
 # wires it into the host: clan vars, the MX certificate, the agent list, the
@@ -43,7 +43,7 @@
 let
   cfg = config.hyper.agentMail;
   vars = config.clan.core.vars.generators;
-  agents = config.hyper.hermesAgents;
+  agents = config.services.hyperhermes.agents;
   dashboard = config.hyper.hermesDashboard;
   ownerHost = "mailgate.${dashboard.host}";
   spacesOn = config.services.spaces-integrations.enable or false;
@@ -124,8 +124,8 @@ in
         certFile = "/var/lib/acme/${cfg.hostname}/fullchain.pem";
         keyFile = "/var/lib/acme/${cfg.hostname}/key.pem";
       };
-      # p0, as the agents' own brain (../hermes-common.nix); the token is
-      # the shared inference var, read as a credential.
+      # p0, as the agents' own brain (machines/som/hermes-inference.nix);
+      # the token is the shared inference var, read as a credential.
       summarizer = {
         enable = true;
         keyFile = vars.inference-api-key.files.token.path;
@@ -156,7 +156,7 @@ in
       after = [ "acme-${cfg.hostname}.service" ];
     };
 
-    services.hermes-native.extraPackages = [ cfg.package ];
-    services.hermes-native.settings.skills.external_dirs = [ "${skill}/share/skills" ];
+    services.hyperhermes.extraPackages = [ cfg.package ];
+    services.hyperhermes.skillDirs = [ "${skill}/share/skills" ];
   };
 }

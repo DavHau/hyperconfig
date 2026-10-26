@@ -1,8 +1,8 @@
-# GPU host for the native hermes agents of `agentsHost` (som): one account
-# per agent, same uid as there, reachable only with the agent's own key
-# (hyper.hermesAgentsGpuHost, ./hermes-agents.nix). The agents' names,
-# uids and keys are read from that machine's config, so the list lives in
-# one place.
+# GPU host for som's hermes agents: one account per agent, same uid as
+# there, reachable only with the agent's own key. Names and uids come from
+# ../../machines/som/hermes-agents-data.nix, the public keys from som's clan
+# vars (hermes-agent-ssh-<agent>, hyperhermes.nixosModules.clan), so the
+# list lives in one place and this host never evaluates som.
 #
 # Per account: reader on /vault/parquet (`vault-ro`), linger (detached
 # jobs survive the ssh session), bash, and a writable python venv at
@@ -18,8 +18,15 @@
 }:
 let
   agentsHost = "som";
-  host = inputs.self.nixosConfigurations.${agentsHost}.config;
-  agents = lib.attrNames host.hyper.hermesAgents;
+  agents = import ../../machines/som/hermes-agents-data.nix;
+  publicKeyOf =
+    name:
+    inputs.clan-core.clanLib.getPublicValue {
+      flake = config.clan.core.settings.directory;
+      machine = agentsHost;
+      generator = "hermes-agent-ssh-${name}";
+      file = "key.pub";
+    };
 
   pkgsCuda = import pkgs.path {
     inherit (pkgs.stdenv.hostPlatform) system;
@@ -29,7 +36,7 @@ let
       cudaSupport = true;
     };
   };
-  pythonVenv = import ./hermes-native/python-venv.nix { inherit lib pkgs; };
+  pythonVenv = inputs.hyperhermes.lib.pythonVenv pkgs;
   venvOf =
     name:
     pythonVenv.mkUnit {
@@ -39,31 +46,31 @@ let
       stateDir = "/home/${name}";
       python = pkgsCuda.python3;
       # The agents' python set on som, built against CUDA here.
-      packages = import ./hermes-native/python-packages.nix;
+      packages = inputs.hyperhermes.lib.pythonPackages;
     };
 in
 {
   imports = [ ./vault-ids.nix ];
 
-  users.users = lib.genAttrs agents (name: {
+  users.users = lib.mapAttrs (name: a: {
     isNormalUser = true;
-    inherit (host.users.users.${name}) uid;
+    inherit (a) uid;
     extraGroups = [ "vault-ro" ];
     shell = pkgs.bash;
     linger = true;
-    openssh.authorizedKeys.keys = [
-      host.clan.core.vars.generators."hermes-agent-ssh-${name}".files."key.pub".value
-    ];
-  });
+    openssh.authorizedKeys.keys = [ (publicKeyOf name) ];
+  }) agents;
 
-  systemd.services = lib.mkMerge (map (name: (venvOf name).services) agents);
+  systemd.services = lib.mkMerge (lib.mapAttrsToList (name: _: (venvOf name).services) agents);
 
-  environment.extraInit = lib.concatMapStrings (name: ''
-    if [ "$(${pkgs.coreutils}/bin/id -u)" = "${toString host.users.users.${name}.uid}" ]; then
-      export PATH="${(venvOf name).venv}/bin:$PATH"
-      export LD_LIBRARY_PATH="${pythonVenv.wheelLibraryPath}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    fi
-  '') agents;
+  environment.extraInit = lib.concatStrings (
+    lib.mapAttrsToList (name: a: ''
+      if [ "$(${pkgs.coreutils}/bin/id -u)" = "${toString a.uid}" ]; then
+        export PATH="${(venvOf name).venv}/bin:$PATH"
+        export LD_LIBRARY_PATH="${pythonVenv.wheelLibraryPath}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+      fi
+    '') agents
+  );
 
   # Standalone executables from pip wheels.
   programs.nix-ld.enable = true;

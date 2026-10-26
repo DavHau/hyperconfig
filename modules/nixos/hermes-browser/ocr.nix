@@ -1,8 +1,8 @@
-# OCR for the agents on our own GPU (cfg.ocr.baseUrl, served by
+# OCR for the agents on our own GPU (browser.ocr.baseUrl, served by
 # ../ocr-server on vit):
 #   - read_file: a fully scanned PDF raises anydoc's NeedsOcrError, and
 #     hermes then sends the PDF through anydoc's Firecrawl Parse client.
-#     file_tools.hosted_ocr_url (patches/hermes-hosted-ocr-url.patch)
+#     file_tools.hosted_ocr_url (hyperhermes' hermes-hosted-ocr-url.patch)
 #     points that client at our endpoint instead of api.firecrawl.dev,
 #     without the agent's Firecrawl key. Pointing FIRECRAWL_API_URL there
 #     instead would also hand hermes' Firecrawl web and browser providers
@@ -19,13 +19,13 @@
   ...
 }:
 let
-  cfg = config.services.hermes-native;
+  cfg = config.services.hyperhermes;
 
   ocrCli = pkgs.writeShellScriptBin "ocr" ''
-    OCR_URL=${lib.escapeShellArg cfg.ocr.baseUrl} exec ${lib.getExe pkgs.python3} ${./ocr-cli.py} "$@"
+    OCR_URL=${lib.escapeShellArg cfg.browser.ocr.baseUrl} exec ${lib.getExe pkgs.python3} ${./ocr-cli.py} "$@"
   '';
 
-  skill = inputs.spaces.lib.mkAgentSkill pkgs {
+  skill = inputs.hyperhermes.lib.mkAgentSkill pkgs {
     name = "ocr";
     src = lib.fileset.toSource {
       root = ./ocr-skill;
@@ -35,10 +35,10 @@ let
   };
 in
 {
-  config = lib.mkIf (cfg.enable && cfg.ocr.baseUrl != null) {
-    services.hermes-native = {
-      settings.file_tools.hosted_ocr_url = cfg.ocr.baseUrl;
-      settings.skills.external_dirs = [ "${skill}/share/skills" ];
+  config = lib.mkIf (cfg.browser.enable && cfg.browser.ocr.baseUrl != null) {
+    services.hyperhermes = {
+      settings.file_tools.hosted_ocr_url = cfg.browser.ocr.baseUrl;
+      skillDirs = [ "${skill}/share/skills" ];
       extraPackages = [ ocrCli ];
     };
   };
