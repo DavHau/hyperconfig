@@ -14,7 +14,7 @@
 #   - the web dashboard at https://<agent>.<agentDomain>/
 #     (../../modules/nixos/hermes-dashboard-public.nix) and 10 published
 #     loopback ports (../../modules/nixos/hermes-agents-serve.nix),
-#   - the web tools (../../modules/nixos/hermes-browser).
+#   - the web tools (hyperhermes.nixosModules.browser).
 #
 # Messengers (Telegram, ...) are not declared here: each agent's owner
 # connects them on the Channels page of the agent's dashboard.
@@ -55,7 +55,7 @@ in
     inputs.hyperhermes.nixosModules.core
     inputs.hyperhermes.nixosModules.clan
     ./hermes-inference.nix
-    ../../modules/nixos/hermes-browser
+    inputs.hyperhermes.nixosModules.browser
     ../../modules/nixos/hermes-dashboard-public.nix
     ../../modules/nixos/hermes-agents-serve.nix
     ../../modules/nixos/lightning-wallet.nix

@@ -1,9 +1,9 @@
 # The CaptchaKraken engine (OpenCV grid detection + the HTTP planner) as a
-# client of our own llama-server on vit (modules/nixos/captchakraken-server.nix).
+# client of a self-hosted model server (VLLM_BASE_URL, e.g. llama-server).
 # Never downloads or reports anything: no Hub prompt lookup, no outcome POST,
 # no local vLLM autostart, and the pip/hf `fetch`/`server` commands removed.
 # Source-available licence (internal use permitted); no nixpkgs licence fits,
-# and marking it unfree would need allowUnfree for `nix build .#web-bench`.
+# and marking it unfree would need allowUnfree in every consumer.
 {
   python,
   buildPythonPackage,

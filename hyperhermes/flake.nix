@@ -37,11 +37,13 @@
         core = import ./modules/core { inherit hermes-agent; };
         exposure = ./modules/exposure.nix;
         sso = ./modules/sso.nix;
+        browser = ./modules/browser;
         default = {
           imports = [
             self.nixosModules.core
             self.nixosModules.exposure
             self.nixosModules.sso
+            self.nixosModules.browser
           ];
         };
         # Not a feature, so not in `default`: fills core's secret paths
@@ -49,7 +51,17 @@
         clan = ./modules/clan.nix;
       };
 
-      packages.${system}.tcp-owner-bridge = import ./pkgs/tcp-owner-bridge { inherit pkgs; };
+      packages.${system} = {
+        tcp-owner-bridge = import ./pkgs/tcp-owner-bridge { inherit pkgs; };
+        # The browser feature's own builds (the module calls them with the
+        # host's pkgs): Camoufox, camofox-browser with its captcha plugin,
+        # and the two Python libraries a consumer's own browser tooling
+        # needs, built for pkgs.python3.
+        camoufox = pkgs.callPackage ./pkgs/camoufox/browser.nix { };
+        camofox-browser = pkgs.callPackage ./pkgs/camofox-browser { };
+        camoufox-python = pkgs.python3Packages.callPackage ./pkgs/camoufox/python.nix { };
+        captchakraken-python = pkgs.python3Packages.callPackage ./pkgs/captchakraken/python.nix { };
+      };
 
       # For consumers that must name an agent's paths, ports or units
       # without evaluating the host that runs it (lib/core.nix: stateDir,
@@ -77,6 +89,8 @@
           inherit pkgs self;
           hermesPackage = hermes-agent.packages.${system}.minimal;
         };
+
+        browser = import ./checks/browser { inherit pkgs self; };
       };
     };
 }

@@ -1,6 +1,6 @@
-"""browser_solve_captcha driver for camofox-test.nix, run as alice with hermes' own interpreter,
-through hermes' tool registry like the agent loop, against her real camofox-browser and
-camofox-test-captcha-site.py (the captcha page and the model stand-in).
+"""browser_solve_captcha driver for the browser check (default.nix), run as alice with hermes' own
+interpreter, through hermes' tool registry like the agent loop, against her real camofox-browser and
+captcha-site.py (the captcha page and the model stand-in).
 
   captcha <site>   solves the grid captcha; reports no_captcha on a plain page; a second
                    camofox userId cannot solve on the first one's tab.

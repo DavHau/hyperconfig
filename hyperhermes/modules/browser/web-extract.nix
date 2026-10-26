@@ -9,19 +9,18 @@
   config,
   lib,
   pkgs,
-  inputs,
   ...
 }:
 let
   cfg = config.services.hyperhermes;
-  hlib = inputs.hyperhermes.lib;
+  hlib = import ../../lib/core.nix { inherit lib; };
 
-  camoufox = pkgs.callPackage ../../../pkgs/camoufox/browser.nix { };
+  camoufox = pkgs.callPackage ../../pkgs/camoufox/browser.nix { };
   python = pkgs.python3.withPackages (ps: [
     ps.curl-cffi
     ps.trafilatura
     ps.pymupdf
-    (ps.callPackage ../../../pkgs/camoufox/python.nix { })
+    (ps.callPackage ../../pkgs/camoufox/python.nix { })
   ]);
 
   # Only the plugin's own files, so stray files (__pycache__) never change it.

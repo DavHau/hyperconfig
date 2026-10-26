@@ -1,4 +1,4 @@
-"""Captcha fixtures for camofox-test.nix, on one port:
+"""Captcha fixtures for the browser check (default.nix), on one port:
 
   /captcha       a 3x3 image-grid captcha in Prosopo's markup (.prosopo-modalInner, which
                  CaptchaKraken detects): tiles 1, 5 and 9 hold a red circle. Verify with exactly
