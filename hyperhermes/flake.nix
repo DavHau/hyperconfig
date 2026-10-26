@@ -46,7 +46,11 @@
         browser = ./modules/browser;
         wallet = ./modules/wallet;
         teamclaude = ./modules/teamclaude.nix;
-        claude-auth = import ./modules/hermes-claude-auth.nix { inherit llm-agents; };
+        # Not lib.modules.importApply: its wrapper module moves these
+        # modules' definitions within list-typed options (PATH order,
+        # ssh_config blocks) on every importer; each module names its own
+        # file (`_file`) for error messages instead.
+        claude-auth = import ./modules/claude-auth { inherit llm-agents; };
         desktop = import ./modules/desktop { inherit hermes-agent; };
         dashboards = ./modules/dashboards;
         publish = ./modules/publish;
@@ -76,6 +80,20 @@
         # features' secret paths from clan vars when the importing system
         # is a clan machine.
         clan = ./modules/clan.nix;
+        # The local deployment on a workstation: hyperhermes (default) in a
+        # NixOS container, forwarded to the host's loopback.
+        local-container = lib.modules.importApply ./modules/local-container {
+          hyperhermes = self.nixosModules.default;
+        };
+      };
+
+      # A workstation with the local deployment (./example).
+      nixosConfigurations.example = lib.nixosSystem {
+        inherit system;
+        modules = [
+          self.nixosModules.local-container
+          ./example/configuration.nix
+        ];
       };
 
       packages.${system} = {
@@ -101,6 +119,8 @@
       lib = import ./lib/core.nix { inherit lib; } // {
         mkAgentSkill = import ./lib/agent-skill.nix;
         sso = import ./lib/sso.nix { inherit lib; };
+        # Generator names of nixosModules.clan (teamclaudeGenerator, ...).
+        clan = import ./lib/clan.nix;
         pythonVenv =
           pkgs:
           import ./lib/python-venv.nix {
@@ -135,6 +155,9 @@
         # Evaluation only: nixosModules.clan's generator names and the
         # secret paths they fill, against a stub clan.core.vars.
         clan-eval = import ./checks/clan-eval { inherit pkgs self; };
+        # nixosModules.local-container with the example's config, from the
+        # host: dashboard sign-in, a published port, the agent's slot.
+        local-deployment = import ./checks/local-deployment { inherit pkgs self; };
       };
     };
 }

@@ -110,6 +110,10 @@ let
     };
 in
 {
+  # Imported with its argument applied (../../flake.nix), so it names
+  # its own file for error messages.
+  _file = ./default.nix;
+
   options.services.hyperhermes.desktop = with lib; {
     enable = mkEnableOption "the hermes-desktop app and TUI launchers for a remote hyperhermes host's agents";
     package = mkOption {

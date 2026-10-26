@@ -11,7 +11,8 @@
 #
 # Nothing here is hermes-specific beyond the agent registry: a slot needs an
 # account with a pinned uid (agents.<name>.uid), the agent's ssh key pair
-# (slot.deployKey, slot.identityFile; nixosModules.clan fills both from
+# (slot.deployKey, or slot.deployKeyFile for a key made at runtime;
+# slot.identityFile; nixosModules.clan fills both from
 # hermes-agent-ssh-<name>, the key core's sshKeyFile names) and the agents'
 # PATH and skill roots (services.hyperhermes.extraPackages, skillDirs).
 #
@@ -578,8 +579,15 @@ in
                 description = "The slot id (services.containerSlots); fixed forever, addresses and ports derive from it. Unique among all container slots of the host.";
               };
               deployKey = mkOption {
-                type = types.str;
-                description = "The agent's ssh public key; the only key the slot's bootstrap sshd admits. nixosModules.clan sets the public half of hermes-agent-ssh-<name>.";
+                type = types.nullOr types.str;
+                default = null;
+                description = "The agent's ssh public key; the only key the slot's bootstrap sshd admits. nixosModules.clan sets the public half of hermes-agent-ssh-<name>. Either this or deployKeyFile.";
+              };
+              deployKeyFile = mkOption {
+                type = types.nullOr types.str;
+                default = null;
+                example = "/var/lib/agent-keys/alice/key.pub";
+                description = "Runtime path of the agent's ssh public key, for a key that only exists at runtime (read at every slot start). Either this or deployKey.";
               };
               identityFile = mkOption {
                 type = types.nullOr types.str;
@@ -613,6 +621,12 @@ in
             message = "services.hyperhermes.agents.<name>.slot needs services.containerSlots.enable (uplink, bridge, ipv6Prefix).";
           }
           {
+            assertion = lib.all (a: (a.slot.deployKey == null) != (a.slot.deployKeyFile == null)) (
+              lib.attrValues agents
+            );
+            message = "services.hyperhermes.agents.<name>.slot needs exactly one of deployKey and deployKeyFile.";
+          }
+          {
             assertion = cfg.legacyDomain != null -> public;
             message = "services.hyperhermes.slots.legacyDomain needs exposure.mode = public.";
           }
@@ -622,7 +636,8 @@ in
           inherit (a.slot) id memoryMax cpuQuota;
           mode = "isolated";
           autoStart = false;
-          deployKeys = [ a.slot.deployKey ];
+          deployKeys = lib.optional (a.slot.deployKey != null) a.slot.deployKey;
+          deployKeyFiles = lib.optional (a.slot.deployKeyFile != null) a.slot.deployKeyFile;
           publicIPv4Ports = lib.optionals public (portsOf a);
         }) agents;
 

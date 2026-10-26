@@ -1,6 +1,6 @@
 # Vendored from https://github.com/kristianvast/hermes-claude-auth
 # commit 6525928e13a2771ca0fcf0539ea286150e83c421 (2026-08-18), fetched 2026-09-06.
-# Loaded by ../hermes-claude-auth.nix.
+# Loaded by the claude-auth module.
 #
 # Local patch (2026-09-20, not upstream as of that date): the injected
 # Claude Code identity block used to hardcode cache_control ttl=1h. Anthropic

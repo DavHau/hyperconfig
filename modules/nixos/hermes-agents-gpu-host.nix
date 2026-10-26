@@ -24,7 +24,7 @@ let
     inputs.clan-core.clanLib.getPublicValue {
       flake = config.clan.core.settings.directory;
       machine = agentsHost;
-      generator = "hermes-agent-ssh-${name}";
+      generator = inputs.hyperhermes.lib.clan.agentSshGenerator name;
       file = "key.pub";
     };
 

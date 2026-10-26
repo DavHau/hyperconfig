@@ -231,6 +231,9 @@ let
     desktop-key-file =
       (hyper enabled).desktop.sshKeyFile == (gens enabled).hermes-desktop-ssh.files.key.path
       && (gens enabled).hermes-desktop-ssh.share;
+    # No generator, no default: bob has no teamclaude, `idle` no desktop.
+    teamclaude-key-file-only-enabled = (hyper enabled).agents.bob.teamclaude.keyFile == null;
+    desktop-key-file-only-enabled = !(builtins.tryEval (hyper idle).desktop.sshKeyFile).success;
 
     published-evaluates = evaluates published && failedAssertions published == [ ];
     published-generator-names =

@@ -75,8 +75,7 @@ let
   random = len: ''openssl rand -hex ${toString len} | tr -d '\n' '';
   hasSlots = options ? services.hyperhermes.slots;
   walletOn = hasWallet && cfg.wallet.enable;
-  generatorFor = name: "hermes-agent-ssh-${name}";
-  teamclaudeGeneratorFor = name: "teamclaude-hermes-${name}";
+  inherit (import ../lib/clan.nix) agentSshGenerator teamclaudeGenerator desktopSshGenerator;
   generators = config.clan.core.vars.generators;
   ssoLib = import ../lib/sso.nix { inherit lib; };
   hasSso = options ? services.hyperhermes.sso.frontDoor;
@@ -88,26 +87,25 @@ in
   options.services.hyperhermes.agents = lib.mkOption {
     type = lib.types.attrsOf (
       lib.types.submodule (
-        { name, ... }:
+        { name, config, ... }:
         {
           config = {
-            sshKeyFile = lib.mkIf hasClan (
-              lib.mkDefault config.clan.core.vars.generators.${generatorFor name}.files.key.path
-            );
+            sshKeyFile = lib.mkIf hasClan (lib.mkDefault generators.${agentSshGenerator name}.files.key.path);
           }
+          # Only where the generator exists (teamclaude.enable).
           // lib.optionalAttrs hasTeamclaude {
-            teamclaude.keyFile = lib.mkIf hasClan (
-              lib.mkDefault config.clan.core.vars.generators.${teamclaudeGeneratorFor name}.files.key.path
+            teamclaude.keyFile = lib.mkIf (hasClan && config.teamclaude.enable) (
+              lib.mkDefault generators.${teamclaudeGenerator name}.files.key.path
             );
           }
           // lib.optionalAttrs hasMail {
             mail.passwordFile = lib.mkIf hasClan (
-              lib.mkDefault config.clan.core.vars.generators."mailgate-imap-${name}".files.password.path
+              lib.mkDefault generators."mailgate-imap-${name}".files.password.path
             );
           }
           // lib.optionalAttrs hasSlots {
             slot.deployKey = lib.mkIf hasClan (
-              lib.mkDefault config.clan.core.vars.generators.${generatorFor name}.files."key.pub".value
+              lib.mkDefault generators.${agentSshGenerator name}.files."key.pub".value
             );
           };
         }
@@ -124,7 +122,7 @@ in
           (lib.optionalAttrs hasCore (
             lib.mapAttrs' (
               name: _:
-              lib.nameValuePair (generatorFor name) {
+              lib.nameValuePair (agentSshGenerator name) {
                 files.key = {
                   secret = true;
                   owner = name;
@@ -141,7 +139,7 @@ in
           (lib.optionalAttrs (hasCore && hasTeamclaude) (
             lib.mapAttrs' (
               name: _:
-              lib.nameValuePair (teamclaudeGeneratorFor name) {
+              lib.nameValuePair (teamclaudeGenerator name) {
                 runtimeInputs = [ pkgs.openssl ];
                 script = ''
                   printf 'sk-ant-oat01-%s' "$(openssl rand -hex 32)" > "$out/key"
@@ -152,7 +150,7 @@ in
           ))
 
           (lib.optionalAttrs hasDesktop {
-            hermes-desktop-ssh = lib.mkIf cfg.desktop.enable {
+            ${desktopSshGenerator} = lib.mkIf cfg.desktop.enable {
               share = true;
               files.key = { };
               files."key.pub".secret = false;
@@ -170,8 +168,12 @@ in
                 pkgs.coreutils
                 pkgs.openssl
               ];
+              # URL-safe base64: oauth2-proxy decodes no other base64 and
+              # takes anything else as raw bytes, which must be 16, 24 or 32
+              # long (standard base64 with a '+' or '/' is 44 raw bytes and
+              # the proxy refuses to start).
               script = ''
-                openssl rand -base64 32 | tr -d '\n' > "$out"/cookie_secret
+                openssl rand -base64 32 | tr '+/' '-_' | tr -d '\n' > "$out"/cookie_secret
               '';
             };
           })
@@ -215,7 +217,9 @@ in
       })
 
       (lib.optionalAttrs hasDesktop {
-        services.hyperhermes.desktop.sshKeyFile = lib.mkDefault generators.hermes-desktop-ssh.files.key.path;
+        services.hyperhermes.desktop.sshKeyFile = lib.mkIf cfg.desktop.enable (
+          lib.mkDefault generators.${desktopSshGenerator}.files.key.path
+        );
       })
 
       (lib.optionalAttrs hasPublish {

@@ -2,13 +2,13 @@
 #
 # Upstream drops `hermes_claude_auth.pth` into the hermes venv's
 # site-packages, and site.py exec's it at interpreter start. The hermes
-# that runs in a hermes microVM is a sealed uv2nix venv in /nix/store: its
+# that runs is a sealed uv2nix venv in /nix/store: its
 # site-packages is read-only and it has no site dir we could add a .pth to
 # (user site is disabled inside a venv, and the venv does not see the base
 # interpreter's site-packages, so nixpkgs' NIX_PYTHONPATH sitecustomize is
 # not even on its path). What CAN be reached is PYTHONPATH: site.py imports
 # `sitecustomize` from sys.path, and PYTHONPATH entries precede the stdlib.
-# hermes-claude-auth.nix therefore points PYTHONPATH at the directory
+# The claude-auth module therefore points PYTHONPATH at the directory
 # holding this file, the upstream bootstrap and the patch module.
 #
 # Scope: PYTHONPATH is inherited by every child of hermes (TUI worker,

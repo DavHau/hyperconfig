@@ -35,13 +35,19 @@ let
   adminKeys = config.users.users.root.openssh.authorizedKeys.keys;
   # hermes-desktop on the dave machines dials dave-hermes and joe over ssh
   # with a shared restricted key (../../modules/nixos/hermes-desktop.nix,
-  # hyperhermes' desktop module and its clan var hermes-desktop-ssh; dave.nix
-  # imports it here too). Its bootstrap needs
+  # hyperhermes' desktop module and its shared clan var hermes-desktop-ssh,
+  # read from the vars store so this does not depend on som running the
+  # desktop itself). Its bootstrap needs
   # command execution plus one loopback -L forward to the port
   # `hermes serve --port 0` picks, nothing else: no pty, no agent/X11
   # forwarding.
   desktopKey = ''restrict,port-forwarding,permitopen="127.0.0.1:*" ${
-    config.clan.core.vars.generators.hermes-desktop-ssh.files."key.pub".value
+    # No machine: the shared var.
+    inputs.clan-core.clanLib.getPublicValue {
+      flake = config.clan.core.settings.directory;
+      generator = inputs.hyperhermes.lib.clan.desktopSshGenerator;
+      file = "key.pub";
+    }
   }'';
 
   gpuHost = "vit.d";
@@ -81,9 +87,9 @@ in
   # name in `teamclaude status` and dropping the flag revokes it on the
   # next deploy without touching any other client.
   services.hyperhermes.teamclaude.gatewayUrl = "https://teamclaude.davhau.com";
-  hyper.teamclaudeGateway.clientKeys = lib.mapAttrs (name: _: "teamclaude-hermes-${name}") (
-    lib.filterAttrs (_: a: a.teamclaude.enable) config.services.hyperhermes.agents
-  );
+  hyper.teamclaudeGateway.clientKeys = lib.mapAttrs (
+    name: _: inputs.hyperhermes.lib.clan.teamclaudeGenerator name
+  ) (lib.filterAttrs (_: a: a.teamclaude.enable) config.services.hyperhermes.agents);
 
   # One shared phoenixd Lightning wallet; every agent below has access.
   services.hyperhermes.wallet.enable = true;

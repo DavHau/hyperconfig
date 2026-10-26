@@ -35,7 +35,8 @@
 #   - first boot: a bootstrap system (sshd) seeds the slot's profile if it
 #     has none yet. After that the profile belongs to the deployer. Its sshd
 #     lets in root with the slot's `deployKeys` (default: the host-wide
-#     list), from a file this host bind-mounts read-only at
+#     list) and the keys in its `deployKeyFiles` (runtime files, read
+#     then), from a file this host bind-mounts read-only at
 #     /var/lib/container-slot/authorized_keys at every start. The keys live
 #     in that file, not in the bootstrap system, so one bootstrap serves
 #     slots with different deployers. The file is owned by the slot's root
@@ -304,7 +305,9 @@ let
       install -d -m 0711 /run/container-slots ${slotRun name}
       install -m 0444 -o ${owner} -g ${owner} \
         ${pkgs.writeText "container-slot-${name}-keys" (lib.concatLines slot.deployKeys)} \
-        ${slotKeys name}
+        ${slotKeys name}${
+          lib.optionalString (slot.deployKeyFiles != [ ]) "\ncat ${lib.escapeShellArgs slot.deployKeyFiles} >>${slotKeys name}"
+        }
 
       install -d -m 0755 /var/lib/container-slots ${hostKeysDir} ${keyDir}
       if [ ! -s ${keyDir}/ssh_host_ed25519_key ] || [ ! -s ${keyDir}/ssh_host_ed25519_key.pub ]; then
@@ -384,6 +387,11 @@ let
         default = cfg.deployKeys;
         defaultText = lib.literalExpression "config.services.containerSlots.deployKeys";
         description = "SSH keys for root in this slot's bootstrap system (the bind-mounted authorized_keys, see the module header).";
+      };
+      deployKeyFiles = mkOption {
+        type = types.listOf types.str;
+        default = [ ];
+        description = "Runtime paths of further authorized_keys files for root in this slot's bootstrap system (keys made at runtime), appended to deployKeys at every start.";
       };
       autoStart = mkOption {
         type = types.bool;

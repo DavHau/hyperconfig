@@ -1,4 +1,4 @@
-# Agent slots (../../modules/slots) on a som-like host with two agents,
+# Agent slots (../../modules/slots) on a public-mode host with two agents,
 # alice (slot 4) and bob (slot 5), in public exposure mode. `client` plays
 # the internet: on vlan 3 it reaches the host's public IPv4 (the link
 # services.containerSlots.publicIPv4Interface names), on vlan 1 the slots'
@@ -38,17 +38,17 @@ let
     responder
     ;
 
-  publicIPv4 = "38.89.142.76";
-  clientIPv4 = "38.89.142.10";
-  # the LAN (som's br0)
-  somIPv4 = "192.0.2.2";
+  publicIPv4 = "203.0.113.76";
+  clientIPv4 = "203.0.113.10";
+  # the LAN (the server's br0)
+  serverIPv4 = "192.0.2.2";
   lanIPv4 = "192.0.2.0/24";
   prefix = "2001:db8:1:2";
   # "the internet" over v6, and the stand-ins for the routers' WAN side
   clientIPv6 = "2001:db8:ffff::10";
   routerWanIPv4 = "198.51.100.1";
   routerWanIPv6 = "2001:db8:fffe::1";
-  # the egress link (a VPN tunnel): som's end, the relay's end
+  # the egress link (a VPN tunnel): the server's end, the relay's end
   tunnelIPv4 = "10.64.0.2";
   tunnelIPv6 = "fd00:64::2";
   relayIPv4 = "10.64.0.1";
@@ -60,7 +60,7 @@ let
   cert = pkgs.runCommand "agent-slots-test-cert" { nativeBuildInputs = [ pkgs.openssl ]; } ''
     mkdir $out
     openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj /CN=test \
-      -addext "subjectAltName=DNS:som.test,DNS:slot.alice.fyi.test,DNS:slot.bob.fyi.test" \
+      -addext "subjectAltName=DNS:server.test,DNS:slot.alice.fyi.test,DNS:slot.bob.fyi.test" \
       -keyout $out/key.pem -out $out/cert.pem
   '';
 
@@ -96,7 +96,7 @@ pkgs.testers.runNixOSTest {
         prefixLength = 64;
       }
     ];
-    # The slots' /64 sits behind som's proxy NDP on this link.
+    # The slots' /64 sits behind the server's proxy NDP on this link.
     networking.interfaces.eth1.ipv6.routes = [
       {
         address = "${prefix}::";
@@ -125,7 +125,7 @@ pkgs.testers.runNixOSTest {
     ];
     networking.firewall.enable = false;
     # The relay end: only the tunnel's own addresses get in, so anything
-    # som sends down the tunnel unmasqueraded (a reply to an inbound
+    # the server sends down the tunnel unmasqueraded (a reply to an inbound
     # connection taking the wrong way) is lost, as it would be at Mullvad.
     networking.nftables.enable = true;
     networking.nftables.tables.relay = {
@@ -156,7 +156,7 @@ pkgs.testers.runNixOSTest {
     environment.systemPackages = [ pkgs.curl ];
   };
 
-  nodes.som =
+  nodes.server =
     { config, ... }:
     {
       imports = [
@@ -173,8 +173,8 @@ pkgs.testers.runNixOSTest {
         3
       ];
 
-      # The public IPv4, on a link of its own (on som it comes through a
-      # tunnel from another host).
+      # The public IPv4, on a link of its own (a real deployment may get it
+      # through a tunnel from another host).
       networking.interfaces.eth3.ipv4.addresses = lib.mkForce [
         {
           address = publicIPv4;
@@ -217,7 +217,7 @@ pkgs.testers.runNixOSTest {
       networking.interfaces.eth1.ipv4.addresses = lib.mkForce [ ];
       networking.interfaces.eth1.ipv6.addresses = lib.mkForce [ ];
       systemd.network.networks."40-br0".address = [
-        "${somIPv4}/24"
+        "${serverIPv4}/24"
         "${prefix}::2/64"
       ];
       # the v6 "internet" client, on-link here (it reaches the slots by NDP)
@@ -284,14 +284,14 @@ pkgs.testers.runNixOSTest {
           }
         ) sshKeys;
 
-      # This host's own https site (as hermes.davhau.com on som); it sorts
-      # before the slot vhosts, as som's own do.
+      # This host's own https site (as a deployment's own site); it sorts
+      # before the slot vhosts, as a deployment's own do.
       services.nginx.virtualHosts.host-site = {
-        serverName = "som.test";
+        serverName = "server.test";
         forceSSL = true;
         sslCertificate = "${cert}/cert.pem";
         sslCertificateKey = "${cert}/key.pem";
-        locations."/".return = "200 'som $remote_addr\\n'";
+        locations."/".return = "200 'server $remote_addr\\n'";
         extraConfig = "default_type text/plain;";
       };
       security.acme.defaults.server = "https://127.0.0.1:1/directory";
@@ -318,7 +318,7 @@ pkgs.testers.runNixOSTest {
         listen = (f"OPENSSL-LISTEN:{port},cert=${cert}/cert.pem,key=${cert}/key.pem,verify=0" if tls
                   else f"TCP6-LISTEN:{port},ipv6only=1" if v6
                   else f"TCP-LISTEN:{port}")
-        som.succeed(f"systemd-run --unit={unit} {in_slot(name)} ${pkgs.socat}/bin/socat {listen},fork,reuseaddr EXEC:'${responder} {tag}'")
+        server.succeed(f"systemd-run --unit={unit} {in_slot(name)} ${pkgs.socat}/bin/socat {listen},fork,reuseaddr EXEC:'${responder} {tag}'")
 
     # the peer a responder reports, v6 in its compressed form
     def peer(out):
@@ -330,48 +330,48 @@ pkgs.testers.runNixOSTest {
     alice6, bob6 = "${prefix}::5107:4", "${prefix}::5107:5"
 
     start_all()
-    som.wait_for_unit("multi-user.target")
-    som.wait_for_unit("nginx.service")
+    server.wait_for_unit("multi-user.target")
+    server.wait_for_unit("nginx.service")
     client.wait_for_unit("web.service")
-    som.wait_until_succeeds("ping -c1 -W1 ${clientIPv4}", timeout=60)
+    server.wait_until_succeeds("ping -c1 -W1 ${clientIPv4}", timeout=60)
 
     with subtest("slots exist but are off by default"):
-        som.succeed("systemctl cat container@alice.service >/dev/null")
-        som.fail("systemctl is-active container@alice.service")
-        assert "desired off" in som.succeed("runuser -u alice -- slot status")
+        server.succeed("systemctl cat container@alice.service >/dev/null")
+        server.fail("systemctl is-active container@alice.service")
+        assert "desired off" in server.succeed("runuser -u alice -- slot status")
 
     with subtest("an agent controls its own slot only"):
-        som.succeed("runuser -u alice -- slot start")
-        som.succeed("systemctl is-active container@alice.service")
-        som.fail("runuser -u alice -- systemctl start agent-slot-start@bob.service")
-        som.fail("runuser -u alice -- systemctl start agent-slot-reset-hard@bob.service")
-        som.fail("runuser -u alice -- systemctl stop container@alice.service")
-        som.fail("runuser -u alice -- systemctl start container@bob.service")
-        som.fail("systemctl is-active container@bob.service")
-        som.succeed("systemctl is-active container@alice.service")
-        som.succeed("journalctl -u agent-slot-start@alice --no-pager | grep -q 'slot alice: start'")
+        server.succeed("runuser -u alice -- slot start")
+        server.succeed("systemctl is-active container@alice.service")
+        server.fail("runuser -u alice -- systemctl start agent-slot-start@bob.service")
+        server.fail("runuser -u alice -- systemctl start agent-slot-reset-hard@bob.service")
+        server.fail("runuser -u alice -- systemctl stop container@alice.service")
+        server.fail("runuser -u alice -- systemctl start container@bob.service")
+        server.fail("systemctl is-active container@bob.service")
+        server.succeed("systemctl is-active container@alice.service")
+        server.succeed("journalctl -u agent-slot-start@alice --no-pager | grep -q 'slot alice: start'")
         # systemd itself still refuses the agents: no polkit rule is left
         # that would let them pick a job mode (flush cancels every queued
         # job on the host)
-        som.fail("runuser -u alice -- systemctl start --job-mode=flush agent-slot-stop@alice.service")
-        som.fail("runuser -u alice -- systemctl start agent-slot-start@alice.service")
-        som.fail("grep -rqs agent-slot /etc/polkit-1/")
-        som.succeed("systemctl is-active container@alice.service")
+        server.fail("runuser -u alice -- systemctl start --job-mode=flush agent-slot-stop@alice.service")
+        server.fail("runuser -u alice -- systemctl start agent-slot-start@alice.service")
+        server.fail("grep -rqs agent-slot /etc/polkit-1/")
+        server.succeed("systemctl is-active container@alice.service")
         # the socket takes the slot from the caller's uid and one verb only
         sock = "${pkgs.socat}/bin/socat -t 60 - UNIX-CONNECT:/run/agent-slot-ctl.sock"
         for user, line in [("nobody", "start"), ("alice", "start bob"), ("alice", "bogus")]:
-            out = som.succeed(f"echo '{line}' | runuser -u {user} -- {sock}")
+            out = server.succeed(f"echo '{line}' | runuser -u {user} -- {sock}")
             assert out.startswith("refused"), (user, line, out)
-        som.fail("systemctl is-active container@bob.service")
-        som.succeed("runuser -u bob -- slot start")
+        server.fail("systemctl is-active container@bob.service")
+        server.succeed("runuser -u bob -- slot start")
 
     with subtest("slot info names the ports, addresses and hostname"):
-        info = som.succeed("runuser -u alice -- slot info")
+        info = server.succeed("runuser -u alice -- slot info")
         for want in ["14040-14049", "slot.alice.fyi.test", alice6, "root@" + alice4, "${publicIPv4}"]:
             assert want in info, info
 
     with subtest("the slots' hostnames are in exposure.dnsRecords"):
-        records = json.load(open("${pkgs.writeText "dns-records.json" (builtins.toJSON nodes.som.services.hyperhermes.exposure.dnsRecords)}"))
+        records = json.load(open("${pkgs.writeText "dns-records.json" (builtins.toJSON nodes.server.services.hyperhermes.exposure.dnsRecords)}"))
         zone = {(r["name"], r["type"]): r["value"] for r in records if "slot" in r["name"]}
         on_link = lambda id: {"ipv6OnLink": {"interface": "br0", "suffix": f"::5107:{id}", "expectedPrefix": "${prefix}"}}
         assert zone == {
@@ -387,49 +387,49 @@ pkgs.testers.runNixOSTest {
         }, zone
 
     with subtest("only the owner's key gets in"):
-        som.wait_until_succeeds(ssh_as("alice", alice4), timeout=90)
-        som.wait_until_succeeds(ssh_as("bob", bob4), timeout=90)
-        som.succeed(ssh_as("alice", alice6))
+        server.wait_until_succeeds(ssh_as("alice", alice4), timeout=90)
+        server.wait_until_succeeds(ssh_as("bob", bob4), timeout=90)
+        server.succeed(ssh_as("alice", alice6))
         # root passes the uid gate: this is the key alone
-        som.succeed(ssh_key("alice", alice4))
-        som.fail(ssh_key("alice", bob4))
-        som.fail(ssh_key("bob", alice4))
+        server.succeed(ssh_key("alice", alice4))
+        server.fail(ssh_key("alice", bob4))
+        server.fail(ssh_key("bob", alice4))
         # the host-wide deploy key is not in an agent slot
-        keys = som.succeed(in_slot("alice") + "cat /var/lib/container-slot/authorized_keys")
+        keys = server.succeed(in_slot("alice") + "cat /var/lib/container-slot/authorized_keys")
         assert keys.strip() == "${sshKeys.alice.pub}", keys
 
     with subtest("ssh pins the slot's host key"):
-        known = som.succeed("cat /var/lib/container-slots/host-keys/alice/known_hosts").split()
+        known = server.succeed("cat /var/lib/container-slots/host-keys/alice/known_hosts").split()
         assert known[0] == f"{alice4},{alice6}", known
-        scanned = som.succeed(f"ssh-keyscan -t ed25519 {alice4} 2>/dev/null | grep -v '^#'").split()
+        scanned = server.succeed(f"ssh-keyscan -t ed25519 {alice4} 2>/dev/null | grep -v '^#'").split()
         assert scanned[1:3] == known[1:3], (scanned, known)
         # the bootstrap's sshd serves the key the host binds in
-        som.succeed(in_slot("alice") + "${pkgs.coreutils}/bin/test -s /var/lib/container-slot/ssh_host_ed25519_key")
+        server.succeed(in_slot("alice") + "${pkgs.coreutils}/bin/test -s /var/lib/container-slot/ssh_host_ed25519_key")
         # a slot presenting another key than the pinned one is refused
         # (bob's known_hosts entry, applied to alice's address)
-        rc, out = som.execute(f"runuser -u alice -- ssh -o BatchMode=yes -o ConnectTimeout=5 -o HostKeyAlias={bob4} -o UserKnownHostsFile=/var/lib/container-slots/host-keys/bob/known_hosts root@{alice4} true 2>&1")
+        rc, out = server.execute(f"runuser -u alice -- ssh -o BatchMode=yes -o ConnectTimeout=5 -o HostKeyAlias={bob4} -o UserKnownHostsFile=/var/lib/container-slots/host-keys/bob/known_hosts root@{alice4} true 2>&1")
         assert rc != 0 and "Host key verification failed" in out, out
 
     with subtest("another uid cannot reach the slot's sshd"):
         for addr in [alice4, alice6]:
-            som.succeed(f"runuser -u alice -- nc -z -w 5 {addr} 22")
-            som.fail(f"runuser -u bob -- nc -z -w 5 {addr} 22")
-        som.succeed(f"nc -z -w 5 {alice4} 22")
+            server.succeed(f"runuser -u alice -- nc -z -w 5 {addr} 22")
+            server.fail(f"runuser -u bob -- nc -z -w 5 {addr} 22")
+        server.succeed(f"nc -z -w 5 {alice4} 22")
 
     with subtest("a slot reaches the internet, not the host or another slot"):
         curl = in_slot("alice") + "${pkgs.curl}/bin/curl -s -m 5 "
         nc = in_slot("alice") + "${pkgs.netcat-openbsd}/bin/nc -z -w 5 "
-        som.succeed(curl + "-f http://${clientIPv4}:8080/")
-        som.fail(curl + "http://10.43.4.1/")
-        som.fail(curl + "http://${somIPv4}/")
-        som.fail(curl + "http://[${prefix}::2]/")
-        som.fail(nc + bob4 + " 22")
-        som.fail(nc + bob6 + " 22")
+        server.succeed(curl + "-f http://${clientIPv4}:8080/")
+        server.fail(curl + "http://10.43.4.1/")
+        server.fail(curl + "http://${serverIPv4}/")
+        server.fail(curl + "http://[${prefix}::2]/")
+        server.fail(nc + bob4 + " 22")
+        server.fail(nc + bob6 + " 22")
 
     with subtest("the public IPv4 reaches the right slot"):
         # the guest's firewall is the guest's business: open it
         for name in ["alice", "bob"]:
-            som.succeed(f"${pkgs.util-linux}/bin/nsenter -t $(machinectl show {name} -p Leader --value) -n ${pkgs.nftables}/bin/nft flush ruleset")
+            server.succeed(f"${pkgs.util-linux}/bin/nsenter -t $(machinectl show {name} -p Leader --value) -n ${pkgs.nftables}/bin/nft flush ruleset")
         serve("alice", "a-http", 80, "alice-http")
         serve("alice", "a-tls", 443, "alice-tls", tls=True)
         serve("alice", "a-port", 14043, "alice-port")
@@ -470,26 +470,26 @@ pkgs.testers.runNixOSTest {
         out = client.succeed(get + "-o /dev/null -w '%{http_code}' -k --resolve carol.slots.test:443:${publicIPv4} https://carol.slots.test/")
         assert out == "404", out
         # this host's own sites: unchanged, client address intact
-        out = client.succeed(get + "-k --resolve som.test:443:${publicIPv4} https://som.test/")
-        assert out.strip() == "som ${clientIPv4}", out
-        code = client.succeed(get + "-o /dev/null -w '%{http_code}' -H 'Host: som.test' http://${publicIPv4}/")
+        out = client.succeed(get + "-k --resolve server.test:443:${publicIPv4} https://server.test/")
+        assert out.strip() == "server ${clientIPv4}", out
+        code = client.succeed(get + "-o /dev/null -w '%{http_code}' -H 'Host: server.test' http://${publicIPv4}/")
         assert code == "301", code
         # the helpers hold the slots' namespaces: nspawn would wait on them
-        som.succeed("systemctl stop a-http a-tls a-port b-http b-tls b-port")
+        server.succeed("systemctl stop a-http a-tls a-port b-http b-tls b-port")
 
     with subtest("other agents reach a slot's public v6 like the internet, nothing else"):
         serve("alice", "a-any", 14043, "alice-any")
         serve("alice", "a-any6", 8086, "alice-any6", v6=True)
-        som.succeed(f"systemd-run --unit=a-udp6 {in_slot('alice')} ${pkgs.socat}/bin/socat UDP6-RECVFROM:8087,fork SYSTEM:'echo alice-udp'")
-        som.wait_until_succeeds(f"nc -z -w 5 {alice4} 14043", timeout=30)
-        som.wait_until_succeeds(f"nc -z -w 5 {alice6} 8086", timeout=30)
+        server.succeed(f"systemd-run --unit=a-udp6 {in_slot('alice')} ${pkgs.socat}/bin/socat UDP6-RECVFROM:8087,fork SYSTEM:'echo alice-udp'")
+        server.wait_until_succeeds(f"nc -z -w 5 {alice4} 14043", timeout=30)
+        server.wait_until_succeeds(f"nc -z -w 5 {alice6} 8086", timeout=30)
         nginx = "setpriv --reuid=nginx --regid=nginx --clear-groups "
         for target in [f"{alice4} 14043", f"{alice6} 8086"]:
-            som.succeed(f"runuser -u alice -- nc -z -w 5 {target}")
-            som.succeed(f"nc -z -w 5 {target}")
-            som.succeed(nginx + f"nc -z -w 5 {target}")
+            server.succeed(f"runuser -u alice -- nc -z -w 5 {target}")
+            server.succeed(f"nc -z -w 5 {target}")
+            server.succeed(nginx + f"nc -z -w 5 {target}")
         # bob: the public v6, TCP and UDP, on a port that is not ssh ...
-        out = som.succeed(f"runuser -u bob -- curl -g -s -m 10 'http://[{alice6}]:8086/'")
+        out = server.succeed(f"runuser -u bob -- curl -g -s -m 10 'http://[{alice6}]:8086/'")
         assert out.startswith("alice-any6"), out
         # ... from this host's uplink address, as the slot's v6 gateway (the
         # veth's host side) is deprecated; never the proxy hop 10.43.4.1
@@ -497,36 +497,36 @@ pkgs.testers.runNixOSTest {
         assert src == ipaddress.ip_address("${prefix}::2"), out
         assert src not in ipaddress.ip_network("fd43:5107::/64") and not src.is_link_local, out
         udp6 = f"echo hi | runuser -u bob -- ${pkgs.socat}/bin/socat -t 5 -T 5 - 'UDP6:[{alice6}]:8087'"
-        som.wait_until_succeeds(udp6 + " | grep -qx alice-udp", timeout=30)
+        server.wait_until_succeeds(udp6 + " | grep -qx alice-udp", timeout=30)
         # ... but not from the veth's host side, picked by hand
-        som.fail(f"runuser -u bob -- nc -z -w 5 -s fd43:5107::4:1 {alice6} 8086")
-        som.succeed(f"runuser -u alice -- nc -z -w 5 -s fd43:5107::4:1 {alice6} 8086")
+        server.fail(f"runuser -u bob -- nc -z -w 5 -s fd43:5107::4:1 {alice6} 8086")
+        server.succeed(f"runuser -u alice -- nc -z -w 5 -s fd43:5107::4:1 {alice6} 8086")
         # the internal v4, where the proxies come from: no port at all
-        som.fail(f"runuser -u bob -- nc -z -w 5 {alice4} 14043")
-        som.fail(f"runuser -u bob -- ${pkgs.curl}/bin/curl -s -m 5 -H 'X-Forwarded-For: 1.2.3.4' http://{alice4}:14043/")
+        server.fail(f"runuser -u bob -- nc -z -w 5 {alice4} 14043")
+        server.fail(f"runuser -u bob -- ${pkgs.curl}/bin/curl -s -m 5 -H 'X-Forwarded-For: 1.2.3.4' http://{alice4}:14043/")
         # Every packet is gated, not only a flow's first: alice holds a UDP
         # flow to her slot's v4 from port 40000 with SO_REUSEADDR, which
         # lets bob bind the same port (no uid check for REUSEADDR) and send
         # on her established conntrack entry. The slot must not hear him.
-        assert "ct state" not in som.succeed("nft list chain inet agent-slots output")
+        assert "ct state" not in server.succeed("nft list chain inet agent-slots output")
         grep = "${pkgs.gnugrep}/bin/grep"
-        som.succeed(f"systemd-run --unit=a-udp4 {in_slot('alice')} ${pkgs.socat}/bin/socat UDP4-LISTEN:9999 SYSTEM:'${pkgs.coreutils}/bin/tee -a /root/udp.log'")
-        som.succeed(f"systemd-run --unit=alice-udp --uid=alice ${pkgs.socat}/bin/socat UDP4:{alice4}:9999,sourceport=40000,reuseaddr SYSTEM:'echo alice; ${pkgs.coreutils}/bin/cat >/tmp/alice-udp.reply; true'")
+        server.succeed(f"systemd-run --unit=a-udp4 {in_slot('alice')} ${pkgs.socat}/bin/socat UDP4-LISTEN:9999 SYSTEM:'${pkgs.coreutils}/bin/tee -a /root/udp.log'")
+        server.succeed(f"systemd-run --unit=alice-udp --uid=alice ${pkgs.socat}/bin/socat UDP4:{alice4}:9999,sourceport=40000,reuseaddr SYSTEM:'echo alice; ${pkgs.coreutils}/bin/cat >/tmp/alice-udp.reply; true'")
         # the slot echoed: the flow is established both ways
-        som.wait_until_succeeds(f"{grep} -qx alice /tmp/alice-udp.reply", timeout=30)
-        som.execute(f"echo bob | runuser -u bob -- ${pkgs.socat}/bin/socat -u - UDP4-SENDTO:{alice4}:9999,sourceport=40000,reuseaddr")
-        som.sleep(2)
-        heard = som.succeed(in_slot("alice") + "${pkgs.coreutils}/bin/cat /root/udp.log")
+        server.wait_until_succeeds(f"{grep} -qx alice /tmp/alice-udp.reply", timeout=30)
+        server.execute(f"echo bob | runuser -u bob -- ${pkgs.socat}/bin/socat -u - UDP4-SENDTO:{alice4}:9999,sourceport=40000,reuseaddr")
+        server.sleep(2)
+        heard = server.succeed(in_slot("alice") + "${pkgs.coreutils}/bin/cat /root/udp.log")
         assert heard.split() == ["alice"], heard
-        som.succeed("systemctl stop alice-udp a-udp4 a-udp6")
+        server.succeed("systemctl stop alice-udp a-udp4 a-udp6")
 
     with subtest("a slot's own connections leave only through the egress link"):
         curl = in_slot("alice") + "${pkgs.curl}/bin/curl -s -m 5 -g "
-        out = som.succeed(curl + "http://${clientIPv4}:8081/")
+        out = server.succeed(curl + "http://${clientIPv4}:8081/")
         assert "peer=${tunnelIPv4}" in out, out
-        out = som.succeed(curl + "'http://[${clientIPv6}]:8081/'")
+        out = server.succeed(curl + "'http://[${clientIPv6}]:8081/'")
         assert peer(out) == "${tunnelIPv6}", out
-        out = som.succeed("ip route get ${clientIPv4} from 10.43.4.2 iif ve-alice mark 0x2000000")
+        out = server.succeed("ip route get ${clientIPv4} from 10.43.4.2 iif ve-alice mark 0x2000000")
         assert "dev eth2" in out, out
         # Inbound keeps answering the way it came: v6 straight back over
         # br0 (down the tunnel the relay would drop it), forwarded v4 back
@@ -536,136 +536,136 @@ pkgs.testers.runNixOSTest {
         out = client.succeed("curl -s -m 10 http://${publicIPv4}:14043/")
         assert "peer=${clientIPv4}" in out, out
         # kill switch: without the egress routes, nothing leaves another way
-        som.succeed("ip route flush table ${toString egressTable}")
-        som.succeed("ip -6 route flush table ${toString egressTable}")
-        som.fail(curl + "http://${clientIPv4}:8081/")
-        som.fail(curl + "'http://[${clientIPv6}]:8081/'")
+        server.succeed("ip route flush table ${toString egressTable}")
+        server.succeed("ip -6 route flush table ${toString egressTable}")
+        server.fail(curl + "http://${clientIPv4}:8081/")
+        server.fail(curl + "'http://[${clientIPv6}]:8081/'")
         out = client.succeed("curl -g -s -m 10 'http://[" + alice6 + "]:8086/'")
         assert peer(out) == "${clientIPv6}", out
-        som.succeed("ip route add default via ${relayIPv4} dev eth2 table ${toString egressTable}")
-        som.succeed("ip -6 route add default via ${relayIPv6} dev eth2 table ${toString egressTable}")
-        som.succeed(curl + "-f http://${clientIPv4}:8081/")
-        som.succeed("systemctl stop a-any a-any6")
+        server.succeed("ip route add default via ${relayIPv4} dev eth2 table ${toString egressTable}")
+        server.succeed("ip -6 route add default via ${relayIPv6} dev eth2 table ${toString egressTable}")
+        server.succeed(curl + "-f http://${clientIPv4}:8081/")
+        server.succeed("systemctl stop a-any a-any6")
 
     with subtest("blocked destinations (the routers' WAN side) stay out of reach"):
         nc = in_slot("alice") + "${pkgs.netcat-openbsd}/bin/nc -z -w 5 "
         # routed down the egress link like any destination, then dropped
-        out = som.succeed("ip route get ${routerWanIPv4} from 10.43.4.2 iif ve-alice mark 0x2000000")
+        out = server.succeed("ip route get ${routerWanIPv4} from 10.43.4.2 iif ve-alice mark 0x2000000")
         assert "dev eth2" in out, out
-        som.succeed(nc + "${clientIPv4} 8081")
-        som.fail(nc + "${routerWanIPv4} 8081")
-        som.fail(nc + "${routerWanIPv6} 8081")
+        server.succeed(nc + "${clientIPv4} 8081")
+        server.fail(nc + "${routerWanIPv4} 8081")
+        server.fail(nc + "${routerWanIPv6} 8081")
 
     with subtest("the slots run in agent-slots.slice, under its limits"):
-        assert som.succeed("systemctl show container@alice.service -p Slice --value").strip() == "agent-slots.slice"
-        props = som.succeed("systemctl show agent-slots.slice -p MemoryMax -p MemoryHigh -p TasksMax -p IOWeight -p CPUWeight")
+        assert server.succeed("systemctl show container@alice.service -p Slice --value").strip() == "agent-slots.slice"
+        props = server.succeed("systemctl show agent-slots.slice -p MemoryMax -p MemoryHigh -p TasksMax -p IOWeight -p CPUWeight")
         for want in ["MemoryMax=12884901888", "MemoryHigh=10737418240", "TasksMax=8192", "IOWeight=20", "CPUWeight=20"]:
             assert want in props, props
-        assert som.succeed("systemctl show container@alice.service -p TasksMax --value").strip() == "2048"
-        som.succeed("machinectl status alice >/dev/null")
+        assert server.succeed("systemctl show container@alice.service -p TasksMax --value").strip() == "2048"
+        server.succeed("machinectl status alice >/dev/null")
 
     with subtest("a slot cannot steer the host's start script through symlinks"):
         root = "/var/lib/nixos-containers/alice"
-        som.succeed("install -d -m 0755 /srv/probe && install -d -m 0700 /var/lib/private")
-        modes = lambda: som.succeed("stat -c '%n %a' / /root /var/lib /var/lib/private /srv/probe")
+        server.succeed("install -d -m 0755 /srv/probe && install -d -m 0700 /var/lib/private")
+        modes = lambda: server.succeed("stat -c '%n %a' / /root /var/lib /var/lib/private /srv/probe")
         before = modes()
         # the guest, as its root, swaps its /root for a link to /
-        som.succeed(in_slot("alice") + "${pkgs.bash}/bin/sh -c 'rm -rf /root && ln -s / /root'")
-        som.succeed("runuser -u alice -- slot stop")
-        som.fail("runuser -u alice -- slot start")
-        som.fail("systemctl is-active container@alice.service")
-        som.succeed("journalctl -u container@alice --no-pager | grep -q '/root in the slot is a symlink'")
+        server.succeed(in_slot("alice") + "${pkgs.bash}/bin/sh -c 'rm -rf /root && ln -s / /root'")
+        server.succeed("runuser -u alice -- slot stop")
+        server.fail("runuser -u alice -- slot start")
+        server.fail("systemctl is-active container@alice.service")
+        server.succeed("journalctl -u container@alice --no-pager | grep -q '/root in the slot is a symlink'")
         assert modes() == before, (before, modes())
         # what it could plant just as well (set here from the host, the
         # slot being down): /var/lib/private -> a host directory
-        som.succeed(f"rm {root}/root && mkdir -m 0700 {root}/root")
-        som.succeed(f"rm -rf {root}/var/lib/private && ln -s /srv/probe {root}/var/lib/private")
-        som.fail("systemctl reset-failed container@alice.service; systemctl start container@alice.service")
-        som.succeed("journalctl -u container@alice --no-pager | grep -q '/var/lib/private in the slot is a symlink'")
-        som.succeed(f"rm {root}/var/lib/private && mkdir -m 0700 {root}/var/lib/private")
-        som.succeed(f"rm -rf {root}/var/lib && ln -s /var/lib/private {root}/var/lib")
-        som.fail("systemctl reset-failed container@alice.service; systemctl start container@alice.service")
-        som.succeed("journalctl -u container@alice --no-pager | grep -q ': /var/lib in the slot is a symlink'")
+        server.succeed(f"rm {root}/root && mkdir -m 0700 {root}/root")
+        server.succeed(f"rm -rf {root}/var/lib/private && ln -s /srv/probe {root}/var/lib/private")
+        server.fail("systemctl reset-failed container@alice.service; systemctl start container@alice.service")
+        server.succeed("journalctl -u container@alice --no-pager | grep -q '/var/lib/private in the slot is a symlink'")
+        server.succeed(f"rm {root}/var/lib/private && mkdir -m 0700 {root}/var/lib/private")
+        server.succeed(f"rm -rf {root}/var/lib && ln -s /var/lib/private {root}/var/lib")
+        server.fail("systemctl reset-failed container@alice.service; systemctl start container@alice.service")
+        server.succeed("journalctl -u container@alice --no-pager | grep -q ': /var/lib in the slot is a symlink'")
         assert modes() == before, (before, modes())
         # dangling links where the script touches or copies a file: removed,
         # the slot starts, nothing appears on the host
-        som.succeed(f"rm {root}/var/lib && mkdir -m 0755 {root}/var/lib")
-        som.succeed(f"ln -sfn /srv/nologin-probe {root}/etc/machine-id && ln -sfn /srv/probe/resolv {root}/etc/resolv.conf")
-        som.succeed("systemctl reset-failed container@alice.service; systemctl start container@alice.service")
-        som.succeed("test ! -e /srv/nologin-probe && test ! -e /srv/probe/resolv")
-        som.succeed(f"test ! -L {root}/etc/machine-id && test ! -L {root}/etc/resolv.conf")
+        server.succeed(f"rm {root}/var/lib && mkdir -m 0755 {root}/var/lib")
+        server.succeed(f"ln -sfn /srv/nologin-probe {root}/etc/machine-id && ln -sfn /srv/probe/resolv {root}/etc/resolv.conf")
+        server.succeed("systemctl reset-failed container@alice.service; systemctl start container@alice.service")
+        server.succeed("test ! -e /srv/nologin-probe && test ! -e /srv/probe/resolv")
+        server.succeed(f"test ! -L {root}/etc/machine-id && test ! -L {root}/etc/resolv.conf")
         assert modes() == before, (before, modes())
         # a machine-id link to a file that exists on the host goes too:
         # its target's existence is host state the agent can flip
-        som.succeed("systemctl stop container@alice.service")
-        som.succeed("echo keep > /srv/mid-probe && touch -d @1000000000 /srv/mid-probe")
-        som.succeed(f"ln -sfn /srv/mid-probe {root}/etc/machine-id")
-        som.succeed("systemctl start container@alice.service")
-        som.succeed(f"test ! -L {root}/etc/machine-id")
-        som.succeed("test \"$(stat -c %Y /srv/mid-probe)\" = 1000000000 && grep -qx keep /srv/mid-probe")
+        server.succeed("systemctl stop container@alice.service")
+        server.succeed("echo keep > /srv/mid-probe && touch -d @1000000000 /srv/mid-probe")
+        server.succeed(f"ln -sfn /srv/mid-probe {root}/etc/machine-id")
+        server.succeed("systemctl start container@alice.service")
+        server.succeed(f"test ! -L {root}/etc/machine-id")
+        server.succeed("test \"$(stat -c %Y /srv/mid-probe)\" = 1000000000 && grep -qx keep /srv/mid-probe")
         # a NixOS guest's own /etc/os-release link does not stop it
-        som.succeed(f"test -L {root}/etc/os-release")
+        server.succeed(f"test -L {root}/etc/os-release")
         # The agent's way out is a hard reset, which also drops the gc
         # roots the guest made (through its bind of gcroots/per-container).
-        som.succeed(in_slot("alice") + "${pkgs.coreutils}/bin/ln -s ${broken} /nix/var/nix/gcroots/pin")
-        som.succeed("test -L /nix/var/nix/gcroots/per-container/alice/pin")
-        som.succeed("runuser -u alice -- slot reset --hard")
-        som.succeed("test ! -e /nix/var/nix/gcroots/per-container/alice/pin")
-        som.succeed("systemctl is-active container@alice.service")
-        som.wait_until_succeeds(ssh_as("alice", alice4), timeout=90)
+        server.succeed(in_slot("alice") + "${pkgs.coreutils}/bin/ln -s ${broken} /nix/var/nix/gcroots/pin")
+        server.succeed("test -L /nix/var/nix/gcroots/per-container/alice/pin")
+        server.succeed("runuser -u alice -- slot reset --hard")
+        server.succeed("test ! -e /nix/var/nix/gcroots/per-container/alice/pin")
+        server.succeed("systemctl is-active container@alice.service")
+        server.wait_until_succeeds(ssh_as("alice", alice4), timeout=90)
 
     with subtest("the desired state survives a reboot"):
-        som.succeed("runuser -u bob -- slot stop")
-        som.fail("systemctl is-active container@bob.service")
+        server.succeed("runuser -u bob -- slot stop")
+        server.fail("systemctl is-active container@bob.service")
         # A stopped slot's addresses lead nowhere, not to the default
         # route or the LAN /64 (where any peer could claim the v6).
-        som.fail(f"ip route get {bob4}")
-        som.fail(f"ip -6 route get {bob6}")
-        assert "dev ve-alice" in som.succeed(f"ip route get {alice4}")
-        assert "dev ve-alice" in som.succeed(f"ip -6 route get {alice6}")
-        som.fail(ssh_as("bob", bob4))
+        server.fail(f"ip route get {bob4}")
+        server.fail(f"ip -6 route get {bob6}")
+        assert "dev ve-alice" in server.succeed(f"ip route get {alice4}")
+        assert "dev ve-alice" in server.succeed(f"ip -6 route get {alice6}")
+        server.fail(ssh_as("bob", bob4))
         # A power cut, not a clean shutdown: the state written by the
         # control units must already be on disk (and this VM's read-only
         # store image keeps a clean poweroff from ever finishing).
-        som.crash()
-        som.start()
-        som.wait_for_unit("agent-slots-restore.service")
-        som.wait_for_unit("container@alice.service")
-        som.fail("systemctl is-active container@bob.service")
-        assert "desired off" in som.succeed("runuser -u bob -- slot status")
-        som.wait_until_succeeds(ssh_as("alice", alice4), timeout=90)
+        server.crash()
+        server.start()
+        server.wait_for_unit("agent-slots-restore.service")
+        server.wait_for_unit("container@alice.service")
+        server.fail("systemctl is-active container@bob.service")
+        assert "desired off" in server.succeed("runuser -u bob -- slot status")
+        server.wait_until_succeeds(ssh_as("alice", alice4), timeout=90)
 
     with subtest("a reset brings back a slot whose deploy dropped sshd"):
         # What a deploy of a system without sshd leaves behind: the slot's
         # profile on it, and the slot rebooted into it. Set from the host:
         # this VM's store is read-only, so nix inside the slot cannot.
-        som.succeed("nix-env -p /nix/var/nix/profiles/per-container/alice/system --set ${broken}")
-        som.succeed("systemctl restart container@alice.service")
-        som.sleep(10)
-        som.fail(ssh_as("alice", alice4))
-        som.succeed("runuser -u alice -- slot reset")
-        som.succeed("systemctl is-active container@alice.service")
-        som.wait_until_succeeds(ssh_as("alice", alice4), timeout=90)
-        som.succeed(ssh_as("alice", alice4, "'touch /root/marker'"))
-        som.succeed("journalctl -u agent-slot-reset@alice --no-pager | grep -q 'slot alice: reset, then back to on'")
+        server.succeed("nix-env -p /nix/var/nix/profiles/per-container/alice/system --set ${broken}")
+        server.succeed("systemctl restart container@alice.service")
+        server.sleep(10)
+        server.fail(ssh_as("alice", alice4))
+        server.succeed("runuser -u alice -- slot reset")
+        server.succeed("systemctl is-active container@alice.service")
+        server.wait_until_succeeds(ssh_as("alice", alice4), timeout=90)
+        server.succeed(ssh_as("alice", alice4, "'touch /root/marker'"))
+        server.succeed("journalctl -u agent-slot-reset@alice --no-pager | grep -q 'slot alice: reset, then back to on'")
 
     with subtest("a hard reset also wipes the slot, and keeps it off when it was off"):
-        som.succeed("runuser -u alice -- slot reset --hard")
-        som.wait_until_succeeds(ssh_as("alice", alice4), timeout=90)
-        som.fail(ssh_as("alice", alice4, "'test -e /root/marker'"))
-        som.succeed("runuser -u bob -- slot reset --hard")
-        som.fail("systemctl is-active container@bob.service")
-        assert "desired off" in som.succeed("runuser -u bob -- slot status")
+        server.succeed("runuser -u alice -- slot reset --hard")
+        server.wait_until_succeeds(ssh_as("alice", alice4), timeout=90)
+        server.fail(ssh_as("alice", alice4, "'test -e /root/marker'"))
+        server.succeed("runuser -u bob -- slot reset --hard")
+        server.fail("systemctl is-active container@bob.service")
+        assert "desired off" in server.succeed("runuser -u bob -- slot status")
 
     with subtest("control units are rate-limited"):
         # bob's earlier stop still counts: at most 6 in 10 minutes in all
         ok = 0
-        while som.execute("runuser -u bob -- slot stop")[0] == 0:
+        while server.execute("runuser -u bob -- slot stop")[0] == 0:
             ok += 1
             assert ok <= 6, "no rate limit"
         assert ok >= 4, ok
-        som.succeed("journalctl -u agent-slot-stop@bob --no-pager | grep -q 'stop refused, 6 already'")
+        server.succeed("journalctl -u agent-slot-stop@bob --no-pager | grep -q 'stop refused, 6 already'")
         # per action: a start still goes through
-        som.succeed("runuser -u bob -- slot start")
+        server.succeed("runuser -u bob -- slot start")
   '';
 }

@@ -147,7 +147,16 @@ let
     claude-auth-claude-on-agent-path = lib.any (
       p: p.pname or "" == "claude-code"
     ) claudeAuth.config.services.hyperhermes.extraPackages;
-    claude-auth-host-shim = lib.length claudeAuth.config.environment.profiles > 0;
+    # Exactly one profile more than the same system without claude-auth:
+    # the hooked `hermes` wrapper (NixOS fills the list on its own).
+    claude-auth-host-shim =
+      let
+        added = lib.subtractLists (evalWith [
+          self.nixosModules.core
+          withAgents
+        ]).config.environment.profiles claudeAuth.config.environment.profiles;
+      in
+      lib.length added == 1 && lib.hasSuffix "-hermes" (lib.head added);
 
     desktop-evaluates = evaluates desktop && failedAssertions desktop == [ ];
     desktop-launchers =

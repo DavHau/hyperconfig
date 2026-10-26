@@ -5,7 +5,10 @@
 # (./login.py) signs in at dex's password form and ends on an
 # authenticated dashboard API call; a second dex account that owns no
 # agent is refused at the same dashboard (dex itself admits it: the group
-# check is hermes', core's allowed-groups patch).
+# check is hermes', core's allowed-groups patch). The app's sign-in
+# (/auth/native/*) the same way: dex asked for a fresh login, the one-time
+# code redeemed for bearer tokens that call the API and refresh; bob gets
+# no code.
 #
 # It also pins the facts the modules rely on:
 # - *.localhost resolves to loopback through nss-myhostname, on the host
@@ -202,6 +205,16 @@ pkgs.testers.runNixOSTest {
     with subtest("an account outside hermes-alice is refused at alice's dashboard"):
         print(machine.succeed(
             "${python}/bin/python3 ${./login.py} --refused http://alice.${domain}:${toString port} "
+            "bob@${domain} bob-password hermes-alice"
+        ))
+
+    with subtest("the app's sign-in: fresh login at dex, bearer tokens, refresh; bob refused"):
+        print(machine.succeed(
+            "${python}/bin/python3 ${./login.py} --native http://alice.${domain}:${toString port} "
+            "alice@${domain} alice-password hermes-alice"
+        ))
+        print(machine.succeed(
+            "${python}/bin/python3 ${./login.py} --native --refused http://alice.${domain}:${toString port} "
             "bob@${domain} bob-password hermes-alice"
         ))
   '';
