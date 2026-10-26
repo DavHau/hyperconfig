@@ -148,7 +148,7 @@
     llm-agents.inputs.flake-parts.follows = "flake-parts";
     llm-agents.inputs.systems.follows = "systems";
 
-    afk.url = "git+file:///home/grmpf/synced/projects/afk?rev=c1cc2da48640276ed39fd9035aef5005577cdde4";
+    afk.url = "git+file:///home/grmpf/synced/projects/afk?rev=4e3d6ac33f57fa25aa493e7c6ca3996803f7099f";
     afk.inputs.nixpkgs.follows = "nixpkgs";
     afk.inputs.llm-agents.follows = "llm-agents";
 
