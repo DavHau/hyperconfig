@@ -34,7 +34,7 @@ in
     interface = lib.mkOption {
       type = lib.types.str;
       example = "enp6s0";
-      description = "The uplink link; needs a 40-<interface>.network (nixos-facter's for a NIC, or container-slots.nix's bridge).";
+      description = "The uplink link; needs a 40-<interface>.network (nixos-facter's for a NIC, or hyperhermes' container-slots bridge).";
     };
   };
 

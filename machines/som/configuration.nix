@@ -14,6 +14,8 @@ let
 in
 {
   imports = [
+    # DNS for hyperhermes' exposure.dnsRecords (mapped below).
+    ../../modules/nixos/porkbun-records
     inputs.nixos-hardware.nixosModules.common-cpu-amd
     inputs.nixos-hardware.nixosModules.common-cpu-amd-pstate
     inputs.nixos-hardware.nixosModules.common-gpu-amd
@@ -36,8 +38,8 @@ in
     ../../modules/nixos/rgb-off.nix
     ../../modules/nixos/cooler-lcd
     ../../modules/nixos/ipv4-forward.nix
-    ../../modules/nixos/container-slots.nix
-    ../../modules/nixos/agent-slots.nix
+    # Container slots (generic) and every agent's own slot.
+    inputs.hyperhermes.nixosModules.slots
     ../../modules/nixos/mullvad-egress
     ../../modules/nixos/web-bench-mullvad.nix
     ../../modules/nixos/zfs-ephemeral-tmp.nix
@@ -186,27 +188,43 @@ in
     interface = "br0";
   };
 
-  # Container slots for other repos to deploy into
-  # (../../modules/nixos/container-slots.nix). enp6s0 is a port of br0,
-  # which keeps its MAC and carries som's own DHCP/SLAAC addresses. Add a
-  # slot as `slots.<name> = { id; mode; }`; ids 4..14 are the agent slots
-  # below (slotIds).
-  hyper.containerSlots = {
+  # Container slots for other repos to deploy into (hyperhermes'
+  # nixosModules.container-slots, generic). enp6s0 is a port of br0, which
+  # keeps its MAC and carries som's own DHCP/SLAAC addresses
+  # (networking.publicIPv6 above points at the bridge). Add a slot as
+  # `slots.<name> = { id; mode; }`; ids 4..16 are the agent slots below
+  # (slotIds). Inbound from the internet needs an allow rule for the
+  # slot's v6 on both routers, the AIS ZTE first, then the Beryl:
+  #   router-ais ipv6-rules add --address <v6> --name <slot>
+  #   router-cm-beryl -J root@som.d ipv6-rules add --address <v6> --name <slot>
+  # router-ais needs the LAN (192.168.1.1, Host header must be that IP):
+  # run it on som when away, with ROUTER_AIS_PASSWORD from
+  # `clan vars get amy router-ais/password`. `slot-onboard som <slot>`
+  # (tools/) prints the handoff for a slot's deployer.
+  services.containerSlots = {
     enable = true;
     uplink = "enp6s0";
     uplinkMac = "a4:0c:66:1b:29:f1";
+    lanIPv4 = "192.168.8.0/24";
+    ipv6Prefix = "2405:9800:b901:94e3";
+    # ../../modules/nixos/ipv4-forward.nix marks the public IPv4's return
+    # traffic; the slots' egress mark must stay clear of it.
+    foreignMarks.ipv4-forward = config.hyper.ipv4Forward.returnMark;
     # Default root key in the bootstrap system every slot starts with
     # (agent slots take their agent's key instead).
     deployKeys = [
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM7ptVA/R16UvtWJD3VfJUWdEL2nzonoFRz2Na6lg+UU agent@amy"
     ];
-    # The borrowed public IPv4 (../../modules/nixos/ipv4-forward.nix).
+    # The borrowed public IPv4 (../../modules/nixos/ipv4-forward.nix, whose
+    # return mark also routes the replies of the connections forwarded on
+    # into a slot back through the tunnel).
     publicIPv4Interface = "wg-v4fwd";
 
     # The isolated (agent) slots' own connections leave through Mullvad,
     # like the agents' own traffic (hyper.mullvadEgress below; 51830 is its
     # table, ../../modules/nixos/mullvad-egress/egress.nix), never the home
-    # uplink. No tunnel, no egress. Inbound to the slots is unchanged.
+    # uplink. No tunnel, no egress. Inbound to the slots is unchanged; som's
+    # ../../modules/nixos/vpn.nix sets the loose rpfilter this needs.
     isolatedEgress = {
       interface = "wg-mullvad";
       table = 51830;
@@ -255,16 +273,17 @@ in
     };
   };
 
-  # One isolated slot per hermes agent (../../modules/nixos/agent-slots.nix),
-  # off until the agent starts it. The ids are fixed: addresses, ports and
-  # the router rules derive from them, so never renumber or reuse one; a new
+  # One isolated slot per hermes agent (hyperhermes' slots module), off
+  # until the agent starts it. The ids are fixed: addresses, ports and the
+  # router rules derive from them, so never renumber or reuse one; a new
   # agent takes the next free id. The deploy key is the agent's own clan
-  # key (hermes-agent-ssh-<name>, hyperhermes.nixosModules.clan), the
-  # one vit's GPU accounts also trust. Hostname slot.<agent>.davhau.fyi, on
-  # the agents' site; the old <agent>.slots.davhau.com only redirects there
-  # during the transition. The other container slots above have no public
-  # hostname, so nothing of theirs moves.
-  hyper.agentSlots =
+  # key (hermes-agent-ssh-<name>, hyperhermes.nixosModules.clan), the one
+  # vit's GPU accounts also trust. Hostname slot.<agent>.davhau.fyi, on the
+  # agents' site (public exposure, records in exposure.dnsRecords above);
+  # the old <agent>.slots.davhau.com only redirects there during the
+  # transition. The other container slots above have no public hostname,
+  # so nothing of theirs moves.
+  services.hyperhermes.agents =
     let
       slotIds = {
         dave-hermes = 4;
@@ -281,20 +300,18 @@ in
         b3x = 15;
         joe = 16;
       };
-      key = name: config.clan.core.vars.generators."hermes-agent-ssh-${name}".files;
     in
-    {
-      domain = (import ./hermes-dashboards.nix).domain;
-      legacyDomain = "slots.davhau.com";
-      publicIPv4 = "38.89.142.76";
-      agents = lib.genAttrs agents (name: {
+    lib.mapAttrs (name: _: {
+      slot = {
+        enable = true;
         id =
-          slotIds.${name}
-            or (throw "machines/som: hermes agent ${name} has no slot id; add it to slotIds");
-        deployKey = (key name)."key.pub".value;
-        identityFile = (key name).key.path;
-      });
-    };
+          slotIds.${name} or (throw "machines/som: hermes agent ${name} has no slot id; add it to slotIds");
+      };
+    }) (import ./hermes-agents-data.nix);
+  services.hyperhermes.slots = {
+    legacyDomain = "slots.davhau.com";
+    egress = "Mullvad (its outbound address is a Mullvad one, not its own IPv6 or the public IPv4)";
+  };
 
   users.users.slot-asof = {
     isSystemUser = true;

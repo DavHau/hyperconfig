@@ -256,11 +256,6 @@
           import ./modules/nixos/mullvad-egress/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
-        agent-slots =
-          import ./modules/nixos/agent-slots-test {
-            pkgs = nixpkgs.legacyPackages.x86_64-linux;
-            inherit (inputs) spaces hyperhermes;
-          };
         porkbun-records =
           import ./modules/nixos/porkbun-records/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;

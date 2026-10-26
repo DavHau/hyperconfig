@@ -51,6 +51,11 @@
         dashboards = ./modules/dashboards;
         publish = ./modules/publish;
         mail = ./modules/mail;
+        # Agent slots (a NixOS container per agent) on container-slots,
+        # which is generic (not hermes-specific) and also usable alone;
+        # slots imports it.
+        container-slots = ./modules/container-slots.nix;
+        slots = ./modules/slots;
         default = {
           imports = [
             self.nixosModules.core
@@ -64,6 +69,7 @@
             self.nixosModules.dashboards
             self.nixosModules.publish
             self.nixosModules.mail
+            self.nixosModules.slots
           ];
         };
         # Not a feature, so not in `default`: fills core's and the
@@ -121,6 +127,8 @@
         browser = import ./checks/browser { inherit pkgs self; };
         wallet = import ./checks/wallet { inherit pkgs self; };
         mail = import ./checks/mail { inherit pkgs self; };
+        slots = import ./checks/slots { inherit pkgs self; };
+        slots-local = import ./checks/slots/local.nix { inherit pkgs self; };
         # Evaluation only: teamclaude, claude-auth and desktop on a system
         # without clan, secrets as runtime paths.
         client-features = import ./checks/client-features { inherit pkgs self; };
