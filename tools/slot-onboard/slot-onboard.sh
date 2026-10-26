@@ -27,7 +27,7 @@ note() { echo "slot-onboard: $*" >&2; }
 expr=$(cat <<EOF
 c:
 let
-  cs = c.services.containerSlots;
+  cs = c.services."container-slots";
   s = cs.slots."$slot" or null;
   comment = k: let p = builtins.filter builtins.isString (builtins.split " " k);
     in if builtins.length p > 2 then builtins.elemAt p 2 else "(no comment)";

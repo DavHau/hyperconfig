@@ -19,7 +19,7 @@ store path.
 | `dashboards` | each agent's hermes dashboard at `<agent>.<domain>`, group-checked, plus an optional front door |
 | `publish` | ten ports per agent at `<port>.<agent>.<domain>`, private ones behind their own login |
 | `slots` | a NixOS container per agent (`agents.<name>.slot`), reachable at `slot.<agent>.<domain>` |
-| `container-slots` | the generic container-slot machinery `slots` builds on (`services.containerSlots`) |
+| `container-slots` | the generic container-slot machinery `slots` builds on (`services.container-slots`) |
 | `browser` | Camofox browser, web extract, SearXNG, captcha and OCR clients |
 | `mail` | receive-only, sanitized mail per agent, read through a read-only IMAP CLI (public mode only) |
 | `wallet` | one shared phoenixd Lightning wallet for agents with `wallet.enable` |

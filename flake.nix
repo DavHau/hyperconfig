@@ -276,6 +276,12 @@
           import ./modules/nixos/noctalia-anthropic-usage/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
+        # ipv4-forward's return path into hyperhermes' container slots.
+        ipv4-forward-slots =
+          import ./modules/nixos/ipv4-forward-slots-test {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+            inherit (inputs) hyperhermes;
+          };
       };
     };
 }

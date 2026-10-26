@@ -2,7 +2,7 @@
 # another repo. This host declares only the shell of each slot (network,
 # limits, isolation); what runs inside is whatever system the slot's
 # deployer last switched to. Nothing here ever rewrites a slot's system.
-# Generic, not tied to hermes: `services.containerSlots`. The agents' own
+# Generic, not tied to hermes: `services.container-slots`. The agents' own
 # slots (./slots) are slots of this module.
 #
 # Deploying into a slot, from the other repo (builds run on this host's
@@ -150,7 +150,7 @@
   ...
 }:
 let
-  cfg = config.services.containerSlots;
+  cfg = config.services.container-slots;
   inherit (lib) mkOption types;
 
   hex = id: lib.toLower (lib.toHexString id);
@@ -395,7 +395,7 @@ let
       deployKeys = mkOption {
         type = types.listOf types.str;
         default = cfg.deployKeys;
-        defaultText = lib.literalExpression "config.services.containerSlots.deployKeys";
+        defaultText = lib.literalExpression "config.services.container-slots.deployKeys";
         description = "SSH keys for root in this slot's bootstrap system (the bind-mounted authorized_keys, see the module header).";
       };
       deployKeyFiles = mkOption {
@@ -432,7 +432,7 @@ let
   };
 in
 {
-  options.services.containerSlots = {
+  options.services.container-slots = {
     enable = lib.mkEnableOption "container slots (bridges the uplink)";
     uplink = mkOption {
       type = types.str;
@@ -528,15 +528,15 @@ in
     assertions =
       lib.mapAttrsToList (name: _: {
         assertion = builtins.stringLength name <= 11;
-        message = "services.containerSlots.slots.${name}: slot names must be <= 11 chars";
+        message = "services.container-slots.slots.${name}: slot names must be <= 11 chars";
       }) cfg.slots
       ++ lib.mapAttrsToList (name: slot: {
         assertion = lib.count (s: s.id == slot.id) (lib.attrValues cfg.slots) == 1;
-        message = "services.containerSlots.slots.${name}: id ${toString slot.id} is not unique";
+        message = "services.container-slots.slots.${name}: id ${toString slot.id} is not unique";
       }) cfg.slots
       ++ lib.mapAttrsToList (name: slot: {
         assertion = slot.publicIPv4Ports == [ ] || (slot.mode == "isolated" && cfg.publicIPv4Interface != null);
-        message = "services.containerSlots.slots.${name}: publicIPv4Ports need mode isolated and publicIPv4Interface";
+        message = "services.container-slots.slots.${name}: publicIPv4Ports need mode isolated and publicIPv4Interface";
       }) cfg.slots
       ++ (
         let
@@ -545,13 +545,13 @@ in
         [
           {
             assertion = lib.length all == lib.length (lib.unique all);
-            message = "services.containerSlots: a publicIPv4Ports port is claimed by more than one slot";
+            message = "services.container-slots: a publicIPv4Ports port is claimed by more than one slot";
           }
         ]
       )
       ++ lib.mapAttrsToList (owner: mark: {
         assertion = builtins.bitAnd egressMark mark == 0;
-        message = "services.containerSlots: the slots' egress mark overlaps ${owner}'s fwmark";
+        message = "services.container-slots: the slots' egress mark overlaps ${owner}'s fwmark";
       }) otherMarks
       ++ [
         {
@@ -564,7 +564,7 @@ in
               true
               "strict"
             ]);
-          message = "services.containerSlots: isolatedEgress needs networking.firewall.checkReversePath = \"loose\" (a strict check drops every packet an isolated slot opens)";
+          message = "services.container-slots: isolatedEgress needs networking.firewall.checkReversePath = \"loose\" (a strict check drops every packet an isolated slot opens)";
         }
       ];
 

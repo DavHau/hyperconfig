@@ -201,7 +201,7 @@ in
   # run it on som when away, with ROUTER_AIS_PASSWORD from
   # `clan vars get amy router-ais/password`. `slot-onboard som <slot>`
   # (tools/) prints the handoff for a slot's deployer.
-  services.containerSlots = {
+  services.container-slots = {
     enable = true;
     uplink = "enp6s0";
     uplinkMac = "a4:0c:66:1b:29:f1";

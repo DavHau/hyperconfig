@@ -21,7 +21,8 @@
 #   the tunnel is marked (ct mark), its packets from elsewhere carry the mark
 #   as fwmark, and a mark rule sends them to the tunnel's table too. The
 #   container's MSS (from a 1500 veth) is clamped to the tunnel on the way
-#   out, as the gateway does for its side.
+#   out, as the gateway does for its side. ./ipv4-forward-slots-test checks
+#   that return path (checks.ipv4-forward-slots).
 {
   config,
   lib,

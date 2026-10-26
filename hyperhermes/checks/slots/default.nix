@@ -1,7 +1,7 @@
 # Agent slots (../../modules/slots) on a public-mode host with two agents,
 # alice (slot 4) and bob (slot 5), in public exposure mode. `client` plays
 # the internet: on vlan 3 it reaches the host's public IPv4 (the link
-# services.containerSlots.publicIPv4Interface names), on vlan 1 the slots'
+# services.container-slots.publicIPv4Interface names), on vlan 1 the slots'
 # public v6, and on a second link (vlan 2) it is a VPN relay: the stand-in
 # for an egress tunnel, which accepts only the tunnel's own source
 # addresses, as a relay does. Covered: each agent starts, stops and resets
@@ -222,7 +222,7 @@ pkgs.testers.runNixOSTest {
       ];
       # the v6 "internet" client, on-link here (it reaches the slots by NDP)
       systemd.network.networks."40-br0".routes = [ { Destination = "2001:db8:ffff::/64"; } ];
-      services.containerSlots = {
+      services.container-slots = {
         enable = true;
         uplink = "eth1";
         uplinkMac = common.uplinkMacOf config;
