@@ -1,17 +1,22 @@
 # nixosModules.local-container end to end, with the example's own
-# container config (../../example/hermes.nix: alice, with a slot). Every
-# check runs from the HOST, as a browser on the workstation would:
+# container config (../../example/hermes.nix: alice, with a slot), on two
+# hosts booting side by side: `machine` runs systemd-networkd and the
+# container the nftables firewall; `nm` runs NetworkManager and the
+# container the iptables firewall, without the slot (slots bring their
+# nftables tables, ../../modules/slots). Every check runs from the HOST,
+# as a browser on the workstation would. On both:
 # - the secrets exist after the container's first boot, alice's dex
 #   password among them,
 # - alice signs in to her dashboard at dex (browser and app sign-in) and
 #   ends on authenticated dashboard API calls,
 # - an app alice publishes on her first private port answers at
 #   http://30010.alice.hermes.localhost:8473/ after her sign-in there,
+# - a peer on the host's LAN routing to the container's address reaches
+#   it (ping), but not its web front.
+# On `machine`:
 # - alice starts her slot (a container inside the container) and gets in
 #   by ssh; its port 80 answers at http://slot.alice.hermes.localhost:8473/,
 # - `slot info` and the skill call the slot's IPv6 private,
-# - a peer on the host's LAN routing to the container's address reaches
-#   it (ping), but not its web front,
 # - alice cannot change her key directory, and a key.pub link to a
 #   root-only file (what earlier versions let her leave) stops her slot
 #   start without leaking the file; the secrets unit replaces it.
@@ -26,6 +31,16 @@ let
   slot4 = "10.43.1.2";
   python = pkgs.python3.withPackages (ps: [ ps.requests ]);
   localAddress = "10.233.73.2";
+  nmHostAddress = "10.233.74.1";
+  nmLocalAddress = "10.233.74.2";
+
+  # The container config both hosts share.
+  deployment = {
+    imports = [ ../../example/hermes.nix ];
+    # The agents' venv is not under test.
+    services.hyperhermes.pythonPackages = _: [ ];
+    environment.systemPackages = [ pkgs.curl ];
+  };
 
   # The slot's port 80, answered from inside the slot (its bootstrap
   # firewall flushed); run in the outer container.
@@ -56,10 +71,7 @@ pkgs.testers.runNixOSTest {
     services.hyperhermes.localContainer = {
       enable = true;
       config = {
-        imports = [ ../../example/hermes.nix ];
-        # The agents' venv is not under test.
-        services.hyperhermes.pythonPackages = _: [ ];
-        environment.systemPackages = [ pkgs.curl ];
+        imports = [ deployment ];
         # The same stand-ins inside: the container seeds the slot's
         # profile with nix-env too.
         inherit (common.slotHost) nix;
@@ -67,6 +79,45 @@ pkgs.testers.runNixOSTest {
       };
     };
   };
+
+  # A workstation NetworkManager runs: its LAN address is a NetworkManager
+  # profile, the container's veth is left to the containers module.
+  nodes.nm =
+    { config, ... }:
+    {
+      imports = [ self.nixosModules.local-container ];
+      virtualisation.memorySize = 4096;
+      virtualisation.cores = 2;
+      environment.systemPackages = [ pkgs.curl ];
+
+      networking.interfaces = lib.mkForce { eth1 = { }; };
+      networking.networkmanager = {
+        enable = true;
+        settings.main.no-auto-default = "*";
+        ensureProfiles.profiles.lan = {
+          connection = {
+            id = "lan";
+            type = "ethernet";
+            interface-name = "eth1";
+          };
+          ipv4 = {
+            method = "manual";
+            address1 = "${config.networking.primaryIPAddress}/24";
+          };
+          ipv6.method = "disabled";
+        };
+      };
+
+      services.hyperhermes.localContainer = {
+        enable = true;
+        hostAddress = nmHostAddress;
+        localAddress = nmLocalAddress;
+        config = {
+          imports = [ deployment ];
+          services.hyperhermes.agents.alice.slot.enable = lib.mkForce false;
+        };
+      };
+    };
 
   # Another machine on the host's LAN.
   nodes.peer = {
@@ -79,49 +130,62 @@ pkgs.testers.runNixOSTest {
     let
       guestHyper = nodes.machine.containers.${name}.config.services.hyperhermes;
       machineAddress = nodes.machine.networking.primaryIPAddress;
+      nmAddress = nodes.nm.networking.primaryIPAddress;
+      nmGuest = nodes.nm.containers.${name}.config;
     in
+    assert lib.assertMsg (
+      !nodes.nm.systemd.network.enable && nodes.nm.networking.networkmanager.enable
+    ) "nm runs NetworkManager, not systemd-networkd";
+    assert lib.assertMsg (
+      nmGuest.networking.firewall.backend == "iptables"
+    ) "nm's container runs the iptables firewall";
     ''
-      def inside(cmd, timeout=900):
-          return machine.succeed(f"nixos-container run ${name} -- {cmd}", timeout=timeout)
+      def inside(cmd, timeout=900, host=machine):
+          return host.succeed(f"nixos-container run ${name} -- {cmd}", timeout=timeout)
 
-      def until_inside(cmd, timeout=300):
-          machine.wait_until_succeeds(f"nixos-container run ${name} -- {cmd}", timeout=timeout)
+      def until_inside(cmd, timeout=300, host=machine):
+          host.wait_until_succeeds(f"nixos-container run ${name} -- {cmd}", timeout=timeout)
 
+      # Both hosts boot at once: the wait for the first covers the second.
       start_all()
-      machine.wait_for_unit("container@${name}.service")
-      until_inside("systemctl is-active hyperhermes-local-secrets.service dex.service nginx.service hermes-dashboard-alice.service")
-      until_inside("curl -sf -o /dev/null --unix-socket /run/oauth2-proxy-serve.sock http://localhost/ping")
+      for host in (machine, nm):
+          host.wait_for_unit("container@${name}.service")
+          until_inside("systemctl is-active hyperhermes-local-secrets.service dex.service nginx.service hermes-dashboard-alice.service", host=host)
+          until_inside("curl -sf -o /dev/null --unix-socket /run/oauth2-proxy-serve.sock http://localhost/ping", host=host)
 
-      with subtest("the secrets from the first boot"):
-          password = inside("cat /var/lib/hyperhermes-local/dex/alice.password").strip()
-          assert len(password) == 24, password
-          modes = inside(
-              "stat -c '%n %U %a' /var/lib/hyperhermes-local/dex/alice.password "
-              "/var/lib/hyperhermes-local/agents/alice /var/lib/hyperhermes-local/agents/alice/key "
-              "/var/lib/hyperhermes-local/agents/alice/key.pub"
-          )
-          print(modes)
-          assert "alice.password root 600" in modes and "agents/alice root 755" in modes, modes
-          assert "key alice 400" in modes and "key.pub root 444" in modes, modes
+      for host in (machine, nm):
+          with subtest(f"{host.name}: the secrets from the first boot"):
+              password = inside("cat /var/lib/hyperhermes-local/dex/alice.password", host=host).strip()
+              assert len(password) == 24, password
+              modes = inside(
+                  "stat -c '%n %U %a' /var/lib/hyperhermes-local/dex/alice.password "
+                  "/var/lib/hyperhermes-local/agents/alice /var/lib/hyperhermes-local/agents/alice/key "
+                  "/var/lib/hyperhermes-local/agents/alice/key.pub",
+                  host=host,
+              )
+              print(modes)
+              assert "alice.password root 600" in modes and "agents/alice root 755" in modes, modes
+              assert "key alice 400" in modes and "key.pub root 444" in modes, modes
 
-      with subtest("alice signs in to her dashboard from the host"):
-          machine.wait_until_succeeds("curl -sf http://alice.${domain}:${toString port}/api/status", timeout=120)
-          for mode in ("", "--native"):
-              print(machine.succeed(
-                  f"${python}/bin/python3 ${../local-sso/login.py} {mode} http://alice.${domain}:${toString port} "
-                  f"alice@${domain} {password} hermes-alice"
+          with subtest(f"{host.name}: alice signs in to her dashboard from the host"):
+              host.wait_until_succeeds("curl -sf http://alice.${domain}:${toString port}/api/status", timeout=120)
+              for mode in ("", "--native"):
+                  print(host.succeed(
+                      f"${python}/bin/python3 ${../local-sso/login.py} {mode} http://alice.${domain}:${toString port} "
+                      f"alice@${domain} {password} hermes-alice"
+                  ))
+
+          with subtest(f"{host.name}: a port alice publishes, after her sign-in there"):
+              inside(
+                  "systemd-run --uid=alice --unit=echo -p RuntimeDirectory=echo "
+                  "${pkgs.python3}/bin/python3 ${../publish/echo.py} ${toString alicePrivate} /run/echo/log",
+                  host=host,
+              )
+              until_inside("curl -sf http://127.0.0.1:${toString alicePrivate}/", host=host)
+              print(host.succeed(
+                  f"${python}/bin/python3 ${../publish/serve.py} http://${toString alicePrivate}.alice.${domain}:${toString port}/ "
+                  f"alice@${domain} {password} ok"
               ))
-
-      with subtest("a port alice publishes, after her sign-in there"):
-          inside(
-              "systemd-run --uid=alice --unit=echo -p RuntimeDirectory=echo "
-              "${pkgs.python3}/bin/python3 ${../publish/echo.py} ${toString alicePrivate} /run/echo/log"
-          )
-          until_inside("curl -sf http://127.0.0.1:${toString alicePrivate}/")
-          print(machine.succeed(
-              f"${python}/bin/python3 ${../publish/serve.py} http://${toString alicePrivate}.alice.${domain}:${toString port}/ "
-              f"alice@${domain} {password} ok"
-          ))
 
       with subtest("alice's slot: in by ssh, its port 80 at slot.alice"):
           # A login shell: the agent's PATH (core) has `slot`.
@@ -145,12 +209,13 @@ pkgs.testers.runNixOSTest {
           for placeholder in ["@summary@", "@egress@", "@v6reach@", "@reach@", "@website@"]:
               assert placeholder not in skill, skill
 
-      with subtest("a LAN peer routed to the container reaches it, but not its web front"):
-          peer.succeed("ip route add ${localAddress}/32 via ${machineAddress}")
-          peer.wait_until_succeeds("ping -c 1 -W 2 ${localAddress}", timeout=60)
-          peer.fail("curl -s -m 5 -o /dev/null http://${localAddress}:${toString port}/")
-          # The host's forward still gets in.
-          machine.succeed("curl -sf -m 10 -o /dev/null http://alice.${domain}:${toString port}/api/status")
+      for host, address, container in ((machine, "${machineAddress}", "${localAddress}"), (nm, "${nmAddress}", "${nmLocalAddress}")):
+          with subtest(f"{host.name}: a LAN peer routed to the container reaches it, but not its web front"):
+              peer.succeed(f"ip route add {container}/32 via {address}")
+              peer.wait_until_succeeds(f"ping -c 1 -W 2 {container}", timeout=60)
+              peer.fail(f"curl -s -m 5 -o /dev/null http://{container}:${toString port}/")
+              # The host's forward still gets in.
+              host.succeed("curl -sf -m 10 -o /dev/null http://alice.${domain}:${toString port}/api/status")
 
       with subtest("alice's key directory is root's; a link left in it leaks nothing"):
           k = "/var/lib/hyperhermes-local/agents/alice"
