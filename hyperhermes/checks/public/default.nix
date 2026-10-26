@@ -4,17 +4,21 @@
 # (it answers every name with the server's address), and dex as the
 # deployment's identity provider at https://id.<front door>.
 #
-# The server runs the exposure (public), sso and dashboards modules with
-# one agent, alice, and a front door. A client node, with the test CA as
-# its only trust, checks:
+# The server runs the exposure (public), sso, dashboards and publish
+# modules with one agent, alice, and a front door. A client node, with the
+# test CA as its only trust, checks:
 # - TLS on every published name, from the ACME certificates
-#   (hermes-fyi for *.<domain>, hermes-subdomains for the front door,
-#   hermes-dashboards for the legacy domain), and 80 -> 443,
+#   (hermes-fyi for *.<domain>, hermes-fyi-alice for alice's ports,
+#   hermes-subdomains for the front door, hermes-dashboards for the legacy
+#   domain), and 80 -> 443,
 # - alice signs in to her dashboard (hermes' OIDC login against the
-#   issuer) and at the front door, which sends her to her dashboard,
+#   issuer), at the front door, which sends her to her dashboard, and on
+#   her private published port (its own login, a __Host- cookie),
 # - bob, whom the issuer signs in to every client (dex has no per-client
-#   groups), is refused at alice's dashboard and gets the front door's 403,
-# - the legacy name answers 301 to the dashboard,
+#   groups), is refused at alice's dashboard, gets the front door's 403
+#   and the 403 of alice's private port; her public port needs no login,
+# - the legacy names answer 301 (dashboards and ports); the slot's name
+#   on a port host's connection answers 421,
 # - dnsRecords lists what the zone must hold.
 {
   pkgs,
@@ -28,6 +32,18 @@ let
   legacyDomain = "old.example.test";
   issuer = "https://id.${frontDoor}";
   secrets = "/var/lib/public-secrets";
+  # alice is uid 1001: published ports 30010-30014 private, 30015- public.
+  alicePrivate = 30010;
+  alicePublic = 30015;
+  portHost = p: "${toString p}.alice.${domain}";
+  echoService = p: {
+    wantedBy = [ "multi-user.target" ];
+    serviceConfig = {
+      User = "alice";
+      ExecStart = "${pkgs.python3}/bin/python3 ${../publish/echo.py} ${toString p} /run/echo-${toString p}/log";
+      RuntimeDirectory = "echo-${toString p}";
+    };
+  };
   pebbleRoot = "/run/pebble-root.pem";
   caa = ''0 issue "pebble.test; validationmethods=dns-01"'';
   python = pkgs.python3.withPackages (ps: [
@@ -36,6 +52,7 @@ let
   ]);
   certs = [
     "hermes-fyi"
+    "hermes-fyi-alice"
     "hermes-subdomains"
     "hermes-dashboards"
   ];
@@ -131,7 +148,16 @@ pkgs.testers.runNixOSTest (
               enable = true;
               inherit legacyDomain;
             };
+            publish = {
+              enable = true;
+              cookieSecretFile = "${secrets}/serve-cookie";
+              legacyFrontDoorPorts = true;
+            };
           };
+
+          # alice's apps on one private and one public port.
+          systemd.services."echo-${toString alicePrivate}" = echoService alicePrivate;
+          systemd.services."echo-${toString alicePublic}" = echoService alicePublic;
 
           # The deployment's identity provider: dex, with exactly the
           # clients sso.oidcClients lists, behind this nginx under the front
@@ -189,6 +215,7 @@ pkgs.testers.runNixOSTest (
           # only at runtime: hermes and oauth2-proxy trust it alone.
           systemd.services.hermes-dashboard-alice.environment.SSL_CERT_FILE = pebbleRoot;
           systemd.services.oauth2-proxy.environment.SSL_CERT_FILE = pebbleRoot;
+          systemd.services.oauth2-proxy-serve.environment.SSL_CERT_FILE = pebbleRoot;
 
           # Stand-ins for the deployment's secrets, created at runtime.
           systemd.services.public-secrets = {
@@ -197,6 +224,7 @@ pkgs.testers.runNixOSTest (
               "dex.service"
               "hermes-agent-alice.service"
               "oauth2-proxy.service"
+              "oauth2-proxy-serve.service"
             ]
             ++ map (cert: "acme-order-renew-${cert}.service") certs;
             before = config.systemd.services.public-secrets.requiredBy;
@@ -213,6 +241,7 @@ pkgs.testers.runNixOSTest (
               done
               # oauth2-proxy decodes URL-safe base64 only.
               openssl rand -base64 32 | tr '+/' '-_' | tr -d '\n' > ${secrets}/cookie.secret
+              openssl rand -hex 16 | tr -d '\n' > ${secrets}/serve-cookie
               for user in alice bob; do
                 ${python}/bin/python3 -c "import bcrypt, sys; sys.stdout.write(bcrypt.hashpw(b'$user-password', bcrypt.gensalt(10)).decode())" \
                   > ${secrets}/$user.hash
@@ -244,13 +273,14 @@ pkgs.testers.runNixOSTest (
       client.start()
 
       with subtest("ACME issues every certificate by DNS-01"):
-          for cert in ("hermes-fyi", "hermes-subdomains", "hermes-dashboards"):
+          for cert in ("hermes-fyi", "hermes-fyi-alice", "hermes-subdomains", "hermes-dashboards"):
               server.wait_until_succeeds(
                   f"openssl x509 -in /var/lib/acme/{cert}/cert.pem -noout -issuer | grep -i pebble",
                   timeout=300,
               )
           print(server.succeed("openssl x509 -in /var/lib/acme/hermes-fyi/cert.pem -noout -ext subjectAltName"))
           server.succeed("openssl x509 -in /var/lib/acme/hermes-subdomains/cert.pem -noout -ext subjectAltName | grep -F 'DNS:${frontDoor}'")
+          server.succeed("openssl x509 -in /var/lib/acme/hermes-fyi-alice/cert.pem -noout -ext subjectAltName | grep -F 'DNS:*.alice.${domain}'")
 
       root = acme.succeed(
           "curl -sf --cacert ${nodes.acme.test-support.acme.caCert} https://${nodes.acme.test-support.acme.caDomain}:15000/roots/0"
@@ -292,6 +322,25 @@ pkgs.testers.runNixOSTest (
               "| grep -x '301 https://alice.${domain}/a?b'"
           )
 
+      with subtest("published ports: alice's private one after her login, bob refused, the public one open"):
+          client.wait_until_succeeds("curl -s --cacert ${pebbleRoot} -o /dev/null -w '%{http_code}' https://${portHost alicePrivate}/ | grep -x 302", timeout=120)
+          print(client.succeed(
+              "${withRoot} ${python}/bin/python3 ${../publish/serve.py} https://${portHost alicePrivate}/p "
+              "alice@example.test alice-password ok"
+          ))
+          print(client.succeed(
+              "${withRoot} ${python}/bin/python3 ${../publish/serve.py} https://${portHost alicePrivate}/ "
+              "bob@example.test bob-password forbidden"
+          ))
+          client.succeed("curl -sf --cacert ${pebbleRoot} https://${portHost alicePublic}/ | grep -x 'backend ${toString alicePublic}'")
+          # The port's old name below the front door, and the slot's name
+          # on a port host's connection.
+          client.succeed(
+              "curl -s --cacert ${pebbleRoot} -o /dev/null -w '%{http_code} %{redirect_url}' https://${toString alicePublic}.${frontDoor}/a?b "
+              "| grep -x '301 https://${portHost alicePublic}/a?b'"
+          )
+          client.succeed("curl -s --cacert ${pebbleRoot} -o /dev/null -w '%{http_code}' https://slot.alice.${domain}/ | grep -x 421")
+
       with subtest("dnsRecords"):
           print(dns_records)
           have = {(r["name"], r["type"]) for r in dns_records}
@@ -299,9 +348,11 @@ pkgs.testers.runNixOSTest (
               ("*.${domain}", "A"), ("*.${domain}", "AAAA"), ("alice.${domain}", "A"),
               ("alice.${domain}", "TXT"), ("${frontDoor}", "CAA"), ("*.${legacyDomain}", "A"),
               ("${legacyDomain}", "CAA"), ("_dmarc.${domain}", "TXT"),
+              ("*.alice.${domain}", "A"), ("*.alice.${domain}", "AAAA"),
           ]:
               assert want in have, want
           assert ("*.${domain}", "TXT") not in have
+          assert ("*.alice.${domain}", "TXT") not in have
     '';
   }
 )

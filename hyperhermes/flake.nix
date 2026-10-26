@@ -49,6 +49,7 @@
         claude-auth = import ./modules/hermes-claude-auth.nix { inherit llm-agents; };
         desktop = import ./modules/desktop { inherit hermes-agent; };
         dashboards = ./modules/dashboards;
+        publish = ./modules/publish;
         default = {
           imports = [
             self.nixosModules.core
@@ -60,6 +61,7 @@
             self.nixosModules.claude-auth
             self.nixosModules.desktop
             self.nixosModules.dashboards
+            self.nixosModules.publish
           ];
         };
         # Not a feature, so not in `default`: fills core's and the
@@ -110,6 +112,9 @@
         public = import ./checks/public {
           inherit pkgs self hermesPackage;
         };
+
+        # Local mode: published ports behind the local dex, end to end.
+        publish = import ./checks/publish { inherit pkgs self; };
 
         browser = import ./checks/browser { inherit pkgs self; };
         wallet = import ./checks/wallet { inherit pkgs self; };

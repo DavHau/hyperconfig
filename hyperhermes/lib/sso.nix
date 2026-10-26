@@ -9,25 +9,38 @@
 # Every agent gets a confidential PKCE client hermes-<agent> that admits the
 # group hermes-<agent>, and the owning account joins that group. With a
 # front door (sso.frontDoor.host), its oauth2-proxy is the confidential
-# PKCE client `hermes`, admitting the group `hermes`.
+# PKCE client `hermes`, admitting the group `hermes`. With published ports
+# (the publish module), their oauth2-proxy is the confidential PKCE client
+# `hermes-serve`, admitting every agent's group (the proxy then lets only
+# the port's owner through).
 { lib }:
 rec {
   clientIdOf = agent: "hermes-${agent}";
   groupOf = agent: "hermes-${agent}";
   frontDoorClientId = "hermes";
   frontDoorGroup = "hermes";
+  publishClientId = "hermes-serve";
+  publishLoginPrefix = "/.hermes-serve-login";
 
   # clientId -> { name, callbackURLs, pkce, allowedGroups }
   #
   # originOf: host name -> origin of that host as the deployment exposes
   # it (the sso module passes exposure.urlOf); defaults to https on 443.
   # frontDoor: the front door's host name, or null for none.
+  # publish: whether to declare the published ports' client.
+  # publishHosts: agent -> its private port hosts, one exact callback each
+  # (the sso module passes them; dex matches callbacks exactly), or null:
+  # one host-wildcard callback per agent, for an issuer that takes host
+  # patterns (pocket-id) and a caller that cannot know the ports (a clan
+  # inventory: they derive from uids).
   oidcClients =
     {
       domain,
       accounts,
       originOf ? (import ./url.nix { inherit lib; }).originOf { },
       frontDoor ? null,
+      publish ? false,
+      publishHosts ? null,
     }:
     lib.mapAttrs' (
       agent: _:
@@ -45,6 +58,22 @@ rec {
         # oauth2-proxy sends S256
         pkce = true;
         allowedGroups = [ frontDoorGroup ];
+      };
+    }
+    // lib.optionalAttrs publish {
+      ${publishClientId} = {
+        name = "Hermes serve ports";
+        callbackURLs = lib.concatLists (
+          lib.mapAttrsToList (
+            agent: _:
+            map (host: "${originOf host}${publishLoginPrefix}/callback") (
+              if publishHosts == null then [ "*.${agent}.${domain}" ] else publishHosts.${agent} or [ ]
+            )
+          ) accounts
+        );
+        # oauth2-proxy sends S256
+        pkce = true;
+        allowedGroups = lib.mapAttrsToList (agent: _: groupOf agent) accounts;
       };
     };
 

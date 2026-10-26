@@ -113,8 +113,8 @@ in
   # Public hermes dashboards, one per agent in ./hermes-agents.nix:
   # https://<agent>.davhau.fyi/ with hermes' own pocket-id login, and their
   # serve ports at https://<port>.<agent>.davhau.fyi/ (hyperhermes'
-  # exposure, sso and dashboards modules, set up in ./hermes-agents.nix;
-  # ../../modules/nixos/hermes-agents-serve.nix). davhau.fyi is the agents'
+  # exposure, sso, dashboards and publish modules, set up in
+  # ./hermes-agents.nix). davhau.fyi is the agents'
   # site, apart from davhau.com. *.davhau.fyi and *.<agent>.davhau.fyi A ->
   # sgp (forwarded here by ipv4-forward), AAAA -> the token address below,
   # kept by porkbun-records. https://hermes.davhau.com/ (oauth2-proxy)
@@ -122,7 +122,7 @@ in
   # addresses for Hermes Mobile; the mail owner page sits next to it. The
   # old names <agent>.agents.davhau.com and <port>.hermes.davhau.com only
   # answer 301 to the new ones during the transition (`legacyDomain`,
-  # hyper.hermesServe.legacyPorts).
+  # `legacyFrontDoorPorts`).
   services.hyperhermes.exposure = {
     enable = true;
     mode = "public";
@@ -148,7 +148,7 @@ in
     };
   };
   services.hyperhermes.dashboards.legacyDomain = "agents.davhau.com";
-  hyper.hermesServe.legacyPorts = true;
+  services.hyperhermes.publish.legacyFrontDoorPorts = true;
   hyper.porkbunRecords.records = lib.mkMerge (
     map (r: { ${r.name}.${r.type} = r.value; }) config.services.hyperhermes.exposure.dnsRecords
   );

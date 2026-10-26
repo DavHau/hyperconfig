@@ -15,14 +15,15 @@
 # localhost is nginx's own listener; from a container host, the forwarded
 # loopback port lands on the same nginx.
 #
-# Authorization: each client names the one group it admits (allowedGroups,
-# hermes-<agent>), and the agent's account carries that group. An issuer
-# may enforce that per client (pocket-id does); dex has no per-client group
-# restriction and only puts the groups into the ID token (`groups` claim,
-# asked for with the `groups` scope). So the relying parties check the
-# claim themselves: hermes through core's allowed-groups patch (the
-# dashboards module sets the group), the front door's oauth2-proxy through
-# allowed-group in local mode.
+# Authorization: each client names the groups it admits (allowedGroups:
+# hermes-<agent>; the published ports' client every agent's), and the
+# agent's account carries its agent's group. An issuer may enforce that per
+# client (pocket-id does); dex has no per-client group restriction and only
+# puts the groups into the ID token (`groups` claim, asked for with the
+# `groups` scope). So the relying parties check the claim themselves:
+# hermes through core's allowed-groups patch (the dashboards module sets
+# the group), the front door's and the published ports' oauth2-proxies
+# through allowed-group in local mode.
 #
 # The front door (`frontDoor.host`): an oauth2-proxy (client `hermes`,
 # group `hermes`) that features put pages behind (the dashboards module's
@@ -176,8 +177,18 @@ in
       description = ''
         The clients this deployment logs in with (../lib/sso.nix): id ->
         { name, callbackURLs, pkce, allowedGroups }. A deployment with its
-        own issuer declares exactly these there.
+        own issuer declares exactly these there (the published ports'
+        client may use one host-pattern callback per agent instead of the
+        exact ones listed here, where the issuer takes patterns:
+        lib.sso.oidcClients without publishHosts).
       '';
+    };
+
+    publishHosts = lib.mkOption {
+      type = lib.types.nullOr (lib.types.attrsOf (lib.types.listOf lib.types.str));
+      default = null;
+      internal = true;
+      description = "Set by the publish module: agent -> its private port hosts, whose callbacks the client hermes-serve lists. Null: no published ports.";
     };
 
     accounts = lib.mkOption {
@@ -226,9 +237,10 @@ in
     {
       services.hyperhermes.sso.oidcClients = ssoLib.oidcClients {
         inherit (exposure) domain;
-        inherit (cfg) accounts;
+        inherit (cfg) accounts publishHosts;
         originOf = exposure.urlOf;
         frontDoor = cfg.frontDoor.host;
+        publish = cfg.publishHosts != null;
       };
     }
 

@@ -14,7 +14,8 @@
 #     and which the gpu-host skill teaches,
 #   - the web dashboard at https://<agent>.<domain>/ (hyperhermes'
 #     dashboards, behind the clan's pocket-id: hyper.oidc) and 10
-#     published loopback ports (../../modules/nixos/hermes-agents-serve.nix),
+#     published loopback ports at https://<port>.<agent>.<domain>/
+#     (hyperhermes' publish),
 #   - the web tools (hyperhermes.nixosModules.browser).
 #
 # Messengers (Telegram, ...) are not declared here: each agent's owner
@@ -61,7 +62,7 @@ in
     inputs.hyperhermes.nixosModules.clan
     ./hermes-inference.nix
     inputs.hyperhermes.nixosModules.browser
-    ../../modules/nixos/hermes-agents-serve.nix
+    inputs.hyperhermes.nixosModules.publish
     inputs.hyperhermes.nixosModules.wallet
     # stefan's account (uid, vault-ro) is shared with vit.
     ../../modules/nixos/users/stefan-vault.nix
@@ -216,10 +217,11 @@ in
     }
   ];
 
-  # Every agent's dashboard, signed in through the clan's pocket-id: the
-  # inventory declares exactly the clients sso.oidcClients lists (from the
-  # same ./hermes-dashboards.nix), and their secrets come from there. The
-  # exposure (domain, DNS, ACME) is in ./configuration.nix.
+  # Every agent's dashboard and published ports, signed in through the
+  # clan's pocket-id: the inventory declares the clients sso.oidcClients
+  # lists (from the same ./hermes-dashboards.nix; the serve ports' client
+  # with one callback pattern per agent), and their secrets come from
+  # there. The exposure (domain, DNS, ACME) is in ./configuration.nix.
   services.hyperhermes.sso = {
     enable = true;
     inherit (config.hyper.oidc) issuer;
@@ -230,6 +232,7 @@ in
     }) config.services.hyperhermes.sso.oidcClients;
   };
   services.hyperhermes.dashboards.enable = true;
+  services.hyperhermes.publish.enable = true;
 
   # ssh.nix sets ControlPath ~/.ssh/control/%C fleet-wide; without the
   # directory every ssh fails. hermes runs with HOME = the account home, so

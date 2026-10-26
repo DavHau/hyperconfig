@@ -1,12 +1,12 @@
 ---
 name: serve-ports
-description: How to publish anything you serve over HTTP (web app, preview, file server, API, dev server, notebook, report) so a person can open it at https://<port>.<your account>.@DOMAIN@/. Every account owns 5 private ports (only its owner, after login) and 5 public ports (anyone with the link). Use it every time you start a listening server that someone else should open.
+description: How to publish anything you serve over HTTP (web app, preview, file server, API, dev server, notebook, report) so a person can open it at @SCHEME@://<port>.<your account>.@DOMAIN@@LISTEN_PORT@/. Every account owns 5 private ports (only its owner, after login) and 5 public ports (anyone with the link). Use it every time you start a listening server that someone else should open.
 ---
 
-# Publishing pages at https://<port>.<account>.@DOMAIN@/
+# Publishing pages at @SCHEME@://<port>.<account>.@DOMAIN@@LISTEN_PORT@/
 
 Nothing you listen on is reachable from outside directly. A reverse proxy
-publishes your own ports, with TLS, at `https://<port>.<account>.@DOMAIN@/`
+publishes your own ports@TLS@ at `@SCHEME@://<port>.<account>.@DOMAIN@@LISTEN_PORT@/`
 (your account name, then the port). Which port you pick decides who can
 open the page:
 
@@ -35,12 +35,12 @@ Your account name is `id -un`. Your ports:
    - `vite --host 127.0.0.1 --port <port> --strictPort`
    - `uvicorn app:app --host 127.0.0.1 --port <port> --proxy-headers`
    - `jupyter lab --ip 127.0.0.1 --port <port> --no-browser`
-3. Give the person the link `https://<port>.<account>.@DOMAIN@/` and say
+3. Give the person the link `@SCHEME@://<port>.<account>.@DOMAIN@@LISTEN_PORT@/` and say
    whether it is private or public.
 
 The page sits at the root of its own host, so apps need no base path. The
-proxy sends `Host: 127.0.0.1:<port>`, `X-Forwarded-Proto: https` and
-`X-Forwarded-Host: <port>.<account>.@DOMAIN@`; apps that build absolute URLs
+proxy sends `Host: 127.0.0.1:<port>`, `X-Forwarded-Proto: @SCHEME@` and
+`X-Forwarded-Host: <port>.<account>.@DOMAIN@@LISTEN_PORT@`; apps that build absolute URLs
 should trust those headers. Websockets work. A browser's `Origin` from the
 page itself arrives as `http://127.0.0.1:<port>`, matching that Host, so an
 app's own same-origin check passes; other origins arrive unchanged.
