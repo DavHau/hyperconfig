@@ -32,8 +32,9 @@ let
   # own reuse it.
   adminKeys = config.users.users.root.openssh.authorizedKeys.keys;
   # hermes-desktop on the dave machines dials dave-hermes and joe over ssh
-  # with a shared restricted key (../../modules/nixos/hermes-desktop owns the
-  # key and the rationale; dave.nix imports it here too). Its bootstrap needs
+  # with a shared restricted key (../../modules/nixos/hermes-desktop.nix,
+  # hyperhermes' desktop module and its clan var hermes-desktop-ssh; dave.nix
+  # imports it here too). Its bootstrap needs
   # command execution plus one loopback -L forward to the port
   # `hermes serve --port 0` picks, nothing else: no pty, no agent/X11
   # forwarding.
@@ -61,9 +62,24 @@ in
     inputs.hyperhermes.nixosModules.wallet
     # stefan's account (uid, vault-ro) is shared with vit.
     ../../modules/nixos/users/stefan-vault.nix
-    # Agents with `teamclaude` reach Claude through som's TeamClaude.
-    ../../modules/nixos/hermes-teamclaude.nix
+    # Agents with `teamclaude.enable` reach Claude through som's TeamClaude.
+    inputs.hyperhermes.nixosModules.teamclaude
   ];
+
+  # Claude subscription OAuth for every agent (hermes-claude-auth; the
+  # module is imported in ./configuration.nix).
+  services.hyperhermes.claudeAuth.enable = true;
+
+  # som's TeamClaude (../../modules/nixos/teamclaude-gateway). Each agent
+  # routed through it is a static gateway client of its own name, keyed by
+  # its per-machine clan var teamclaude-hermes-<agent> (minted by
+  # hyperhermes' clan module), so its usage is booked under the agent's
+  # name in `teamclaude status` and dropping the flag revokes it on the
+  # next deploy without touching any other client.
+  services.hyperhermes.teamclaude.gatewayUrl = "https://teamclaude.davhau.com";
+  hyper.teamclaudeGateway.clientKeys = lib.mapAttrs (name: _: "teamclaude-hermes-${name}") (
+    lib.filterAttrs (_: a: a.teamclaude.enable) config.services.hyperhermes.agents
+  );
 
   # One shared phoenixd Lightning wallet; every agent below has access.
   services.hyperhermes.wallet.enable = true;
@@ -161,7 +177,7 @@ in
         description = "dave's hermes agent";
         sshKeys = adminKeys ++ [ desktopKey ];
         # Claude through the TeamClaude gateway, not a login of its own.
-        teamclaude = true;
+        teamclaude.enable = true;
       };
 
       # joe: dave's former amy microVM agent (hermes-grmpf), its state and

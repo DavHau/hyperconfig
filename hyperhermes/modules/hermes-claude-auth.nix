@@ -1,5 +1,6 @@
 # hermes-claude-auth (github.com/kristianvast/hermes-claude-auth) for every
-# hermes agent on this host (services.hyperhermes.agents): a runtime patch
+# hermes agent on this host (`services.hyperhermes.claudeAuth.enable`, for
+# all of services.hyperhermes.agents): a runtime patch
 # of hermes-agent's anthropic adapter that makes OAuth (Claude Pro/Max
 # subscription) requests pass Anthropic's Claude-Code billing validator.
 # Vendored copy + provenance in ./hermes-claude-auth/.
@@ -25,7 +26,7 @@
 # the writable venv, survives restarts and rebuilds, updates with the
 # vendored file. PYTHONPATH is inherited by the TUI's python worker.
 #
-# Injection points (hyperhermes' core, host units as the owner):
+# Injection points (core, host units as the owner):
 #   - hermes-agent-<user>.service, hermes-dashboard-<user>.service: unit
 #     environment. (Not the .env file: core strips PYTHONPATH from it
 #     before every start, on purpose.)
@@ -41,10 +42,11 @@
 # extraPackages): the patch signs headers with `claude --version`, and
 # Anthropic rejects versions below a moving minimum ("Claude Code 2.1.238
 # does not support this model; version 2.1.251 or newer is required").
-# Hence the llm-agents.nix package, the one packages.nix ships
-# system-wide, not nixpkgs' lagging one: the agent's PATH puts
-# extraPackages ahead of /run/current-system/sw, so a stale pin here beats
-# a fresh system profile. Bump llm-agents when it hits again. The OAuth
+# Hence the llm-agents.nix package (this flake's input, claudeCodePackage),
+# not nixpkgs' lagging one: the agent's PATH puts extraPackages ahead of
+# /run/current-system/sw, so a stale pin here beats a fresh system
+# profile; a consumer that ships claude-code system-wide should make the
+# input follow its own. Bump llm-agents when it hits again. The OAuth
 # login (`claude` -> /login) must write ~/.claude/.credentials.json into
 # the AGENT's HOME, the account home, so the owner runs plain `claude` on
 # the host (claude-code is in systemPackages for that). Hermes itself
@@ -54,15 +56,16 @@
 # on the wire (billing-header signature, Claude Code identity/system-prompt
 # layout, Stainless headers, tool-name namespacing, thinking-replay and
 # 429 handling).
+# `llm-agents` is this flake's input, the source of claude-code.
+{ llm-agents }:
 {
   config,
-  inputs,
   lib,
   pkgs,
   ...
 }:
 let
-  claude-code = inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.claude-code;
+  cfg = config.services.hyperhermes.claudeAuth;
   agents = config.services.hyperhermes.agents;
 
   site = pkgs.runCommand "hermes-claude-auth-site" { } ''
@@ -79,14 +82,23 @@ let
     export PYTHONPATH=${site}''${PYTHONPATH:+:$PYTHONPATH}
     exec /run/current-system/sw/bin/hermes "$@"
   '';
-  # Static top-level keys only (see hyperhermes' core agents.nix): a
-  # config-dependent list at the config root would recurse through
-  # the agent list.
+  # Static top-level keys only (see core's agents.nix): a config-dependent
+  # list at the config root would recurse through the agent list.
   forEachAgent = f: lib.mkMerge (lib.mapAttrsToList f agents);
 in
 {
-  config = lib.mkIf (agents != { }) {
-    services.hyperhermes.extraPackages = [ claude-code ];
+  options.services.hyperhermes.claudeAuth = {
+    enable = lib.mkEnableOption "the hermes-claude-auth patch (Claude Pro/Max OAuth through Anthropic's Claude Code billing validator) for every agent";
+    claudeCodePackage = lib.mkOption {
+      type = lib.types.package;
+      default = llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.claude-code;
+      defaultText = lib.literalExpression "llm-agents.packages.\${system}.claude-code";
+      description = "The Claude Code CLI on the agents' PATH (the patch signs with its version) and the host's, for the owner's OAuth login.";
+    };
+  };
+
+  config = lib.mkIf (cfg.enable && agents != { }) {
+    services.hyperhermes.extraPackages = [ cfg.claudeCodePackage ];
     systemd.services = forEachAgent (
       user: _: {
         "hermes-agent-${user}".environment.PYTHONPATH = "${site}";
@@ -95,7 +107,7 @@ in
     );
     environment.profiles = [ "${hookedShim}" ];
     # For the owner's OAuth login on the host (plain `claude`).
-    environment.systemPackages = [ claude-code ];
+    environment.systemPackages = [ cfg.claudeCodePackage ];
     environment.etc."hermes-claude-auth".source = site;
   };
 }

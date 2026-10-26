@@ -28,7 +28,8 @@ in
     ../../modules/nixos/vault-nfs-client.nix
     ../../modules/nixos/users/hsjobeki-vault.nix
     ./hermes-agents.nix
-    ../../modules/nixos/hermes-claude-auth.nix
+    # Claude subscription OAuth for every agent (enabled in ./hermes-agents.nix).
+    inputs.hyperhermes.nixosModules.claude-auth
     ../../modules/nixos/public-ipv6-token.nix
     ../../modules/nixos/linger-normal-users.nix
     ../../modules/nixos/user-manager-restart
