@@ -38,16 +38,19 @@
         exposure = ./modules/exposure.nix;
         sso = ./modules/sso.nix;
         browser = ./modules/browser;
+        wallet = ./modules/wallet;
         default = {
           imports = [
             self.nixosModules.core
             self.nixosModules.exposure
             self.nixosModules.sso
             self.nixosModules.browser
+            self.nixosModules.wallet
           ];
         };
-        # Not a feature, so not in `default`: fills core's secret paths
-        # from clan vars when the importing system is a clan machine.
+        # Not a feature, so not in `default`: fills core's and the
+        # features' secret paths from clan vars when the importing system
+        # is a clan machine.
         clan = ./modules/clan.nix;
       };
 
@@ -91,6 +94,7 @@
         };
 
         browser = import ./checks/browser { inherit pkgs self; };
+        wallet = import ./checks/wallet { inherit pkgs self; };
       };
     };
 }
