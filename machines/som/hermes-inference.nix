@@ -63,7 +63,7 @@ in
       # routes are unaffected). Sessions here pause for more than five
       # minutes between turns, which is where the 1h tier's 2x write
       # premium beats re-warming the whole context; under the Claude
-      # subscription (hermes-claude-auth.nix) it is flat-rate anyway.
+      # subscription (hyperhermes' claude-auth) it is flat-rate anyway.
       settings.prompt_caching.cache_ttl = "1h";
       # hermes 0.21 defaults sessions.auto_prune on (retention_days 90): the
       # gateway deletes ended sessions at startup and daily. We keep all

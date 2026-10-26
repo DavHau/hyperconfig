@@ -1,0 +1,29 @@
+What upstream lacks (hermes-agent v2026.8.16, apps/desktop/electron/main.ts):
+renderer routing for a `hermes://session/<id>` deep link. main.ts already
+finds a hermes:// token in the cold-start argv and in a second launch's
+argv, parses it and queues it until the renderer is ready, but the
+renderer's deep-link listener handles only the `blueprint` and `mcp`
+kinds, so a `session` payload is dropped. This hunk sends a `session`
+payload to 'hermes:focus-session' instead, the notification-click channel
+the renderer answers by opening that chat.
+
+A host launcher passes the URL as a positional
+(packages/spaces-installer-session), the form upstream's own protocol
+launch relies on. A switch such as `--session <id>` does not survive
+Chromium's switches-first re-serialisation of a second launch's argv.
+
+--- a/apps/desktop/electron/main.ts
++++ b/apps/desktop/electron/main.ts
+@@ -14192,7 +14192,11 @@
+     }
+ 
+     mainWindow.focus()
+-    mainWindow.webContents.send('hermes:deep-link', payload)
++    if (kind === 'session') {
++      mainWindow.webContents.send('hermes:focus-session', name)
++    } else {
++      mainWindow.webContents.send('hermes:deep-link', payload)
++    }
+     rememberLog(`[deeplink] delivered ${kind}/${name}`)
+   } catch (err) {
+     rememberLog(`[deeplink] delivery failed: ${err.message}`)

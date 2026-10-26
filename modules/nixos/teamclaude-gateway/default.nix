@@ -17,7 +17,8 @@
 # (client name -> clan generator whose `key` file holds the key): our own
 # infrastructure's, the shared clan var teamclaude-api-key
 # (../teamclaude-api-key.nix) as `hyperconfig`, and one per hermes agent
-# that routes its Anthropic provider here (../hermes-teamclaude.nix). The
+# that routes its Anthropic provider here (hyperhermes' teamclaude, wired
+# in ../../../machines/som/hermes-agents.nix). The
 # config var carries them and preStart keeps them in proxy.clientKeys on
 # every start. `teamclaude-keys revoke <name>` therefore lasts only until
 # the next restart; drop the declaration or rotate the var instead.

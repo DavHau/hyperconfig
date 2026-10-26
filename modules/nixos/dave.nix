@@ -14,7 +14,10 @@ in
     ./sbox-age.nix
     ./sbox-mullvad.nix
     ./nix-ssh-client.nix
-    ./hermes-desktop
+    # hermes-desktop and the TUI launchers for som's agents; ./hermes-desktop.nix
+    # sets them up.
+    inputs.hyperhermes.nixosModules.desktop
+    ./hermes-desktop.nix
     ./ssh-tpm-agent.nix
     ./etc-hosts.nix
     ./nix-development.nix

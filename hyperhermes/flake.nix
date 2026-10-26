@@ -23,6 +23,7 @@
       self,
       nixpkgs,
       hermes-agent,
+      llm-agents,
       ...
     }:
     let
@@ -39,6 +40,9 @@
         sso = ./modules/sso.nix;
         browser = ./modules/browser;
         wallet = ./modules/wallet;
+        teamclaude = ./modules/teamclaude.nix;
+        claude-auth = import ./modules/hermes-claude-auth.nix { inherit llm-agents; };
+        desktop = import ./modules/desktop { inherit hermes-agent; };
         default = {
           imports = [
             self.nixosModules.core
@@ -46,6 +50,9 @@
             self.nixosModules.sso
             self.nixosModules.browser
             self.nixosModules.wallet
+            self.nixosModules.teamclaude
+            self.nixosModules.claude-auth
+            self.nixosModules.desktop
           ];
         };
         # Not a feature, so not in `default`: fills core's and the
@@ -64,6 +71,7 @@
         camofox-browser = pkgs.callPackage ./pkgs/camofox-browser { };
         camoufox-python = pkgs.python3Packages.callPackage ./pkgs/camoufox/python.nix { };
         captchakraken-python = pkgs.python3Packages.callPackage ./pkgs/captchakraken/python.nix { };
+        hermes-desktop = import ./pkgs/hermes-desktop { inherit pkgs hermes-agent; };
       };
 
       # For consumers that must name an agent's paths, ports or units
@@ -95,6 +103,9 @@
 
         browser = import ./checks/browser { inherit pkgs self; };
         wallet = import ./checks/wallet { inherit pkgs self; };
+        # Evaluation only: teamclaude, claude-auth and desktop on a system
+        # without clan, secrets as runtime paths.
+        client-features = import ./checks/client-features { inherit pkgs self; };
       };
     };
 }
