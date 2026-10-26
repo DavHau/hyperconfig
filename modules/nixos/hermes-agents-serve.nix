@@ -2,7 +2,7 @@
 # below the agent's name: https://<port>.<agent>.<agentDomain>/ (on som
 # <port>.<agent>.davhau.fyi) -> nginx -> the owner's bridge -> the app on
 # 127.0.0.1:<port>. agentDomain is
-# the agent-controlled site (./hermes-dashboard-public.nix says why it is
+# the agent-controlled site (hyperhermes' dashboards module says why it is
 # not davhau.com); the port sits below the agent's name so that a Public
 # Suffix List entry for davhau.fyi would make every agent a site of its own
 # without further changes.
@@ -10,11 +10,11 @@
 # Ports: each agent owns 10 loopback ports, servePortBase + (uid - 1000) * 10
 # .. +9, disjoint per uid and below the kernel's ephemeral range (32768+).
 # The first five are PRIVATE: a pocket-id login per host, and only the
-# agent's own dashboard account (hyper.hermesDashboard.users.<name>.account)
+# agent's own dashboard account (services.hyperhermes.sso.accounts.<name>)
 # gets through. The last five are PUBLIC: no login. The agent picks the
 # mode by picking the port; the URL cannot upgrade a private port to
 # public, and a port under another agent's name is no server at all (the
-# catch-all of ./hermes-dashboard-public.nix answers 404).
+# catch-all of hyperhermes' exposure answers 404).
 #
 # Private ports, per host:
 #   - their own oauth2-proxy (`oauth2-proxy-serve`, its own cookie secret
@@ -52,7 +52,7 @@
 #     lands on a 403 server on a unix socket in /run/nginx (0750, nginx
 #     only). The map runs at proxy_pass time, after auth_request_set,
 #     which an `if` would not.
-#   - a Fetch Metadata gate (./fetch-metadata-gate.nix): another origin
+#   - a Fetch Metadata gate (hyperhermes' exposure): another origin
 #     (another agent's page, a public port) cannot post, fetch or open a
 #     websocket here with the visitor's login; links still work.
 # The session cookie is sealed with one secret for every host: one copied
@@ -82,7 +82,7 @@
 #     sockets down but never stops them, and nginx limits requests per
 #     client network and port host, and per port host alone, as for the
 #     dashboards (the request limits and their residual in
-#     ./hermes-dashboard-public.nix).
+#     hyperhermes' dashboards module).
 #   - the ports are owner-only on loopback (iptables, the same chain
 #     hyperhermes' core firewall gates the dashboard ports in): the owner
 #     (and so its bridge) and root may dial them, other agents may not.
@@ -94,15 +94,15 @@
 # check (jupyter's) passes for its own pages; any other Origin reaches the
 # app unchanged, so that check still refuses it.
 #
-# Transition (hyper.hermesDashboard.legacy.servePorts): the old names
-# https://<port>.<host>/ answer 301 to the new one, path and query kept, and
+# Transition (hyper.hermesServe.legacyPorts): the old names
+# https://<port>.<front door>/ answer 301 to the new one, path and query kept, and
 # serve nothing else; drop it once the old links are gone.
 #
 # TLS: one wildcard cert per agent, *.<agent>.<agentDomain>, via porkbun
 # DNS-01; no port number lands in the CT logs. DNS: *.<agent>.<agentDomain>
 # A (sgp's v4, forwarded by ./ipv4-forward.nix) and AAAA (this host's
 # networking.publicIPv6), kept by ./porkbun-records (no wildcard TXT: it
-# would answer _acme-challenge, ../hermes-dashboard-public.nix); the
+# would answer _acme-challenge, hyperhermes' exposure); the
 # agent slot's name has records of its own (./agent-slots.nix). The
 # wildcard also covers the slot's name slot.<agent>.<agentDomain>, so a
 # browser may reuse a connection to one of these hosts (same v4 address)
@@ -122,8 +122,8 @@
 let
   agents = config.services.hyperhermes.agents;
   names = lib.attrNames agents;
-  dashboard = config.hyper.hermesDashboard;
-  domain = dashboard.agentDomain;
+  inherit (config.services.hyperhermes) exposure sso;
+  inherit (exposure) domain;
   inherit (inputs.hyperhermes.lib) chain ephemeralPortLow;
   tcpOwnerBridgeBin = config.services.hyperhermes.tcpOwnerBridge;
   vars = config.clan.core.vars.generators;
@@ -140,7 +140,7 @@ let
       public = lib.genList (i: from + 5 + i) 5;
       to = from + 9;
     };
-  accountOf = name: dashboard.users.${name}.account;
+  accountOf = name: sso.accounts.${name};
   hostOf = name: port: "${toString port}.${name}.${domain}";
   certOf = name: "hermes-fyi-${name}";
   # What nginx dials for a port: a root-held socket whose connections a
@@ -230,7 +230,7 @@ let
       forceSSL = true;
       useACMEHost = certOf name;
       # The request limits of the dashboards, zones and all
-      # (./hermes-dashboard-public.nix says why and how much), per port
+      # (hyperhermes' dashboards module says why and how much), per port
       # host and client network, and per port host alone (below the
       # socket's MaxConnections); on a private host they cover the
       # sign-in too.
@@ -264,6 +264,14 @@ let
   };
 in
 {
+  imports = [ ./porkbun-records ];
+
+  options.hyper.hermesServe.legacyPorts = lib.mkOption {
+    type = lib.types.bool;
+    default = false;
+    description = "Transition: https://<port>.<front door>/, the serve ports' old names, answers 301 to https://<port>.<agent>.<domain>/, nothing else.";
+  };
+
   config = lib.mkIf (agents != { }) (
     lib.mkMerge [
       {
@@ -347,7 +355,7 @@ in
           wantedBy = [ "sockets.target" ];
           listenStreams = [ loginSocket ];
           # No trigger limit, as the front door's
-          # (./hermes-dashboard-public.nix says why).
+          # (hyperhermes' sso module says why).
           socketConfig = {
             TriggerLimitIntervalSec = 0;
             SocketUser = "root";
@@ -438,12 +446,12 @@ in
     };
 
     # Cross-origin requests on the private hosts (the header).
-    hyper.fetchMetadataGate.virtualHosts = map (name: "hermes-serve-${name}") names;
+    services.hyperhermes.exposure.fetchMetadataGate.virtualHosts = map (name: "hermes-serve-${name}") names;
 
     # --- DNS and TLS (the header) -----------------------------------------
-    hyper.porkbunRecords.records = lib.mkIf (dashboard.publicIPv4 != null) (
+    hyper.porkbunRecords.records = lib.mkIf (exposure.publicIPv4 != null) (
       lib.genAttrs (map (name: "*.${name}.${domain}") names) (_: {
-        A = dashboard.publicIPv4;
+        A = exposure.publicIPv4;
         AAAA.ipv6OnLink = {
           inherit (config.networking.publicIPv6) interface;
           suffix = config.networking.publicIPv6.token;
@@ -462,7 +470,7 @@ in
             PORKBUN_API_KEY_FILE = vars.porkbun.files.apikey.path;
             PORKBUN_SECRET_API_KEY_FILE = vars.porkbun.files.secretkey.path;
           };
-          # As the dashboards' cert (./hermes-dashboard-public.nix).
+          # As the dashboards' cert (machines/som exposure.acme).
           dnsResolver = "1.1.1.1:53";
         }
       ) names
@@ -494,7 +502,7 @@ in
           ) (portsOf name).private
         ) names}}
       ''
-      + lib.optionalString dashboard.legacy.servePorts ''
+      + lib.optionalString config.hyper.hermesServe.legacyPorts ''
         map $hermes_serve_legacy_port $hermes_serve_legacy {
           default "";
         ${lib.concatMapStrings (
@@ -577,14 +585,14 @@ in
             extraConfig = "default_type text/plain;";
           };
         }
-        // lib.optionalAttrs dashboard.legacy.servePorts {
+        // lib.optionalAttrs config.hyper.hermesServe.legacyPorts {
           # Transition only: 301 to the new name, never a backend, on 80 and
           # 443 alike. Let's Encrypt follows redirects in HTTP-01, so a
           # challenge path that redirected into an agent's page would hand
           # the agent a certificate for a davhau.com name: 404 for those (and
-          # CAA allows DNS-01 only, ./hermes-dashboard-public.nix).
+          # CAA allows DNS-01 only, hyperhermes' sso module).
           hermes-serve-legacy = {
-            serverName = "~^(?<hermes_serve_legacy_port>[0-9]+)\\.${lib.escapeRegex dashboard.host}$";
+            serverName = "~^(?<hermes_serve_legacy_port>[0-9]+)\\.${lib.escapeRegex sso.frontDoor.host}$";
             addSSL = true;
             useACMEHost = "hermes-subdomains";
             locations."^~ /.well-known/acme-challenge/".return = "404";

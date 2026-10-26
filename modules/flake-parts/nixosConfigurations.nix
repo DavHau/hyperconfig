@@ -12,33 +12,29 @@
       )
   );
 
-  # som's hermes agents (machines/som/hermes-dashboards.nix): one
-  # confidential pocket-id client and one group per agent for its dashboard
-  # at https://<agent>.<domain>/, joined by the agent's account
-  # (modules/nixos/hermes-dashboard-public.nix says why confidential and
-  # why every app login asks for the passkey), and one confidential client
-  # for every agent's private serve ports, https://<port>.<agent>.<domain>/,
-  # with a host-wildcard callback per agent
-  # (modules/nixos/hermes-agents-serve.nix says why a pattern and why that
-  # is safe). Both modules assert that what they get matches.
+  # som's hermes agents (machines/som/hermes-dashboards.nix): the pocket-id
+  # clients hyperhermes' lib.sso.oidcClients derives (one confidential
+  # client and one group per agent for its dashboard at
+  # https://<agent>.<domain>/, joined by the agent's account, and the front
+  # door's client `hermes`; hyperhermes' dashboards module says why
+  # confidential and why every app login asks for the passkey), and one
+  # confidential client for every agent's private serve ports,
+  # https://<port>.<agent>.<domain>/, with a host-wildcard callback per
+  # agent (modules/nixos/hermes-agents-serve.nix says why a pattern and why
+  # that is safe, and asserts that its client matches).
   somDashboards = import ../../machines/som/hermes-dashboards.nix;
-  dashboardGroupsOf = account:
-    lib.mapAttrsToList (agent: _: "hermes-${agent}")
-      (lib.filterAttrs (_: a: a == account) somDashboards.accounts);
+  hermesSso = inputs.hyperhermes.lib.sso;
+  somHermesClients = hermesSso.oidcClients {
+    inherit (somDashboards) domain accounts frontDoor;
+  };
+  dashboardGroups = hermesSso.accountGroups somDashboards.accounts;
   withDashboardGroups = users:
     let
       unknown = lib.filter (a: !(users ? ${a})) (lib.attrValues somDashboards.accounts);
     in
       assert lib.assertMsg (unknown == [ ])
         "machines/som/hermes-dashboards.nix names accounts the oidc instance does not declare: ${toString unknown}";
-      lib.mapAttrs (name: u: u // { groups = (u.groups or [ ]) ++ dashboardGroupsOf name; }) users;
-  dashboardClients = lib.mapAttrs' (agent: _:
-    lib.nameValuePair "hermes-${agent}" {
-      name = "Hermes ${agent}";
-      callbackURLs = [ "https://${agent}.${somDashboards.domain}/auth/callback" ];
-      pkce = true;
-      allowedGroups = [ "hermes-${agent}" ];
-    }) somDashboards.accounts;
+      lib.mapAttrs (name: u: u // { groups = (u.groups or [ ]) ++ dashboardGroups.${name} or [ ]; }) users;
   serveClient = {
     name = "Hermes serve ports";
     callbackURLs = lib.mapAttrsToList (agent: _:
@@ -214,8 +210,8 @@ in {
             # Pocket ID at id.davhau.com (modules/clan/oidc). som's hermes
             # dashboards sign in with hermes' own OIDC login, one confidential
             # client and group hermes-<agent> per agent, derived from
-            # machines/som/hermes-dashboards.nix
-            # (modules/nixos/hermes-dashboard-public.nix); the agents' private
+            # machines/som/hermes-dashboards.nix (hyperhermes'
+            # lib.sso.oidcClients); the agents' private
             # serve ports with client hermes-serve, open to those groups. The
             # `hermes` group opens som's front door (the redirect at
             # hermes.davhau.com) and the mail owner page.
@@ -270,20 +266,17 @@ in {
                 public = true;
                 allowedGroups = [ "apps" ];
               };
-              # som's oauth2-proxy front door: hermes.davhau.com (redirects
-              # to the account's dashboard) and the agent mail owner page
-              # (modules/nixos/agent-mail/owner-page.nix, its own
-              # oauth2-proxy), the private serve ports' oauth2-proxy
-              # (hermes-serve), plus one client per agent dashboard.
-              roles.client.machines.som.settings.clients = dashboardClients // {
-                hermes = {
-                  name = "Hermes";
-                  callbackURLs = [
-                    "https://hermes.davhau.com/oauth2/callback"
-                    "https://mailgate.hermes.davhau.com/oauth2/callback"
+              # som's oauth2-proxy front door `hermes`: hermes.davhau.com
+              # (redirects to the account's dashboard), whose client the agent
+              # mail owner page shares (modules/nixos/agent-mail/owner-page.nix,
+              # its own oauth2-proxy, its own callback), the private serve
+              # ports' oauth2-proxy (hermes-serve), plus one client per agent
+              # dashboard.
+              roles.client.machines.som.settings.clients = somHermesClients // {
+                hermes = somHermesClients.hermes // {
+                  callbackURLs = somHermesClients.hermes.callbackURLs ++ [
+                    "https://mailgate.${somDashboards.frontDoor}/oauth2/callback"
                   ];
-                  pkce = true; # oauth2-proxy sends S256
-                  allowedGroups = [ "hermes" ];
                 };
                 hermes-serve = serveClient;
               };

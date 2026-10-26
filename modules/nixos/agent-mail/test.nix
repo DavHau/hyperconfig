@@ -1,5 +1,6 @@
 # ./mail.nix and ./owner-page.nix end to end, with the real nginx config of
-# the front door and the agents' dashboards (../hermes-dashboard-public.nix,
+# the front door and the agents' dashboards (hyperhermes' exposure, sso and
+# dashboards modules,
 # hermes itself stubbed by an echo backend behind the real owner-checking
 # forward of hyperhermes' core) and the serve ports
 # (../hermes-agents-serve.nix) on the agents' own domain, with the old
@@ -606,9 +607,11 @@ pkgs.testers.runNixOSTest {
       imports = [
         ./mail.nix
         ./owner-page.nix
-        ../hermes-dashboard-public.nix
         ../hermes-agents-serve.nix
         inputs.hyperhermes.nixosModules.core
+        inputs.hyperhermes.nixosModules.exposure
+        inputs.hyperhermes.nixosModules.sso
+        inputs.hyperhermes.nixosModules.dashboards
         inputs.spaces.nixosModules.spaces-users
         stubs
       ];
@@ -667,16 +670,40 @@ pkgs.testers.runNixOSTest {
       systemd.services.hermes-agent-bob.enable = false;
       systemd.services.hermes-dashboard-bob.enable = false;
       systemd.services.hermes-python-venv-bob.enable = false;
-      hyper.hermesDashboard = {
-        host = dashHost;
-        agentDomain = fyi;
-        legacy = {
-          agentDomain = domain;
-          servePorts = true;
+      services.hyperhermes = {
+        exposure = {
+          enable = true;
+          mode = "public";
+          domain = fyi;
+          acme = {
+            dnsProvider = "porkbun";
+            credentialFiles = {
+              PORKBUN_API_KEY_FILE = "/etc/vars/porkbun/apikey";
+              PORKBUN_SECRET_API_KEY_FILE = "/etc/vars/porkbun/secretkey";
+            };
+          };
         };
-        users.alice.account = "alice-owner";
-        users.bob.account = "bob-owner";
+        sso = {
+          enable = true;
+          inherit (config.hyper.oidc) issuer;
+          accounts = {
+            alice = "alice-owner";
+            bob = "bob-owner";
+          };
+          frontDoor = {
+            host = dashHost;
+            cookieSecretFile = "/etc/vars/hermes-oauth2-proxy/cookie_secret";
+          };
+          clients = lib.mapAttrs (id: _: {
+            inherit (config.hyper.oidc.clients.${id}) secretFile;
+          }) config.services.hyperhermes.sso.oidcClients;
+        };
+        dashboards = {
+          enable = true;
+          legacyDomain = domain;
+        };
       };
+      hyper.hermesServe.legacyPorts = true;
       hyper.oidc = {
         issuer = "http://127.0.0.1:9000";
         clients.hermes = {

@@ -112,25 +112,46 @@ in
 
   # Public hermes dashboards, one per agent in ./hermes-agents.nix:
   # https://<agent>.davhau.fyi/ with hermes' own pocket-id login, and their
-  # serve ports at https://<port>.<agent>.davhau.fyi/
-  # (../../modules/nixos/hermes-dashboard-public.nix,
+  # serve ports at https://<port>.<agent>.davhau.fyi/ (hyperhermes'
+  # exposure, sso and dashboards modules, set up in ./hermes-agents.nix;
   # ../../modules/nixos/hermes-agents-serve.nix). davhau.fyi is the agents'
   # site, apart from davhau.com. *.davhau.fyi and *.<agent>.davhau.fyi A ->
-  # sgp (forwarded here), AAAA -> the token address below, kept by
-  # porkbun-records. https://hermes.davhau.com/ (oauth2-proxy) redirects the
-  # signed-in account to its dashboard, /app lists its addresses for Hermes
-  # Mobile; the mail owner page sits next to it. The old names
-  # <agent>.agents.davhau.com and <port>.hermes.davhau.com only answer 301
-  # to the new ones during the transition (`legacy`).
-  hyper.hermesDashboard = {
-    host = "hermes.davhau.com";
-    agentDomain = (import ./hermes-dashboards.nix).domain;
+  # sgp (forwarded here by ipv4-forward), AAAA -> the token address below,
+  # kept by porkbun-records. https://hermes.davhau.com/ (oauth2-proxy)
+  # redirects the signed-in account to its dashboard, /app lists its
+  # addresses for Hermes Mobile; the mail owner page sits next to it. The
+  # old names <agent>.agents.davhau.com and <port>.hermes.davhau.com only
+  # answer 301 to the new ones during the transition (`legacyDomain`,
+  # hyper.hermesServe.legacyPorts).
+  services.hyperhermes.exposure = {
+    enable = true;
+    mode = "public";
+    domain = (import ./hermes-dashboards.nix).domain;
     publicIPv4 = "38.89.142.76";
-    legacy = {
-      agentDomain = "agents.davhau.com";
-      servePorts = true;
+    publicIPv6.ipv6OnLink = {
+      inherit (config.networking.publicIPv6) interface;
+      suffix = config.networking.publicIPv6.token;
+    };
+    acme = {
+      dnsProvider = "porkbun";
+      credentialFiles = {
+        PORKBUN_API_KEY_FILE = config.clan.core.vars.generators.porkbun.files.apikey.path;
+        PORKBUN_SECRET_API_KEY_FILE = config.clan.core.vars.generators.porkbun.files.secretkey.path;
+      };
+      email = "info@davhau.com";
+      # som's upstream answers REFUSED for names that do not exist yet,
+      # which ends lego's SOA walk (../../modules/nixos/agent-mail).
+      dnsResolver = "1.1.1.1:53";
+      # Let's Encrypt only, by DNS-01 only. Without issuewild the issue
+      # property governs wildcards as well.
+      caa = ''0 issue "letsencrypt.org; validationmethods=dns-01"'';
     };
   };
+  services.hyperhermes.dashboards.legacyDomain = "agents.davhau.com";
+  hyper.hermesServe.legacyPorts = true;
+  hyper.porkbunRecords.records = lib.mkMerge (
+    map (r: { ${r.name}.${r.type} = r.value; }) config.services.hyperhermes.exposure.dnsRecords
+  );
 
   # Receive-only mail for every agent in ./hermes-agents.nix at
   # <agent>@agents.davhau.com (../../modules/nixos/agent-mail, DNS records

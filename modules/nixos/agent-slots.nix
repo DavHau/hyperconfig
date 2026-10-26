@@ -110,7 +110,7 @@
 # mean moving roots on a 92% full production pool, not done here.
 #
 # Cookies: a slot serves whatever its agent deploys, so it lives on the
-# agents' site (davhau.fyi, ./hermes-dashboard-public.nix), never on
+# agents' site (davhau.fyi, hyperhermes' dashboards module), never on
 # davhau.com. A page in the slot can set cookies for <agent>.<domain> (its
 # own agent's dashboard and serve ports: nothing the agent does not control
 # already; logins there are `__Host-` cookies it cannot touch) or for
@@ -579,7 +579,7 @@ in
           PORKBUN_API_KEY_FILE = config.clan.core.vars.generators.porkbun.files.apikey.path;
           PORKBUN_SECRET_API_KEY_FILE = config.clan.core.vars.generators.porkbun.files.secretkey.path;
         };
-        # As the dashboards' cert (./hermes-dashboard-public.nix).
+        # As the dashboards' cert (machines/som exposure.acme).
         dnsResolver = "1.1.1.1:53";
       };
     };

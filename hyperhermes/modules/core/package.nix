@@ -13,6 +13,11 @@
 # uv2nix input that packages.nix receives gets one more overlay that
 # patches the hermes-agent wheel. The wheel source drops tests/, so
 # filterdiff drops the test hunks.
+#
+# Bundled plugins (plugins/, e.g. the dashboard's OIDC login) do not load
+# from the wheel: the wrapper points HERMES_BUNDLED_PLUGINS at
+# share/hermes-agent/plugins, a link to the unpatched source tree. The
+# package's link is replaced by a copy with the patches' plugins/ hunks.
 {
   lib,
   system,
@@ -29,6 +34,7 @@ let
     ./patches/hermes-camofox-solve-captcha.patch
     ./patches/hermes-camofox-vault.patch
     ./patches/hermes-hosted-ocr-url.patch
+    ./patches/hermes-dashboard-oidc-allowed-groups.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {
@@ -68,5 +74,24 @@ let
         inputs'.npm-lockfile-fix.packages.default =
           hermesInputs.npm-lockfile-fix.packages.${system}.default;
       };
+  patchedPlugins =
+    hermesPkgs.runCommand "hermes-agent-plugins-patched"
+      {
+        nativeBuildInputs = [ hermesPkgs.patchutils ];
+      }
+      (
+        ''
+          cp -r ${hermes-agent}/plugins $out
+          chmod -R u+w $out
+          cd $out
+        ''
+        + lib.concatMapStrings (p: ''
+          filterdiff -p1 -i 'plugins/*' ${p} | patch -p2
+        '') hermesWheelPatches
+      );
 in
-hermesUpstream.packages.default
+hermesUpstream.packages.default.overrideAttrs (old: {
+  postInstall = (old.postInstall or "") + ''
+    ln -sfn ${patchedPlugins} $out/share/hermes-agent/plugins
+  '';
+})

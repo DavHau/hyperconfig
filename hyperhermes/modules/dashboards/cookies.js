@@ -1,6 +1,5 @@
-// The Cookie header an agent's dashboard receives
-// (./hermes-dashboard-public.nix): hermes' own cookies, nothing else,
-// rebuilt pair by pair.
+// The Cookie header an agent's dashboard receives (./default.nix):
+// hermes' own cookies, nothing else, rebuilt pair by pair.
 //
 // Over HTTPS without a path prefix hermes names its cookies `__Host-`
 // (hermes_cli/dashboard_auth/cookies.py): the session (`hermes_session_at`,
@@ -13,16 +12,21 @@
 // itself; it sends them as bare `hermes_session_at`, `_rt` and `_provider`
 // (hermes-mobile CookieSerialization.kt), which hermes reads after the
 // `__Host-` names. A bare name can be tossed from a sibling host
-// (Domain=davhau.fyi or Domain=<agent>.davhau.fyi from another agent's page
+// (Domain=<domain> or Domain=<agent>.<domain> from another agent's page
 // or this agent's own serve ports and slot). That is harmless: hermes
 // prefers the `__Host-` cookie when both are there, and a tossed token must
 // still carry aud=hermes-<this agent>, i.e. be a login of this dashboard's
 // own members. Every other cookie, login cookies of other hosts included,
 // stays out, however many there are.
-var ALLOWED =
+//
+// Over plain HTTP (exposure's local mode, loopback only) hermes uses the
+// bare names for all of them, the sign-in's PKCE state and loop guard too.
+var HTTPS_ALLOWED =
   /^(__Host-hermes_(session_(at|rt|provider|pkce)|sso_attempt)|hermes_session_(at|rt|provider))=/;
+var HTTP_ALLOWED = /^hermes_(session_(at|rt|provider|pkce)|sso_attempt)=/;
 
 function hermesCookies(r) {
+  var allowed = r.variables.scheme === "https" ? HTTPS_ALLOWED : HTTP_ALLOWED;
   // nginx joins repeated Cookie headers (HTTP/2 sends one per pair) with "; ".
   var header = r.variables.http_cookie;
   if (!header) {
@@ -34,7 +38,7 @@ function hermesCookies(r) {
       return pair.trim();
     })
     .filter(function (pair) {
-      return ALLOWED.test(pair);
+      return allowed.test(pair);
     })
     .join("; ");
 }
