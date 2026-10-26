@@ -718,6 +718,11 @@ in
             secrets.password.file = a.passwordFile;
           };
         }) cfg.agents;
+      })
+
+      # The units that stage and serve those profiles exist only while the
+      # spaces integrations run; without them the profile above is inert.
+      (lib.mkIf (config.services.spaces-integrations.enable or false) {
         # These are the first Nix-managed profiles on this host, and spaces'
         # stager script (spaces-integrations/default.nix, perIntegrationScript)
         # writes each TOML line with its own `>> "$cttmp"`. Under spaces'

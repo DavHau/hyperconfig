@@ -1,7 +1,7 @@
 # Shared building blocks for the afk harness wrapper (afk.nix): the jj
-# AGENTS.md, the spaces MCP server config, the inference-endpoint token
-# export, and the models.yml providers (fleet inference + optional
-# llama-swap). Imported as a plain function, NOT a NixOS module.
+# AGENTS.md, the inference-endpoint token export, and the models.yml
+# providers (fleet inference + optional llama-swap). Imported as a plain
+# function, NOT a NixOS module.
 #
 # The locally-patched omp package and the generated config.yml used to live
 # here too, for the pi.nix / pi-superpowers.nix wrappers. Both wrappers are
@@ -104,20 +104,6 @@ in rec {
   models-needed = modelProviderBlocks != [ ];
   modelsFile = pkgs.writeText "models.yml"
     (lib.concatStringsSep "\n" ([ "providers:" ] ++ modelProviderBlocks) + "\n");
-  # Shared MCP servers (symlinked to $config_dir/mcp.json).
-  # `spaces` reaches the always-on per-user spaces-integration-gateway --user
-  # service (socket $XDG_RUNTIME_DIR/spaces-integration-gateway.sock, 0700 and
-  # owner-only) through the stdio<->socket bridge `spaces-mcp-connect` — on PATH
-  # from inputs.spaces.nixosModules.spaces-integration-gateway (default-enabled
-  # via services.pi-chat). omp runs as the human user, so it connects to the
-  # owner-only socket directly; OMP expands ${XDG_RUNTIME_DIR} at discovery time.
-  mcpFile = pkgs.writeText "mcp.json" (builtins.toJSON {
-    "$schema" = "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json";
-    mcpServers.spaces = {
-      command = "spaces-mcp-connect";
-      args = [ "\${XDG_RUNTIME_DIR}/spaces-integration-gateway.sock" ];
-    };
-  });
   # herdr <-> omp agent-state extension, shared by afk (afk.nix) and bare omp
   # (omp-p0.nix). Verbatim copy of what `herdr integration install omp`
   # (herdr 0.9.1, HERDR_INTEGRATION_VERSION=10) writes; refresh it from
