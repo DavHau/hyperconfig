@@ -101,20 +101,22 @@ in
       };
     };
 
-    # The container's web front admits hostAddress only (./guest.nix), so
-    # the host's own connections must reach it from that address.
-    # systemd-networkd would configure ve-* by its 80-container-ve.network:
-    # a link-local and a /28 address, and masquerading of every address on
-    # the link, which rewrites the forward's source to the /28. Here it
-    # only brings the link up (the container's start waits for its
-    # carrier); the containers module sets the address and the route.
+    # The container's veth is up the moment it exists, whatever runs the
+    # host's network: the containers module brings it up only after the
+    # container has booted, and the container's boot waits for its
+    # carrier (network-online.target). systemd-networkd keeps out of it:
+    # its 80-container-ve.network would add a link-local and a /28
+    # address and masquerade every address on the link, rewriting the
+    # forward's source to the /28, while the container's web front admits
+    # hostAddress only (./guest.nix). NetworkManager leaves ve-* alone
+    # already (the containers module). The containers module sets the
+    # address and the route.
+    services.udev.extraRules = ''
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="ve-${cfg.name}", RUN+="${pkgs.iproute2}/bin/ip link set dev $name up"
+    '';
     systemd.network.networks."10-ve-${cfg.name}" = lib.mkIf config.systemd.network.enable {
       matchConfig.Name = "ve-${cfg.name}";
-      networkConfig = {
-        LinkLocalAddressing = "no";
-        KeepConfiguration = "yes";
-      };
-      linkConfig.RequiredForOnline = "no";
+      linkConfig.Unmanaged = true;
     };
     # Any other address on the veth stays out of the source selection.
     systemd.services."container@${cfg.name}".postStart = lib.mkAfter ''
