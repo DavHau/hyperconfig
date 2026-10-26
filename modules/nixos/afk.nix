@@ -14,8 +14,6 @@
 #
 # - the models.yml with the p0 provider and the TeamClaude anthropic
 #   override (omp-common.nix),
-# - the spaces MCP server (mcp.json): stdio bridge to the per-user
-#   spaces-integration-gateway socket,
 # - the host-specific always-apply rule (repo layout) and the top-level
 #   AGENTS.md,
 # - the jobs-hub extension (background-jobs widget, Ctrl+J / /bashjobs),
@@ -61,9 +59,6 @@ in
         # HERDR_SOCKET_PATH, HERDR_PANE_ID). Vendored verbatim from what
         # `herdr integration install omp` writes; see herdr-omp-agent-state/.
         ln -sf ${common.herdrOmpExtension} "$config_dir/extensions/herdr-omp-agent-state.ts"
-        # spaces MCP server: stdio bridge to the per-user
-        # spaces-integration-gateway socket. See omp-common.nix for rationale.
-        ln -sf ${common.mcpFile} "$config_dir/mcp.json"
         ${lib.optionalString common.models-needed ''ln -sf ${common.modelsFile} "$config_dir/models.yml"''}
       '';
     })

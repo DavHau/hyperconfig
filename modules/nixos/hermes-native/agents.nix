@@ -20,18 +20,10 @@ let
       ;
   };
   pythonVenv = import ./python-venv.nix { inherit lib pkgs; };
-  spacesIntegrations = config.services.spaces-integrations.enable or false;
 
   # Upstream's deep merge: Nix keys win, keys the user added through the
   # dashboard survive.
   configMergeScript = pkgs.callPackage "${inputs.hermes-agent}/nix/configMergeScript.nix" { };
-
-  # The spaces integration gateway is a per-user socket under
-  # /run/user/<uid>. The uid is runtime-allocated, so the wrapper
-  # resolves it when the agent dials.
-  spacesMcp = pkgs.writeShellScript "hermes-spaces-mcp" ''
-    exec ${pkgs.socat}/bin/socat STDIO "UNIX-CONNECT:/run/user/$(${pkgs.coreutils}/bin/id -u)/spaces-integration-gateway.sock"
-  '';
 
   settingsFor =
     user:
@@ -40,14 +32,6 @@ let
         lib.recursiveUpdate {
           terminal.cwd = hlib.workspace user;
         } ac.settings
-        // lib.optionalAttrs spacesIntegrations {
-          mcp_servers = (ac.settings.mcp_servers or { }) // {
-            spaces = {
-              command = "${spacesMcp}";
-              args = [ ];
-            };
-          };
-        }
       )
     );
 

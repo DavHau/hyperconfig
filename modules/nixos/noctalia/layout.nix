@@ -80,11 +80,8 @@ in
         hermes = {
           type = "custom_button";
           glyph = "robot";
-          tooltip = "Left: ${cmds.hermes.name}\nRight: ${cmds.integrations.name}";
-          actions = {
-            left = "exec ${cmds.hermes.name}";
-            right = "exec ${cmds.integrations.name}";
-          };
+          tooltip = cmds.hermes.name;
+          actions.left = "exec ${cmds.hermes.name}";
         };
         battery.display_mode = "graphic";
         volume.show_label = false;

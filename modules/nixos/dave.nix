@@ -111,6 +111,11 @@ in
 
   clan.core.state.HOME.folders = [ "/home" ];
 
+  # spaces' desktop profile turns its integration gateway (per-user MCP
+  # servers for mail, calendar, signal, ...) on by default; no harness or
+  # agent here uses it.
+  services.spaces-integrations.enable = false;
+
   # services.hyprspace.settings.peers = [
   #   { id = self.nixosConfigurations.nas.config.clan.core.vars.generators.hyprspace.files.peer-id.value; }
   # ];

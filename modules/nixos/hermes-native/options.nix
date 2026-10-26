@@ -148,13 +148,6 @@ in
 
   config = lib.mkIf cfg.enable {
     services.hermes-native.settings = {
-      # The spaces integration gateway carries its own Signal integration.
-      # Two Signal surfaces confuse the user, so the Hermes signal-cli
-      # channel is pinned off. The explicit `enabled: false` survives
-      # upstream's env-override pass (gateway/config.py,
-      # `_enabled_explicit`).
-      platforms.signal.enabled = lib.mkDefault false;
-
       # hermes copies its bundled skills into ~/.hermes/skills on every
       # start; productivity/maps declares `name: maps`, and the spaces
       # skill root ships `osm-maps` for the same job. Two skills of one
@@ -163,16 +156,6 @@ in
       # CONCATENATES with an operator's entries; re-enabling needs
       # lib.mkForce.
       skills.disabled = [ "maps" ];
-
-      # The agent snapshots its tool registry when it is built, and MCP
-      # discovery only gets a bounded head start (1.5s interactive, 15s
-      # for a single query, hermes_cli/config_defaults.py). The spaces
-      # gateway can take longer, and the first turn then carries no
-      # mcp__spaces__* tool at all. `thread.join(timeout)` returns the
-      # instant discovery finishes, so a wider bound costs a fast host
-      # nothing.
-      mcp_discovery_timeout = lib.mkDefault 30;
-      mcp_single_query_discovery_timeout = lib.mkDefault 30;
 
       # No approval gate. Cron runs and subagents have nobody to answer
       # it: a flagged command ended BLOCKED or parked as pending_approval.

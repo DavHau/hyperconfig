@@ -24,7 +24,6 @@
     ../../modules/nixos/amd-powersave-limits.nix
     ../../modules/nixos/powersave-panel-refresh.nix
     ../../modules/nixos/chores-on-ac.nix
-    ../../modules/nixos/spaces-kiwix.nix
     ../../modules/nixos/vibepn.nix
     ../../modules/nixos/storagebox.nix
     ../../modules/nixos/vault-nfs-client.nix

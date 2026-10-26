@@ -30,9 +30,8 @@
 # the assertion below catches a missing pin. The id ladder lives in
 # ./vault-ids.nix.
 #
-# linger: the agent units reach the owner's session bus and the spaces
-# gateway socket under /run/user/<uid>, which exist from boot only while
-# the account lingers.
+# linger: the agent units reach the owner's session bus under
+# /run/user/<uid>, which exists from boot only while the account lingers.
 #
 # Anything agent-specific that hermes-common.nix knows (telegram, extra
 # .env entries) goes into `hermes`, which merges into

@@ -93,10 +93,7 @@ in
         ];
         # The nix daemon socket is root-equivalent for trusted users (grmpf
         # is one); sbox exposes it too via its read-only /nix bind.
-        socketFiles = [
-          nixDaemonSocket
-          "${realRuntime}/spaces-integration-gateway.sock"
-        ];
+        socketFiles = [ nixDaemonSocket ];
         connectTcpPorts = [ 22 443 ]
           ++ lib.optional config.services.llama-swap.enable config.services.llama-swap.port;
       };
@@ -110,8 +107,6 @@ in
         "${houseHome}/.ssh/id_ed25519_github" = "${home}/.ssh/id_ed25519_github1";
         "${houseHome}/.config/age/identities" =
           config.clan.core.vars.generators.sbox-age.files.identity.path;
-        "${houseRuntime}/spaces-integration-gateway.sock" =
-          "${realRuntime}/spaces-integration-gateway.sock";
       };
       # ssh resolves ~ from passwd, not $HOME, so it never looks in the house
       # home; point git (and jj, which shells out to git) at the GitHub key.
