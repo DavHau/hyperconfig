@@ -3,7 +3,7 @@
 # dashboards modules,
 # hermes itself stubbed by an echo backend behind the real owner-checking
 # forward of hyperhermes' core) and the serve ports
-# (../hermes-agents-serve.nix) on the agents' own domain, with the old
+# (hyperhermes' publish module) on the agents' own domain, with the old
 # names' redirects: Stalwart as MX, mailgate, two agents (alice, bob), all
 # three oauth2-proxy instances against a stub OIDC provider, and a
 # sending client that also serves the senders' DNS (SPF, DKIM, DMARC) and a
@@ -607,7 +607,7 @@ pkgs.testers.runNixOSTest {
       imports = [
         ./mail.nix
         ./owner-page.nix
-        ../hermes-agents-serve.nix
+        inputs.hyperhermes.nixosModules.publish
         inputs.hyperhermes.nixosModules.core
         inputs.hyperhermes.nixosModules.exposure
         inputs.hyperhermes.nixosModules.sso
@@ -703,7 +703,11 @@ pkgs.testers.runNixOSTest {
           legacyDomain = domain;
         };
       };
-      hyper.hermesServe.legacyPorts = true;
+      services.hyperhermes.publish = {
+        enable = true;
+        cookieSecretFile = "/etc/vars/hermes-serve-oauth2-proxy/cookie_secret";
+        legacyFrontDoorPorts = true;
+      };
       hyper.oidc = {
         issuer = "http://127.0.0.1:9000";
         clients.hermes = {

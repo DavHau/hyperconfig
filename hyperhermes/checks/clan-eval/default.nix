@@ -114,6 +114,33 @@ let
     }
   ];
 
+  # The published ports (local mode, so no issuer to name): their cookie
+  # secret from clan, the client secret's restart.
+  published = evalWith [
+    self.nixosModules.default
+    agents
+    {
+      services.hyperhermes = {
+        exposure.enable = true;
+        sso = {
+          enable = true;
+          accounts = {
+            alice = "alice";
+            bob = "bob";
+          };
+          clients = lib.genAttrs [ "hermes-alice" "hermes-bob" "hermes-serve" ] (id: {
+            secretFile = "/run/secrets/${id}";
+          });
+          dex.users = lib.genAttrs [ "alice" "bob" ] (account: {
+            passwordHashFile = "/run/secrets/${account}.hash";
+          });
+        };
+        dashboards.enable = true;
+        publish.enable = true;
+      };
+    }
+  ];
+
   # nixosModules.default already imports core.
   coreTwice = evalWith [
     self.nixosModules.default
@@ -163,6 +190,27 @@ let
     desktop-key-file =
       (hyper enabled).desktop.sshKeyFile == (gens enabled).hermes-desktop-ssh.files.key.path
       && (gens enabled).hermes-desktop-ssh.share;
+
+    published-evaluates = evaluates published && failedAssertions published == [ ];
+    published-generator-names =
+      genNames published == [
+        "hermes-agent-ssh-alice"
+        "hermes-agent-ssh-bob"
+        "hermes-serve-oauth2-proxy"
+        "oidc-client-hermes-alice"
+        "oidc-client-hermes-bob"
+        "oidc-client-hermes-serve"
+      ];
+    publish-cookie-secret-file =
+      (hyper published).publish.cookieSecretFile
+      == (gens published).hermes-serve-oauth2-proxy.files.cookie_secret.path
+      && (gens published).hermes-serve-oauth2-proxy.files.cookie_secret.restartUnits == [
+        "oauth2-proxy-serve.service"
+      ];
+    publish-client-secret-restarts =
+      (gens published).oidc-client-hermes-serve.files.secret.restartUnits == [
+        "oauth2-proxy-serve.service"
+      ];
 
     core-imported-twice-evaluates = evaluates coreTwice && failedAssertions coreTwice == [ ];
   };

@@ -1,13 +1,13 @@
-// The Cookie header an agent's published app receives
-// (./hermes-agents-serve.nix): an allowlist, rebuilt pair by pair.
+// The Cookie header an agent's published app receives (./default.nix): an
+// allowlist, rebuilt pair by pair.
 //
 // Allowed: names that start with a letter or digit (what apps choose for
 // themselves), and jupyter's `_xsrf`. Everything a login uses starts with
-// an underscore (the private ports' `__Host-hermes_serve` and its
-// `__Host-hermes_serve_csrf`, and, should a browser ever send them here,
-// the front door's `__Host-hermes` and the mail owner page's
-// `__Host-mailgate`), so no number or order of such cookies gets one
-// through. Pairs without a name are dropped too.
+// an underscore (the private ports' `__Host-hermes_serve`, or
+// `_hermes_serve` over local HTTP, and their `_csrf` companions; should a
+// browser ever send them here, the front door's `__Host-hermes` and the
+// mail owner page's `__Host-mailgate`), so no number or order of such
+// cookies gets one through. Pairs without a name are dropped too.
 var ALLOWED = /^(?:[A-Za-z0-9][A-Za-z0-9!#$%&'*+.^_`|~-]*|_xsrf)=/;
 
 function appCookies(r) {

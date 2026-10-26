@@ -38,6 +38,12 @@
 # (declared by whatever runs the clan's identity provider) restarts the
 # agent and its dashboard: the secret reaches the .env when the agent
 # restarts, and the dashboard reads it when it restarts after the agent.
+#
+# publish, with services.hyperhermes.publish on (./publish): the
+# per-machine generator hermes-serve-oauth2-proxy, oauth2-proxy-serve's
+# cookie secret, root-only, path into publish.cookieSecretFile; and the
+# client secret oidc-client-hermes-serve (declared by whatever runs the
+# clan's identity provider) restarts that proxy.
 {
   config,
   lib,
@@ -61,6 +67,8 @@ let
   ssoLib = import ../lib/sso.nix { inherit lib; };
   hasSso = options ? services.hyperhermes.sso.frontDoor;
   frontDoor = hasSso && cfg.sso.enable && cfg.sso.frontDoor.host != null;
+  hasPublish = options ? services.hyperhermes.publish;
+  publishOn = hasPublish && cfg.publish.enable;
 in
 {
   options.services.hyperhermes.agents = lib.mkOption {
@@ -155,6 +163,24 @@ in
               }
             ) cfg.agents
           ))
+
+          (lib.mkIf publishOn {
+            hermes-serve-oauth2-proxy = {
+              files.cookie_secret.restartUnits = [ "oauth2-proxy-serve.service" ];
+              runtimeInputs = [
+                pkgs.coreutils
+                pkgs.openssl
+              ];
+              # 32 hex characters are 32 raw bytes: oauth2-proxy takes a
+              # raw secret of that length as is.
+              script = ''
+                openssl rand -hex 16 | tr -d '\n' > "$out"/cookie_secret
+              '';
+            };
+            "oidc-client-${ssoLib.publishClientId}".files.secret.restartUnits = [
+              "oauth2-proxy-serve.service"
+            ];
+          })
         ];
       }
 
@@ -166,6 +192,12 @@ in
 
       (lib.optionalAttrs hasDesktop {
         services.hyperhermes.desktop.sshKeyFile = lib.mkDefault generators.hermes-desktop-ssh.files.key.path;
+      })
+
+      (lib.optionalAttrs hasPublish {
+        services.hyperhermes.publish.cookieSecretFile = lib.mkIf publishOn (
+          lib.mkDefault generators.hermes-serve-oauth2-proxy.files.cookie_secret.path
+        );
       })
 
       (lib.optionalAttrs hasWallet {
