@@ -180,14 +180,14 @@ Uses the **current clan-core test harness** (verified against clan-core
   committed-vars layout in `modules/clan/wireguard/tests/vm` is the
   legacy pattern; recent upstream services — `p2p-ssh-iroh`,
   `borgbackup` — commit only `default.nix`.)
-- **Containers, not VMs:** the harness defaults to
-  `clan.test.useContainers = true` (systemd-nspawn; far cheaper).
-  Requires the `uid-range` system feature (`auto-allocate-uids`,
-  `cgroups`) on the building host. Risk: assertion 4 runs nested nix
-  builds inside a node — likely needs `nix.settings.sandbox = false` on
-  the test nodes; if container nesting still fights the daemon, set
-  `clan.test.useContainers = false` for this one test (documented
-  fallback, decided by first implementation run).
+- **VMs, not containers:** the harness defaults to
+  `clan.test.useContainers = true` (systemd-nspawn), but nspawn
+  bind-mounts `/nix/store` read-only and the node's nix-daemon fails
+  every connection with `remounting "/nix/store" writable: Operation not
+  permitted`, so assertion 4 (nested builds + path import) cannot run in
+  a container. The test sets `clan.test.useContainers = false` and
+  declares `nodes.<name>` (QEMU, writable store overlay). Nodes keep
+  `nix.settings.sandbox = false` for the `/bin/sh`-builder derivations.
 - **Wiring into checks:** a new flake-parts module
   `modules/flake-parts/clan-tests.nix` (auto-imported by
   `all-modules.nix`):
@@ -215,8 +215,7 @@ Uses the **current clan-core test harness** (verified against clan-core
   node-level extras kept minimal (upstream pattern: harness injects
   minify + age-secrets modules via `defaults`).
 - **Debugging:** `nix run .#checks.x86_64-linux.remote-building.driver
-  -- --interactive` when on VMs; container runs log an `nsenter` command
-  per node.
+  -- --interactive`.
 - **Assertions (the contract, in order):**
   1. `remote-builders.service` active at boot on client1;
      `/run/remote-builders/machines` non-empty and names

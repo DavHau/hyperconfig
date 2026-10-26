@@ -18,7 +18,9 @@
 
   clan = {
     directory = ./.;
-    test.useContainers = true;
+    # VMs, not containers: nspawn bind-mounts /nix/store read-only, so the
+    # node's nix-daemon cannot remount it writable to build or import paths.
+    test.useContainers = false;
     inventory = {
       machines.builder1 = { };
       machines.client1 = { };
@@ -42,7 +44,7 @@
 
   nodes = {
     builder1 = {
-      # Nested builds inside the test node cannot sandbox.
+      # The test derivations use the node's /bin/sh as builder.
       nix.settings.sandbox = false;
       nix.settings.experimental-features = [ "nix-command" ];
     };
@@ -69,12 +71,8 @@
   testScript = ''
     start_all()
 
-    # multi-user first: right after container boot the sshd start job may
-    # not be queued yet, and wait_for_unit errors on inactive-with-no-jobs.
-    # nixpkgs-unstable socket-activates sshd: the unit is sshd.socket, and
-    # sshd@ instances are spawned per connection.
     builder1.wait_for_unit("multi-user.target")
-    builder1.wait_for_unit("sshd.socket")
+    builder1.wait_for_open_port(22)
     client1.wait_for_unit("multi-user.target")
     external1.wait_for_unit("multi-user.target")
 
