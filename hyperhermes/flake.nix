@@ -50,6 +50,7 @@
         desktop = import ./modules/desktop { inherit hermes-agent; };
         dashboards = ./modules/dashboards;
         publish = ./modules/publish;
+        mail = ./modules/mail;
         default = {
           imports = [
             self.nixosModules.core
@@ -62,6 +63,7 @@
             self.nixosModules.desktop
             self.nixosModules.dashboards
             self.nixosModules.publish
+            self.nixosModules.mail
           ];
         };
         # Not a feature, so not in `default`: fills core's and the
@@ -118,6 +120,7 @@
 
         browser = import ./checks/browser { inherit pkgs self; };
         wallet = import ./checks/wallet { inherit pkgs self; };
+        mail = import ./checks/mail { inherit pkgs self; };
         # Evaluation only: teamclaude, claude-auth and desktop on a system
         # without clan, secrets as runtime paths.
         client-features = import ./checks/client-features { inherit pkgs self; };

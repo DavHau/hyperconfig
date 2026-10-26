@@ -1,6 +1,10 @@
-# Receive-only mailboxes for agents, without the secrets plumbing
-# (./default.nix declares the clan vars and the host wiring; the VM test,
-# ./test.nix, imports this file with plain files instead).
+# Receive-only email for the agents (services.hyperhermes.agents):
+# <agent>@<mail.domain>, Stalwart as MX, mailgate as sanitizer, quarantine,
+# allowlist and alias registry. Public deployments only (asserted): the MX
+# takes mail from the internet, and the owner page (./owner-page.nix) sits
+# behind the sso front door. Secrets are runtime paths; nixosModules.clan
+# fills them from the generators `mailgate`, `mailgate-imap-<agent>` and
+# `mailgate-oauth2-proxy`.
 #
 # Mail path:
 #
@@ -22,8 +26,11 @@
 #   agent: reads its INBOX with `mailgate inbox` / `mailgate read <id>`
 #     (rendered from the original here) and everything else through
 #     /run/mailgate/agent.sock, where the peer uid picks the mailbox. The
-#     IMAP copy on 127.0.0.1:143 (spaces mail tools, profile "mailgate", its
-#     own password) holds the same sanitized text.
+#     IMAP copy on 127.0.0.1:143 holds the same sanitized text; the agent
+#     reads it with `himalaya`, built with the IMAP backend only (no SMTP
+#     or other transport compiled in), as its own IMAP account: the
+#     password is the agent's alone (mailgate-imap-passwords copies it to
+#     /run/mailgate-imap/<agent>/password, 0400 the agent).
 #
 # Why the agent cannot reach the raw mail: its IMAP account only ever holds
 # the sanitized copies (Stalwart delivers nothing itself), the originals and
@@ -36,27 +43,49 @@
 # only Stalwart and root dial LMTP and the hook, only root dials the MX from
 # this host (local users cannot inject mail; agents cannot reach it through
 # the forwarded public address either, `mxAddresses`), only the agents,
-# mailgate and root dial IMAP, and nobody but root reaches 587, where the
-# agents' SMTP profile points so that sending fails at connect. Stalwart may
-# open no connection off this host except DNS; mailgate only DNS and the
-# summariser's port.
+# mailgate and root dial IMAP, and nobody but root reaches 587 (submission,
+# which nothing serves; should anything ever listen there, agents still
+# cannot send through it). Stalwart may open no connection off this host
+# except DNS; mailgate only DNS and the summariser's port.
+#
+# DNS: the mail domain is usually not exposure.domain (agent-controlled),
+# and these records are not in exposure.dnsRecords; the deployment's zone
+# holds them. Nothing is ever sent from the domain, so SPF and DMARC say so:
+#   <hostname>             A     <public IPv4 of the MX>   (no AAAA)
+#   <domain>               MX    10 <hostname>
+#   <domain>               TXT   "v=spf1 -all"
+#   <hostname>             TXT   "v=spf1 -all"
+#   _dmarc.<domain>        TXT   "v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s"
+#   *._domainkey.<domain>  TXT   "v=DKIM1; p="   (no key is valid)
+# and a PTR for the address to <hostname> if its provider allows one
+# (senders may score a missing or mismatching PTR).
 {
   config,
   lib,
   pkgs,
-  options,
   ...
 }:
 let
-  cfg = config.hyper.agentMail;
+  cfg = config.services.hyperhermes.mail;
+  exposure = config.services.hyperhermes.exposure;
+  # The sso module is optional; the owner page needs its front door.
+  sso = config.services.hyperhermes.sso or null;
+  frontDoorHost = if sso == null || !sso.enable then null else sso.frontDoor.host;
+  # Agent name -> its mailbox (agents.<name>.mail), for the agents that
+  # have one.
+  mailboxes = lib.mapAttrs (_: a: a.mail) (
+    lib.filterAttrs (_: a: a.mail.enable) config.services.hyperhermes.agents
+  );
+  inStore = path: lib.hasPrefix builtins.storeDir (toString path);
   lmtpPort = 24;
   hookPort = 226;
   imapPort = 143;
-  # The agents' SMTP profile points here. Nothing listens and the firewall
-  # refuses everyone but root, so message_send fails at connect.
+  # Submission. Nothing listens and the firewall refuses everyone but root.
   closedSmtpPort = 587;
   stalwartUser = config.services.stalwart.user;
   credDir = "/run/credentials/stalwart.service";
+  # Each agent's own copy of its IMAP password (mailgate-imap-passwords).
+  passwordDir = "/run/mailgate-imap";
 
   src = lib.fileset.toSource {
     root = ./.;
@@ -76,6 +105,53 @@ let
     ];
   };
 
+  # The read-only IMAP client: himalaya with the IMAP backend alone, so no
+  # build of it can submit mail anywhere (no SMTP, sendmail, JMAP, Gmail or
+  # Graph transport compiled in). `himalaya` picks the caller's account by
+  # unix name: the agent's own mailbox, logged in with its own password.
+  himalayaPackage = pkgs.himalaya.override {
+    buildNoDefaultFeatures = true;
+    buildFeatures = [
+      "imap"
+      "rustls-ring"
+    ];
+  };
+  toml = pkgs.formats.toml { };
+  himalayaConfigFor =
+    name:
+    toml.generate "himalaya-${name}.toml" {
+      accounts.${name} = {
+        default = true;
+        email = "${name}@${cfg.domain}";
+        # Plain IMAP on loopback, as Stalwart listens.
+        imap = {
+          server = "imap://127.0.0.1:${toString imapPort}";
+          starttls = false;
+          sasl.plain = {
+            username = name;
+            password.command = [
+              "${pkgs.coreutils}/bin/cat"
+              "${passwordDir}/${name}/password"
+            ];
+          };
+        };
+        mailbox.alias.inbox = "INBOX";
+      };
+    };
+  himalaya = pkgs.writeShellScriptBin "himalaya" ''
+    case "$(${pkgs.coreutils}/bin/id -un)" in
+    ${lib.concatMapStrings (name: ''
+      ${name}) HIMALAYA_CONFIG=${himalayaConfigFor name} ;;
+    '') (lib.attrNames mailboxes)}
+      *)
+        echo "himalaya: $(${pkgs.coreutils}/bin/id -un) has no agent mailbox on this host" >&2
+        exit 1
+        ;;
+    esac
+    export HIMALAYA_CONFIG
+    exec ${himalayaPackage}/bin/himalaya "$@"
+  '';
+
   ownerOrigin = if cfg.ownerPage.host == null then null else "https://${cfg.ownerPage.host}";
   configFile = pkgs.writeText "mailgate.json" (
     builtins.toJSON {
@@ -91,7 +167,7 @@ let
       agents = lib.mapAttrs (_: a: {
         inherit (a) owner;
         allowlist = map lib.toLower a.allowlist;
-      }) cfg.agents;
+      }) mailboxes;
       ownerUrl = if ownerOrigin == null then null else "${ownerOrigin}/";
       inherit ownerOrigin;
       summarizer =
@@ -119,7 +195,7 @@ let
       listen = "/run/mailgate/agent.sock";
       extra.SocketMode = "0666";
     };
-    # nginx alone (the owner page behind the dashboard login).
+    # nginx alone (the owner page behind its own login).
     owner = {
       listen = "/run/mailgate/owner.sock";
       extra = {
@@ -151,52 +227,207 @@ let
     gate ${toString hookPort} ${stalwartUser}
     gate 25
     gate ${toString closedSmtpPort}
-    gate ${toString imapPort} mailgate ${lib.concatStringsSep " " (lib.attrNames cfg.agents)}
+    gate ${toString imapPort} mailgate ${lib.concatStringsSep " " (lib.attrNames mailboxes)}
   '';
 
   # When the MX's public address belongs to another host that forwards it
-  # here (som: sgp's), this host's own traffic to it leaves over the uplink
-  # and comes back like any internet sender's, past the loopback gate on 25.
+  # here, this host's own traffic to it leaves over the uplink and comes
+  # back like any internet sender's, past the loopback gate on 25.
   mxHairpin = lib.concatMapStrings (
     addr:
     lib.concatMapStrings (agent: ''
       iptables -w -A mailgate-mx -d ${addr} -p tcp --dport 25 -m owner --uid-owner ${agent} -j REJECT --reject-with tcp-reset
-    '') (lib.attrNames cfg.agents)
+    '') (lib.attrNames mailboxes)
   ) cfg.mxAddresses;
+
+  skill = import ../../lib/agent-skill.nix pkgs {
+    name = "mailgate";
+    src = pkgs.writeTextDir "SKILL.md" (
+      builtins.replaceStrings
+        [ "@DOMAIN@" "@INBOX_DAYS@" ]
+        [ cfg.domain (toString cfg.limits.inboxDays) ]
+        (builtins.readFile ./skill/SKILL.md)
+    );
+  };
 in
 {
-  options.hyper.agentMail = with lib; {
-    enable = mkEnableOption "receive-only mailboxes for the agents";
+  imports = [ ./owner-page.nix ];
 
-    domain = mkOption {
-      type = types.str;
-      default = "agents.davhau.com";
-      description = "Mail domain: every agent receives at <agent>@<domain>.";
-    };
-    hostname = mkOption {
-      type = types.str;
-      default = "mail.${cfg.domain}";
-      defaultText = literalExpression ''"mail.''${domain}"'';
-      description = "The MX host name: SMTP greeting, TLS certificate, authserv-id of Authentication-Results.";
-    };
-    smtpInterfaces = mkOption {
-      type = types.listOf types.str;
-      default = [ ];
-      description = "Interfaces where 25/tcp is opened; the listener itself is IPv4 only.";
+  options.services.hyperhermes = with lib; {
+    mail = {
+      enable = mkEnableOption "receive-only mailboxes for the agents (public exposure only)";
+
+      domain = mkOption {
+        type = types.str;
+        example = "agents.example.com";
+        description = "Mail domain: every agent with a mailbox receives at <agent>@<domain>.";
+      };
+      hostname = mkOption {
+        type = types.str;
+        default = "mail.${cfg.domain}";
+        defaultText = literalExpression ''"mail.''${domain}"'';
+        description = "The MX host name: SMTP greeting, TLS certificate, authserv-id of Authentication-Results.";
+      };
+      smtpInterfaces = mkOption {
+        type = types.listOf types.str;
+        default = [ ];
+        description = "Interfaces where 25/tcp is opened; the listener itself is IPv4 only.";
+      };
+
+      secrets = lib.genAttrs [ "master" "hook" "lmtp" "csrf" ] (
+        n:
+        mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          description = "Runtime path of the root-only internal shared secret `${n}` (a random string).";
+        }
+      );
+
+      acme = mkOption {
+        type = types.bool;
+        default = true;
+        description = ''
+          Obtain the MX certificate for `hostname` by DNS-01 with
+          exposure.acme's provider, credentials and resolver (port 80 of the
+          MX name is nobody's), and use it as `tls`.
+        '';
+      };
+      tls = mkOption {
+        type = types.nullOr (
+          types.submodule {
+            options = {
+              certFile = mkOption { type = types.str; };
+              keyFile = mkOption { type = types.str; };
+            };
+          }
+        );
+        default =
+          if cfg.acme then
+            {
+              certFile = "/var/lib/acme/${cfg.hostname}/fullchain.pem";
+              keyFile = "/var/lib/acme/${cfg.hostname}/key.pem";
+            }
+          else
+            null;
+        defaultText = literalMD "the ACME certificate of `hostname` when `acme` is on, else null";
+        description = "Certificate for STARTTLS on the MX; null offers no TLS.";
+      };
+
+      summarizer = {
+        enable = mkEnableOption "summaries of quarantined mail by a tool-less model";
+        url = mkOption {
+          type = types.str;
+          example = "https://inference.example.com/v1";
+          description = "OpenAI-compatible base URL.";
+        };
+        model = mkOption {
+          type = types.str;
+          description = "Model id at that endpoint.";
+        };
+        keyFile = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          description = "Runtime path of the bearer token (root-readable).";
+        };
+        egressPort = mkOption {
+          type = types.port;
+          default = 443;
+          description = "The only TCP port mailgate may dial off this host.";
+        };
+      };
+
+      ownerPage = {
+        host = mkOption {
+          type = types.nullOr types.str;
+          default = if frontDoorHost == null then null else "mailgate.${frontDoorHost}";
+          defaultText = literalExpression ''"mailgate.''${sso.frontDoor.host}", or null without a front door'';
+          description = ''
+            Host of the owner page (./owner-page.nix), under the front door's
+            certificate; the CSRF origin check and the links in request
+            answers use it. Null: no owner page (root decides with
+            mailgate-admin).
+          '';
+        };
+        cookieSecretFile = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          description = "Runtime path of the owner page's oauth2-proxy cookie secret: 16, 24 or 32 bytes, raw or in URL-safe base64.";
+        };
+      };
+
+      mxAddresses = mkOption {
+        type = types.listOf types.str;
+        default = [ ];
+        example = [ "192.0.2.1" ];
+        description = ''
+          Public IPv4 addresses of the MX when they are not this host's own
+          (a forwarded address). Agents may not dial port 25 there: the
+          connection would hairpin back in as an internet sender and skip
+          the loopback gate.
+        '';
+      };
+
+      limits =
+        let
+          limit =
+            default: description:
+            mkOption {
+              type = types.ints.positive;
+              inherit default description;
+            };
+        in
+        {
+          messageBytes = limit 10485760 "Largest message Stalwart accepts; mailgate keeps 1 MiB of headroom for Stalwart's own headers.";
+          attachmentBytes = limit 10485760 "Largest attachment an agent may fetch.";
+          maxRecipients = limit 10 "Recipients per SMTP transaction.";
+          inboundPerIpHour = limit 60 "Messages per remote IP and hour (Stalwart rate limit).";
+          inboundPerSenderDomainHour = limit 30 "Messages per remote IP and MAIL FROM domain and hour (Stalwart rate limit).";
+          queueBytes = limit 268435456 "Bytes Stalwart's queue may hold before it tempfails new mail.";
+          queueMessages = limit 500 "Messages Stalwart's queue may hold before it tempfails new mail.";
+          quarantineBytes = limit 104857600 "Per agent: quarantined bytes kept (each original once).";
+          quarantineMessages = limit 300 "Per agent: quarantined messages kept.";
+          quarantineSourceBytes = limit 20971520 "Per agent and source (an aligned sender's organizational domain, else the sending /24 or /64): quarantined bytes kept; beyond it the source only pushes out its own entries.";
+          quarantineSourceMessages = limit 50 "Per agent and source: quarantined messages kept.";
+          quarantineKeepBytes = limit 1048576 "A quarantined message bigger than this keeps only its first bytes and never moves to the INBOX.";
+          quarantineDays = limit 14 "Days a quarantined message is kept.";
+          inboxDays = limit 90 "Days an INBOX original (for attachments) is kept.";
+          summaryQueue = limit 100 "Quarantined messages waiting for a summary; more are marked queue-full.";
+          workerSeconds = limit 60 "Hard timeout of one parse of a message (analyze.py), after which it is killed.";
+          workerMemoryBytes = limit 671088640 "Address-space limit of one parse.";
+          agentConnections = limit 4 "Per agent: open connections to agent.sock; more are refused at once.";
+          pendingRequests = limit 5 "Per agent: open allowlist requests.";
+          requestsPerDay = limit 10 "Per agent: allowlist requests per day.";
+          activeAliases = limit 200 "Per agent: live aliases.";
+          aliasesPerDay = limit 20 "Per agent: aliases created per day.";
+          summariesPerAgentDay = limit 50 "Per agent: summaries per day.";
+          summariesPerDay = limit 300 "Summaries per day in total (not counting on-demand ones).";
+        };
+
+      package = mkOption {
+        type = types.package;
+        readOnly = true;
+        default = package;
+        description = "`mailgate` (agents) and `mailgate-admin` (root).";
+      };
     };
 
     agents = mkOption {
-      default = { };
-      description = "Mailboxes; the name is the local part and the unix account that may use the mailbox.";
       type = types.attrsOf (
         types.submodule (
-          { name, ... }:
+          { name, config, ... }:
           {
-            options = {
+            options.mail = {
+              enable = mkOption {
+                type = types.bool;
+                default = cfg.enable;
+                defaultText = literalExpression "services.hyperhermes.mail.enable";
+                description = "A mailbox <agent>@<mail.domain>: the `mailgate` and `himalaya` CLIs and the mailgate skill.";
+              };
               owner = mkOption {
                 type = types.str;
-                default = name;
-                description = "Dashboard (pocket-id) account that confirms this agent's allowlist requests.";
+                default = if sso == null then name else sso.accounts.${name} or name;
+                defaultText = literalExpression "services.hyperhermes.sso.accounts.<agent>, else the agent's name";
+                description = "Login account that confirms this agent's allowlist requests on the owner page.";
               };
               allowlist = mkOption {
                 type = types.listOf types.str;
@@ -208,133 +439,66 @@ in
                 description = "Senders that always reach the INBOX when DMARC passes; runtime entries add to these.";
               };
               passwordFile = mkOption {
-                type = types.str;
-                description = "IMAP password of the mailbox (raw, root-readable).";
+                type = types.nullOr types.str;
+                default = null;
+                description = "Runtime path of the mailbox's IMAP password (raw, root-readable); the agent gets its own copy.";
               };
+            };
+            config = lib.mkIf (cfg.enable && config.mail.enable) {
+              extraPackages = [
+                package
+                himalaya
+              ];
+              skillDirs = [ "${skill}/share/skills" ];
             };
           }
         )
       );
-    };
-
-    secrets = mkOption {
-      description = "Root-readable files with the internal shared secrets.";
-      type = types.submodule {
-        options = lib.genAttrs [ "master" "hook" "lmtp" "csrf" ] (
-          n:
-          mkOption {
-            type = types.str;
-            description = "Secret `${n}`.";
-          }
-        );
-      };
-    };
-
-    tls = mkOption {
-      type = types.nullOr (
-        types.submodule {
-          options = {
-            certFile = mkOption { type = types.str; };
-            keyFile = mkOption { type = types.str; };
-          };
-        }
-      );
-      default = null;
-      description = "Certificate for STARTTLS on the MX; null offers no TLS.";
-    };
-
-    summarizer = {
-      enable = mkEnableOption "summaries of quarantined mail by a tool-less model";
-      url = mkOption {
-        type = types.str;
-        default = "https://inference.p0.contact/v1";
-        description = "OpenAI-compatible base URL.";
-      };
-      model = mkOption {
-        type = types.str;
-        default = "qwen";
-      };
-      keyFile = mkOption {
-        type = types.nullOr types.str;
-        default = null;
-        description = "Bearer token file (root-readable).";
-      };
-      egressPort = mkOption {
-        type = types.port;
-        default = 443;
-        description = "The only TCP port mailgate may dial off this host.";
-      };
-    };
-
-    ownerPage.host = mkOption {
-      type = types.nullOr types.str;
-      default = null;
-      description = "Public host of the owner page; the CSRF origin check and the links in request answers use it.";
-    };
-
-    mxAddresses = mkOption {
-      type = types.listOf types.str;
-      default = [ ];
-      example = [ "38.89.142.76" ];
-      description = ''
-        Public IPv4 addresses of the MX when they are not this host's own
-        (a forwarded address). Agents may not dial port 25 there: the
-        connection would hairpin back in as an internet sender and skip
-        the loopback gate.
-      '';
-    };
-
-    limits =
-      let
-        limit =
-          default: description:
-          mkOption {
-            type = types.ints.positive;
-            inherit default description;
-          };
-      in
-      {
-        messageBytes = limit 10485760 "Largest message Stalwart accepts; mailgate keeps 1 MiB of headroom for Stalwart's own headers.";
-        attachmentBytes = limit 10485760 "Largest attachment an agent may fetch.";
-        maxRecipients = limit 10 "Recipients per SMTP transaction.";
-        inboundPerIpHour = limit 60 "Messages per remote IP and hour (Stalwart rate limit).";
-        inboundPerSenderDomainHour = limit 30 "Messages per remote IP and MAIL FROM domain and hour (Stalwart rate limit).";
-        queueBytes = limit 268435456 "Bytes Stalwart's queue may hold before it tempfails new mail.";
-        queueMessages = limit 500 "Messages Stalwart's queue may hold before it tempfails new mail.";
-        quarantineBytes = limit 104857600 "Per agent: quarantined bytes kept (each original once).";
-        quarantineMessages = limit 300 "Per agent: quarantined messages kept.";
-        quarantineSourceBytes = limit 20971520 "Per agent and source (an aligned sender's organizational domain, else the sending /24 or /64): quarantined bytes kept; beyond it the source only pushes out its own entries.";
-        quarantineSourceMessages = limit 50 "Per agent and source: quarantined messages kept.";
-        quarantineKeepBytes = limit 1048576 "A quarantined message bigger than this keeps only its first bytes and never moves to the INBOX.";
-        quarantineDays = limit 14 "Days a quarantined message is kept.";
-        inboxDays = limit 90 "Days an INBOX original (for attachments) is kept.";
-        summaryQueue = limit 100 "Quarantined messages waiting for a summary; more are marked queue-full.";
-        workerSeconds = limit 60 "Hard timeout of one parse of a message (analyze.py), after which it is killed.";
-        workerMemoryBytes = limit 671088640 "Address-space limit of one parse.";
-        agentConnections = limit 4 "Per agent: open connections to agent.sock; more are refused at once.";
-        pendingRequests = limit 5 "Per agent: open allowlist requests.";
-        requestsPerDay = limit 10 "Per agent: allowlist requests per day.";
-        activeAliases = limit 200 "Per agent: live aliases.";
-        aliasesPerDay = limit 20 "Per agent: aliases created per day.";
-        summariesPerAgentDay = limit 50 "Per agent: summaries per day.";
-        summariesPerDay = limit 300 "Summaries per day in total (not counting on-demand ones).";
-      };
-
-    package = mkOption {
-      type = types.package;
-      readOnly = true;
-      default = package;
-      description = "`mailgate` (agents) and `mailgate-admin` (root).";
     };
   };
 
   config = lib.mkIf cfg.enable (
     lib.mkMerge [
       {
-        assertions = lib.mapAttrsToList (name: _: {
-          assertion = builtins.match "[a-z][a-z0-9-]*" name != null && config.users.users ? ${name};
-          message = "hyper.agentMail.agents.${name}: needs a lowercase name and a users.users account of that name.";
-        }) cfg.agents;
+        assertions = [
+          {
+            assertion = exposure.enable && exposure.mode == "public";
+            message = "services.hyperhermes.mail needs services.hyperhermes.exposure in public mode: the MX takes mail from the internet.";
+          }
+          {
+            assertion = lib.all (s: s != null) (lib.attrValues cfg.secrets);
+            message = "services.hyperhermes.mail.secrets: set master, hook, lmtp and csrf (nixosModules.clan does on a clan machine).";
+          }
+          {
+            assertion = cfg.ownerPage.host != null -> frontDoorHost != null && cfg.ownerPage.cookieSecretFile != null;
+            message = "services.hyperhermes.mail.ownerPage needs the sso front door (sso.frontDoor.host) and ownerPage.cookieSecretFile.";
+          }
+          {
+            assertion = cfg.acme -> exposure.acme.dnsProvider != null;
+            message = "services.hyperhermes.mail.acme needs services.hyperhermes.exposure.acme.dnsProvider.";
+          }
+          {
+            assertion =
+              !lib.any inStore (
+                lib.filter (p: p != null) (
+                  lib.attrValues cfg.secrets
+                  ++ [
+                    cfg.summarizer.keyFile
+                    cfg.ownerPage.cookieSecretFile
+                  ]
+                  ++ lib.mapAttrsToList (_: m: m.passwordFile) mailboxes
+                )
+              );
+            message = "services.hyperhermes.mail: secret files must be runtime paths outside the Nix store; the store is world-readable.";
+          }
+        ]
+        ++ lib.mapAttrsToList (name: m: {
+          assertion =
+            builtins.match "[a-z][a-z0-9-]*" name != null
+            && config.users.users ? ${name}
+            && m.passwordFile != null;
+          message = "services.hyperhermes.agents.${name}.mail: needs a lowercase name, a users.users account of that name and passwordFile (nixosModules.clan sets it).";
+        }) mailboxes;
 
         users.users.mailgate = {
           isSystemUser = true;
@@ -342,7 +506,41 @@ in
         };
         users.groups.mailgate = { };
 
-        environment.systemPackages = [ package ];
+        environment.systemPackages = [
+          package
+          himalaya
+        ];
+
+        # Each agent's own copy of its IMAP password, for its himalaya. The
+        # source is root-only; the copy is 0400 the agent's, in a 0500
+        # directory of its own.
+        systemd.services.mailgate-imap-passwords = {
+          description = "Each mailbox agent's own copy of its IMAP password";
+          wantedBy = [ "multi-user.target" ];
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+            LoadCredential = lib.mapAttrsToList (name: m: "imap-${name}:${m.passwordFile}") mailboxes;
+          };
+          path = [ pkgs.coreutils ];
+          script = ''
+            install -d -m 0755 ${passwordDir}
+            ${lib.concatMapStrings (name: ''
+              install -d -m 0500 -o ${name} -g root ${passwordDir}/${name}
+              install -m 0400 -o ${name} -g root "$CREDENTIALS_DIRECTORY/imap-${name}" ${passwordDir}/${name}/password
+            '') (lib.attrNames mailboxes)}
+          '';
+        };
+
+        # DNS-01 like the published names' certificates.
+        security.acme.certs.${cfg.hostname} = lib.mkIf cfg.acme (
+          {
+            inherit (exposure.acme) dnsProvider credentialFiles;
+            # Stalwart reads the files at start (LoadCredential).
+            reloadServices = [ "stalwart.service" ];
+          }
+          // lib.optionalAttrs (exposure.acme.dnsResolver != null) { inherit (exposure.acme) dnsResolver; }
+        );
 
         services.stalwart = {
           enable = true;
@@ -352,7 +550,7 @@ in
           # "host resolves loopback address". Upstream fixed it for relay
           # routes in 0.16, which services.stalwart does not support yet.
           # The test suite stays off: the nixpkgs package already skips its
-          # outbound/LMTP tests, and ./test.nix covers the route end to end.
+          # outbound/LMTP tests, and checks/mail covers the route end to end.
           package = pkgs.stalwart.overrideAttrs (old: {
             patches = (old.patches or [ ]) ++ [ ./stalwart-relay-loopback.patch ];
             doCheck = false;
@@ -362,7 +560,7 @@ in
             hook = cfg.secrets.hook;
             lmtp = cfg.secrets.lmtp;
           }
-          // lib.mapAttrs' (name: a: lib.nameValuePair "imap-${name}" a.passwordFile) cfg.agents
+          // lib.mapAttrs' (name: m: lib.nameValuePair "imap-${name}" m.passwordFile) mailboxes
           // lib.optionalAttrs (cfg.tls != null) {
             tls-cert = cfg.tls.certFile;
             tls-key = cfg.tls.keyFile;
@@ -405,7 +603,7 @@ in
                 inherit name;
                 secret = "%{file:${credDir}/imap-${name}}%";
                 email = [ "${name}@${cfg.domain}" ];
-              }) cfg.agents;
+              }) mailboxes;
             };
             authentication.master = {
               user = "mailgate";
@@ -696,72 +894,10 @@ in
         };
       }
 
-      # Each agent's INBOX as a Nix-managed profile of the spaces mail
-      # integration. Its SMTP side points at the closed port: the
-      # integration has no read-only mode, and a refused connect is the
-      # cleanest failure message_send can give.
-      (lib.optionalAttrs (options ? spaces) {
-        spaces.users = lib.mapAttrs (name: a: {
-          integrations.mail.profiles.mailgate = {
-            config = {
-              email = "${name}@${cfg.domain}";
-              display_name = name;
-              imap_host = "127.0.0.1";
-              imap_port = toString imapPort;
-              imap_encryption = "none";
-              imap_login = name;
-              smtp_host = "127.0.0.1";
-              smtp_port = toString closedSmtpPort;
-              smtp_encryption = "none";
-              smtp_login = name;
-            };
-            secrets.password.file = a.passwordFile;
-          };
-        }) cfg.agents;
-      })
-
-      # The units that stage and serve those profiles exist only while the
-      # spaces integrations run; without them the profile above is inert.
-      (lib.mkIf (config.services.spaces-integrations.enable or false) {
-        # These are the first Nix-managed profiles on this host, and spaces'
-        # stager script (spaces-integrations/default.nix, perIntegrationScript)
-        # writes each TOML line with its own `>> "$cttmp"`. Under spaces'
-        # systemd.enableStrictShellChecks that style warning (SC2129) fails
-        # the build. spaces' own tests never build the script. Drop this
-        # once spaces groups the redirects.
-        systemd.services.spaces-integrations-managed-load.enableStrictShellChecks = false;
-
-        # The integration unit loads the broker's own store (config.toml and
-        # a sealed secrets blob) as credentials next to the managed tree, and
-        # a missing source fails it with 243/CREDENTIALS. The broker writes
-        # that store only when someone sets an account in the Integrations
-        # app, which never happens for an agent whose only account is this
-        # managed one; so the mail tools never came up. Seed an empty store,
-        # sealed the way the broker seals it, before the unit starts.
-        systemd.user.services.agent-mail-store-seed = {
-          description = "Seed an empty spaces mail store for an agent mailbox";
-          wantedBy = [ "spaces-integration-mail.service" ];
-          before = [ "spaces-integration-mail.service" ];
-          serviceConfig = {
-            Type = "oneshot";
-            RemainAfterExit = true;
-          };
-          script = ''
-            case "$(${pkgs.coreutils}/bin/id -un)" in
-              ${lib.concatStringsSep "|" (lib.attrNames cfg.agents)}) ;;
-              *) exit 0 ;;
-            esac
-            dir="''${XDG_STATE_HOME:-$HOME/.local/state}/spaces-integrationd/mail"
-            ${pkgs.coreutils}/bin/mkdir -p "$dir"
-            ${pkgs.coreutils}/bin/chmod 0700 "$dir"
-            [ -e "$dir/config.toml" ] || : > "$dir/config.toml"
-            if [ ! -e "$dir/secrets" ]; then
-              empty=$(${pkgs.coreutils}/bin/mktemp)
-              ${pkgs.systemd}/bin/systemd-creds encrypt --user --uid=self --with-key=host+tpm2 \
-                --name=secrets "$empty" "$dir/secrets"
-              ${pkgs.coreutils}/bin/rm -f "$empty"
-            fi
-          '';
+      (lib.mkIf cfg.acme {
+        systemd.services.stalwart = {
+          wants = [ "acme-${cfg.hostname}.service" ];
+          after = [ "acme-${cfg.hostname}.service" ];
         };
       })
     ]

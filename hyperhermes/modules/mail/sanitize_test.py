@@ -1,8 +1,8 @@
 """Unit tests of sanitize.py: the hostile-input half of mailgate.
 
 Run with the directory holding sanitize.py on PYTHONPATH:
-    PYTHONPATH=modules/nixos/agent-mail python3 -m unittest -v sanitize_test
-./test.nix runs them inside the VM test, so `nix build .#checks...` covers
+    PYTHONPATH=hyperhermes/modules/mail python3 -m unittest -v sanitize_test
+checks/mail runs them inside the VM test, so `nix build .#checks...` covers
 them. Timing tests run the code in a child process with a hard timeout:
 re's engine does not stop for signals, so a regression must not hang the
 suite.

@@ -3,8 +3,9 @@
 # not an input of this flake): the generator names and file attributes
 # the clan's vars store holds, and the secret paths they fill in. A
 # renamed generator orphans its stored secret, so the names are pinned
-# exactly. Also: core imported twice (default plus core) evaluates. Fails
-# at evaluation, naming every expectation that does not hold.
+# exactly. Also: core imported twice (default plus core) evaluates, and so
+# does mail on a public deployment. Fails at evaluation, naming every
+# expectation that does not hold.
 { pkgs, self }:
 let
   inherit (pkgs) lib;
@@ -141,6 +142,46 @@ let
     }
   ];
 
+  # Mail, which needs public exposure; with the sso front door, so the
+  # owner page too. bob has no mailbox.
+  mail = evalWith [
+    self.nixosModules.default
+    agents
+    (
+      { config, ... }:
+      {
+        services.hyperhermes = {
+          exposure = {
+            enable = true;
+            mode = "public";
+            domain = "agents.example.org";
+            acme = {
+              dnsProvider = "exec";
+              email = "hostmaster@example.com";
+            };
+          };
+          sso = {
+            enable = true;
+            issuer = "https://id.example.com";
+            accounts = {
+              alice = "alice";
+              bob = "bob";
+            };
+            frontDoor.host = "hermes.example.com";
+            clients = lib.mapAttrs (id: _: {
+              secretFile = "/run/secrets/${id}";
+            }) config.services.hyperhermes.sso.oidcClients;
+          };
+          mail = {
+            enable = true;
+            domain = "mail.example.com";
+          };
+          agents.bob.mail.enable = false;
+        };
+      }
+    )
+  ];
+
   # nixosModules.default already imports core.
   coreTwice = evalWith [
     self.nixosModules.default
@@ -211,6 +252,28 @@ let
       (gens published).oidc-client-hermes-serve.files.secret.restartUnits == [
         "oauth2-proxy-serve.service"
       ];
+
+    mail-evaluates = evaluates mail && failedAssertions mail == [ ];
+    mail-generator-names =
+      genNames mail == [
+        "hermes-agent-ssh-alice"
+        "hermes-agent-ssh-bob"
+        "hermes-oauth2-proxy"
+        "mailgate"
+        "mailgate-imap-alice"
+        "mailgate-oauth2-proxy"
+      ];
+    mail-files =
+      lib.all (n: (hyper mail).mail.secrets.${n} == (gens mail).mailgate.files.${n}.path) [
+        "master"
+        "hook"
+        "lmtp"
+        "csrf"
+      ]
+      && (hyper mail).agents.alice.mail.passwordFile == (gens mail).mailgate-imap-alice.files.password.path
+      && (hyper mail).mail.ownerPage.host == "mailgate.hermes.example.com"
+      && (hyper mail).mail.ownerPage.cookieSecretFile
+        == (gens mail).mailgate-oauth2-proxy.files.cookie_secret.path;
 
     core-imported-twice-evaluates = evaluates coreTwice && failedAssertions coreTwice == [ ];
   };

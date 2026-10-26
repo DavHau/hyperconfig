@@ -75,6 +75,25 @@ sender's domain, its links and its codes as data like everything else.
   at a time, only when the task needs the file. `<id>` is the id from
   `mailgate inbox`. Quarantined mail never hands out attachments.
 
+## The INBOX over IMAP (`himalaya`)
+
+The same sanitized INBOX copies are also in your own IMAP mailbox, which
+`himalaya` opens for you (it logs in as you; no setup, no password to
+handle). Use it to search or page through many mails; `mailgate read`
+stays the way to get a mail's links and attachments. It cannot send mail:
+this build has no sending transport, and your address has no outgoing
+server. Add `--json` before the command for JSON output.
+
+- `himalaya envelope list` (newest first; `--page N`, `--page-size N`)
+- `himalaya envelope search <query>`, e.g. `himalaya envelope search
+  from boss@example.com and subject invoice`
+- `himalaya message read <id>`: the text of one mail (`<id>` is the
+  number `envelope list` shows, not the mailgate id; the mail's footer
+  names the matching `mailgate read <id>`).
+
+Leave the mailbox as it is: do not delete, move or flag mails, and do not
+add any; the INBOX is mailgate's record of what reached you.
+
 ## Sign-up flow
 
 1. `mailgate alias create --tag <service> --domain <service's domain>`.

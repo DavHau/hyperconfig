@@ -1,13 +1,12 @@
-# ./mail.nix and ./owner-page.nix end to end, with the real nginx config of
-# the front door and the agents' dashboards (hyperhermes' exposure, sso and
-# dashboards modules,
-# hermes itself stubbed by an echo backend behind the real owner-checking
-# forward of hyperhermes' core) and the serve ports
-# (hyperhermes' publish module) on the agents' own domain, with the old
-# names' redirects: Stalwart as MX, mailgate, two agents (alice, bob), all
-# three oauth2-proxy instances against a stub OIDC provider, and a
-# sending client that also serves the senders' DNS (SPF, DKIM, DMARC) and a
-# stub OpenAI-compatible summariser.
+# The mail module end to end (../../modules/mail, with its owner page), with
+# the real nginx config of the front door and the agents' dashboards
+# (exposure in public mode, sso and dashboards; hermes itself stubbed by an
+# echo backend behind the real owner-checking forward of core), with the
+# old dashboard names' redirects: Stalwart as MX, mailgate, two agents
+# (alice, bob) with their read-only IMAP client, both oauth2-proxy
+# instances against a stub OIDC provider, and a sending client that also
+# serves the senders' DNS (SPF, DKIM, DMARC) and a stub OpenAI-compatible
+# summariser. The serve ports are the publish module's checks'.
 #
 #   trusted.test  SPF ip4:client, DKIM, DMARC p=reject (alice allowlists boss@)
 #   lax.test      SPF ip4:client, DKIM, DMARC p=none   (alice allowlists boss@)
@@ -16,36 +15,22 @@
 #   flood.test    nothing                              (rate limit target)
 #
 # The subtests named after a finding (F1..F9 of the first review, G1..G6
-# of the second, HIGH-1, MEDIUM-1 and LOW-2 of the third, MEDIUM-N1 and
-# LOW-N2 of the fourth) are its regression tests; those of the first two
-# reviews each reproduced the finding against the code before the fix.
-{ pkgs, inputs }:
+# of the second, HIGH-1 and MEDIUM-1 of the third, MEDIUM-N1 and LOW-N2 of
+# the fourth) are its regression tests; those of the first two reviews
+# each reproduced the finding against the code before the fix.
+{ pkgs, self }:
 let
   inherit (pkgs) lib;
-  system = pkgs.stdenv.hostPlatform.system;
-  integrationMail = inputs.spaces.packages.${system}.integration-mail;
-  hlib = inputs.hyperhermes.lib;
+  hlib = self.lib;
   domain = "agents.test";
   dashHost = "hermes.test";
   ownerHost = "mailgate.${dashHost}";
-  # The agents' own site, as davhau.fyi on som; the mail domain doubles as
-  # the dashboards' old one, as agents.davhau.com does.
+  # The agents' own site; the mail domain doubles as the dashboards' old
+  # one.
   fyi = "fyi.test";
-  aliceDashPort = hlib.dashboardPortFor "alice";
   # hermes' own port, behind the forward (alice is uid 1001).
   aliceDashBackend = hlib.dashboardBackendBase + 1001;
   aliceDashHost = "alice.${fyi}";
-  # alice is uid 1001: serve ports 30010-30014 private, 30015-30019 public;
-  # bob (1002) has 30020-30024 private.
-  alicePrivate = 30010;
-  alicePrivate2 = 30011;
-  alicePublic = 30015;
-  bobPrivate = 30020;
-  portHost = port: agent: "${toString port}.${agent}.${fyi}";
-  alicePrivateHost = portHost alicePrivate "alice";
-  alicePrivate2Host = portHost alicePrivate2 "alice";
-  alicePublicHost = portHost alicePublic "alice";
-  serveCallback = agent: "https://*.${agent}.${fyi}/.hermes-serve-login/callback";
 
   limits = {
     messageBytes = 4194304;
@@ -67,8 +52,8 @@ let
 
   sanitizeTests = pkgs.runCommand "sanitize-tests" { } ''
     mkdir $out
-    cp ${./sanitize.py} $out/sanitize.py
-    cp ${./sanitize_test.py} $out/sanitize_test.py
+    cp ${../../modules/mail/sanitize.py} $out/sanitize.py
+    cp ${../../modules/mail/sanitize_test.py} $out/sanitize_test.py
   '';
 
   # Hidden-text cases a human reader would not see; none may reach the
@@ -423,16 +408,44 @@ let
         print(json.dumps(out))
   '';
 
-  # One JSON-RPC tools/call against a spaces integration server.
-  mcpCall = pkgs.writeText "mcp-call.py" ''
-    import json, socket, sys
-    s = socket.socket(socket.AF_UNIX)
-    s.connect(sys.argv[1])
-    req = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-           "params": {"name": sys.argv[2], "arguments": json.loads(sys.argv[3])}}
-    s.sendall(json.dumps(req).encode() + b"\n")
-    print(s.makefile().readline())
-  '';
+  # himalaya configurations alice could write herself: her own password
+  # against bob's mailbox, and an SMTP transport next to her IMAP account
+  # (submission on loopback, and the client's MX).
+  himalayaAs = name: extra: (pkgs.formats.toml { }).generate "himalaya-${name}.toml" {
+    accounts.${name} = {
+      default = true;
+      email = "alice@${domain}";
+      imap = {
+        server = "imap://127.0.0.1:143";
+        starttls = false;
+        sasl.plain = {
+          username = name;
+          password.command = [
+            "${pkgs.coreutils}/bin/cat"
+            "/run/mailgate-imap/alice/password"
+          ];
+        };
+      };
+      mailbox.alias.inbox = "INBOX";
+    }
+    // extra;
+  };
+  himalayaAsBob = himalayaAs "bob" { };
+  himalayaSmtp =
+    server:
+    himalayaAs "alice" {
+      smtp = {
+        inherit server;
+        starttls = false;
+        sasl.plain = {
+          username = "alice";
+          password.command = [
+            "${pkgs.coreutils}/bin/cat"
+            "/run/mailgate-imap/alice/password"
+          ];
+        };
+      };
+    };
 
   # Exit 0 iff a TCP connection to host:port opens.
   connect = pkgs.writeText "connect.py" ''
@@ -474,61 +487,9 @@ let
       mode = "0400";
     };
   };
-  var = gen: file: value: {
-    "vars/${gen}/${file}" = {
-      text = value;
-      mode = "0400";
-    };
-  };
-
-  # What the modules under test read from clan and the oidc service, as
-  # plain options.
-  stubs =
-    { lib, ... }:
-    let
-      inherit (lib) mkOption types;
-      freeform = types.attrsOf types.anything;
-    in
-    {
-      options = {
-        hyper.oidc = {
-          issuer = mkOption { type = types.str; };
-          clients = mkOption { type = types.attrsOf types.attrs; };
-        };
-        clan.core.vars.generators = mkOption {
-          default = { };
-          type = types.attrsOf (
-            types.submodule (
-              { name, ... }:
-              let
-                gen = name;
-              in
-              {
-                freeformType = freeform;
-                options.files = mkOption {
-                  default = { };
-                  type = types.attrsOf (
-                    types.submodule (
-                      { name, ... }:
-                      {
-                        freeformType = freeform;
-                        options.path = mkOption {
-                          type = types.str;
-                          default = "/etc/vars/${gen}/${name}";
-                        };
-                      }
-                    )
-                  );
-                };
-              }
-            )
-          );
-        };
-      };
-    };
 in
 pkgs.testers.runNixOSTest {
-  name = "agent-mail";
+  name = "hyperhermes-mail";
   globalTimeout = 3600;
 
   nodes.client = {
@@ -605,39 +566,24 @@ pkgs.testers.runNixOSTest {
     { config, ... }:
     {
       imports = [
-        ./mail.nix
-        ./owner-page.nix
-        inputs.hyperhermes.nixosModules.publish
-        inputs.hyperhermes.nixosModules.core
-        inputs.hyperhermes.nixosModules.exposure
-        inputs.hyperhermes.nixosModules.sso
-        inputs.hyperhermes.nixosModules.dashboards
-        inputs.spaces.nixosModules.spaces-users
-        stubs
+        self.nixosModules.core
+        self.nixosModules.exposure
+        self.nixosModules.sso
+        self.nixosModules.dashboards
+        self.nixosModules.mail
       ];
-      _module.args.inputs = inputs;
       virtualisation.memorySize = 3072;
       virtualisation.cores = 2;
       networking.nameservers = [ "192.168.1.1" ];
       networking.hosts."127.0.0.1" = [
         dashHost
         ownerHost
-        alicePrivateHost
-        alicePrivate2Host
-        alicePublicHost
-        (portHost bobPrivate "bob")
-        # alice's port under bob's name
-        (portHost alicePrivate "bob")
         aliceDashHost
         "bob.${fyi}"
         "nobody.${fyi}"
-        "slot.alice.${fyi}"
         # the old names
         "alice.${domain}"
         "nobody.${domain}"
-        "${toString alicePrivate}.${dashHost}"
-        "${toString alicePublic}.${dashHost}"
-        "12345.${dashHost}"
       ];
 
       environment.etc = lib.mkMerge [
@@ -649,20 +595,30 @@ pkgs.testers.runNixOSTest {
         (secret "imap-alice" "alice-imap-password")
         (secret "imap-bob" "bob-imap-password")
         (secret "oidc-hermes" "test-oidc-client-secret")
-        (secret "oidc-hermes-serve" "test-oidc-serve-secret")
-        (var "hermes-oauth2-proxy" "cookie_secret" "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
-        (var "hermes-serve-oauth2-proxy" "cookie_secret" "0123456789abcdef0123456789abcdef")
-        (var "mailgate-oauth2-proxy" "cookie_secret" "ZmVkY2JhOTg3NjU0MzIxMGZlZGNiYTk4NzY1NDMyMTA=")
-        (var "porkbun" "apikey" "unused")
-        (var "porkbun" "secretkey" "unused")
+        (secret "oidc-hermes-alice" "test-oidc-alice-secret")
+        (secret "oidc-hermes-bob" "test-oidc-bob-secret")
+        (secret "front-door-cookie" "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+        (secret "owner-page-cookie" "ZmVkY2JhOTg3NjU0MzIxMGZlZGNiYTk4NzY1NDMyMTA=")
+        (secret "porkbun-apikey" "unused")
+        (secret "porkbun-secretkey" "unused")
       ];
 
-      # The dashboards and serve ports, as on som, minus hermes itself:
+      # The dashboards, as on a public deployment, minus hermes itself:
       # core's accounts, forwards and firewall, but none of its agent
-      # units (the echo backends below stand in for the dashboard).
+      # units (the echo backend below stands in for the dashboard).
       services.hyperhermes.agents = {
-        alice.uid = 1001;
-        bob.uid = 1002;
+        alice = {
+          uid = 1001;
+          mail.allowlist = [
+            "boss@trusted.test"
+            "boss@lax.test"
+          ];
+          mail.passwordFile = "/etc/mailtest/imap-alice";
+        };
+        bob = {
+          uid = 1002;
+          mail.passwordFile = "/etc/mailtest/imap-bob";
+        };
       };
       systemd.services.hermes-agent-alice.enable = false;
       systemd.services.hermes-dashboard-alice.enable = false;
@@ -678,85 +634,60 @@ pkgs.testers.runNixOSTest {
           acme = {
             dnsProvider = "porkbun";
             credentialFiles = {
-              PORKBUN_API_KEY_FILE = "/etc/vars/porkbun/apikey";
-              PORKBUN_SECRET_API_KEY_FILE = "/etc/vars/porkbun/secretkey";
+              PORKBUN_API_KEY_FILE = "/etc/mailtest/porkbun-apikey";
+              PORKBUN_SECRET_API_KEY_FILE = "/etc/mailtest/porkbun-secretkey";
             };
           };
         };
         sso = {
           enable = true;
-          inherit (config.hyper.oidc) issuer;
+          issuer = "http://127.0.0.1:9000";
           accounts = {
             alice = "alice-owner";
             bob = "bob-owner";
           };
           frontDoor = {
             host = dashHost;
-            cookieSecretFile = "/etc/vars/hermes-oauth2-proxy/cookie_secret";
+            cookieSecretFile = "/etc/mailtest/front-door-cookie";
           };
           clients = lib.mapAttrs (id: _: {
-            inherit (config.hyper.oidc.clients.${id}) secretFile;
+            secretFile = "/etc/mailtest/oidc-${id}";
           }) config.services.hyperhermes.sso.oidcClients;
         };
         dashboards = {
           enable = true;
           legacyDomain = domain;
         };
-      };
-      services.hyperhermes.publish = {
-        enable = true;
-        cookieSecretFile = "/etc/vars/hermes-serve-oauth2-proxy/cookie_secret";
-        legacyFrontDoorPorts = true;
-      };
-      hyper.oidc = {
-        issuer = "http://127.0.0.1:9000";
-        clients.hermes = {
-          clientId = "hermes";
-          public = false;
-          secretFile = "/etc/mailtest/oidc-hermes";
-          callbackURLs = [ ];
-          allowedGroups = [ ];
-        };
-        clients.hermes-alice = {
-          clientId = "hermes-alice";
-          public = false;
-          pkce = true;
-          secretFile = "/etc/mailtest/oidc-hermes-alice";
-          callbackURLs = [ "https://${aliceDashHost}/auth/callback" ];
-          allowedGroups = [ "hermes-alice" ];
-        };
-        clients.hermes-bob = {
-          clientId = "hermes-bob";
-          public = false;
-          pkce = true;
-          secretFile = "/etc/mailtest/oidc-hermes-bob";
-          callbackURLs = [ "https://bob.${fyi}/auth/callback" ];
-          allowedGroups = [ "hermes-bob" ];
-        };
-        clients.hermes-serve = {
-          clientId = "hermes-serve";
-          public = false;
-          pkce = true;
-          secretFile = "/etc/mailtest/oidc-hermes-serve";
-          callbackURLs = map serveCallback [
-            "alice"
-            "bob"
-          ];
-          allowedGroups = [
-            "hermes-alice"
-            "hermes-bob"
-          ];
+        mail = {
+          enable = true;
+          inherit domain limits;
+          smtpInterfaces = [ "eth1" ];
+          mxAddresses = [ "192.168.1.1" ];
+          secrets = lib.genAttrs [ "master" "hook" "lmtp" "csrf" ] (n: "/etc/mailtest/${n}");
+          # No ACME server here: a self-signed MX certificate.
+          acme = false;
+          tls = {
+            certFile = "${cert}/cert.pem";
+            keyFile = "${cert}/key.pem";
+          };
+          summarizer = {
+            enable = true;
+            url = "http://192.168.1.1:8080/v1";
+            model = "qwen";
+            keyFile = "/etc/mailtest/p0";
+            egressPort = 8080;
+          };
+          ownerPage.cookieSecretFile = "/etc/mailtest/owner-page-cookie";
         };
       };
-      # No ACME server here: the self-signed placeholders stay, and the
-      # renewals fail fast.
+      # The front door's and the owner page's certificates: the self-signed
+      # placeholders stay, and the renewals fail fast.
       security.acme.defaults.server = "https://127.0.0.1:1/directory";
       systemd.services.stub-oidc = {
         wantedBy = [ "multi-user.target" ];
         before = [
           "oauth2-proxy.service"
           "oauth2-proxy-mailgate.service"
-          "oauth2-proxy-serve.service"
         ];
         serviceConfig = {
           ExecStartPre = "${pkgs.bash}/bin/sh -c 'echo alice-owner > /run/stub-oidc/user'";
@@ -765,91 +696,14 @@ pkgs.testers.runNixOSTest {
           RuntimeDirectoryPreserve = true;
         };
       };
-      # alice's agent backends: her dashboard and two private, one public
-      # serve port. The forward and the serve ports' bridges take only a
-      # backend alice runs.
+      # alice's dashboard backend. The forward takes only a backend alice
+      # runs.
       systemd.services.echo-dashboard = echoService "alice" aliceDashBackend;
-      systemd.services.echo-private = echoService "alice" alicePrivate;
-      systemd.services.echo-private2 = echoService "alice" alicePrivate2;
-      systemd.services.echo-public = echoService "alice" alicePublic;
-      # clan turns persisted prompts into files; the stub does not.
-      clan.core.vars.generators.porkbun.files = {
-        apikey = { };
-        secretkey = { };
-      };
-
-      hyper.agentMail = {
-        enable = true;
-        inherit domain limits;
-        smtpInterfaces = [ "eth1" ];
-        mxAddresses = [ "192.168.1.1" ];
-        agents.alice = {
-          owner = "alice-owner";
-          allowlist = [
-            "boss@trusted.test"
-            "boss@lax.test"
-          ];
-          passwordFile = "/etc/mailtest/imap-alice";
-        };
-        agents.bob = {
-          owner = "bob-owner";
-          passwordFile = "/etc/mailtest/imap-bob";
-        };
-        secrets = lib.genAttrs [ "master" "hook" "lmtp" "csrf" ] (n: "/etc/mailtest/${n}");
-        tls = {
-          certFile = "${cert}/cert.pem";
-          keyFile = "${cert}/key.pem";
-        };
-        summarizer = {
-          enable = true;
-          url = "http://192.168.1.1:8080/v1";
-          keyFile = "/etc/mailtest/p0";
-          egressPort = 8080;
-        };
-        ownerPage.host = ownerHost;
-      };
-
-      # What the spaces stager does for the mail integration: the profile
-      # ./mail.nix declares, staged as the agent's own credential tree.
-      systemd.services.fake-spaces-stage = {
-        wantedBy = [ "multi-user.target" ];
-        serviceConfig = {
-          Type = "oneshot";
-          RemainAfterExit = true;
-        };
-        script =
-          lib.concatMapStrings
-            (
-              u:
-              let
-                p = config.spaces.users.${u}.integrations.mail.profiles.mailgate;
-              in
-              ''
-                d=/run/spaces-test/${u}
-                install -d -m 0755 /run/spaces-test
-                install -d -m 0500 -o ${u} $d
-                {
-                  echo '[mail.mailgate]'
-                  ${lib.concatStrings (
-                    lib.mapAttrsToList (k: v: "echo ${lib.escapeShellArg "${k} = ${builtins.toJSON v}"}\n") p.config
-                  )}
-                } > $d/managed_managed-config.toml
-                install -m 0400 -o ${u} ${p.secrets.password.file} $d/managed_secret-mailgate-password
-                chown ${u} $d/managed_managed-config.toml
-                chmod 0400 $d/managed_managed-config.toml
-              ''
-            )
-            [
-              "alice"
-              "bob"
-            ];
-      };
 
       environment.systemPackages = [
         pkgs.curl
         pkgs.python3
         pkgs.iproute2
-        integrationMail
       ];
     };
 
@@ -865,7 +719,7 @@ pkgs.testers.runNixOSTest {
     server.wait_for_unit("mailgate-firewall.service")
     server.wait_for_unit("stalwart.service")
     server.wait_for_unit("mailgate.service")
-    server.wait_for_unit("fake-spaces-stage.service")
+    server.wait_for_unit("mailgate-imap-passwords.service")
     server.wait_for_open_port(25)
     server.wait_for_open_port(143, "127.0.0.1")
 
@@ -880,12 +734,16 @@ pkgs.testers.runNixOSTest {
 
     def inbox(user):
         return json.loads(server.succeed(
-            f"runuser -u {user} -- python3 ${imapDump} {user} /run/spaces-test/{user}/managed_secret-mailgate-password"))
+            f"runuser -u {user} -- python3 ${imapDump} {user} /run/mailgate-imap/{user}/password"))
 
     def wait_inbox(user, text, timeout=120):
         server.wait_until_succeeds(
-            f"runuser -u {user} -- python3 ${imapDump} {user} /run/spaces-test/{user}/managed_secret-mailgate-password | grep -q {text}",
+            f"runuser -u {user} -- python3 ${imapDump} {user} /run/mailgate-imap/{user}/password | grep -q {text}",
             timeout=timeout)
+
+    def himalaya(user, args, config=None):
+        opt = f"-c {config} " if config else ""
+        return server.execute(f"runuser -u {user} -- himalaya {opt}{args}")
 
     def quarantine(user):
         rc, out = mailgate(user, "quarantine --limit 100")
@@ -1006,27 +864,36 @@ pkgs.testers.runNixOSTest {
         rc, lst = mailgate("bob", "inbox")
         assert rc == 0 and alice_mid not in json.dumps(lst), lst
 
-    with subtest("the agent's spaces mail tools read the INBOX; sending fails cleanly"):
-        server.succeed(
-            "systemd-run --uid=alice --unit=mailtool-alice "
-            "-p Environment=CREDENTIALS_DIRECTORY=/run/spaces-test/alice "
-            "-p Environment=SPACES_INTEGRATION_SOCKET=/tmp/alice-mail.sock "
-            "${integrationMail}/bin/integration-mail"
-        )
-        server.wait_for_file("/tmp/alice-mail.sock")
-        call = "runuser -u alice -- python3 ${mcpCall} /tmp/alice-mail.sock "
-        r = json.loads(server.succeed(call + "envelope_list '{\"profile\": \"mailgate\"}'"))["result"]
-        assert not r["isError"] and "Numbers" in r["content"][0]["text"], r
-        envs = json.loads(r["content"][0]["text"])
+    with subtest("the agent reads its own INBOX with himalaya, never another's, and cannot send"):
+        rc, out = himalaya("alice", "--json envelope list")
+        print(out)
+        assert rc == 0 and "Numbers" in out, out
+        envs = json.loads(out)
         envs = envs.get("envelopes", envs) if isinstance(envs, dict) else envs
-        env_id = envs[0]["id"]
-        r = json.loads(server.succeed(call + f"message_read '{{\"profile\": \"mailgate\", \"id\": \"{env_id}\"}}'"))["result"]
-        assert not r["isError"] and "Quarterly numbers are fine." in r["content"][0]["text"], r
-        assert "HIDDEN_" not in r["content"][0]["text"]
-        r = json.loads(server.succeed(call + "message_send '{\"profile\": \"mailgate\", \"to\": [\"x@trusted.test\"], \"subject\": \"s\", \"body\": \"b\"}'"))["result"]
-        print(r)
-        assert r["isError"], r
-        assert re.search(r"(?i)refused|reset|connect", r["content"][0]["text"]), r
+        env_id = [e for e in envs if "Numbers" in json.dumps(e)][0]["id"]
+        rc, out = himalaya("alice", f"message read {env_id}")
+        print(out)
+        assert rc == 0 and "Quarterly numbers are fine." in out, out
+        assert "HIDDEN_" not in out and "PLAINSECRET" not in out, out
+        assert f"mailgate read {alice_mid}" in out, out
+        # bob's himalaya opens bob's mailbox, which holds none of it.
+        rc, out = himalaya("bob", "--json envelope list")
+        assert rc == 0 and "Numbers" not in out, out
+        # alice's password opens no other mailbox, and bob's is not hers
+        # to read.
+        rc, out = himalaya("alice", "envelope list", config="${himalayaAsBob}")
+        assert rc != 0 and "Numbers" not in out, out
+        server.fail("runuser -u alice -- cat /run/mailgate-imap/bob/password")
+        server.fail("runuser -u alice -- ls /run/mailgate-imap/bob")
+        assert server.succeed("stat -c '%U %a' /run/mailgate-imap/alice/password").strip() == "alice 400"
+        # No transport compiled in: not with the given account, not with an
+        # SMTP block of alice's own (submission here, the client's MX).
+        msg = "printf 'From: alice@${domain}\\nTo: x@trusted.test\\nSubject: s\\n\\nb\\n'"
+        for config in (None, "${himalayaSmtp "smtp://127.0.0.1:587"}", "${himalayaSmtp "smtp://192.168.1.1:25"}"):
+            opt = f"-c {config} " if config else ""
+            rc, out = server.execute(f"{msg} | runuser -u alice -- himalaya {opt}message send 2>&1")
+            print(config, out)
+            assert rc != 0 and "No send-capable backend" in out, (config, out)
 
     with subtest("aliases: tag bound to a domain, random, revoke"):
         rc, a = mailgate("alice", "alias create --tag shop --domain signup.test --note 'shop sign-up'")
@@ -1172,9 +1039,11 @@ pkgs.testers.runNixOSTest {
         assert rc != 0, out
         # IMAP: her password opens only her account; the master login needs
         # a secret she cannot read.
-        server.fail("runuser -u alice -- python3 ${imapDump} bob /run/spaces-test/alice/managed_secret-mailgate-password")
-        server.fail("runuser -u alice -- python3 ${imapDump} 'bob%mailgate' /run/spaces-test/alice/managed_secret-mailgate-password")
-        for f in ("/run/spaces-test/bob/managed_secret-mailgate-password", "/etc/mailtest/imap-bob",
+        server.fail("runuser -u alice -- python3 ${imapDump} bob /run/mailgate-imap/alice/password")
+        server.fail("runuser -u alice -- python3 ${imapDump} 'bob%mailgate' /run/mailgate-imap/alice/password")
+        rc, out = himalaya("alice", "--json envelope list", config="${himalayaAsBob}")
+        assert rc != 0 and "for-bob-only" not in out, out
+        for f in ("/run/mailgate-imap/bob/password", "/etc/mailtest/imap-bob",
                   "/etc/mailtest/master", "/etc/mailtest/p0"):
             server.fail(f"runuser -u alice -- cat {f}")
         server.fail("runuser -u alice -- ls /var/lib/mailgate")
@@ -1196,6 +1065,8 @@ pkgs.testers.runNixOSTest {
         server.succeed("useradd -m mallory")
         rc, out = mailgate("mallory", "quarantine")
         assert rc != 0 and "no agent mailbox" in str(out), out
+        rc, out = himalaya("mallory", "envelope list 2>&1")
+        assert rc != 0 and "no agent mailbox" in out, out
 
     with subtest("F9: the gates hold on IPv6 loopback and for the forwarded MX address"):
         server.succeed("systemd-run --unit=v6-listener ${pkgs.python3}/bin/python3 -c "
@@ -1282,7 +1153,6 @@ pkgs.testers.runNixOSTest {
         def proxy_up(sock):
             server.wait_until_succeeds(f"curl -sf -o /dev/null --unix-socket {sock} http://localhost/ping", timeout=120)
         proxy_up("/run/oauth2-proxy.sock")
-        proxy_up("/run/oauth2-proxy-serve.sock")
         server.wait_for_open_port(443)
         def redirect(url, *opts):
             """(status, Location) of one request, not followed."""
@@ -1324,63 +1194,16 @@ pkgs.testers.runNixOSTest {
         assert https("https://${dashHost}/", "-b /tmp/jn")[0] == "403"
         login_as("alice-owner")
 
-        # A private port: a sign-in on its own host (no prompt=login: it
-        # rides the pocket-id session), back to the page asked for, with a
-        # host-only __Host- cookie.
-        code, eff, body = https("https://${alicePrivateHost}/p?x=1&y=2", "-L -c /tmp/j3 -b /tmp/j3")
-        assert code == "200" and eff == "https://${alicePrivateHost}/p?x=1&y=2" and body == "backend ${toString alicePrivate}\n", (code, eff, body)
-        last = last_authorize()
-        assert last["client_id"] == "hermes-serve" and "prompt" not in last, last
-        assert last["redirect_uri"] == "https://${alicePrivateHost}/.hermes-serve-login/callback", last
-        # (the app's own `planted` is in the jar too)
-        serve = {n: c for n, c in jar_cookies("/tmp/j3").items() if n.startswith("_")}
-        assert set(serve) == {"__Host-hermes_serve"}, serve
-        assert serve["__Host-hermes_serve"][:2] == ("${alicePrivateHost}", "FALSE"), serve
-        serve_value = serve["__Host-hermes_serve"][2]
-        # Set-Cookie itself: no Domain, Secure, Path=/.
-        hdrs = server.succeed("curl -sk -D - -o /dev/null 'https://${alicePrivateHost}/.hermes-serve-login/start?rd=/'")
-        csrf = [l for l in hdrs.splitlines() if l.lower().startswith("set-cookie: __host-hermes_serve")]
-        assert csrf and all("domain=" not in l.lower() and "secure" in l.lower() and "path=/;" in l.lower() for l in csrf), hdrs
-        # The browser sends it to that host only: the next port signs in
-        # again, on its own host.
-        code, loc = redirect("https://${alicePrivate2Host}/", "-b /tmp/j3")
-        assert code == "302" and loc.startswith("http://127.0.0.1:9000/authorize?"), (code, loc)
-        assert "redirect_uri=https%3A%2F%2F${alicePrivate2Host}%2F.hermes-serve-login%2Fcallback" in loc, loc
-        # Another agent's private host refuses it, and alice's port under
-        # bob's name is no server at all.
-        code, _, body = https("https://${portHost bobPrivate "bob"}/", f"-H 'Cookie: __Host-hermes_serve={serve_value}'")
-        assert code == "403" and "Not published" in body, (code, body)
-        assert https("https://${portHost alicePrivate "bob"}/", f"-H 'Cookie: __Host-hermes_serve={serve_value}'")[0] == "404"
-        assert https("https://${portHost alicePrivate "bob"}/")[0] == "404"
-        # Nor does the front door's session open a private port.
-        code, loc = redirect("https://${alicePrivateHost}/", f"-H 'Cookie: __Host-hermes={front_value}'")
-        assert code == "302" and loc.startswith("http://127.0.0.1:9000/authorize?"), (code, loc)
-        # Only the agent's own account gets through.
-        login_as("bob-owner")
-        code, _, body = https("https://${alicePrivate2Host}/", "-L -c /tmp/j4 -b /tmp/j4")
-        assert code == "403" and "Not published" in body, (code, body)
-        login_as("alice-owner")
-        # The login's redirect stays on the host.
-        code, loc = redirect("https://${alicePrivateHost}/.hermes-serve-login/start?rd=https://evil.example/")
-        assert code == "302" and loc.startswith("http://127.0.0.1:9000/authorize?") and "evil.example" not in loc, (code, loc)
-
-        # Cookies: the agent planted decoys; the app gets its own cookies
-        # only, the dashboard hermes' own, never a login.
-        cookies = ("__Host-hermes_serve_csrf=x; __Host-hermes=" + front_value
-                   + "; app=1; trader_dashboard=tok; _xsrf=abc; __Host-mailgate=stolen; __Host-hermes_session_at=hs; "
-                   + "__Host-hermes_serve=" + serve_value)
-        secrets_ = [front_value, serve_value, "stolen"]
-        for port, url, expected in (
-            (${toString aliceDashBackend}, "https://${aliceDashHost}/leak", ["__Host-hermes_session_at=hs"]),
-            (${toString alicePrivate}, "https://${alicePrivateHost}/leak", ["app=1; trader_dashboard=tok; _xsrf=abc"]),
-            (${toString alicePublic}, "https://${alicePublicHost}/leak", ["app=1; trader_dashboard=tok; _xsrf=abc"]),
-        ):
-            code, _, _ = https(url, f"-H 'Cookie: {cookies}'")
-            assert code == "200", (url, code)
-            got = [e for e in echo_log(port) if e["path"] == "/leak"][-1]["cookie"]
-            print(port, got)
-            assert got == expected, (url, got)
-            assert not any(s in json.dumps(got) for s in secrets_), (url, got)
+        # Cookies: the agent planted decoys; the dashboard gets hermes' own
+        # only, never a login.
+        cookies = ("__Host-hermes=" + front_value
+                   + "; app=1; trader_dashboard=tok; _xsrf=abc; __Host-mailgate=stolen; __Host-hermes_session_at=hs")
+        code, _, _ = https("https://${aliceDashHost}/leak", f"-H 'Cookie: {cookies}'")
+        assert code == "200", code
+        got = [e for e in echo_log(${toString aliceDashBackend}) if e["path"] == "/leak"][-1]["cookie"]
+        print(got)
+        assert got == ["__Host-hermes_session_at=hs"], got
+        assert not any(s in json.dumps(got) for s in (front_value, "stolen")), got
         # Hermes Mobile's bare-named session cookies and hermes' sign-in
         # cookies reach the dashboard too, nothing else of the kind
         # (__Secure- is only for a path prefix; bare PKCE/SSO names only
@@ -1401,71 +1224,37 @@ pkgs.testers.runNixOSTest {
         assert "planted=1; Domain=${aliceDashHost};" in hdrs and "Domain=${fyi};" not in hdrs, hdrs
         assert "content-security-policy: frame-ancestors 'self'" in hdrs.lower(), hdrs
         assert "x-frame-options: sameorigin" in hdrs.lower(), hdrs
-        hdrs = server.succeed("curl -sk -D - -o /dev/null -b /tmp/j3 https://${alicePrivateHost}/")
-        assert "planted=1; Domain=${alicePrivateHost};" in hdrs, hdrs
-
-        # Origin: the page's own becomes the loopback origin the app sees
-        # as its Host; any other arrives unchanged; none stays none.
-        for origin, seen in (("https://${alicePublicHost}", "http://127.0.0.1:${toString alicePublic}"),
-                             ("https://${alicePrivateHost}", "https://${alicePrivateHost}"),
-                             ("https://evil.example", "https://evil.example"),
-                             (None, None)):
-            https("https://${alicePublicHost}/origin", *([f"-H 'Origin: {origin}'"] if origin else []))
-            e = [e for e in echo_log(${toString alicePublic}) if e["path"] == "/origin"][-1]
-            assert e["origin"] == seen and e["host"] == "127.0.0.1:${toString alicePublic}", (origin, e)
 
         # Fetch Metadata: other origins may only navigate (GET) to a
-        # dashboard, a private port or the front door; the public ports
-        # take anything.
+        # dashboard, the front door or the owner page.
         nav = ["Sec-Fetch-Mode: navigate", "Sec-Fetch-Dest: document"]
         def fm(url, site, extra, method="GET"):
             hs = ([f"Sec-Fetch-Site: {site}"] if site else []) + extra
-            return https(url, "-b /tmp/j3", f"-X {method}", *[f"-H '{h}'" for h in hs])[0]
-        for url in ("https://${aliceDashHost}/fm", "https://${alicePrivateHost}/fm"):
-            for site in ("cross-site", "same-site"):
-                assert fm(url, site, nav, "POST") == "403", (url, site)
-                assert fm(url, site, ["Sec-Fetch-Mode: cors", "Sec-Fetch-Dest: empty"]) == "403", (url, site)
-                assert fm(url, site, ["Sec-Fetch-Mode: no-cors", "Sec-Fetch-Dest: image"]) == "403", (url, site)
-                assert fm(url, site, ["Sec-Fetch-Mode: websocket", "Sec-Fetch-Dest: websocket"]) == "403", (url, site)
-                assert fm(url, site, ["Sec-Fetch-Mode: navigate", "Sec-Fetch-Dest: iframe"]) == "403", (url, site)
-                assert fm(url, site, nav) == "200", (url, site)
-            assert fm(url, "", []) == "200", url
-            assert fm(url, "same-origin", ["Sec-Fetch-Mode: cors", "Sec-Fetch-Dest: empty"]) == "200", url
-            assert fm(url, "none", nav) == "200", url
-        assert fm("https://${alicePublicHost}/fm", "cross-site", ["Sec-Fetch-Mode: cors", "Sec-Fetch-Dest: empty"]) == "200"
+            return https(url, f"-X {method}", *[f"-H '{h}'" for h in hs])[0]
+        url = "https://${aliceDashHost}/fm"
+        for site in ("cross-site", "same-site"):
+            assert fm(url, site, nav, "POST") == "403", (url, site)
+            assert fm(url, site, ["Sec-Fetch-Mode: cors", "Sec-Fetch-Dest: empty"]) == "403", (url, site)
+            assert fm(url, site, ["Sec-Fetch-Mode: no-cors", "Sec-Fetch-Dest: image"]) == "403", (url, site)
+            assert fm(url, site, ["Sec-Fetch-Mode: websocket", "Sec-Fetch-Dest: websocket"]) == "403", (url, site)
+            assert fm(url, site, ["Sec-Fetch-Mode: navigate", "Sec-Fetch-Dest: iframe"]) == "403", (url, site)
+            assert fm(url, site, nav) == "200", (url, site)
+        assert fm(url, "", []) == "200", url
+        assert fm(url, "same-origin", ["Sec-Fetch-Mode: cors", "Sec-Fetch-Dest: empty"]) == "200", url
+        assert fm(url, "none", nav) == "200", url
         assert fm("https://${dashHost}/", "cross-site", nav, "POST") == "403"
         code, _, body = https("https://${ownerHost}/action", "-X POST", "-H 'Sec-Fetch-Site: same-site'", "-H 'Sec-Fetch-Mode: navigate'")
         assert code == "403" and "another site" in body, (code, body)
-        # The sign-in flows above were navigations: a cross-site callback
-        # passes the gate.
-        code, _, body = https("https://${alicePrivateHost}/.hermes-serve-login/callback?code=x&state=y",
-                             "-H 'Sec-Fetch-Site: cross-site'", "-H 'Sec-Fetch-Mode: navigate'", "-H 'Sec-Fetch-Dest: document'")
-        assert "another site" not in body, (code, body)
 
         # The old names only redirect, path and query kept, on port 80 as on
         # 443, and never reach a backend.
-        for old, new in (("alice.${domain}/old?q=1", "https://${aliceDashHost}/old?q=1"),
-                         ("${toString alicePrivate}.${dashHost}/old?q=1", "https://${alicePrivateHost}/old?q=1"),
-                         ("${toString alicePublic}.${dashHost}/old?q=1", "https://${alicePublicHost}/old?q=1")):
-            for scheme in ("https", "http"):
-                assert redirect(f"{scheme}://{old}", "-b /tmp/j3") == ("301", new), (scheme, old, redirect(f"{scheme}://{old}"))
-        # MEDIUM-1: no ACME HTTP-01 challenge on an old name follows the 301
-        # into an agent's page.
-        for host in ("alice.${domain}", "${toString alicePrivate}.${dashHost}", "${toString alicePublic}.${dashHost}"):
-            for scheme in ("https", "http"):
-                assert redirect(f"{scheme}://{host}/.well-known/acme-challenge/tok") == ("404", ""), (scheme, host)
-        for port in (${toString aliceDashBackend}, ${toString alicePrivate}, ${toString alicePublic}):
-            assert not any(e["path"].startswith(("/old", "/.well-known")) for e in echo_log(port)), port
+        for scheme in ("https", "http"):
+            assert redirect(f"{scheme}://alice.${domain}/old?q=1") == ("301", "https://${aliceDashHost}/old?q=1"), scheme
+            # MEDIUM-1: no ACME HTTP-01 challenge on an old name follows the
+            # 301 into an agent's page.
+            assert redirect(f"{scheme}://alice.${domain}/.well-known/acme-challenge/tok") == ("404", ""), scheme
+        assert not any(e["path"].startswith(("/old", "/.well-known")) for e in echo_log(${toString aliceDashBackend}))
         assert https("https://nobody.${domain}/")[0] == "404"
-        assert https("https://12345.${dashHost}/")[0] == "404"
-
-        # LOW-2: the agent's wildcard cert covers its slot's name; a request
-        # for the slot on a connection to one of these hosts gets 421, so
-        # the browser opens a connection of its own for it.
-        assert https("https://slot.alice.${fyi}/")[0] == "421"
-        code = server.succeed("curl -sk -o /dev/null -w '%{http_code}' -H 'Host: slot.alice.${fyi}' https://${alicePublicHost}/x")
-        assert code == "421", code
-        assert not any(e["path"] == "/x" for e in echo_log(${toString alicePublic}))
 
         # Sign-ins are rate-limited per client: 1 + a burst of 10, then 429.
         codes = [https("https://${aliceDashHost}/auth/native/authorize")[0] for _ in range(14)]
@@ -1476,7 +1265,7 @@ pkgs.testers.runNixOSTest {
         codes = [https("https://${aliceDashHost}/auth/native/authorize", v6)[0] for _ in range(14)]
         assert codes[:11] == ["302"] * 11 and codes[-1] == "429", codes
         # The app's sign-in always asks for the passkey (prompt=login on the
-        # issuer redirect); the browser's rides the pocket-id session. From
+        # issuer redirect); the browser's rides the issuer session. From
         # 127.0.0.2, a bucket of its own.
         fresh = "--interface 127.0.0.2"
         def location(path):
@@ -1508,9 +1297,9 @@ pkgs.testers.runNixOSTest {
         assert d == "${ownerHost}" and sub == "FALSE", mg["__Host-mailgate"]
         assert "__Host-hermes" not in mg, mg
         # Not even the real owner-page cookie reaches an agent.
-        code, _, _ = https("https://${alicePublicHost}/leak2", f"-H 'Cookie: __Host-mailgate={value}; app=2'")
-        got = [e for e in echo_log(${toString alicePublic}) if e["path"] == "/leak2"][-1]["cookie"]
-        assert got == ["app=2"], got
+        code, _, _ = https("https://${aliceDashHost}/leak2", f"-H 'Cookie: __Host-mailgate={value}; hermes_session_at=x'")
+        got = [e for e in echo_log(${toString aliceDashBackend}) if e["path"] == "/leak2"][-1]["cookie"]
+        assert got == ["hermes_session_at=x"], got
         # A confirmation through the real vhost.
         rc, r = mailgate("alice", "allowlist request someone@signup.test --reason 'sign-up mails'")
         assert rc == 0, r
@@ -1525,8 +1314,8 @@ pkgs.testers.runNixOSTest {
         rc, r2 = mailgate("alice", "allowlist")
         assert [x["state"] for x in r2["requests"] if x["request"] == r["request"]] == ["denied"], r2
 
-    with subtest("G6: the oauth2-proxy sockets answer nginx and root only; the owner page's and the serve ports' are sandboxed"):
-        socks = ("/run/oauth2-proxy.sock", "/run/oauth2-proxy-mailgate.sock", "/run/oauth2-proxy-serve.sock")
+    with subtest("G6: the oauth2-proxy sockets answer nginx and root only; the owner page's is sandboxed"):
+        socks = ("/run/oauth2-proxy.sock", "/run/oauth2-proxy-mailgate.sock")
         for sock in socks:
             server.succeed(f"curl -sf -o /dev/null --unix-socket {sock} http://localhost/ping")
             assert server.succeed(f"stat -c '%U:%G %a' {sock}").strip() == "root:nginx 660", sock
@@ -1538,24 +1327,17 @@ pkgs.testers.runNixOSTest {
         # nginx still reaches them (the F2 sign-ins above went through them).
         code, _, _ = https("https://${ownerHost}/", "-b /tmp/j2")
         assert code == "200", code
-        assert https("https://${alicePrivateHost}/", "-b /tmp/j3")[0] == "200"
-        for unit in ("oauth2-proxy", "oauth2-proxy-mailgate", "oauth2-proxy-serve"):
+        for unit in ("oauth2-proxy", "oauth2-proxy-mailgate"):
             cat = server.succeed(f"systemctl cat {unit}")
             for flag in ("--trusted-proxy-ip='?127.0.0.1", "--http-address='?fd:3"):
                 assert re.search(flag, cat), (unit, flag, cat)
-        for unit in ("oauth2-proxy-mailgate", "oauth2-proxy-serve"):
-            props = server.succeed(
-                f"systemctl show {unit} -p MemoryDenyWriteExecute -p RestrictNamespaces "
-                "-p LockPersonality -p ProtectProc -p SystemCallFilter -p ActiveState")
-            print(props)
-            for want in ("MemoryDenyWriteExecute=yes", "RestrictNamespaces=yes", "LockPersonality=yes",
-                         "ProtectProc=invisible", "ActiveState=active"):
-                assert want in props, (unit, want, props)
-        # The serve ports' proxy: callback from the request's host, no
-        # cookie domain, no redirect beyond it.
-        cat = server.succeed("systemctl cat oauth2-proxy-serve")
-        for flag in ("--redirect-url", "--cookie-domain", "--whitelist-domain"):
-            assert flag not in cat, (flag, cat)
+        props = server.succeed(
+            "systemctl show oauth2-proxy-mailgate -p MemoryDenyWriteExecute -p RestrictNamespaces "
+            "-p LockPersonality -p ProtectProc -p SystemCallFilter -p ActiveState")
+        print(props)
+        for want in ("MemoryDenyWriteExecute=yes", "RestrictNamespaces=yes", "LockPersonality=yes",
+                     "ProtectProc=invisible", "ActiveState=active"):
+            assert want in props, (want, props)
 
     with subtest("HIGH-1: nginx never dials a loopback port another agent may have bound"):
         def squat(port):
@@ -1563,69 +1345,30 @@ pkgs.testers.runNixOSTest {
             server.wait_until_succeeds(f"python3 ${connect} 127.0.0.1 {port}")
         def squatted(port):
             return server.succeed(f"cat /tmp/squat-{port}.log")
-        proxies = ("oauth2-proxy", "oauth2-proxy-mailgate", "oauth2-proxy-serve")
+        proxies = ("oauth2-proxy", "oauth2-proxy-mailgate")
 
         # The oauth2-proxies down, bob on their old ports (forging alice's
         # owner as the signed-in account): every login-gated page fails
         # closed, none asks bob.
         server.succeed("systemctl stop " + " ".join(f"{u}.socket {u}.service" for u in proxies))
-        for port in (4180, 4181, 4182):
+        for port in (4180, 4181):
             squat(port)
         # nor can bob put a socket where nginx looks
-        server.fail("runuser -u bob -- python3 -c \"import socket; socket.socket(socket.AF_UNIX).bind('/run/oauth2-proxy-serve.sock')\"")
-        for url, opts in (("https://${dashHost}/", ""), ("https://${ownerHost}/", "-b /tmp/j2"),
-                          ("https://${alicePrivateHost}/forged", ""), ("https://${alicePrivateHost}/forged", "-b /tmp/j3")):
+        server.fail("runuser -u bob -- python3 -c \"import socket; socket.socket(socket.AF_UNIX).bind('/run/oauth2-proxy-mailgate.sock')\"")
+        for url, opts in (("https://${dashHost}/", ""), ("https://${ownerHost}/", "-b /tmp/j2")):
             code, loc = redirect(url, opts)
             assert code.startswith("5"), (url, opts, code, loc)
-        assert not any(e["path"] == "/forged" for e in echo_log(${toString alicePrivate}))
         # The proxies start while bob still holds the ports: they need none.
         server.succeed("systemctl start " + " ".join(f"{u}.socket {u}.service" for u in proxies))
         for sock in socks:
             proxy_up(sock)
         assert redirect("https://${dashHost}/", "-b /tmp/j1") == ("302", "https://${aliceDashHost}/")
         assert https("https://${ownerHost}/", "-b /tmp/j2")[0] == "200"
-        assert https("https://${alicePrivateHost}/", "-b /tmp/j3")[0] == "200"
-        code, loc = redirect("https://${alicePrivateHost}/forged")
-        assert code == "302" and loc.startswith("http://127.0.0.1:9000/authorize?"), (code, loc)
-        for port in (4180, 4181, 4182):
+        for port in (4180, 4181):
             assert squatted(port) == "", (port, squatted(port))
+        server.succeed("systemctl stop squat-4180 squat-4181")
 
-        # alice's private and public app down, bob on their ports: 502, and
-        # bob sees nothing (the bridge refuses a backend uid 1002 bound).
-        server.succeed("systemctl stop echo-private echo-public")
-        for port in (${toString alicePrivate}, ${toString alicePublic}):
-            squat(port)
-        code, _, body = https("https://${alicePrivateHost}/squat", "-b /tmp/j3")
-        assert code == "502" and "squatter" not in body, (code, body)
-        code, _, body = https("https://${alicePublicHost}/squat", "-H 'Cookie: app=1'")
-        assert code == "502" and "squatter" not in body, (code, body)
-        for port in (${toString alicePrivate}, ${toString alicePublic}):
-            assert squatted(port) == "", (port, squatted(port))
-            server.wait_until_succeeds(f"journalctl -u 'hermes-serve-fwd-{port}@*' | grep -q 'owned by uid 1002'")
-        # A refused connection leaves no failed bridge unit behind
-        # (CollectMode); the refusal is in the journal above.
-        failed = server.succeed("systemctl list-units --failed --all --plain --no-legend 'hermes-serve-fwd-*' 'hermes-*-fwd-*'")
-        assert failed.strip() == "", failed
-        server.succeed("systemctl stop squat-${toString alicePrivate} squat-${toString alicePublic}")
-        server.succeed("systemctl start echo-private echo-public")
-        server.wait_until_succeeds("python3 ${connect} 127.0.0.1 ${toString alicePublic}")
-        server.wait_until_succeeds("python3 ${connect} 127.0.0.1 ${toString alicePrivate}")
-        code, _, body = https("https://${alicePrivateHost}/back", "-b /tmp/j3")
-        assert code == "200" and body == "backend ${toString alicePrivate}\n", (code, body)
-        code, _, body = https("https://${alicePublicHost}/back")
-        assert code == "200" and body == "backend ${toString alicePublic}\n", (code, body)
-
-        # The old 403 port held by bob: nginx (re)starts without it and the
-        # refusal never asks bob.
-        squat(29999)
-        server.succeed("systemctl restart nginx")
-        server.wait_for_open_port(443)
-        code, _, body = https("https://${portHost bobPrivate "bob"}/", f"-H 'Cookie: __Host-hermes_serve={serve_value}'")
-        assert code == "403" and "Not published" in body, (code, body)
-        assert squatted(29999) == ""
-        server.succeed("systemctl stop squat-4180 squat-4181 squat-4182 squat-29999")
-
-    with subtest("MEDIUM-N1: a request flood slows a public port or a dashboard, never stops its socket"):
+    with subtest("MEDIUM-N1: a request flood slows a dashboard, never stops its socket"):
         def flood(url, n, *opts):
             """{status: count} of n requests at once (100 in flight)."""
             out = server.succeed(
@@ -1638,25 +1381,15 @@ pkgs.testers.runNixOSTest {
         # nginx opens a connection to the socket per request: 300 at once
         # are 300 activations, past systemd's default trigger limit (200
         # per 2s) were it set.
-        for url, unit, backend in (
-            ("https://${alicePublicHost}", "hermes-serve-fwd-${toString alicePublic}.socket", ${toString alicePublic}),
-            ("https://${aliceDashHost}", "hermes-dashboard-fwd-alice.socket", ${toString aliceDashBackend}),
-        ):
-            props = server.succeed(f"systemctl show -p TriggerLimitIntervalUSec -p MaxConnections {unit}")
-            assert "TriggerLimitIntervalUSec=0\n" in props and "MaxConnections=512\n" in props, (unit, props)
-            codes = flood(url, 300)
-            assert codes == {"200": 300}, (url, codes)
-            assert sum(e["path"].startswith("/flood") for e in echo_log(backend)) == 300, url
-            assert server.succeed(f"systemctl show -p ActiveState --value {unit}").strip() == "active", unit
-            code, _, body = https(url + "/after-flood")
-            assert code == "200" and body == f"backend {backend}\n", (url, code, body)
-        # nginx's per-client-network limit: past the burst of 500 a client
-        # gets 429 (here unsigned requests on a private port, which nginx
-        # and the login answer fast), other clients do not.
-        codes = flood("https://${alicePrivateHost}", 1000, "--interface 127.0.0.3")
-        assert codes.get("429", 0) > 0 and codes.get("302", 0) >= 500, codes
-        code, loc = redirect("https://${alicePrivateHost}/")
-        assert code == "302" and loc.startswith("http://127.0.0.1:9000/authorize?"), (code, loc)
+        url, unit, backend = "https://${aliceDashHost}", "hermes-dashboard-fwd-alice.socket", ${toString aliceDashBackend}
+        props = server.succeed(f"systemctl show -p TriggerLimitIntervalUSec -p MaxConnections {unit}")
+        assert "TriggerLimitIntervalUSec=0\n" in props and "MaxConnections=512\n" in props, (unit, props)
+        codes = flood(url, 300)
+        assert codes == {"200": 300}, (url, codes)
+        assert sum(e["path"].startswith("/flood") for e in echo_log(backend)) == 300, url
+        assert server.succeed(f"systemctl show -p ActiveState --value {unit}").strip() == "active", unit
+        code, _, body = https(url + "/after-flood")
+        assert code == "200" and body == f"backend {backend}\n", (url, code, body)
 
     with subtest("LOW-N2: an issuer outage fails no oauth2-proxy socket; restarts back off; logins work after"):
         def restarts(unit):
@@ -1670,7 +1403,7 @@ pkgs.testers.runNixOSTest {
         before = {u: restarts(u) for u in proxies}
         # Requests queue up on every socket meanwhile, through nginx and
         # directly.
-        urls = ["https://${dashHost}/", "https://${ownerHost}/", "https://${alicePrivateHost}/"]
+        urls = ["https://${dashHost}/", "https://${ownerHost}/"]
         urls += [f"--unix-socket {s} http://localhost/ping" for s in socks]
         server.succeed(" ".join(f"curl -sk -o /dev/null --max-time 30 {u} >/dev/null 2>&1 &" for u in urls * 10))
         time.sleep(15)
@@ -1684,13 +1417,11 @@ pkgs.testers.runNixOSTest {
         server.succeed("systemctl start stub-oidc")
         for sock in socks:
             proxy_up(sock)
-        # Fresh sign-ins at all three.
+        # Fresh sign-ins at both.
         code, eff, body = https("https://${dashHost}/", "-L -c /tmp/jo1 -b /tmp/jo1")
         assert code == "200" and eff == "https://${aliceDashHost}/" and body == "backend ${toString aliceDashBackend}\n", (code, eff, body)
         code, _, page = https("https://${ownerHost}/", "-L -c /tmp/jo2 -b /tmp/jo2")
         assert code == "200" and "Agent mail: alice-owner" in page, (code, page)
-        code, eff, body = https("https://${alicePrivateHost}/after-outage", "-L -c /tmp/jo3 -b /tmp/jo3")
-        assert code == "200" and body == "backend ${toString alicePrivate}\n", (code, eff, body)
 
     with subtest("F3: a hostile stylesheet stalls nothing"):
         alice_before, bob_before = entry_ids("alice"), entry_ids("bob")
@@ -1790,8 +1521,12 @@ pkgs.testers.runNixOSTest {
         assert grown < 2 * 2_000_000, grown
         out = send("--mail-from attacker@evil.test --to alice@${domain},bob@${domain},alice+shop@${domain},alice+news@${domain}", expect=3)
         assert "RCPT 4" in out and "(recipient 4)" in out, out
+        # Paced: Stalwart's stock `ip` limiter (manager/boot.rs
+        # DEFAULT_SETTINGS, 5 connections per remote IP per wall-clock
+        # second) drops a faster loop's connection before the greeting.
         codes = []
         for i in range(${toString limits.inboundPerSenderDomainHour} + 1):
+            time.sleep(0.3)
             rc, out = client.execute(f"python3 ${sendMail} --mail-from n{i}@flood.test --to alice@${domain} --subject flood{i}")
             codes.append(out.split()[0] if rc else "OK")
         print(codes)
@@ -1816,6 +1551,7 @@ pkgs.testers.runNixOSTest {
         client.succeed("ip addr add 192.168.1.3/24 dev eth1")
         codes = []
         for i in range(${toString limits.inboundPerSenderDomainHour} + 1):
+            time.sleep(0.3)
             rc, out = client.execute(
                 f"python3 ${sendMail} --source 192.168.1.3 --mail-from x{i}@lax.test --to bob@${domain} --subject g2-flood{i}")
             codes.append(out.split()[0] if rc else "OK")

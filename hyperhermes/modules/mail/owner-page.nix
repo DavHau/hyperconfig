@@ -1,27 +1,26 @@
 # The owner page, https://<ownerPage.host>/: where an agent's owner confirms
 # allowlist requests. It has its own login, separate from the front door's.
 #
-# It lives under davhau.com, a site apart from the agent-controlled
-# davhau.fyi (hyperhermes' dashboards module), and nginx forwards no login
-# cookie to agents (hyperhermes' dashboards module,
-# ../hermes-agents-serve.nix), but a page an agent controls must never hold
-# the key to this one anyway, nor the front door's session. So this page
-# runs an oauth2-proxy of its own:
+# It lives next to the front door, on the deployment's own site, apart
+# from the agent-controlled exposure.domain, and nginx forwards no login
+# cookie to agents (hyperhermes' dashboards and publish modules), but a
+# page an agent controls must never hold the key to this one anyway, nor
+# the front door's session. So this page runs an oauth2-proxy of its own:
 #   - its session cookie is `__Host-mailgate`: host-only by browser rule
 #     (no Domain attribute allowed), Secure, Path=/. No agent-controlled
 #     host ever receives it, and no other host can set or overwrite it,
-#   - a separate cookie secret, so the front door's session cookie is
-#     meaningless here,
-#   - prompt=login: every sign-in asks pocket-id for the passkey again,
-#     even inside a live pocket-id session, and the session lasts
+#   - a separate cookie secret (ownerPage.cookieSecretFile), so the front
+#     door's session cookie is meaningless here,
+#   - prompt=login: every sign-in asks the issuer for the passkey again,
+#     even inside a live issuer session, and the session lasts
 #     `sessionLifetime` without refresh. Confirming an allowlist entry
 #     therefore always follows a fresh passkey check.
-# Same OIDC client as the front door (pocket-id's `hermes` client, which
-# lists this host's callback; modules/flake-parts/nixosConfigurations.nix).
+# Same OIDC client as the front door (lib.sso's `hermes`); the deployment's
+# issuer must list this host's callback, https://<host>/oauth2/callback,
+# for that client too.
 # Requests a browser sends from another origin are refused unless they are
 # top-level GET navigations (hyperhermes' exposure: Fetch Metadata gate);
-# the sign-in is
-# navigations only, the confirmations are same-origin posts.
+# the sign-in is navigations only, the confirmations are same-origin posts.
 #
 # nginx passes the signed-in account to mailgate in a header it always
 # overwrites; mailgate shows that account's agents only, and checks Origin
@@ -38,15 +37,15 @@
   config,
   lib,
   pkgs,
-  inputs,
   ...
 }:
 let
-  cfg = config.hyper.agentMail;
+  cfg = config.services.hyperhermes.mail;
+  sso = config.services.hyperhermes.sso;
+  exposure = config.services.hyperhermes.exposure;
   host = cfg.ownerPage.host;
-  # The front door's client (hyperhermes' lib.sso).
-  client = config.hyper.oidc.clients.${inputs.hyperhermes.lib.sso.frontDoorClientId};
-  vars = config.clan.core.vars.generators;
+  # The front door's client (../../lib/sso.nix).
+  clientId = (import ../../lib/sso.nix { inherit lib; }).frontDoorClientId;
   socket = "/run/oauth2-proxy-mailgate.sock";
   address = "unix:${socket}:";
   sessionLifetime = "30m";
@@ -54,8 +53,8 @@ let
   # flags take no separate argument.
   args = lib.cli.toCommandLineShellGNU { } {
     provider = "oidc";
-    oidc-issuer-url = config.hyper.oidc.issuer;
-    client-id = client.clientId;
+    oidc-issuer-url = sso.issuer;
+    client-id = clientId;
     client-secret-file = "%d/client-secret";
     cookie-secret-file = "%d/cookie-secret";
     cookie-name = "__Host-mailgate";
@@ -85,21 +84,6 @@ let
 in
 {
   config = lib.mkIf (cfg.enable && host != null) {
-    clan.core.vars.generators.mailgate-oauth2-proxy = {
-      files.cookie_secret.restartUnits = [ "oauth2-proxy-mailgate.service" ];
-      runtimeInputs = [
-        pkgs.coreutils
-        pkgs.openssl
-      ];
-      # oauth2-proxy decodes a cookie secret only as URL-safe base64 and
-      # otherwise takes the raw bytes, which must then be 16, 24 or 32
-      # long: standard base64 with a '+' or '/' is 44 raw bytes and the
-      # proxy refuses to start. 32 hex characters are 32 raw bytes.
-      script = ''
-        openssl rand -hex 16 | tr -d '\n' > "$out"/cookie_secret
-      '';
-    };
-
     systemd.services.oauth2-proxy-mailgate = {
       description = "oauth2-proxy of the agent mail owner page";
       wantedBy = [ "multi-user.target" ];
@@ -116,8 +100,8 @@ in
         ExecStart = "${lib.getExe pkgs.oauth2-proxy} ${args}";
         DynamicUser = true;
         LoadCredential = [
-          "client-secret:${client.secretFile}"
-          "cookie-secret:${vars.mailgate-oauth2-proxy.files.cookie_secret.path}"
+          "client-secret:${sso.clients.${clientId}.secretFile}"
+          "cookie-secret:${cfg.ownerPage.cookieSecretFile}"
         ];
         Restart = "always";
         RestartSec = "5s";
@@ -152,7 +136,7 @@ in
           "~@privileged"
           "~@resources"
         ];
-        # No IPAddressDeny: the issuer (pocket-id) is a DNS name whose
+        # No IPAddressDeny: the issuer is a DNS name whose
         # address is not pinned anywhere in this config, and the resolver
         # must be reachable too.
       };
@@ -173,10 +157,8 @@ in
     };
 
     services.hyperhermes.exposure.fetchMetadataGate.virtualHosts = [ host ];
-    services.nginx.virtualHosts.${host} = {
-      forceSSL = true;
-      # *.<front door host> (hyperhermes' sso module)
-      useACMEHost = "hermes-subdomains";
+    # *.<front door host>, hyperhermes' sso module's certificate.
+    services.nginx.virtualHosts.${host} = exposure.virtualHost "hermes-subdomains" // {
       locations."/oauth2/" = {
         proxyPass = "http://${address}";
         recommendedProxySettings = false;
