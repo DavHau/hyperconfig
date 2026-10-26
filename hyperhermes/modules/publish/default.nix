@@ -105,7 +105,7 @@
 # kept, and serve nothing else; drop it once the old links are gone.
 #
 # Public mode, TLS: one wildcard cert per agent, *.<agent>.<domain>
-# (hermes-fyi-<agent>), by exposure's DNS-01; no port number lands in the
+# (hermes-publish-<agent>), by exposure's DNS-01; no port number lands in the
 # CT logs. DNS (exposure.dnsRecords): *.<agent>.<domain> gets the wildcard's
 # A and AAAA, no TXT (a wildcard TXT would answer _acme-challenge,
 # exposure's header). The wildcard also covers the agent slot's name
@@ -159,7 +159,7 @@ let
     };
   accountOf = name: sso.accounts.${name};
   hostOf = name: port: "${toString port}.${name}.${domain}";
-  certOf = name: "hermes-fyi-${name}";
+  certOf = name: "hermes-publish-${name}";
   # What nginx dials for a port: a root-held socket whose connections a
   # bridge running as the owner forwards to the app (the header).
   backendDir = "/run/hermes-serve";

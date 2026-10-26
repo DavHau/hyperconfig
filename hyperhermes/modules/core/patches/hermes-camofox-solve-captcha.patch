@@ -7,7 +7,7 @@ inside the challenge's cross-origin frame, and its model is no captcha reader.
 
 Upstream: neither hermes-agent (main 848fc0ad) nor camofox-browser (v1.18.1)
 has a captcha solver hook; camofox-browser's plugin system can carry one.
-hyperconfig's camofox-browser has it (pkgs/camofox-browser/captcha-plugin:
+hyperhermes's camofox-browser has it (pkgs/camofox-browser/captcha-plugin:
 POST /tabs/<id>/solve-captcha, CaptchaKraken on the tab's live page against a
 self-hosted model).
 

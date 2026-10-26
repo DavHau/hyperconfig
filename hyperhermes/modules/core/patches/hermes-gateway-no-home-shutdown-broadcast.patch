@@ -1,8 +1,8 @@
 hermes v2026.9.14 (0.21.3): every gateway shutdown broadcasts
 "⚠️ Gateway shutting down — Your current task will be interrupted." to
 each platform's home channel, whether or not any session is running.
-On som every deploy restarts all native agents, so each user's home
-chat got the notice on every deploy (2026-10-19 17:18 and 21:21: nine
+Where every deploy restarts all native agents, each user's home chat
+gets the notice on every deploy (two deploys in one evening: nine
 home-channel sends, all with active_at_start=0).
 
 The per-session notice to chats with a running agent stays; those

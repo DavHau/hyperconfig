@@ -1,5 +1,5 @@
 hermes v2026.9.14 (0.21.3): a native user whose config.yaml pins
-`model.provider: p0` (a bare `providers.p0` name) parks every dashboard
+`model.provider: acme` (a bare `providers.acme` name) parks every dashboard
 and TUI session on "Setup Required" while `hermes chat -q` works.
 
 Symptom chain: setup.status -> free_tier_bootstrap.run_bootstrap ->
@@ -17,8 +17,8 @@ test adds both spellings to upstream's own #108383 suite; only the bare
 one failed before this change.
 
 Configs seeded with the bare name, or switched to it at runtime, keep
-it (pinpox and willi on som), so the fix belongs in hermes, not in the
-seed.
+it (two users of one deployment did), so the fix belongs in hermes, not
+in the seed.
 
  hermes_cli/auth.py                                 |  7 +++++++
  .../test_resolve_provider_custom_endpoint.py       | 14 ++++++++++++++
@@ -32,8 +32,8 @@ index d4c15bb..4640568 100644
              return model_cfg, "custom"
          if provider in PROVIDER_REGISTRY:
              return model_cfg, provider
-+        # A bare ``providers:`` / ``custom_providers:`` name (``provider: p0``) is the same intent
-+        # as ``custom:p0``: the runtime rung (_get_named_custom_provider) accepts both spellings,
++        # A bare ``providers:`` / ``custom_providers:`` name (``provider: acme``) is the same intent
++        # as ``custom:acme``: the runtime rung (_get_named_custom_provider) accepts both spellings,
 +        # so this rung must too, or the boot inventory parks a working config on Setup Required.
 +        if provider:
 +            from hermes_cli.runtime_provider import has_named_custom_provider
@@ -51,17 +51,17 @@ index 1e6b279..2eff3fb 100644
              id="loopback-base-url-only",
          ),
 +        pytest.param(
-+            "model:\n  default: some-model\n  provider: custom:p0\n"
-+            "  base_url: https://api.p0.example/v1\n"
-+            "providers:\n  p0:\n    base_url: https://api.p0.example/v1\n"
-+            "    key_env: P0_API_KEY\n    default_model: some-model\n",
++            "model:\n  default: some-model\n  provider: custom:acme\n"
++            "  base_url: https://api.acme.example/v1\n"
++            "providers:\n  acme:\n    base_url: https://api.acme.example/v1\n"
++            "    key_env: ACME_API_KEY\n    default_model: some-model\n",
 +            id="named-provider-slug",
 +        ),
 +        pytest.param(
-+            "model:\n  default: some-model\n  provider: p0\n"
-+            "  base_url: https://api.p0.example/v1\n"
-+            "providers:\n  p0:\n    base_url: https://api.p0.example/v1\n"
-+            "    key_env: P0_API_KEY\n    default_model: some-model\n",
++            "model:\n  default: some-model\n  provider: acme\n"
++            "  base_url: https://api.acme.example/v1\n"
++            "providers:\n  acme:\n    base_url: https://api.acme.example/v1\n"
++            "    key_env: ACME_API_KEY\n    default_model: some-model\n",
 +            id="named-provider-bare",
 +        ),
      ],

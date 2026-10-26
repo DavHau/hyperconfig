@@ -8,8 +8,9 @@
 # nixpkgs follows, and the headers output cannot drift from
 # `electron.version`), and the XDG icon/desktop-entry files come from
 # the injected hermesSrc (upstream's ../ sibling paths resolve to
-# nothing here). Two more are marked below: the wordmark, and the
-# `hermes://session/<id>` deep link (./patches/desktop-session-deeplink.patch).
+# nothing here). Two more are marked below: the tests/fixtures dir, and
+# the `hermes://session/<id>` deep link
+# (./patches/desktop-session-deeplink.patch).
 #
 # `hermesAgent` is the fully-built `.#default` package — it ships the
 # `hermes` binary with the venv, runtime PATH, bundled skills/plugins, etc.
@@ -63,20 +64,7 @@ let
 
     doCheck = true;
 
-    # Fourth change: the empty-state wordmark says "HERMES AGENT"
-    # upstream. spaces, where this build comes from, made it the Spaces
-    # agent surface, so it says "SPACES AGENT"; kept, so the renderer is
-    # the one the desktops already run. The constant feeds the aria-label
-    # and both rendered spans, so one substitution covers the screen and
-    # the accessible name. --replace-fail stops the build if an input bump
-    # renames the constant, instead of shipping the old text.
-    postPatch = ''
-      substituteInPlace apps/desktop/src/components/chat/intro.tsx \
-        --replace-fail "const WORDMARK = 'HERMES AGENT'" \
-                       "const WORDMARK = 'SPACES AGENT'"
-    '';
-
-    # Fifth change: `hermes-desktop hermes://session/<id>` opens that chat,
+    # Fourth change: `hermes-desktop hermes://session/<id>` opens that chat,
     # and a second launch switches the running window to it. The patch
     # header names what upstream lacks; building packages.hermes-desktop
     # proves it applies to the pinned input.

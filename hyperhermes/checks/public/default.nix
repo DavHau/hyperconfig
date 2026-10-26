@@ -8,7 +8,7 @@
 # modules with one agent, alice, and a front door. A client node, with the
 # test CA as its only trust, checks:
 # - TLS on every published name, from the ACME certificates
-#   (hermes-fyi for *.<domain>, hermes-fyi-alice for alice's ports,
+#   (hermes-domain for *.<domain>, hermes-publish-alice for alice's ports,
 #   hermes-subdomains for the front door, hermes-dashboards for the legacy
 #   domain), and 80 -> 443,
 # - alice signs in to her dashboard (hermes' OIDC login against the
@@ -55,8 +55,8 @@ let
     ps.requests
   ]);
   certs = [
-    "hermes-fyi"
-    "hermes-fyi-alice"
+    "hermes-domain"
+    "hermes-publish-alice"
     "hermes-subdomains"
     "hermes-dashboards"
   ];
@@ -279,14 +279,14 @@ pkgs.testers.runNixOSTest (
       client.start()
 
       with subtest("ACME issues every certificate by DNS-01"):
-          for cert in ("hermes-fyi", "hermes-fyi-alice", "hermes-subdomains", "hermes-dashboards"):
+          for cert in ("hermes-domain", "hermes-publish-alice", "hermes-subdomains", "hermes-dashboards"):
               server.wait_until_succeeds(
                   f"openssl x509 -in /var/lib/acme/{cert}/cert.pem -noout -issuer | grep -i pebble",
                   timeout=300,
               )
-          print(server.succeed("openssl x509 -in /var/lib/acme/hermes-fyi/cert.pem -noout -ext subjectAltName"))
+          print(server.succeed("openssl x509 -in /var/lib/acme/hermes-domain/cert.pem -noout -ext subjectAltName"))
           server.succeed("openssl x509 -in /var/lib/acme/hermes-subdomains/cert.pem -noout -ext subjectAltName | grep -F 'DNS:${frontDoor}'")
-          server.succeed("openssl x509 -in /var/lib/acme/hermes-fyi-alice/cert.pem -noout -ext subjectAltName | grep -F 'DNS:*.alice.${domain}'")
+          server.succeed("openssl x509 -in /var/lib/acme/hermes-publish-alice/cert.pem -noout -ext subjectAltName | grep -F 'DNS:*.alice.${domain}'")
 
       root = acme.succeed(
           "curl -sf --cacert ${nodes.acme.test-support.acme.caCert} https://${nodes.acme.test-support.acme.caDomain}:15000/roots/0"
