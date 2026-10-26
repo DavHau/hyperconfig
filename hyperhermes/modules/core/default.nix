@@ -20,9 +20,12 @@
 # config merge script.
 { hermes-agent }:
 let
-  # lib.modules.importApply, without needing lib to build `imports`.
+  # lib.modules.importApply, without needing lib to build `imports`. The
+  # key lets the module system drop a second import of core (default plus
+  # core, or two features each importing it).
   importApply = file: arg: {
     _file = file;
+    key = toString file;
     imports = [ (import file arg) ];
   };
 in

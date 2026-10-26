@@ -1,8 +1,14 @@
 # Declarative WhatsApp bridge for native hermes agents
 
-Date: 2026-09-25. Status: approved, implementing.
-Scope: `modules/nixos/hermes-common.nix`, `pkgs/hermes-whatsapp-bridge`,
-`machines/som/hermes-agents.nix`, spaces `modules/nixos/hermes/{options,native,guest}.nix`.
+> Historical: `modules/nixos/hermes-common.nix` and `hyper.hermes.users`
+> were replaced by the hyperhermes subflake (`hyperhermes/modules/core`,
+> `services.hyperhermes.agents.<n>`); the bridge was never built.
+
+Date: 2026-09-25. Status: superseded, unimplemented.
+Scope (if revived): `services.hyperhermes.agents.<n>` in
+`hyperhermes/modules/core`, `pkgs/hermes-whatsapp-bridge`. Originally:
+`modules/nixos/hermes-common.nix`, `machines/som/hermes-agents.nix`, spaces
+`modules/nixos/hermes/{options,native,guest}.nix`.
 
 ## Goal
 

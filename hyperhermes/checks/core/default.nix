@@ -1,7 +1,9 @@
 # Core end to end on one host with two agents, alice and bob, on the
 # patched hermes package: both agents' gateway and dashboard units start;
 # alice's secretEnv entry reaches her .env (owner-only, hers) and nobody
-# else's, and a rotated value replaces the old one on restart; the
+# else's, and a rotated value replaces the old one on restart; a key in
+# alice's dashboardDropEnv is gone from her .env once the dashboard
+# restarts, while the others stay; the
 # root-held dashboard forward of each agent answers its owner and root,
 # while the other agent gets a reset, at the forward and at the backend
 # behind it; the hermes-native chain is in place and hooked into OUTPUT.
@@ -28,6 +30,7 @@ pkgs.testers.runNixOSTest {
       agents.alice = {
         uid = 1001;
         secretEnv.HH_TEST_TOKEN = secret;
+        dashboardDropEnv = [ "HH_DROP_ME" ];
       };
       agents.bob.uid = 1002;
     };
@@ -72,6 +75,13 @@ pkgs.testers.runNixOSTest {
         machine.wait_until_succeeds("grep -qx 'HH_TEST_TOKEN=second-secret' ${envOf "alice"}")
         machine.fail("grep -q first-secret ${envOf "alice"}")
         assert machine.succeed("grep -c '^HH_TEST_TOKEN=' ${envOf "alice"}").strip() == "1"
+
+    with subtest("dashboardDropEnv keys are dropped before the dashboard starts"):
+        machine.succeed("runuser -u alice -- sh -c 'echo HH_DROP_ME=x >> ${envOf "alice"}'")
+        machine.succeed("systemctl restart hermes-dashboard-alice.service")
+        machine.wait_for_unit("hermes-dashboard-alice.service")
+        machine.fail("grep -q '^HH_DROP_ME=' ${envOf "alice"}")
+        machine.succeed("grep -qx 'HH_TEST_TOKEN=second-secret' ${envOf "alice"}")
 
     with subtest("the dashboard forward admits its owner and root"):
         for user in ("alice", "bob"):
