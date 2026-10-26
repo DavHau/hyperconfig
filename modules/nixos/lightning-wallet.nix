@@ -1,5 +1,5 @@
 # One shared Bitcoin/Lightning wallet for every native hermes agent
-# (hyper.hermesAgents): phoenixd, ACINQ's headless Phoenix node. It needs
+# (services.hyperhermes.agents): phoenixd, ACINQ's headless Phoenix node. It needs
 # no bitcoind and no chain sync (Electrum servers for chain data, the
 # ACINQ LSP for channels/liquidity) and keeps the keys on this host.
 #
@@ -88,7 +88,9 @@ in
         home = stateDir;
       };
     }
-    // lib.mapAttrs (_: _: { extraGroups = [ "lightning-wallet" ]; }) config.hyper.hermesAgents;
+    // lib.mapAttrs (_: _: {
+      extraGroups = [ "lightning-wallet" ];
+    }) config.services.hyperhermes.agents;
 
     clan.core.vars.generators.phoenixd-seed = {
       files.seed = {
@@ -165,7 +167,7 @@ in
       };
     };
 
-    services.hermes-native.extraPackages = [ lnwallet ];
-    services.hermes-native.settings.skills.external_dirs = [ "${skill}/share/skills" ];
+    services.hyperhermes.extraPackages = [ lnwallet ];
+    services.hyperhermes.skillDirs = [ "${skill}/share/skills" ];
   };
 }

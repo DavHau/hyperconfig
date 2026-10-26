@@ -28,19 +28,12 @@
 { pkgs, inputs }:
 let
   inherit (pkgs) lib;
-  hlib = import ./lib.nix { inherit lib; };
+  hlib = inputs.hyperhermes.lib;
   aliceUid = 1000;
   port = toString (hlib.camofoxPortFor "alice");
   backend = toString (hlib.camofoxBackendBase + aliceUid);
   dir = hlib.camofoxDir "alice";
 
-  # Only the hermes package is used; it reads neither cfg nor hlib.
-  hermes =
-    (import ./agent-config.nix {
-      inherit lib pkgs inputs;
-      hlib = null;
-      cfg = { };
-    }).hermesPackage;
   site = ./camofox-test-site.py;
   captchaSite = ./camofox-test-captcha-site.py;
 
@@ -48,76 +41,70 @@ let
   # camofox URL and key from its .env (as hermes reads them) and its
   # working directory.
   driverScript =
-    script: user: args:
+    hermes: script: user: args:
     "runuser -u ${user} -- sh -c 'set -a; . ${hlib.stateDir user}/.hermes/.env; set +a; "
     + "HERMES_HOME=/home/${user}/hermes-test TERMINAL_CWD=${hlib.workspace user} "
     + "exec ${hermes.hermesVenv}/bin/python3 ${script} ${args}' 2>&1";
-  driver = driverScript ./camofox-test-downloads.py;
-  captchaDriver = driverScript ./camofox-test-captcha.py;
-  vaultDriver = driverScript ./camofox-test-vault.py;
   privateTmp = "/tmp/systemd-private-*-hermes-camofox-alice.service-*/tmp";
+  agents = [
+    "alice"
+    "bob"
+  ];
 in
 pkgs.testers.runNixOSTest {
   name = "hermes-camofox-isolation";
 
   nodes.machine = {
     imports = [
+      inputs.hyperhermes.nixosModules.core
       ./options.nix
-      ./forwards.nix
-      ./firewall.nix
       ./camofox.nix
     ];
+    _module.args.inputs = inputs;
     virtualisation.memorySize = 3072;
 
-    users.users.alice = {
-      isNormalUser = true;
-      uid = aliceUid;
-    };
-    users.users.bob = {
-      isNormalUser = true;
-      uid = aliceUid + 1;
+    services.hyperhermes = {
+      agents.alice.uid = aliceUid;
+      agents.bob.uid = aliceUid + 1;
+      browser = {
+        enable = true;
+        captchaSolver.baseUrl = "http://127.0.0.1:8766/v1";
+      };
     };
 
-    services.hermes-native = {
-      enable = true;
-      users.alice = { };
-      users.bob = { };
-      captchaSolver.baseUrl = "http://127.0.0.1:8766/v1";
-    };
-
-    # What agents.nix provides around camofox.nix: the state dirs, and an
-    # agent unit whose preStart hands the key to hermes.
-    systemd.tmpfiles.rules = lib.concatMap (u: [
-      "d ${hlib.baseDir u} 0711 root root - -"
-      "d ${hlib.stateDir u} 0700 ${u} users - -"
-      "d ${hlib.stateDir u}/.hermes 0700 ${u} users - -"
-      "f ${hlib.stateDir u}/.hermes/.env 0600 ${u} users - -"
-    ]) [ "alice" "bob" ];
-    systemd.services = lib.genAttrs [ "hermes-agent-alice" "hermes-agent-bob" ] (unit: {
-      serviceConfig = {
-        Type = "oneshot";
-        User = lib.removePrefix "hermes-agent-" unit;
-        ExecStart = "${pkgs.coreutils}/bin/true";
-      };
-    }) // {
-      # The downloads test opens two camofox userIds next to the "a" one
-      # the routes subtest left open.
-      hermes-camofox-alice.environment.MAX_SESSIONS = lib.mkForce "3";
-      download-site = {
-        wantedBy = [ "multi-user.target" ];
+    # Core's agent unit, minus hermes itself: its preStart (state dirs,
+    # .env, then camofox.nix's key hand-off) runs, the gateway does not.
+    # Neither the dashboard nor the agent's pip venv plays a part here.
+    systemd.services =
+      lib.genAttrs (map (u: "hermes-agent-${u}") agents) (_: {
         serviceConfig = {
-          DynamicUser = true;
-          ExecStart = "${pkgs.python3}/bin/python3 ${site} 8765";
+          Type = lib.mkForce "oneshot";
+          ExecStart = lib.mkForce "${pkgs.coreutils}/bin/true";
+          Restart = lib.mkForce "no";
+        };
+      })
+      // lib.genAttrs (map (u: "hermes-dashboard-${u}") agents ++ map (u: "hermes-python-venv-${u}") agents) (_: {
+        enable = false;
+      })
+      // {
+        # The downloads test opens two camofox userIds next to the "a" one
+        # the routes subtest left open.
+        hermes-camofox-alice.environment.MAX_SESSIONS = lib.mkForce "3";
+        download-site = {
+          wantedBy = [ "multi-user.target" ];
+          serviceConfig = {
+            DynamicUser = true;
+            ExecStart = "${pkgs.python3}/bin/python3 ${site} 8765";
+          };
+        };
+        captcha-site = {
+          wantedBy = [ "multi-user.target" ];
+          serviceConfig = {
+            DynamicUser = true;
+            ExecStart = "${pkgs.python3}/bin/python3 ${captchaSite} 8766";
+          };
         };
       };
-      captcha-site = {
-        wantedBy = [ "multi-user.target" ];
-        serviceConfig = {
-          DynamicUser = true;
-          ExecStart = "${pkgs.python3}/bin/python3 ${captchaSite} 8766";
-        };
-      };
-    };
 
     environment.systemPackages = [
       pkgs.curl
@@ -125,7 +112,16 @@ pkgs.testers.runNixOSTest {
     ];
   };
 
-  testScript = ''
+  testScript =
+    { nodes, ... }:
+    let
+      hermes = nodes.machine.services.hyperhermes.package;
+      driverOf = driverScript hermes;
+      driver = driverOf ./camofox-test-downloads.py;
+      captchaDriver = driverOf ./camofox-test-captcha.py;
+      vaultDriver = driverOf ./camofox-test-vault.py;
+    in
+    ''
     import json
 
     machine.wait_for_unit("hermes-firewall.service")

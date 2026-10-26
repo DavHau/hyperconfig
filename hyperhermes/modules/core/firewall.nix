@@ -1,8 +1,9 @@
 # Owner-only loopback gates for every agent port: each root-held port
-# (hlib.forwards: dashboard, Camofox) and its owner-bound backend answer
-# the owner and root only; any other uid (another agent included) gets a
-# reset. Consumers append gates for their own ports to the same chain
-# (hlib.chain).
+# (services.hyperhermes.forwards: the dashboard, and what features add)
+# and its owner-bound backend answer the owner and root only; any other
+# uid (another agent included) gets a reset. Features append gates for
+# their own ports to the same chain (hyperhermes.lib.chain), with
+# lib.mkAfter on this unit's script.
 {
   config,
   lib,
@@ -10,8 +11,8 @@
   ...
 }:
 let
-  cfg = config.services.hermes-native;
-  hlib = import ./lib.nix { inherit lib; };
+  cfg = config.services.hyperhermes;
+  hlib = import ../../lib/core.nix { inherit lib; };
   inherit (hlib) chain;
 
   ownerOnlyRules = port: user: ''
@@ -29,13 +30,13 @@ let
           _: fwd:
           ownerOnlyRules (fwd.portFor user) user
           + ownerOnlyRules "$((${toString fwd.backendBase} + $(id -u ${user})))" user
-        ) hlib.forwards
-      ) cfg.users
+        ) cfg.forwards
+      ) cfg.agents
     )
   );
 in
 {
-  config = lib.mkIf cfg.enable {
+  config = lib.mkIf (cfg.agents != { }) {
     # Owner-match rules ride their own unit, not
     # networking.firewall.extraCommands: the nftables backend refuses
     # extraCommands. `iptables` here is iptables-nft; the rules land in a

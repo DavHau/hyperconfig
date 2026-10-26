@@ -7,9 +7,10 @@
 #
 # Per agent, as the agent's uid:
 #   - the server binds 127.0.0.1:<camofoxBackendBase + uid>; the agent
-#     dials its root-held port (lib.nix), bridged per connection by the
-#     owner-checking forward (forwards.nix), which also starts the server
-#     on first use; both ports are owner-only (firewall.nix),
+#     dials its root-held port (hyperhermes.lib), bridged per connection
+#     by core's owner-checking forward (services.hyperhermes.forwards),
+#     which also starts the server on first use; both ports are owner-only
+#     (core's firewall),
 #   - every route but /health needs the agent's access key, generated
 #     once into a 0600 file in the agent's 0700 state dir,
 #   - the profile store (cookies and storage of hermes' stable per-agent
@@ -23,11 +24,12 @@
   config,
   lib,
   pkgs,
+  inputs,
   ...
 }:
 let
-  cfg = config.services.hermes-native;
-  hlib = import ./lib.nix { inherit lib; };
+  cfg = config.services.hyperhermes;
+  hlib = inputs.hyperhermes.lib;
 
   # The default build (pkgs/camoufox/browser.nix), as web-extract uses.
   # camofox-browser 1.18.1 downloads 152.0.4-beta.30 for itself
@@ -86,11 +88,17 @@ let
     exit 1
   '';
 
-  forEachUser = f: lib.mkMerge (lib.mapAttrsToList (user: _: f user) cfg.users);
+  forEachUser = f: lib.mkMerge (lib.mapAttrsToList (user: _: f user) cfg.agents);
 in
 {
-  config = lib.mkIf cfg.enable {
-    services.hermes-native.settings.browser = {
+  config = lib.mkIf cfg.browser.enable {
+    services.hyperhermes.forwards.camofox = {
+      label = "Camofox";
+      portFor = hlib.camofoxPortFor;
+      backendBase = hlib.camofoxBackendBase;
+    };
+
+    services.hyperhermes.settings.browser = {
       cloud_provider = lib.mkDefault "camofox";
       # A stable per-agent userId: Camofox keeps that profile's cookies.
       camofox.managed_persistence = lib.mkDefault true;
@@ -131,9 +139,9 @@ in
           # hermes' browser_solve_captcha: the captcha plugin
           # (pkgs/camofox-browser) runs CaptchaKraken's engine, which reads
           # each challenge with this model.
-          // lib.optionalAttrs (cfg.captchaSolver.baseUrl != null) {
-            VLLM_BASE_URL = cfg.captchaSolver.baseUrl;
-            CAPTCHA_LORA_NAME = cfg.captchaSolver.model;
+          // lib.optionalAttrs (cfg.browser.captchaSolver.baseUrl != null) {
+            VLLM_BASE_URL = cfg.browser.captchaSolver.baseUrl;
+            CAPTCHA_LORA_NAME = cfg.browser.captchaSolver.model;
           };
           # Xvfb for the headful browser; camoufox-js finds it with `which`.
           path = [
@@ -194,6 +202,6 @@ in
 
     systemd.tmpfiles.rules = lib.mapAttrsToList (
       user: _: "d ${hlib.camofoxDir user} 0700 ${user} users - -"
-    ) cfg.users;
+    ) cfg.agents;
   };
 }

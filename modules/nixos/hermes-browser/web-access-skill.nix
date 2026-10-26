@@ -10,7 +10,7 @@
 #
 # Host-scoped: it names tools only this module sets up, so it is its own
 # skills root (a second entry in skills.external_dirs), not part of the
-# spaces bundle. Its name must stay unique across every root, hermes'
+# host's other skill roots. Its name must stay unique across every root, hermes'
 # bundled skills included, or skill_view refuses both copies as
 # ambiguous.
 {
@@ -21,9 +21,9 @@
   ...
 }:
 let
-  cfg = config.services.hermes-native;
+  cfg = config.services.hyperhermes;
 
-  skill = inputs.spaces.lib.mkAgentSkill pkgs {
+  skill = inputs.hyperhermes.lib.mkAgentSkill pkgs {
     name = "web-access";
     src = lib.fileset.toSource {
       root = ./web-access-skill;
@@ -32,7 +32,7 @@ let
   };
 in
 {
-  config = lib.mkIf cfg.enable {
-    services.hermes-native.settings.skills.external_dirs = [ "${skill}/share/skills" ];
+  config = lib.mkIf cfg.browser.enable {
+    services.hyperhermes.skillDirs = [ "${skill}/share/skills" ];
   };
 }

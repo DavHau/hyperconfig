@@ -21,7 +21,8 @@ let
   port = 8473;
   containerAddress = "10.233.1.2";
   secrets = "/var/lib/local-sso-secrets";
-  dashboardPort = 9119;
+  # alice's root-held dashboard port (core's forward to her backend).
+  dashboardPort = self.lib.dashboardPortFor "alice";
   python = pkgs.python3.withPackages (ps: [
     ps.bcrypt
     ps.requests
@@ -57,7 +58,7 @@ pkgs.testers.runNixOSTest {
       hostAddress = "10.233.1.1";
       localAddress = containerAddress;
       config =
-        { config, ... }:
+        { config, lib, ... }:
         {
           imports = [ self.nixosModules.default ];
           system.stateVersion = "26.05";
@@ -68,7 +69,21 @@ pkgs.testers.runNixOSTest {
           ];
 
           services.hyperhermes = {
-            agents.alice.uid = 1001;
+            package = hermesPackage;
+            pythonPackages = _: [ ];
+            # alice's agent on core's units, with hermes' OIDC gate on as
+            # upstream documents it (env); the dashboards feature will
+            # derive these.
+            agents.alice = {
+              uid = 1001;
+              environment = {
+                HERMES_DASHBOARD_PUBLIC_URL = config.services.hyperhermes.exposure.urlOf "alice.${domain}";
+                HERMES_DASHBOARD_OIDC_ISSUER = config.services.hyperhermes.sso.issuer;
+                HERMES_DASHBOARD_OIDC_CLIENT_ID = "hermes-alice";
+                HERMES_DASHBOARD_OIDC_SCOPES = "openid profile email groups offline_access";
+              };
+              secretEnv.HERMES_DASHBOARD_OIDC_CLIENT_SECRET = "${secrets}/hermes-alice";
+            };
             exposure = {
               enable = true;
               listenAddresses = [
@@ -89,11 +104,11 @@ pkgs.testers.runNixOSTest {
             wantedBy = [ "multi-user.target" ];
             before = [
               "dex.service"
-              "hermes-dashboard-alice.service"
+              "hermes-agent-alice.service"
             ];
             requiredBy = [
               "dex.service"
-              "hermes-dashboard-alice.service"
+              "hermes-agent-alice.service"
             ];
             serviceConfig = {
               Type = "oneshot";
@@ -107,33 +122,16 @@ pkgs.testers.runNixOSTest {
             '';
           };
 
-          # alice's dashboard with hermes' OIDC gate on, as upstream
-          # documents it (env), and its virtual host. The real units are
-          # core's and the dashboards feature's.
-          systemd.services.hermes-dashboard-alice = {
-            wantedBy = [ "multi-user.target" ];
-            after = [
-              "dex.service"
-              "nginx.service"
-            ];
-            environment = {
-              HOME = "/home/alice";
-              HERMES_DASHBOARD_PUBLIC_URL = config.services.hyperhermes.exposure.urlOf "alice.${domain}";
-              HERMES_DASHBOARD_OIDC_ISSUER = config.services.hyperhermes.sso.issuer;
-              HERMES_DASHBOARD_OIDC_CLIENT_ID = "hermes-alice";
-              HERMES_DASHBOARD_OIDC_SCOPES = "openid profile email groups offline_access";
-            };
-            script = ''
-              HERMES_DASHBOARD_OIDC_CLIENT_SECRET=$(cat "$CREDENTIALS_DIRECTORY/client-secret")
-              export HERMES_DASHBOARD_OIDC_CLIENT_SECRET
-              exec ${hermesPackage}/bin/hermes dashboard --no-open --host 127.0.0.1 --port ${toString dashboardPort}
-            '';
-            serviceConfig = {
-              User = "alice";
-              LoadCredential = "client-secret:${secrets}/hermes-alice";
-              Restart = "on-failure";
-            };
-          };
+          systemd.services.hermes-dashboard-alice.after = [
+            "dex.service"
+            "nginx.service"
+          ];
+          # alice's virtual host, on her root-held dashboard port, which
+          # core's firewall opens to her and root only; nginx gets its own
+          # exception, as the dashboards feature will add.
+          systemd.services.hermes-firewall.script = lib.mkAfter ''
+            iptables -w -I ${self.lib.chain} 1 -p tcp --dport ${toString dashboardPort} -m owner --uid-owner nginx -j RETURN
+          '';
           services.nginx.virtualHosts.local-sso-dashboard-alice = {
             serverName = "alice.${domain}";
             listen = config.services.hyperhermes.exposure.nginxListen;
@@ -185,7 +183,8 @@ pkgs.testers.runNixOSTest {
             "HERMES_DASHBOARD_PUBLIC_URL=http://bob.${domain}:${toString port} "
             "HERMES_DASHBOARD_OIDC_ISSUER=http://id.${domain}:${toString port} "
             "HERMES_DASHBOARD_OIDC_CLIENT_ID=hermes-bob "
-            "hermes dashboard --no-open --host 127.0.0.1 --port 9200 2>&1",
+            # The package itself: `hermes` on PATH is core's per-agent shim.
+            "${hermesPackage}/bin/hermes dashboard --no-open --host 127.0.0.1 --port 9200 2>&1",
             timeout=120,
         )
         print(out)

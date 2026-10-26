@@ -1,6 +1,7 @@
 # Python libraries in every agent's writable venv, as a `python.withPackages`
-# argument. ./python-venv.nix builds the venv on som; ../hermes-agents-gpu-host.nix
-# builds the same set against CUDA on the GPU host.
+# argument: the default of services.hyperhermes.pythonPackages, exported as
+# `hyperhermes.lib.pythonPackages` so a GPU host can build the same set
+# against CUDA.
 ps: with ps; [
   numpy
   scipy

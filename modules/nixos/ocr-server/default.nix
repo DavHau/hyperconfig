@@ -3,7 +3,7 @@
 # English documents, Apache-2.0) on llama-server, behind ./parse.py, a
 # Firecrawl-Parse-compatible endpoint (POST /v2/parse). hermes' read_file
 # sends scanned PDFs there (file_tools.hosted_ocr_url, see
-# ../hermes-native/ocr.nix); the agents' `ocr` CLI uses it for images and
+# ../hermes-browser/ocr.nix); the agents' `ocr` CLI uses it for images and
 # page ranges. Why this model: the best open Thai OCR by a wide margin
 # (median page CER 0.21% on printed Thai vs 6.64% for PaddleOCR-VL-1.6,
 # arXiv:2609.03595 Table 7), 2B so it fits beside CaptchaKraken, and

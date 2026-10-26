@@ -1,37 +1,36 @@
-# The agent units and the `hermes` shim. Per user, the gateway and the web
-# dashboard run on the host as the owner, with no systemd sandboxing.
+# The agent units and the `hermes` shim. Per agent, the gateway and the
+# web dashboard run on the host as the owner, with no systemd sandboxing.
+{ hermes-agent }:
 {
   config,
   lib,
   pkgs,
-  inputs,
   ...
 }:
 let
-  cfg = config.services.hermes-native;
-  hlib = import ./lib.nix { inherit lib; };
+  cfg = config.services.hyperhermes;
+  hlib = import ../../lib/core.nix { inherit lib; };
   ac = import ./agent-config.nix {
     inherit
       lib
       pkgs
-      inputs
       hlib
       cfg
       ;
   };
-  pythonVenv = import ./python-venv.nix { inherit lib pkgs; };
+  pythonVenv = import ../../lib/python-venv.nix { inherit lib pkgs; };
 
   # Upstream's deep merge: Nix keys win, keys the user added through the
   # dashboard survive.
-  configMergeScript = pkgs.callPackage "${inputs.hermes-agent}/nix/configMergeScript.nix" { };
+  configMergeScript = pkgs.callPackage "${hermes-agent}/nix/configMergeScript.nix" { };
 
   settingsFor =
-    user:
+    user: ucfg:
     pkgs.writeText "hermes-settings-${user}.json" (
       builtins.toJSON (
         lib.recursiveUpdate {
           terminal.cwd = hlib.workspace user;
-        } ac.settings
+        } (ac.settingsFor ucfg)
       )
     );
 
@@ -42,7 +41,7 @@ let
     cfg.environment
     // ucfg.environment
     // {
-      HERMES_SANDBOX = (ac.runtime user config.users.users.${user}.home).env.HERMES_SANDBOX;
+      HERMES_SANDBOX = (ac.runtime user config.users.users.${user}.home ucfg).env.HERMES_SANDBOX;
     };
 
   # Hermes' managed scope (hermes_cli/managed_scope.py) for one agent:
@@ -66,7 +65,7 @@ let
       ''
         mkdir $out
         # JSON is YAML, so the settings file is the managed config.yaml.
-        cp ${settingsFor user} $out/config.yaml
+        cp ${settingsFor user ucfg} $out/config.yaml
         cp "$envTextPath" $out/.env
       '';
   envBlockFor =
@@ -105,7 +104,13 @@ let
   # hermes takes a skill in its manifest but missing on disk as deleted
   # by the user and would not install it again.
   pruneMovedBundledSkills = pkgs.writeShellScript "hermes-prune-moved-bundled-skills" ''
-    PATH=${lib.makeBinPath [ pkgs.coreutils pkgs.findutils pkgs.gnugrep ]}
+    PATH=${
+      lib.makeBinPath [
+        pkgs.coreutils
+        pkgs.findutils
+        pkgs.gnugrep
+      ]
+    }
     bundled=$1
     skills=$2
     manifest=$skills/.bundled_manifest
@@ -142,7 +147,7 @@ let
     user: ucfg:
     let
       home = config.users.users.${user}.home;
-      rt = ac.runtime user home;
+      rt = ac.runtime user home ucfg;
       inherit (rt) stateDir;
       hermesHome = "${stateDir}/.hermes";
       workspace = hlib.workspace user;
@@ -151,7 +156,7 @@ let
         inherit user stateDir;
         group = "users";
         python = pkgs.python3;
-        packages = import ./python-packages.nix;
+        packages = cfg.pythonPackages;
       };
       # HERMES_MANAGED in .env would lock the whole install, and
       # HERMES_MANAGED_DIR would move the managed scope away from the Nix
@@ -166,10 +171,10 @@ let
         stateDir
         home
       ];
-      # The user's private /tmp, as in their own sessions (../per-user-tmp).
+      # The user's private /tmp, as in their own sessions (perUserTmp).
       # No "-": with per-user tmp on, a missing instance must stop the unit,
       # not quietly put it on the shared /tmp.
-      userTmpBinds = lib.optionals (config.hyper.perUserTmp.enable or false) [
+      userTmpBinds = lib.optionals cfg.perUserTmp [
         "/tmp/.inst/${user}:/tmp"
         "/var/tmp/.inst/${user}:/var/tmp"
       ];
@@ -181,7 +186,7 @@ let
           ${hermesHome}/memories ${hermesHome}/plugins ${workspace}
         # The managed scope pins these keys and wins over this file. The
         # merge keeps them in the file the dashboard's raw editor shows.
-        ${configMergeScript} ${settingsFor user} ${hermesHome}/config.yaml
+        ${configMergeScript} ${settingsFor user ucfg} ${hermesHome}/config.yaml
         # The same keys as the managed .env. Hermes loads that file after
         # this one, so the managed values win; this copy lets the
         # dashboard list them. Strip, then append, like the credential
@@ -285,8 +290,8 @@ let
         # Web dashboard, a separate process upstream; it shares state
         # through HERMES_HOME. It binds its backend on loopback; the
         # root-held port (forwards.nix) bridges to it. Whether it asks for
-        # a login is the managed environment's business
-        # (../hermes-dashboard-public.nix turns hermes' OIDC gate on).
+        # a login is the managed environment's business (a public
+        # deployment turns hermes' OIDC gate on through it).
         "hermes-dashboard-${user}" = {
           description = "Hermes Agent web dashboard for ${user}";
           wantedBy = [ "multi-user.target" ];
@@ -312,13 +317,19 @@ let
           # hermes reads keys from (hermes_cli/env_loader.py): .env, and
           # .op.env, the 1Password bootstrap it loads after .env without
           # override, so a key missing from .env would come from there.
-          preStart = lib.concatMapStrings (file: ''
-            ${dropEnvKeys} ${hermesHome}/${file} ${
-              lib.escapeShellArg (
-                lib.concatMapStringsSep "|" (k: "(?:${k})") ([ "HERMES_MANAGED(_DIR)?" ] ++ ucfg.dashboardDropEnv)
-              )
-            }
-          '') [ ".env" ".op.env" ];
+          preStart =
+            lib.concatMapStrings
+              (file: ''
+                ${dropEnvKeys} ${hermesHome}/${file} ${
+                  lib.escapeShellArg (
+                    lib.concatMapStringsSep "|" (k: "(?:${k})") ([ "HERMES_MANAGED(_DIR)?" ] ++ ucfg.dashboardDropEnv)
+                  )
+                }
+              '')
+              [
+                ".env"
+                ".op.env"
+              ];
           script = ''
             exec ${withSession} ${ac.hermesPackage}/bin/hermes dashboard \
               --no-open --host 127.0.0.1 \
@@ -336,12 +347,12 @@ let
         };
       };
     };
-  users = lib.mapAttrs perUser cfg.users;
+  users = lib.mapAttrs perUser cfg.agents;
   # Static top-level option keys only. A config-dependent mkMerge list at
-  # the config root would make option-key resolution depend on cfg.users,
+  # the config root would make option-key resolution depend on cfg.agents,
   # and that is infinite recursion.
-  forEachUser = f: lib.mkMerge (lib.mapAttrsToList (user: _: f users.${user}) cfg.users);
-  anyUser = cfg.users != { };
+  forEachUser = f: lib.mkMerge (lib.mapAttrsToList (user: _: f users.${user}) cfg.agents);
+  anyUser = cfg.agents != { };
 
   hermesShim = pkgs.writeShellScriptBin "hermes" ''
     u="$(${pkgs.coreutils}/bin/id -un)"
@@ -360,19 +371,17 @@ let
   '';
 in
 {
-  config = lib.mkIf cfg.enable {
+  config = lib.mkIf anyUser {
     systemd.services = forEachUser (u: u.services);
     systemd.tmpfiles.rules = [
       "d ${hlib.stateRoot} 0755 root root - -"
     ]
     ++ lib.concatMap (u: u.tmpfiles) (lib.attrValues users);
     environment.systemPackages = [ hermesShim ];
-    environment.extraInit = lib.mkIf anyUser (
-      lib.concatMapStrings (u: u.loginInit) (lib.attrValues users)
-    );
+    environment.extraInit = lib.concatMapStrings (u: u.loginInit) (lib.attrValues users);
     # The venv's manylinux wheels dlopen host libraries; nix-ld serves the
     # standalone executables pip installs.
-    programs.nix-ld.enable = lib.mkIf anyUser true;
-    programs.nix-ld.libraries = lib.mkIf anyUser pythonVenv.nixLdLibraries;
+    programs.nix-ld.enable = true;
+    programs.nix-ld.libraries = pythonVenv.nixLdLibraries;
   };
 }

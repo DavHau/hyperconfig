@@ -7,16 +7,16 @@
   ...
 }:
 let
-  cfg = config.services.hermes-native;
+  cfg = config.services.hyperhermes;
   port = 8890;
   envFile = "/var/lib/hermes-searxng/env";
 in
 {
-  config = lib.mkIf cfg.enable {
+  config = lib.mkIf cfg.browser.enable {
     assertions = [
       {
         assertion = !(config.services.spaces-searxng.enable or false);
-        message = "services.hermes-native and spaces' services.spaces-searxng both run services.searx; set services.spaces-searxng.enable = false.";
+        message = "services.hyperhermes.browser and spaces' services.spaces-searxng both run services.searx; set services.spaces-searxng.enable = false.";
       }
     ];
 
@@ -92,7 +92,7 @@ in
     };
 
     # Env and settings stay operator-overridable.
-    services.hermes-native = {
+    services.hyperhermes = {
       environment.SEARXNG_URL = lib.mkDefault "http://127.0.0.1:${toString port}";
       settings.web.search_backend = lib.mkDefault "searxng";
     };

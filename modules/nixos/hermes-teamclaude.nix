@@ -1,7 +1,6 @@
 # Route a native hermes agent's Anthropic provider through the TeamClaude
 # gateway on the same host (./teamclaude-gateway) instead of a Claude login
-# of its own: `hyper.hermes.users.<name>.teamclaude = true` (for
-# hyper.hermesAgents entries: `hermes.teamclaude = true`).
+# of its own: `services.hyperhermes.agents.<name>.teamclaude = true`.
 #
 # Per agent this derives:
 #   - a dedicated gateway client key, the per-machine clan var
@@ -32,22 +31,30 @@
   ...
 }:
 let
-  users = lib.filterAttrs (_: u: u.teamclaude) config.hyper.hermes.users;
+  users = lib.filterAttrs (_: a: a.teamclaude) config.services.hyperhermes.agents;
   generatorFor = name: "teamclaude-hermes-${name}";
+  outer = config;
 in
 {
-  options.hyper.hermes.users = lib.mkOption {
+  options.services.hyperhermes.agents = lib.mkOption {
     type = lib.types.attrsOf (
-      lib.types.submodule {
-        options.teamclaude = lib.mkEnableOption "the TeamClaude gateway on this host as the agent's Anthropic endpoint and credential";
-      }
+      lib.types.submodule (
+        { name, config, ... }:
+        {
+          options.teamclaude = lib.mkEnableOption "the TeamClaude gateway on this host as the agent's Anthropic endpoint and credential";
+          config = lib.mkIf config.teamclaude {
+            environment.ANTHROPIC_BASE_URL = "https://teamclaude.davhau.com";
+            secretEnv.ANTHROPIC_TOKEN = outer.clan.core.vars.generators.${generatorFor name}.files.key.path;
+          };
+        }
+      )
     );
   };
 
   config = lib.mkIf (users != { }) {
-    assertions = lib.mapAttrsToList (name: u: {
-      assertion = u.native && config.services.teamclaude.enable or false;
-      message = "hyper.hermes.users.${name}.teamclaude needs a native agent on the TeamClaude gateway host (./teamclaude-gateway).";
+    assertions = lib.mapAttrsToList (name: _: {
+      assertion = config.services.teamclaude.enable or false;
+      message = "services.hyperhermes.agents.${name}.teamclaude needs the TeamClaude gateway on this host (./teamclaude-gateway).";
     }) users;
 
     clan.core.vars.generators = lib.mapAttrs' (
@@ -63,10 +70,5 @@ in
     ) users;
 
     hyper.teamclaudeGateway.clientKeys = lib.mapAttrs (name: _: generatorFor name) users;
-
-    services.hermes-native.users = lib.mapAttrs (name: _: {
-      environment.ANTHROPIC_BASE_URL = "https://teamclaude.davhau.com";
-      secretEnv.ANTHROPIC_TOKEN = config.clan.core.vars.generators.${generatorFor name}.files.key.path;
-    }) users;
   };
 }

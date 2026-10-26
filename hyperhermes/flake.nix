@@ -34,7 +34,7 @@
       # One module per feature; `default` imports all of them, each off
       # until enabled.
       nixosModules = {
-        core = ./modules/core.nix;
+        core = import ./modules/core { inherit hermes-agent; };
         exposure = ./modules/exposure.nix;
         sso = ./modules/sso.nix;
         default = {
@@ -44,16 +44,39 @@
             self.nixosModules.sso
           ];
         };
+        # Not a feature, so not in `default`: fills core's secret paths
+        # from clan vars when the importing system is a clan machine.
+        clan = ./modules/clan.nix;
       };
 
-      lib = {
+      packages.${system}.tcp-owner-bridge = import ./pkgs/tcp-owner-bridge { inherit pkgs; };
+
+      # For consumers that must name an agent's paths, ports or units
+      # without evaluating the host that runs it (lib/core.nix: stateDir,
+      # workspace, agentUnits, chain, dashboardPortFor, ...), plus:
+      #   mkAgentSkill pkgs { name; src; packages; }  one skill package,
+      #   pythonVenv pkgs   the agents' writable venv unit factory, and
+      #   pythonPackages    its default library set, for a host the agents
+      #                     ssh into (e.g. built against CUDA there).
+      lib = import ./lib/core.nix { inherit lib; } // {
         mkAgentSkill = import ./lib/agent-skill.nix;
         sso = import ./lib/sso.nix { inherit lib; };
+        pythonVenv =
+          pkgs:
+          import ./lib/python-venv.nix {
+            inherit (pkgs) lib;
+            inherit pkgs;
+          };
+        pythonPackages = import ./lib/python-packages.nix;
       };
 
-      checks.${system}.local-sso = import ./checks/local-sso {
-        inherit pkgs self;
-        hermesPackage = hermes-agent.packages.${system}.minimal;
+      checks.${system} = {
+        core = import ./checks/core { inherit pkgs self; };
+
+        local-sso = import ./checks/local-sso {
+          inherit pkgs self;
+          hermesPackage = hermes-agent.packages.${system}.minimal;
+        };
       };
     };
 }

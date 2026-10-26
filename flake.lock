@@ -513,6 +513,7 @@
     "flake-parts_3": {
       "inputs": {
         "nixpkgs-lib": [
+          "hyperhermes",
           "hermes-agent",
           "nixpkgs"
         ]
@@ -834,9 +835,10 @@
       "inputs": {
         "flake-parts": "flake-parts_3",
         "home-manager": [
-          "home-manager"
+          "hyperhermes"
         ],
         "nixpkgs": [
+          "hyperhermes",
           "nixpkgs"
         ],
         "npm-lockfile-fix": "npm-lockfile-fix",
@@ -930,6 +932,26 @@
         "repo": "home-manager",
         "type": "github"
       }
+    },
+    "hyperhermes": {
+      "inputs": {
+        "hermes-agent": "hermes-agent",
+        "llm-agents": [
+          "llm-agents"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "path": "./hyperhermes",
+        "type": "path"
+      },
+      "original": {
+        "path": "./hyperhermes",
+        "type": "path"
+      },
+      "parent": []
     },
     "hyprspace": {
       "inputs": {
@@ -1591,6 +1613,7 @@
     "npm-lockfile-fix": {
       "inputs": {
         "nixpkgs": [
+          "hyperhermes",
           "hermes-agent",
           "nixpkgs"
         ]
@@ -1702,14 +1725,17 @@
     "pyproject-build-systems": {
       "inputs": {
         "nixpkgs": [
+          "hyperhermes",
           "hermes-agent",
           "nixpkgs"
         ],
         "pyproject-nix": [
+          "hyperhermes",
           "hermes-agent",
           "pyproject-nix"
         ],
         "uv2nix": [
+          "hyperhermes",
           "hermes-agent",
           "uv2nix"
         ]
@@ -1763,6 +1789,7 @@
     "pyproject-nix": {
       "inputs": {
         "nixpkgs": [
+          "hyperhermes",
           "hermes-agent",
           "nixpkgs"
         ]
@@ -1831,8 +1858,8 @@
         "fast-nix-gc": "fast-nix-gc",
         "flake-compat": "flake-compat",
         "flake-parts": "flake-parts_2",
-        "hermes-agent": "hermes-agent",
         "home-manager": "home-manager",
+        "hyperhermes": "hyperhermes",
         "hyprspace": "hyprspace",
         "llm-agents": "llm-agents",
         "ncps": "ncps",
@@ -2423,10 +2450,12 @@
     "uv2nix": {
       "inputs": {
         "nixpkgs": [
+          "hyperhermes",
           "hermes-agent",
           "nixpkgs"
         ],
         "pyproject-nix": [
+          "hyperhermes",
           "hermes-agent",
           "pyproject-nix"
         ]

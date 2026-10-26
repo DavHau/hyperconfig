@@ -1,6 +1,6 @@
 # One writable, pip-capable python venv over a nixpkgs interpreter, as a
-# unit factory. agents.nix calls `mkUnit` once per agent;
-# ../hermes-agents-gpu-host.nix reuses it on the GPU host.
+# unit factory. The core module calls `mkUnit` once per agent; a host the
+# agents ssh into (a GPU box) reuses it through `hyperhermes.lib.pythonVenv`.
 #
 # Manylinux wheels work two ways. nix-ld loads standalone executables.
 # LD_LIBRARY_PATH finds the extension modules. The nix-built interpreter

@@ -9,7 +9,7 @@
 # <agent>@hermes.davhau.com (som's public name). The SSH connection kind
 # needs no token: the app runs `hermes serve --isolated` as the agent over
 # ssh, tunnels the ephemeral port and adopts the token the remote mints. On
-# som the command lands in the `hermes` shim of ../hermes-native, which
+# som the command lands in the `hermes` shim of hyperhermes' core, which
 # exports the account's real HERMES_HOME, so it serves the same state the
 # gateway and dashboard use. The managed dashboard.public_url does not gate
 # it: hermes exempts the loopback backend the desktop spawns
@@ -60,9 +60,10 @@ let
   users = [ "dave" ] ++ lib.optional (config.users.users ? grmpf) "grmpf";
 
   # Electron app: our nixpkgs electron plus upstream's renderer, assembled
-  # by spaces' desktop-package.nix against this flake's hermes-agent.
+  # by spaces' desktop-package.nix against hyperhermes' hermes-agent, the
+  # one som's agents run.
   desktopPackage = import (inputs.spaces + /modules/nixos/hermes/desktop-package.nix) {
-    inputs = { inherit (inputs) hermes-agent; };
+    inputs = { inherit (inputs.hyperhermes.inputs) hermes-agent; };
     inherit pkgs;
   };
   icon = "${desktopPackage}/share/hermes-desktop/dist/hermes.png";
