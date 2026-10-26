@@ -3,7 +3,7 @@
 # all of services.hyperhermes.agents): a runtime patch
 # of hermes-agent's anthropic adapter that makes OAuth (Claude Pro/Max
 # subscription) requests pass Anthropic's Claude-Code billing validator.
-# Vendored copy + provenance in ./hermes-claude-auth/.
+# Vendored copy + provenance beside this file.
 #
 # Why not upstream's install.sh: it copies a `.pth` + bootstrap module into
 # the hermes venv's site-packages and the patch into $HERMES_HOME/patches.
@@ -14,7 +14,7 @@
 # a .pth there would be inert. Instead everything ships as one store
 # directory and the hermes wrapper family gets PYTHONPATH pointed at it:
 # site.py imports `sitecustomize` from sys.path and PYTHONPATH precedes the
-# stdlib, so the loader in ./hermes-claude-auth/sitecustomize.py runs at
+# stdlib, so the loader in ./sitecustomize.py runs at
 # interpreter start exactly where upstream's .pth would (see that file for
 # the interpreter gate). The patch module sits in the same directory, so
 # the bootstrap's `import anthropic_billing_bypass` resolves without
@@ -70,9 +70,9 @@ let
 
   site = pkgs.runCommand "hermes-claude-auth-site" { } ''
     mkdir -p $out
-    cp ${./hermes-claude-auth/sitecustomize.py} $out/sitecustomize.py
-    cp ${./hermes-claude-auth/_hermes_claude_auth_bootstrap.py} $out/_hermes_claude_auth_bootstrap.py
-    cp ${./hermes-claude-auth/anthropic_billing_bypass.py} $out/anthropic_billing_bypass.py
+    cp ${./sitecustomize.py} $out/sitecustomize.py
+    cp ${./_hermes_claude_auth_bootstrap.py} $out/_hermes_claude_auth_bootstrap.py
+    cp ${./anthropic_billing_bypass.py} $out/anthropic_billing_bypass.py
   '';
 
   # The same PYTHONPATH ahead of core's shim. The shim keeps the caller's
@@ -87,6 +87,10 @@ let
   forEachAgent = f: lib.mkMerge (lib.mapAttrsToList f agents);
 in
 {
+  # Imported with its argument applied (../../flake.nix), so it names
+  # its own file for error messages.
+  _file = ./default.nix;
+
   options.services.hyperhermes.claudeAuth = {
     enable = lib.mkEnableOption "the hermes-claude-auth patch (Claude Pro/Max OAuth through Anthropic's Claude Code billing validator) for every agent";
     claudeCodePackage = lib.mkOption {

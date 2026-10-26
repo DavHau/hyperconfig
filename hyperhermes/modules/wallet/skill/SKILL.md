@@ -6,8 +6,9 @@ description: Send and receive bitcoin over Lightning (invoices, Lightning addres
 # Shared Lightning wallet
 
 You have full access to one Bitcoin/Lightning wallet (a phoenixd node on
-this host). It is **shared by every agent here**: all agents spend from the
-same balance, and everything you see in the history may be another agent's.
+this host). It is **shared by every agent with wallet access**: all of them
+spend from the same balance, and everything you see in the history may be
+another agent's.
 The float is small; treat it as real money.
 
 Use the `lnwallet` command. Every subcommand prints JSON. Amounts are in

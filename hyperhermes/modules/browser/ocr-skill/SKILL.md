@@ -1,13 +1,13 @@
 ---
 name: ocr
-description: Read text from scanned PDFs, photos and screenshots of documents (English and Thai) with the `ocr` CLI on this fleet's own GPU. Use when read_file reports NEEDS OCR or a PDF coverage note says pages have no text layer, or when a document arrives as an image.
+description: Read text from scanned PDFs, photos and screenshots of documents (English and Thai) with the `ocr` CLI, which runs on the deployment's own OCR model. Use when read_file reports NEEDS OCR or a PDF coverage note says pages have no text layer, or when a document arrives as an image.
 ---
 
 # OCR on this host
 
-Documents stay on our own machines: `ocr` sends them to the OCR model on
-vit (Typhoon OCR, trained for Thai and English documents), never to a
-third-party service. Use it for private papers (medical, financial, IDs)
+Documents stay on the deployment's own machines: `ocr` sends them to its
+OCR endpoint (Typhoon OCR, trained for Thai and English documents), never
+to a third-party service. Use it for private papers (medical, financial, IDs)
 instead of uploading them anywhere or describing them with vision.
 
 - `read_file` on a PDF that is entirely scanned already runs this OCR

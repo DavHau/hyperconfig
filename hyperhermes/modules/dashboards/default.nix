@@ -58,7 +58,8 @@
 # native-app flow is different: hermes accepts any http://127.0.0.1:<port>
 # redirect for it, so a program on the user's device listening there could
 # start a login in the browser and collect it silently. nginx therefore
-# adds prompt=login to the issuer redirect /auth/native/authorize answers
+# adds prompt=login to the issuer redirect (to sso.authorizationEndpoint)
+# /auth/native/authorize answers
 # with, and the issuer asks again on every app sign-in. The broker state
 # rides in a `__Host-` cookie of that same browser response, so taking the
 # redirect without the prompt and replaying it elsewhere breaks the
@@ -503,7 +504,7 @@ in
                   # The app's sign-in always asks again (the header).
                   locations."= /auth/native/authorize" = signIn // {
                     extraConfig = signIn.extraConfig + ''
-                      proxy_redirect "~^(${lib.escapeRegex sso.issuer}/authorize\?.*)$" "$1&prompt=login";
+                      proxy_redirect "~^(${lib.escapeRegex sso.authorizationEndpoint}\?.*)$" "$1&prompt=login";
                     '';
                   };
                 }

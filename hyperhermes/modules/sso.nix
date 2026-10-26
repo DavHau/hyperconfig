@@ -154,6 +154,18 @@ in
       '';
     };
 
+    authorizationEndpoint = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = if cfg.issuer == null then null else "${cfg.issuer}/authorize";
+      defaultText = lib.literalExpression ''"''${issuer}/authorize"'';
+      description = ''
+        The issuer's authorization endpoint (authorization_endpoint in its
+        discovery document), where the dashboards' app sign-in asks for a
+        fresh login (prompt=login). The default is pocket-id's; local mode
+        sets its dex's (`''${issuer}/auth`).
+      '';
+    };
+
     frontDoor = {
       host = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
@@ -374,6 +386,7 @@ in
 
     (lib.mkIf (cfg.enable && local) {
       services.hyperhermes.sso.issuer = lib.mkDefault (exposure.urlOf issuerHost);
+      services.hyperhermes.sso.authorizationEndpoint = lib.mkDefault "${cfg.issuer}/auth";
 
       services.dex = {
         enable = true;

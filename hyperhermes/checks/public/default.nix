@@ -13,12 +13,16 @@
 #   domain), and 80 -> 443,
 # - alice signs in to her dashboard (hermes' OIDC login against the
 #   issuer), at the front door, which sends her to her dashboard, and on
-#   her private published port (its own login, a __Host- cookie),
+#   her private published port (its own login, a __Host- cookie); the
+#   app's sign-in (/auth/native/*) asks the issuer again (prompt=login at
+#   sso.authorizationEndpoint) and ends in bearer tokens,
 # - bob, whom the issuer signs in to every client (dex has no per-client
-#   groups), is refused at alice's dashboard, gets the front door's 403
-#   and the 403 of alice's private port; her public port needs no login,
-# - the legacy names answer 301 (dashboards and ports); the slot's name
-#   on a port host's connection answers 421,
+#   groups), is refused at alice's dashboard (browser and app), gets the
+#   front door's 403 and the 403 of alice's private port; her public port
+#   needs no login,
+# - the legacy names answer 301 (dashboards and ports, 80 and 443) and 404
+#   under /.well-known/acme-challenge/; the slot's name on a port host's
+#   connection answers 421,
 # - dnsRecords lists what the zone must hold.
 {
   pkgs,
@@ -135,6 +139,8 @@ pkgs.testers.runNixOSTest (
             sso = {
               enable = true;
               inherit issuer;
+              # dex's, not the pocket-id default.
+              authorizationEndpoint = "${issuer}/auth";
               accounts.alice = "alice";
               frontDoor = {
                 host = frontDoor;
@@ -307,6 +313,16 @@ pkgs.testers.runNixOSTest (
               "bob@example.test bob-password hermes-alice"
           ))
 
+      with subtest("the app's sign-in asks the issuer again; bob gets no code"):
+          print(client.succeed(
+              "${withRoot} ${python}/bin/python3 ${../local-sso/login.py} --native https://alice.${domain} "
+              "alice@example.test alice-password hermes-alice,hermes"
+          ))
+          print(client.succeed(
+              "${withRoot} ${python}/bin/python3 ${../local-sso/login.py} --native --refused https://alice.${domain} "
+              "bob@example.test bob-password hermes-alice"
+          ))
+
       with subtest("front door"):
           client.wait_until_succeeds("curl -s --cacert ${pebbleRoot} -o /dev/null -w '%{http_code}' https://${frontDoor}/ | grep -E '^30[27]$'", timeout=120)
           print(client.succeed(
@@ -321,6 +337,17 @@ pkgs.testers.runNixOSTest (
               "curl -s --cacert ${pebbleRoot} -o /dev/null -w '%{http_code} %{redirect_url}' https://alice.${legacyDomain}/a?b "
               "| grep -x '301 https://alice.${domain}/a?b'"
           )
+          # Port 80 the same; no ACME challenge answer an agent could
+          # steer by the redirect (the dashboards module's header).
+          client.succeed(
+              "curl -s -o /dev/null -w '%{http_code} %{redirect_url}' 'http://alice.${legacyDomain}/a?b' "
+              "| grep -x '301 https://alice.${domain}/a?b'"
+          )
+          for scheme in ("http", "https"):
+              client.succeed(
+                  f"curl -s --cacert ${pebbleRoot} -o /dev/null -w '%{{http_code}}' {scheme}://alice.${legacyDomain}/.well-known/acme-challenge/x "
+                  "| grep -x 404"
+              )
 
       with subtest("published ports: alice's private one after her login, bob refused, the public one open"):
           client.wait_until_succeeds("curl -s --cacert ${pebbleRoot} -o /dev/null -w '%{http_code}' https://${portHost alicePrivate}/ | grep -x 302", timeout=120)

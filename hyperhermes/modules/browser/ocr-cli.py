@@ -1,6 +1,6 @@
 """ocr FILE [--pages 2-4,7] [-o OUT.md]: Markdown of a scanned PDF or a
-document image, from this fleet's own OCR model (../ocr-server on vit).
-Nothing goes to a third party. The endpoint comes from OCR_URL."""
+document image, from the deployment's own OCR endpoint (OCR_URL).
+Nothing goes to a third party."""
 
 import argparse
 import json
