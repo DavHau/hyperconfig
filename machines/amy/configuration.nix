@@ -12,6 +12,9 @@
     ../../modules/nixos/dave.nix
     ../../modules/nixos/laptop.nix
     ../../modules/nixos/user-grmpf.nix
+    # Live LLM ghost-text suggestions in grmpf's fish (amy's desktop account).
+    ../../modules/nixos/fish-llm-suggest.nix
+    { hyper.fishLlmSuggest.users = [ "grmpf" ]; }
     ../../modules/nixos/amdgpu.nix
     ../../modules/nixos/llama-swap.nix
     ../../modules/nixos/llama-swap-maple.nix
