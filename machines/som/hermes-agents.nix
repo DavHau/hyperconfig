@@ -8,6 +8,7 @@
 #
 # Site shape on top of hyperhermes, per agent:
 #   - reader on /vault/parquet (`vault-ro`, ../../modules/nixos/vault-ids.nix),
+#     unless its data entry says `vault = false`,
 #   - its own ssh key (clan var hermes-agent-ssh-<agent>,
 #     hyperhermes.nixosModules.clan) for vit, the GPU host, where it has an
 #     account of the same uid (../../modules/nixos/hermes-agents-gpu-host.nix)
@@ -29,6 +30,8 @@
 }:
 let
   data = import ./hermes-agents-data.nix;
+  # Agents in vault-ro: all but those marked `vault = false`.
+  vaultReaders = lib.filterAttrs (_: a: a.vault or true) data;
   dashboards = import ./hermes-dashboards.nix;
   # The clan sshd instance fills root's list; accounts without keys of their
   # own reuse it.
@@ -95,7 +98,7 @@ in
   services.hyperhermes.wallet.enable = true;
 
   services.hyperhermes.agents = lib.mkMerge [
-    data
+    (lib.mapAttrs (_: a: { inherit (a) uid; }) data)
     (lib.mapAttrs (_: _: { wallet.enable = true; }) data)
     {
       # Account and description from users/stefan-vault.nix.
@@ -198,6 +201,13 @@ in
         sshKeys = adminKeys ++ [ desktopKey ];
       };
 
+      # thaigersprint: no vault access (./hermes-agents-data.nix); logs in
+      # with the admin keys, dave signs in to its dashboard.
+      thaigersprint = {
+        description = "thaigersprint - hermes agent, no vault access";
+        sshKeys = adminKeys;
+      };
+
       # momentum: OpenRouter brain, and a Telegram bot in ONE group chat where
       # several allow-listed people prompt it (connected on its dashboard).
       # Identity (uid 1100, vault-ro) in ../../modules/nixos/vault-ids.nix;
@@ -214,7 +224,7 @@ in
 
   users.users = lib.mkMerge [
     # vault readers, as every login on the wg-vault clients.
-    (lib.mapAttrs (_: _: { extraGroups = [ "vault-ro" ]; }) data)
+    (lib.mapAttrs (_: _: { extraGroups = [ "vault-ro" ]; }) vaultReaders)
     {
       # The daily Open LLM brief cron job (moved from amy's microVM) scans
       # its blog feeds with blogwatcher-cli; the feed db sits in the

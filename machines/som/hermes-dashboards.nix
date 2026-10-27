@@ -33,6 +33,7 @@
     egg = "egg";
     dave-hermes = "dave";
     joe = "dave";
+    thaigersprint = "dave";
     momentum = "momentum";
   };
 }

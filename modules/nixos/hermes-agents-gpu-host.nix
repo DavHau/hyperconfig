@@ -4,7 +4,8 @@
 # vars (hermes-agent-ssh-<agent>, hyperhermes.nixosModules.clan), so the
 # list lives in one place and this host never evaluates som.
 #
-# Per account: reader on /vault/parquet (`vault-ro`), linger (detached
+# Per account: reader on /vault/parquet (`vault-ro`, unless the agent's data
+# entry says `vault = false`), linger (detached
 # jobs survive the ssh session), bash, and a writable python venv at
 # ~/.venv over a CUDA python set (torch etc. from cache.nixos-cuda.org),
 # first on PATH in login shells. The venv is --system-site-packages, so it
@@ -55,7 +56,7 @@ in
   users.users = lib.mapAttrs (name: a: {
     isNormalUser = true;
     inherit (a) uid;
-    extraGroups = [ "vault-ro" ];
+    extraGroups = lib.optional (a.vault or true) "vault-ro";
     shell = pkgs.bash;
     linger = true;
     openssh.authorizedKeys.keys = [ (publicKeyOf name) ];

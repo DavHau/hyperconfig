@@ -9,6 +9,11 @@
 # shared identities owned elsewhere (../../modules/nixos/users/stefan-vault.nix,
 # ../../modules/nixos/vault-ids.nix, whose id ladder lists them all); the
 # values here must match.
+#
+# `vault = false` keeps an agent out of `vault-ro` on som and vit. That
+# alone does not lock it out: /vault/parquet is world-readable on bam, so
+# such an agent's uid also carries a deny ACL on bam's /vault
+# (../../modules/nixos/vault-ids.nix).
 {
   stefan.uid = 1002;
   egg.uid = 1004;
@@ -23,4 +28,8 @@
   chris.uid = 1111;
   b3x.uid = 1112;
   joe.uid = 1113;
+  thaigersprint = {
+    uid = 1114;
+    vault = false;
+  };
 }

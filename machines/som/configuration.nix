@@ -323,6 +323,9 @@ in
         b3x = 15;
         joe = 16;
       };
+      # Slot names are the agent names, capped at 11 chars (nspawn veth
+      # names, hyperhermes container-slots): these agents get no slot.
+      noSlot = [ "thaigersprint" ];
     in
     lib.mapAttrs (name: _: {
       slot = {
@@ -330,7 +333,7 @@ in
         id =
           slotIds.${name} or (throw "machines/som: hermes agent ${name} has no slot id; add it to slotIds");
       };
-    }) (import ./hermes-agents-data.nix);
+    }) (removeAttrs (import ./hermes-agents-data.nix) noSlot);
   services.hyperhermes.slots = {
     legacyDomain = "slots.davhau.com";
     egress = "Mullvad (its outbound address is a Mullvad one, not its own IPv6 or the public IPv4)";
