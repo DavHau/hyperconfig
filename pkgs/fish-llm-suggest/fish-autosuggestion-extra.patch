@@ -1,0 +1,177 @@
+diff -ru a/src/env_dispatch.rs b/src/env_dispatch.rs
+--- a/src/env_dispatch.rs	2026-09-09 01:53:36.000000000 +0700
++++ b/src/env_dispatch.rs	2026-10-27 23:27:31.758735252 +0700
+@@ -9,7 +9,8 @@
+ use crate::prelude::*;
+ use crate::reader::{
+     reader_change_cursor_end_mode, reader_change_cursor_selection_mode, reader_change_history,
+-    reader_current_data, reader_schedule_prompt_repaint, reader_set_autosuggestion_enabled,
++    reader_current_data, reader_refresh_autosuggestion, reader_schedule_prompt_repaint,
++    reader_set_autosuggestion_enabled,
+     reader_set_transient_prompt,
+ };
+ use crate::screen::{IS_DUMB, ONLY_GRAYSCALE, screen_set_midnight_commander_hack};
+@@ -79,6 +80,10 @@
+             vars!(handle_autosuggestion_change),
+         );
+         table.add(
++            L!("fish_autosuggestion_extra"),
++            vars!(handle_autosuggestion_extra_change),
++        );
++        table.add(
+             L!("fish_transient_prompt"),
+             vars!(handle_transient_prompt_change),
+         );
+@@ -236,6 +241,10 @@
+     reader_set_autosuggestion_enabled(vars);
+ }
+ 
++fn handle_autosuggestion_extra_change(_vars: &EnvStack) {
++    reader_refresh_autosuggestion();
++}
++
+ fn handle_transient_prompt_change(vars: &EnvStack) {
+     reader_set_transient_prompt(vars);
+ }
+diff -ru a/src/reader/reader.rs b/src/reader/reader.rs
+--- a/src/reader/reader.rs	2026-09-09 01:53:36.000000000 +0700
++++ b/src/reader/reader.rs	2026-10-27 23:39:27.479008311 +0700
+@@ -123,7 +123,7 @@
+     join_strings, string_prefixes_string, string_prefixes_string_case_insensitive,
+     string_prefixes_string_maybe_case_insensitive,
+ };
+-use fish_widestring::{ELLIPSIS_CHAR, UTF8_BOM_WCHAR, bytes2wcstring};
++use fish_widestring::{ELLIPSIS_CHAR, UTF8_BOM_WCHAR, bytes2wcstring, wcs2bytes};
+ use libc::{
+     _POSIX_VDISABLE, SIGINT, STDIN_FILENO, STDOUT_FILENO, VMIN, VQUIT, VSUSP, VTIME, c_char,
+ };
+@@ -746,6 +746,9 @@
+     /// If these differs from the text of the command line, then we must kick off a new request.
+     in_flight_highlight_request: WString,
+     in_flight_autosuggest_request: WString,
++    /// Set when `fish_autosuggestion_extra` changes: recompute the autosuggestion even if the
++    /// current one still matches the command line.
++    autosuggest_refresh: bool,
+ 
+     rls: Option<ReadlineLoopState>,
+ 
+@@ -1123,6 +1126,15 @@
+     }
+ }
+ 
++/// Recompute the autosuggestion on the next reader loop iteration, since the candidates in
++/// `fish_autosuggestion_extra` changed.
++pub fn reader_refresh_autosuggestion() {
++    if let Some(data) = current_data() {
++        data.autosuggest_refresh = true;
++        data.in_flight_autosuggest_request.clear();
++    }
++}
++
+ /// Enable or disable transient prompt based on the associated variable.
+ pub fn reader_set_transient_prompt(vars: &dyn Environment) {
+     // We don't need to _change_ if we're not initialized yet.
+@@ -1423,6 +1435,7 @@
+             last_jump_precision: JumpPrecision::To,
+             in_flight_highlight_request: Default::default(),
+             in_flight_autosuggest_request: Default::default(),
++            autosuggest_refresh: false,
+             rls: None,
+             debouncers: Debouncers::new(),
+         }))
+@@ -5333,6 +5346,27 @@
+             return nothing;
+         }
+ 
++        // Tell an external suggestion provider (listening on the datagram socket named by
++        // `fish_autosuggestion_socket`) whether this command line wants a suggestion from it
++        // (`m`) or not (`h`: covered by history or a candidate, or not at the end of a single-line
++        // command line). Best effort: never blocks, errors are ignored.
++        let notify_provider = |kind: u8| {
++            let Some(socket) = vars.get(L!("fish_autosuggestion_socket")) else {
++                return;
++            };
++            let path = wcs2bytes(socket.as_string().as_char_slice());
++            let Ok(sock) = std::os::unix::net::UnixDatagram::unbound() else {
++                return;
++            };
++            if sock.set_nonblocking(true).is_err() {
++                return;
++            }
++            let mut msg = vec![kind];
++            msg.extend(wcs2bytes(command_line.as_char_slice()));
++            use std::os::unix::ffi::OsStrExt as _;
++            let _ = sock.send_to(&msg, std::ffi::OsStr::from_bytes(&path));
++        };
++
+         // Only to be used if no case-sensitive suggestions are found.
+         let mut icase_history_result = None;
+ 
+@@ -5444,6 +5478,7 @@
+                     if icase {
+                         icase_history_result = Some(result);
+                     } else {
++                        notify_provider(b'h');
+                         return result;
+                     }
+                 }
+@@ -5455,6 +5490,33 @@
+             return nothing;
+         }
+ 
++        // Externally provided whole-line candidates (`fish_autosuggestion_extra`), used after
++        // history but before completions. Only for a single-line command line with the cursor
++        // at its end.
++        let chars = command_line.as_char_slice();
++        if cursor_pos == chars.len() && !chars.contains(&'\n') {
++            let extra = vars.get(L!("fish_autosuggestion_extra"));
++            let candidates = extra.as_ref().map_or(&[][..], |extra| extra.as_list());
++            if let Some(candidate) = candidates
++                .iter()
++                .find(|c| c.len() > chars.len() && c.as_char_slice().starts_with(chars))
++            {
++                notify_provider(b'h');
++                return AutosuggestionResult::new(
++                    command_line.clone(),
++                    0..chars.len(),
++                    candidate.clone(),
++                    None,
++                    /*is_whole_item_from_history=*/ false,
++                );
++            }
++            // A fully accepted candidate needs no new suggestion either.
++            let accepted = candidates.iter().any(|c| c.as_char_slice() == chars);
++            notify_provider(if accepted { b'h' } else { b'm' });
++        } else {
++            notify_provider(b'h');
++        }
++
+         let Some(last_char) = command_line[line_range.clone()].chars().next_back() else {
+             // Let's make sure we aren't using the empty string.
+             return nothing;
+@@ -5595,8 +5657,9 @@
+             return;
+         }
+ 
++        let refresh = std::mem::take(&mut self.data.autosuggest_refresh);
+         let el = &self.data.command_line;
+-        if self.is_at_line_with_autosuggestion() {
++        if !refresh && self.is_at_line_with_autosuggestion() {
+             let autosuggestion = &self.autosuggestion;
+             assert!(string_prefixes_string_maybe_case_insensitive(
+                 autosuggestion.icase_matched_codepoints.is_some(),
+@@ -5612,9 +5675,12 @@
+         }
+         self.data.in_flight_autosuggest_request = el.text().to_owned();
+ 
+-        // Clear the autosuggestion and kick it off in the background.
++        // Clear the autosuggestion and kick it off in the background. On a refresh, keep showing
++        // the current one until the new result arrives.
+         flog!(reader_render, "Autosuggesting");
+-        self.data.autosuggestion.clear();
++        if !(refresh && self.is_at_line_with_autosuggestion()) {
++            self.data.autosuggestion.clear();
++        }
+         let performer = get_autosuggestion_performer(
+             self.parser,
+             el.text().to_owned(),
