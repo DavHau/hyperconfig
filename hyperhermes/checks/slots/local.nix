@@ -6,7 +6,8 @@
 # slot's port 80 through the local web front for anyone on the host (Host
 # kept, the proxy hop 10.43.4.1 as the peer), while bob still cannot reach
 # the slot's internal v4 himself; none of the public-mode pieces (SNI
-# router, public IPv4 ports) exist.
+# router, public IPv4 ports) exist; a host file declared as a slot
+# credential shows up in the slot as a system credential.
 { pkgs, self }:
 let
   inherit (pkgs) lib;
@@ -46,6 +47,9 @@ pkgs.testers.runNixOSTest {
         ipv6Prefix = prefix;
         deployKeys = [ common.adminKey ];
       };
+      # A secret outside the store, root-only, as a clan var would be.
+      systemd.tmpfiles.rules = [ "f+ /var/lib/slot-test-cred 0400 root root - alice-secret" ];
+      services.container-slots.slots.alice.credentials.test-cred = "/var/lib/slot-test-cred";
 
       services.hyperhermes = {
         exposure.enable = true;
@@ -98,6 +102,10 @@ pkgs.testers.runNixOSTest {
       with subtest("the agent starts its slot and gets in"):
           host.succeed("runuser -u alice -- slot start")
           host.wait_until_succeeds("runuser -u alice -- ssh -o BatchMode=yes -o ConnectTimeout=5 root@${alice4} true", timeout=90)
+
+      with subtest("a declared credential reaches the slot as a system credential"):
+          cred = host.succeed(in_slot + "-a ${pkgs.coreutils}/bin/cat /run/credentials/@system/test-cred")
+          assert cred == "alice-secret", repr(cred)
 
       with subtest("slot info and the skill name the local URL, nothing public"):
           info = host.succeed("runuser -u alice -- slot info")
