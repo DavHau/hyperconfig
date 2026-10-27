@@ -540,11 +540,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1782949081,
-        "narHash": "sha256-vp6Y/Grm98ESt6ceOkWiHWyZRDV3J1RID4w+6NWK9yA=",
+        "lastModified": 1778716662,
+        "narHash": "sha256-m1Yf0wZ8j1OHjTc2UwHwyQRSnNeSgLJOd7q5Y45hzi4=",
         "owner": "hercules-ci",
         "repo": "flake-parts",
-        "rev": "17c9d6cdfc60c64f4ee8d306f9bc0b4ccb51481e",
+        "rev": "f7c1a2d347e4c52d5fb8d10cb4d94b5884e546fb",
         "type": "github"
       },
       "original": {
@@ -714,17 +714,20 @@
         "flake-compat": [
           "nix"
         ],
+        "gitignore": [
+          "nix"
+        ],
         "nixpkgs": [
           "nix",
           "nixpkgs"
         ]
       },
       "locked": {
-        "lastModified": 1783008725,
-        "narHash": "sha256-jGiy6+sxjNWXSjp25uoJuNfyH9zBK1PEDY0lVoL4ibQ=",
+        "lastModified": 1778507602,
+        "narHash": "sha256-kTwur1wV+01SdqskVMSo6JMEpg71ps3HpbFY2GsflKs=",
         "owner": "cachix",
         "repo": "git-hooks.nix",
-        "rev": "bca82caa46d5ec0f5d422c61fb1e30bc51313cbe",
+        "rev": "61ab0e80d9c7ab14c256b5b453d8b3fb0189ba0a",
         "type": "github"
       },
       "original": {
@@ -1175,10 +1178,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1792838583,
-        "narHash": "sha256-THfe/COoP8PBqLIZacwHNFORJpkoVcvy+1fbqS9TvXM=",
+        "lastModified": 1793006458,
+        "narHash": "sha256-iCR26hle4wYiXeNiQwlYWQ/reu5xIwtnfcFuMyC13Us=",
         "ref": "parallel-downloads",
-        "rev": "44758a56d804fddab1c997e6ffba6621f853bf5c",
+        "rev": "a5ef70a406403f5f882e7944efc25a95d2868fe3",
         "shallow": true,
         "type": "git",
         "url": "file:///home/grmpf/projects/nix"
@@ -1503,11 +1506,11 @@
     },
     "nixpkgs_2": {
       "locked": {
-        "lastModified": 1783148766,
-        "narHash": "sha256-H9+N+GFtsbVC8ZniHliChM7ndizxtqVZs6bnGOLM3WQ=",
-        "rev": "a50de1b7d8a586adc18d2395c19de7d6058e6030",
+        "lastModified": 1792503283,
+        "narHash": "sha256-OtQ9jaQ9aXZDm61TqykPLZdXJa2NMykYG3d0tbT683U=",
+        "rev": "cd4ea8d57de16f4810bc5f14207bac45fbf19f67",
         "type": "tarball",
-        "url": "https://releases.nixos.org/nixos/26.05/nixos-26.05.4193.a50de1b7d8a5/nixexprs.tar.xz"
+        "url": "https://releases.nixos.org/nixos/26.05/nixos-26.05.12297.cd4ea8d57de1/nixexprs.tar.xz"
       },
       "original": {
         "type": "tarball",
