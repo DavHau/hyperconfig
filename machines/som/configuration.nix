@@ -3,6 +3,7 @@
   config,
   inputs,
   lib,
+  pkgs,
   ...
 }:
 let
@@ -270,7 +271,29 @@ in
     slots.asof-agents = {
       id = 3;
       mode = "lan";
+      # The nmm agents' TeamClaude client key (generator below), as the
+      # guest's system credential teamclaude-key: the service running
+      # their omp takes it with LoadCredential = "teamclaude-key", so the
+      # key is never copied in by hand.
+      credentials.teamclaude-key = config.clan.core.vars.generators.teamclaude-nmm.files.key.path;
     };
+  };
+
+  # The asof-agents slot (nmm's `agents` machine, deployed from its own
+  # flake) gets its own gateway client, so it can be revoked or rotated
+  # alone. No restartUnits: restarting the slot would end the swarm's
+  # sessions, so a rotated key reaches the slot at its next restart of
+  # container@asof-agents. The `sk-ant-oat01-` prefix is load-bearing, as
+  # for every gateway key (../../modules/nixos/teamclaude-api-key.nix): omp
+  # presents as Claude Code only when its key looks like a subscription
+  # token.
+  hyper.teamclaudeGateway.clientKeys.nmm = "teamclaude-nmm";
+  clan.core.vars.generators.teamclaude-nmm = {
+    runtimeInputs = [ pkgs.openssl ];
+    script = ''
+      printf 'sk-ant-oat01-%s' "$(openssl rand -hex 32)" > "$out/key"
+    '';
+    files.key.secret = true;
   };
 
   # One isolated slot per hermes agent (hyperhermes' slots module), off

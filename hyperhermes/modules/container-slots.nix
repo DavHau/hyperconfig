@@ -109,6 +109,17 @@
 # the running slot. A share retries forever; a hung NFS source only stalls
 # I/O until its server is back.
 #
+# Credentials: `credentials.<id> = "<host path>"` hands a host secret file
+# to the slot as a systemd system credential (nspawn's
+# --load-credential=<id>:<path>), so a secret reaches the guest without
+# being copied in by hand or sitting in the store. The guest finds it at
+# /run/credentials/@system/<id>, readable by its root only; a guest service
+# takes it with `serviceConfig.LoadCredential = "<id>";` (no path: from the
+# system credentials) as $CREDENTIALS_DIRECTORY/<id>, or with
+# `ImportCredential = "<id>";`. nspawn reads the file when the slot starts:
+# a changed file reaches the guest at the next restart of container@<slot>,
+# and a missing one keeps the slot from starting.
+#
 # Modes (host-side only; the guest cannot tell and need not care):
 #   isolated  routed veth; this host answers NDP on the bridge for the /128
 #             and forwards. The slot reaches the internet only (v4 NAT'd);
@@ -428,6 +439,15 @@ let
         };
         description = "Host directories served into the slot, keyed by their path inside it (see the module header).";
       };
+      credentials = mkOption {
+        # IDs checked in the assertions (attrsOf cannot type its names).
+        type = types.attrsOf types.str;
+        default = { };
+        example = {
+          api-key = "/run/secrets/vars/foo/key";
+        };
+        description = "System credentials for the slot: credential ID -> host runtime path of the file (never a store path), read at every start (see the module header).";
+      };
     };
   };
 in
@@ -538,6 +558,25 @@ in
         assertion = slot.publicIPv4Ports == [ ] || (slot.mode == "isolated" && cfg.publicIPv4Interface != null);
         message = "services.container-slots.slots.${name}: publicIPv4Ports need mode isolated and publicIPv4Interface";
       }) cfg.slots
+      ++ lib.concatLists (
+        lib.mapAttrsToList (
+          name: slot:
+          lib.concatLists (
+            lib.mapAttrsToList (id: path: [
+              {
+                # systemd's credential names, conservatively: one path
+                # component, no leading dot (so neither "." nor "..")
+                assertion = builtins.match "[A-Za-z0-9_-][A-Za-z0-9_.-]*" id != null;
+                message = "services.container-slots.slots.${name}.credentials: '${id}' is not a valid credential ID ([A-Za-z0-9_.-], no leading dot)";
+              }
+              {
+                assertion = lib.hasPrefix "/" path && !lib.hasPrefix "/nix/store" path;
+                message = "services.container-slots.slots.${name}.credentials.${id}: ${path} is not an absolute runtime path; a credential is a secret, never a store path";
+              }
+            ]) slot.credentials
+          )
+        ) cfg.slots
+      )
       ++ (
         let
           all = lib.concatMap (s: s.publicIPv4Ports) (lib.attrValues cfg.slots);
@@ -671,7 +710,8 @@ in
           # tree stays host-root-owned, i.e. nobody's inside the slot
           "--private-users-ownership=auto"
           "--bind=${slotTmp name}:/tmp"
-        ];
+        ]
+        ++ lib.mapAttrsToList (id: path: "--load-credential=${id}:${path}") slot.credentials;
         bindMounts =
           lib.mapAttrs (path: _: {
             hostPath = shareMount name path;
