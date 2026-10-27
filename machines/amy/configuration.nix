@@ -21,6 +21,7 @@
     ../../modules/nixos/llama-swap-qwen36-amy.nix
     ../../modules/nixos/llama-swap-nanbeige42-amy.nix
     ../../modules/nixos/llama-swap-ling30-tiny-amy.nix
+    ../../modules/nixos/llama-swap-k2-horizon-amy.nix
     ../../modules/nixos/bluetooth-resume-fix.nix
     ../../modules/nixos/noctalia-anthropic-usage
     ../../modules/nixos/fw-fanctrl.nix
