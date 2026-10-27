@@ -38,26 +38,26 @@
 #     environment.profiles: a plain entry precedes /run/current-system/sw
 #     (mkAfter in programs/environment.nix). Only bin/hermes lives there.
 #
-# The Claude Code CLI is on the agent's PATH (services.hyperhermes
-# extraPackages): the patch signs headers with `claude --version`, and
+# Hermes runs `claude --version` (the patch for the billing-header
+# signature and user-agent, hermes' own adapter for the user-agent), and
 # Anthropic rejects versions below a moving minimum ("Claude Code 2.1.238
 # does not support this model; version 2.1.251 or newer is required").
-# Hence the llm-agents.nix package (this flake's input, claudeCodePackage),
-# not nixpkgs' lagging one: the agent's PATH puts extraPackages ahead of
-# /run/current-system/sw, so a stale pin here beats a fresh system
-# profile; a consumer that ships claude-code system-wide should make the
-# input follow its own. Bump llm-agents when it hits again. The OAuth
-# login (`claude` -> /login) must write ~/.claude/.credentials.json into
-# the AGENT's HOME, the account home, so the owner runs plain `claude` on
-# the host (claude-code is in systemPackages for that). Hermes itself
-# already knows Claude Code credentials: once anthropic is the configured
-# provider, agent/credential_pool.py seeds a `claude_code` entry into
-# $HERMES_HOME/auth.json from that file. The patch adds what hermes lacks
-# on the wire (billing-header signature, Claude Code identity/system-prompt
-# layout, Stainless headers, tool-name namespacing, thinking-replay and
-# 429 handling).
-# `llm-agents` is this flake's input, the source of claude-code.
-{ llm-agents }:
+# Only the leading X.Y.Z token of that output is read, so the agents'
+# PATH (services.hyperhermes extraPackages, ahead of
+# /run/current-system/sw) gets a `claude` stub that prints
+# claudeCodeVersion instead of the real CLI. Its default is the
+# @anthropic-ai/claude-code npm release in ./claude-code-version; run
+# ./update-claude-code-version.sh when the minimum hits again. Any other
+# invocation fails, so hermes' `claude setup-token` wizard falls through
+# to pasting a token and the claude-code skill reports the CLI missing.
+#
+# Login needs no CLI: `hermes auth add anthropic --type oauth` (or the
+# dashboard) runs hermes' own PKCE flow with Claude Code's OAuth client
+# and keeps the tokens in hermes' credential pool. The patch rewrites
+# every OAuth request, whatever the credential's source. It adds what
+# hermes lacks on the wire (billing-header signature, Claude Code
+# identity/system-prompt layout, Stainless headers, tool-name
+# namespacing, thinking-replay and 429 handling).
 {
   config,
   lib,
@@ -82,27 +82,33 @@ let
     export PYTHONPATH=${site}''${PYTHONPATH:+:$PYTHONPATH}
     exec /run/current-system/sw/bin/hermes "$@"
   '';
+  # See the header: the version is all hermes reads from `claude`.
+  claudeStub = pkgs.writeShellScriptBin "claude" ''
+    if [ "$*" = --version ]; then
+      echo "${cfg.claudeCodeVersion} (Claude Code)"
+      exit 0
+    fi
+    echo "claude: version stub of hyperhermes' claude-auth, not the Claude Code CLI; log in with: hermes auth add anthropic --type oauth" >&2
+    exit 1
+  '';
   # Static top-level keys only (see core's agents.nix): a config-dependent
   # list at the config root would recurse through the agent list.
   forEachAgent = f: lib.mkMerge (lib.mapAttrsToList f agents);
 in
 {
-  # Imported with its argument applied (../../flake.nix), so it names
-  # its own file for error messages.
-  _file = ./default.nix;
-
   options.services.hyperhermes.claudeAuth = {
     enable = lib.mkEnableOption "the hermes-claude-auth patch (Claude Pro/Max OAuth through Anthropic's Claude Code billing validator) for every agent";
-    claudeCodePackage = lib.mkOption {
-      type = lib.types.package;
-      default = llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.claude-code;
-      defaultText = lib.literalExpression "llm-agents.packages.\${system}.claude-code";
-      description = "The Claude Code CLI on the agents' PATH (the patch signs with its version) and the host's, for the owner's OAuth login.";
+    claudeCodeVersion = lib.mkOption {
+      type = lib.types.strMatching "[0-9]+\\.[0-9]+\\.[0-9]+";
+      default = lib.fileContents ./claude-code-version;
+      defaultText = lib.literalMD "the version in `./claude-code-version` (latest @anthropic-ai/claude-code on npm when last updated)";
+      example = "2.1.311";
+      description = "The Claude Code version the agents' `claude --version` stub reports; the patch signs the billing header and user-agent with it.";
     };
   };
 
   config = lib.mkIf (cfg.enable && agents != { }) {
-    services.hyperhermes.extraPackages = [ cfg.claudeCodePackage ];
+    services.hyperhermes.extraPackages = [ claudeStub ];
     systemd.services = forEachAgent (
       user: _: {
         "hermes-agent-${user}".environment.PYTHONPATH = "${site}";
@@ -110,8 +116,6 @@ in
       }
     );
     environment.profiles = [ "${hookedShim}" ];
-    # For the owner's OAuth login on the host (plain `claude`).
-    environment.systemPackages = [ cfg.claudeCodePackage ];
     environment.etc."hermes-claude-auth".source = site;
   };
 }
