@@ -37,9 +37,17 @@
 # When adding readers to an existing tree, set the ACL before closing the
 # modes, or the readers lose access in between.
 #
+# /vault/parquet's "other" r-x lets any uid read most of it. Agents kept
+# off the vault (`vault = false`, machines/som/hermes-agents-data.nix)
+# therefore get a named-user deny on the pool root, which blocks every
+# dataset below it:
+#
+#   setfacl -m u:<uid>:--- /vault                             # thaigersprint 1114
+#
 # Pinned ids: 1002 stefan, 1004 egg, 1005 dave-hermes, 1100 momentum,
 # 1101 vault (gid), 1102 hsjobeki, 1103 vault-ro (gid), 1104 pinpox,
-# 1105 adam, 1106 j, 1107 vault-parquet-rw (gid), 1108 willi, 1109 domi, 1110 rti, 1111 chris, 1112 b3x, 1113 joe, 1200 agent,
+# 1105 adam, 1106 j, 1107 vault-parquet-rw (gid), 1108 willi, 1109 domi, 1110 rti, 1111 chris, 1112 b3x, 1113 joe,
+# 1114 thaigersprint (no vault access, denied above), 1200 agent,
 # 1201 slot-asof, 1202 slot-mm. gid 1100 stays unallocated.
 {
   users.groups.vault.gid = 1101;
