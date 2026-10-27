@@ -51,7 +51,9 @@ subdirectory inside it, `overwrite=true` replaces a file). Over 50 MB it
 refuses; fetch the listed URL with curl.
 
 A file URL you can read (an `href`) is fine with `curl -fL -o <file>
-<url>`. `web_extract` refuses files over 25 MB and binaries.
+<url>`. `web_extract` refuses files over 25 MB and binaries. A scanned
+PDF that `web_extract` reports without a text layer: download it with
+curl and `read_file` it (OCR runs there; the `ocr` skill for page ranges).
 
 If `browser_downloads` fails or never lists the file, hand the CAPTCHA
 token to curl: stop the form's submit (set its `action` to
