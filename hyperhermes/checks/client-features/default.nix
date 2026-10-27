@@ -144,8 +144,8 @@ let
         unit:
         lib.hasSuffix "-hermes-claude-auth-site" claudeAuth.config.systemd.services.${unit}.environment.PYTHONPATH
       ) (lib.concatMap (u: [ "hermes-agent-${u}" "hermes-dashboard-${u}" ]) (lib.attrNames agents));
-    claude-auth-claude-on-agent-path = lib.any (
-      p: p.pname or "" == "claude-code"
+    claude-auth-claude-stub-on-agent-path = lib.any (
+      p: p.name == "claude"
     ) claudeAuth.config.services.hyperhermes.extraPackages;
     # Exactly one profile more than the same system without claude-auth:
     # the hooked `hermes` wrapper (NixOS fills the list on its own).

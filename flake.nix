@@ -185,7 +185,6 @@
     # input (inputs.hyperhermes.inputs.hermes-agent).
     hyperhermes.url = "path:./hyperhermes";
     hyperhermes.inputs.nixpkgs.follows = "nixpkgs";
-    hyperhermes.inputs.llm-agents.follows = "llm-agents";
 
     cctl.url = "github:allouis/cctl";
     cctl.inputs.nixpkgs.follows = "nixpkgs";

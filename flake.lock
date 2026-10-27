@@ -936,9 +936,6 @@
     "hyperhermes": {
       "inputs": {
         "hermes-agent": "hermes-agent",
-        "llm-agents": [
-          "llm-agents"
-        ],
         "nixpkgs": [
           "nixpkgs"
         ]

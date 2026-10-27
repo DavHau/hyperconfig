@@ -12,10 +12,6 @@
     # says so); pointing the input at this flake keeps home-manager out of
     # the lock file.
     hermes-agent.inputs.home-manager.follows = "";
-
-    # Keeps its own nixpkgs on purpose: its derivations then hash-match what
-    # numtide's CI pushed to cache.numtide.com and substitute.
-    llm-agents.url = "github:numtide/llm-agents.nix";
   };
 
   outputs =
@@ -23,7 +19,6 @@
       self,
       nixpkgs,
       hermes-agent,
-      llm-agents,
       ...
     }:
     let
@@ -46,11 +41,11 @@
         browser = ./modules/browser;
         wallet = ./modules/wallet;
         teamclaude = ./modules/teamclaude.nix;
+        claude-auth = ./modules/claude-auth;
         # Not lib.modules.importApply: its wrapper module moves these
         # modules' definitions within list-typed options (PATH order,
         # ssh_config blocks) on every importer; each module names its own
         # file (`_file`) for error messages instead.
-        claude-auth = import ./modules/claude-auth { inherit llm-agents; };
         desktop = import ./modules/desktop { inherit hermes-agent; };
         dashboards = ./modules/dashboards;
         publish = ./modules/publish;
