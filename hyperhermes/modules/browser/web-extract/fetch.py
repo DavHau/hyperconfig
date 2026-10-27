@@ -230,7 +230,7 @@ def extract_pdf(body, url):
         title = (doc.metadata or {}).get("title") or ""
     text = "\n\n".join(p for p in pages if p)
     if not text:
-        raise Failure("unreadable", f"The PDF has {len(pages)} pages but no text layer (scanned images); there is no OCR here.")
+        raise Failure("unreadable", f"The PDF has {len(pages)} pages but no text layer (scanned images); download it with the terminal (curl -fL -o <file>.pdf {url}) and read it with read_file, which OCRs scanned PDFs; for selected pages use the ocr skill.")
     return title.strip() or urlsplit(url).path.rsplit("/", 1)[-1], text
 
 
