@@ -51,7 +51,6 @@
     minicom
     # AI
     # aider-chat-full
-    inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.claude-code
 
     delta
     lsd
