@@ -13,6 +13,11 @@
 # carries none. Unlike project-zero, nginx holds no key of its own: a key
 # minted at runtime works without a deploy.
 #
+# Of TeamClaude's own API only GET /teamclaude/status is public, gated by
+# the same check (any client key reads it): per-account quota for the
+# anthropic-usage bar widget on amy (../noctalia-anthropic-usage). The rest
+# of /teamclaude/ stays loopback-only.
+#
 # Some client keys are static, declared in hyper.teamclaudeGateway.clientKeys
 # (client name -> clan generator whose `key` file holds the key): our own
 # infrastructure's, the shared clan var teamclaude-api-key
@@ -251,9 +256,20 @@ in
       virtualHosts.${domain} = {
         forceSSL = true;
         useACMEHost = domain;
-        # TeamClaude's status and steering API stays off the public name:
-        # the operator uses it on loopback with the operator key.
+        # TeamClaude's steering API stays off the public name: the operator
+        # uses it on loopback with the operator key. Only GET
+        # /teamclaude/status is public (the exact match wins over the 404),
+        # still gated by TeamClaude's own check, which accepts any client
+        # key there; the anthropic-usage bar widget on amy reads it
+        # (../noctalia-anthropic-usage).
         locations."^~ /teamclaude/".return = "404";
+        locations."= /teamclaude/status" = {
+          proxyPass = "http://127.0.0.1:3456";
+          extraConfig = ''
+            limit_except GET { deny all; }
+            proxy_set_header x-api-key $teamclaude_key;
+          '';
+        };
         locations."/" = {
           proxyPass = "http://127.0.0.1:3456";
           proxyWebsockets = true;

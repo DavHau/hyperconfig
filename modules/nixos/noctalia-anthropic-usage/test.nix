@@ -1,8 +1,9 @@
 # Behavior tests for noctalia-anthropic-usage (see default.nix):
-#   test-poller.py: the state file the bar widget consumes — logins from
-#   all omp agent.dbs, latest-expiring token per account, weekly + Fable
-#   percents, previous-state fallback on fetch failure, expired accounts
-#   not queried. Stubbed agent.dbs + local HTTP stub, no network.
+#   test-poller.py: the state file the bar widget consumes — accounts from
+#   TeamClaude's /teamclaude/status fetched with the client key as
+#   x-api-key, weekly + Fable ratios as percents, reset epoch ms passed
+#   through, previous values kept stale on any failure (HTTP error, wrong
+#   key, missing key file, bad response). Local HTTP stub, no network.
 { pkgs }:
 pkgs.runCommand "noctalia-anthropic-usage-test"
   {
