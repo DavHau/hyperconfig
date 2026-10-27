@@ -1,25 +1,29 @@
-# Two mini bars in the noctalia bar, one per logged-in Anthropic account,
-# each overlaying the weekly all-model usage and the weekly Fable usage.
+# Two mini bars in the noctalia bar, one per Claude account pooled in our
+# TeamClaude gateway, each overlaying the weekly all-model usage and the
+# weekly Fable usage.
 #
 # Two parts:
 #   1. anthropic-usage-poll — a user timer (5 min) running poller.py:
-#      collects the Anthropic OAuth logins from every omp agent.db
-#      (~/.omp/agent/agent.db + ~/.omp/profiles/*/agent/agent.db,
-#      READ-ONLY, never refreshes tokens — a refresh rotates the refresh
-#      token and would corrupt omp's copy), takes the latest-expiring
-#      token per account, asks the OAuth usage endpoint for both weekly
-#      utilizations and publishes ~/.local/state/anthropic-usage.json.
-#      omp moves its login store between releases (≥18.6 keeps it in the
-#      shared agent.db), so no single profile is trusted. Accounts with
-#      no unexpired token are not queried; they, like failed fetches,
-#      keep their last published values, marked stale.
+#      fetches the gateway's GET /teamclaude/status
+#      (https://teamclaude.davhau.com, ../teamclaude-gateway on som) with
+#      the shared teamclaude-api-key client key as x-api-key and publishes
+#      both weekly utilizations per account to
+#      ~/.local/state/anthropic-usage.json. The gateway knows an account's
+#      quota from the rate-limit headers of the traffic it forwards and of
+#      its own probes, so no omp database or per-account token is involved.
+#      A failed fetch keeps the last published values, marked stale.
 #   2. a `hyperconfig/anthropic-usage` noctalia plugin (plugin/, Luau)
 #      rendering one thin gauge per account, placed in the bar's end
 #      section just before the toggle buttons.
 #
 # Behavior tests: test-poller.py, wired as the `noctalia-anthropic-usage`
 # flake check.
-{ lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   poller = pkgs.writeShellApplication {
     name = "anthropic-usage-poll";
@@ -29,8 +33,13 @@ let
   };
 in
 {
+  # The client key: the shared clan var, readable by the user via group
+  # teamclaude-api-key.
+  imports = [ ../teamclaude-api-key.nix ];
+
   systemd.user.services.anthropic-usage-poll = {
     description = "Publish per-account Anthropic weekly usage for the noctalia bar";
+    environment.TEAMCLAUDE_KEY_FILE = config.clan.core.vars.generators.teamclaude-api-key.files.key.path;
     serviceConfig = {
       Type = "oneshot";
       ExecStart = "${poller}/bin/anthropic-usage-poll";

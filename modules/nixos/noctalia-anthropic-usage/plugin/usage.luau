@@ -3,16 +3,17 @@
 --
 -- Reads the state file the anthropic-usage-poll user timer publishes
 -- ($XDG_STATE_HOME/anthropic-usage.json, default ~/.local/state/...):
---   { accounts: [ { email, weekly, weeklyResetsAt, fable, fableResetsAt, fetchedAt, stale } ] }
---   weekly / fable in 0..100 or null; *ResetsAt ISO 8601 or null;
+--   { version: 3, updatedAt,
+--     accounts: [ { email, weekly, weeklyResetsAt, fable, fableResetsAt, fetchedAt, stale } ] }
+--   weekly / fable in 0..100 or null; *ResetsAt epoch ms or null;
 --   fetchedAt epoch ms of the last successful fetch or null.
 --
 -- One thin gauge per account, stacked across the bar. Each gauge overlays two
 -- fills on one track: weekly all-model usage (primary) and weekly Fable usage
 -- (tertiary). The wider fill sits underneath so both stay visible. A fill at
--- >= 80% turns error; stale data (no valid token / failed fetch) dims both.
--- Hidden while there are no accounts. The tooltip lists each account's
--- percentages, reset times and, for stale accounts, when it was last fetched.
+-- >= 80% turns error; stale data (failed fetch) dims both. Hidden while there
+-- are no accounts. The tooltip lists each account's percentages, reset times
+-- and, for stale accounts, when it was last fetched.
 
 -- Gauge geometry in logical px (the host scales by the widget scale). Sized
 -- for the default bar (thickness 34, capsule 0.76): the stack of gauges stays
@@ -36,42 +37,6 @@ local statePath = if stateHome ~= nil and stateHome ~= ""
 local accounts = {}
 local lastStamp: string? = nil
 
--- ISO 8601 ("2026-07-15T15:59:59.123+00:00", "...Z", or no offset = UTC) -> unix seconds.
-local function daysFromCivil(y: number, m: number, d: number): number
-  if m <= 2 then
-    y -= 1
-  end
-  local era = (if y >= 0 then y else y - 399) // 400
-  local yoe = y - era * 400
-  local mp = (m + 9) % 12
-  local doy = (153 * mp + 2) // 5 + d - 1
-  local doe = yoe * 365 + yoe // 4 - yoe // 100 + doy
-  return era * 146097 + doe - 719468
-end
-
-local function isoToUnix(iso: any): number?
-  if type(iso) ~= "string" then
-    return nil
-  end
-  local y, mo, d, h, mi, s, rest = string.match(iso, "^(%d+)-(%d+)-(%d+)[T ](%d+):(%d+):(%d+)(.*)$")
-  if y == nil then
-    return nil
-  end
-  rest = string.gsub(rest, "^%.%d+", "")
-  local offset = 0
-  local sign, oh, om = string.match(rest, "^([+-])(%d%d):?(%d%d)$")
-  if sign ~= nil then
-    offset = (tonumber(oh) * 60 + tonumber(om)) * 60
-    if sign == "-" then
-      offset = -offset
-    end
-  elseif rest ~= "" and rest ~= "Z" then
-    return nil
-  end
-  local days = daysFromCivil(tonumber(y), tonumber(mo), tonumber(d))
-  return days * 86400 + tonumber(h) * 3600 + tonumber(mi) * 60 + tonumber(s) - offset
-end
-
 local function pct(p: any): string
   if type(p) ~= "number" then
     return "?"
@@ -79,12 +44,14 @@ local function pct(p: any): string
   return string.format("%d%%", math.floor(p + 0.5))
 end
 
-local function resetsText(iso: any): string
-  local t = isoToUnix(iso)
-  if t == nil then
-    return ""
+local function usageText(p: any, resetsAt: any): string
+  if type(p) ~= "number" then
+    return "?"
   end
-  return " (resets " .. noctalia.formatTime(TIME_FORMAT, t) .. ")"
+  if type(resetsAt) ~= "number" then
+    return pct(p)
+  end
+  return pct(p) .. ", resets " .. noctalia.formatTime(TIME_FORMAT, resetsAt // 1000)
 end
 
 local function fraction(p: any): number
@@ -102,19 +69,24 @@ local function fillColor(p: any, base: string, stale: boolean): string
   return role
 end
 
+-- Sized for noctalia's tooltip table (280 px across key + value): keys are
+-- the email's local part, values stay within ~21 monospace characters.
 local function tooltipRows()
   local rows = {}
   for _, a in ipairs(accounts) do
     local status = ""
     if a.stale then
-      local fetched = if type(a.fetchedAt) == "number"
-        then noctalia.formatTime(TIME_FORMAT, a.fetchedAt // 1000)
-        else "never"
-      status = "stale, fetched " .. fetched
+      status = if type(a.fetchedAt) == "number"
+        then "stale since " .. noctalia.formatTime(TIME_FORMAT, a.fetchedAt // 1000)
+        else "stale"
     end
-    table.insert(rows, { key = tostring(a.email or "?"), value = status })
-    table.insert(rows, { key = "  Weekly", value = pct(a.weekly) .. resetsText(a.weeklyResetsAt) })
-    table.insert(rows, { key = "  Fable", value = pct(a.fable) .. resetsText(a.fableResetsAt) })
+    local name = string.match(tostring(a.email or "?"), "^([^@]*)") or "?"
+    table.insert(rows, { key = name, value = status })
+    table.insert(rows, { key = "  Weekly", value = usageText(a.weekly, a.weeklyResetsAt) })
+    -- JSON null: the gateway has seen no Fable quota for this account.
+    if type(a.fable) == "number" then
+      table.insert(rows, { key = "  Fable", value = usageText(a.fable, a.fableResetsAt) })
+    end
   end
   return rows
 end

@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
 """Behavior tests for the anthropic-usage poller.
 
-The poller's contract: collect the Anthropic logins from every omp
-agent.db under $OMP_HOME (read-only), pick the latest-expiring token per
-account, ask the Anthropic OAuth usage endpoint for each account's weekly
-all-model and weekly Fable utilization, and publish one small JSON state
-file the noctalia bar widget renders.
+The poller's contract: read a TeamClaude client key from
+$TEAMCLAUDE_KEY_FILE, fetch the gateway's GET /teamclaude/status with it
+as x-api-key, and publish one small JSON state file the noctalia bar
+widget renders: per account the weekly all-model and weekly Fable usage
+as percents with their reset times (epoch ms). A failed fetch keeps the
+previously published accounts, marked stale.
 
-Everything is stubbed locally: fake agent.dbs with omp's real schema and
-an in-process HTTP server mapping bearer tokens to usage responses. No
-network, no omp.
+The gateway is a local in-process HTTP stub. No network, no TeamClaude.
 """
 
 import json
 import os
-import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -24,40 +22,49 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 POLLER = os.environ.get("POLLER", os.path.join(os.path.dirname(__file__), "poller.py"))
 
-NOW_MS = int(time.time() * 1000)
+KEY = "tc-client-key"
+STATUS_PATH = "/teamclaude/status"
 
 
-def usage_response(weekly, fable, resets_at="2026-07-15T15:59:59+00:00",
-                   fable_resets_at="2026-07-15T15:59:58+00:00"):
-    """Shape of https://api.anthropic.com/api/oauth/usage (fields we touch)."""
+def account(name, weekly, fable, weekly_reset, fable_reset):
+    """One entry of TeamClaude's /teamclaude/status `accounts` (fields we touch
+    plus some we ignore)."""
     return {
-        "five_hour": {"utilization": 30.0, "resets_at": "2026-07-10T05:59:59+00:00"},
-        "seven_day": {"utilization": float(weekly), "resets_at": resets_at},
-        "limits": [
-            {"kind": "session", "group": "session", "percent": 30,
-             "severity": "normal", "resets_at": "2026-07-10T05:59:59+00:00",
-             "scope": None, "is_active": True},
-            {"kind": "weekly_all", "group": "weekly", "percent": weekly,
-             "severity": "normal", "resets_at": resets_at, "scope": None, "is_active": False},
-            {"kind": "weekly_scoped", "group": "weekly", "percent": fable,
-             "severity": "normal", "resets_at": fable_resets_at,
-             "scope": {"model": {"id": None, "display_name": "Fable"}, "surface": None},
-             "is_active": False},
-        ],
+        "name": name,
+        "type": "oauth",
+        "orgName": None,
+        "enabled": True,
+        "rateLimitedUntil": None,
+        "quota": {
+            "unified5h": 0.3,
+            "unified5hReset": weekly_reset - 86_400_000,
+            "unified7d": weekly,
+            "unified7dReset": weekly_reset,
+            "unified7dFable": fable,
+            "unified7dFableReset": fable_reset,
+            "unified7dSonnet": None,
+            "unified7dSeenAt": 1_793_000_000_000,
+        },
     }
 
 
-class StubApi(BaseHTTPRequestHandler):
-    # access token -> usage dict | int status
-    responses = {}
-    # tokens seen, in request order
-    requests = []
+class StubGateway(BaseHTTPRequestHandler):
+    # dict served as JSON, or an int status
+    response = 500
+    # x-api-key values seen, in request order
+    keys = []
 
     def do_GET(self):
-        token = self.headers.get("Authorization", "").removeprefix("Bearer ")
-        self.requests.append(token)
-        resp = self.responses.get(token, 401)
-        status, payload = (resp, {"error": "unauthorized"}) if isinstance(resp, int) else (200, resp)
+        key = self.headers.get("x-api-key")
+        self.keys.append(key)
+        if self.path != STATUS_PATH:
+            status, payload = 404, {"error": "not found"}
+        elif key != KEY:
+            status, payload = 401, {"error": "unauthorized"}
+        elif isinstance(self.response, int):
+            status, payload = self.response, {"error": "boom"}
+        else:
+            status, payload = 200, self.response
         body = json.dumps(payload).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -68,53 +75,18 @@ class StubApi(BaseHTTPRequestHandler):
         pass
 
 
-def make_db(omp_home, rel, creds):
-    """Fake omp agent.db at $OMP_HOME/<rel>: auth_credentials, real schema."""
-    path = os.path.join(omp_home, rel)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    db = sqlite3.connect(path)
-    db.execute(
-        """CREATE TABLE auth_credentials (
-             id INTEGER PRIMARY KEY AUTOINCREMENT,
-             provider TEXT NOT NULL,
-             credential_type TEXT NOT NULL,
-             data TEXT NOT NULL,
-             disabled_cause TEXT DEFAULT NULL,
-             identity_key TEXT DEFAULT NULL,
-             created_at INTEGER NOT NULL DEFAULT 0,
-             updated_at INTEGER NOT NULL DEFAULT 0)"""
-    )
-    for c in creds:
-        db.execute(
-            "INSERT INTO auth_credentials (provider, credential_type, data, identity_key, updated_at)"
-            " VALUES ('anthropic', 'oauth', ?, ?, ?)",
-            (json.dumps(c["data"]), c.get("identity_key"), c.get("updated_at", 0)),
-        )
-    db.commit()
-    db.close()
+def write_key(tmp, key=KEY):
+    path = os.path.join(tmp, "key")
+    with open(path, "w") as fh:
+        fh.write(key + "\n")  # clan vars may end in a newline
+    return path
 
 
-def cred(email, token, updated_at=100, expires_in_ms=3_600_000):
-    return {
-        "data": {
-            "access": token,
-            "refresh": "rt-" + token,
-            "expires": NOW_MS + expires_in_ms,
-            "accountId": "acct-" + email,
-            "email": email,
-        },
-        "identity_key": "email:" + email,
-        "updated_at": updated_at,
-    }
-
-
-SHARED = "agent/agent.db"
-AFK = "profiles/afk/agent/agent.db"
-
-
-def run_poller(omp_home, state_path, url):
+def run_poller(tmp, url, key_file):
+    state_path = os.path.join(tmp, "state.json")
     env = dict(os.environ)
-    env.update(OMP_HOME=omp_home, ANTHROPIC_USAGE_STATE=state_path, ANTHROPIC_USAGE_URL=url)
+    env.update(ANTHROPIC_USAGE_STATE=state_path, TEAMCLAUDE_STATUS_URL=url,
+               TEAMCLAUDE_KEY_FILE=key_file)
     proc = subprocess.run(
         [sys.executable, POLLER], env=env, capture_output=True, text=True, timeout=60
     )
@@ -132,125 +104,119 @@ def check(name, cond, detail=""):
     print(f"ok: {name}")
 
 
-def test_happy_path_two_accounts(tmp, url):
-    """Both tokens valid: both accounts, sorted by email, with weekly and
-    Fable percents + reset times taken from their own limit entries."""
-    db = os.path.join(tmp, "omp")
-    state = os.path.join(tmp, "state.json")
-    make_db(db, SHARED, [cred("bob@example.com", "tok-bob"), cred("alice@example.com", "tok-alice")])
-    StubApi.responses = {
-        "tok-alice": usage_response(42, 11, resets_at="2026-07-15T16:00:00+00:00",
-                                    fable_resets_at="2026-07-15T15:59:59+00:00"),
-        "tok-bob": usage_response(72, 63),
+def two_accounts():
+    return {
+        "currentAccount": "bob@example.com",
+        "accounts": [
+            account("bob@example.com", 0.75, None, 1_793_552_400_000, None),
+            account("alice@example.com", 0.5, 0.25, 1_793_552_400_000, 1_793_552_399_000),
+        ],
     }
 
-    got = run_poller(db, state, url)
 
-    accounts = got.get("accounts")
-    check("version 2", got.get("version") == 2, f"got {got!r}")
+def test_happy_path_two_accounts(tmp, url):
+    """Both accounts, sorted by email; ratios become percents, reset epoch
+    ms pass through, a null Fable quota stays null; the key goes out as
+    x-api-key without its trailing newline."""
+    StubGateway.response = two_accounts()
+
+    before = int(time.time() * 1000)
+    got = run_poller(tmp, url, write_key(tmp))
+
+    check("version 3", got.get("version") == 3, f"got {got!r}")
+    check("key sent stripped", StubGateway.keys == [KEY], f"got {StubGateway.keys!r}")
+    accounts = got["accounts"]
     emails = [a["email"] for a in accounts]
     check("sorted by email", emails == ["alice@example.com", "bob@example.com"], f"got {emails}")
     a, b = accounts
-    check("alice weekly", a["weekly"] == 42, f"got {a!r}")
-    check("alice fable", a["fable"] == 11, f"got {a!r}")
-    check("bob weekly/fable", (b["weekly"], b["fable"]) == (72, 63), f"got {b!r}")
-    check("weekly reset", a["weeklyResetsAt"] == "2026-07-15T16:00:00+00:00", f"got {a!r}")
-    check("fable reset", a["fableResetsAt"] == "2026-07-15T15:59:59+00:00", f"got {a!r}")
+    check("alice percents", (a["weekly"], a["fable"]) == (50, 25), f"got {a!r}")
+    check("alice resets", (a["weeklyResetsAt"], a["fableResetsAt"])
+          == (1_793_552_400_000, 1_793_552_399_000), f"got {a!r}")
+    check("bob weekly", (b["weekly"], b["weeklyResetsAt"]) == (75, 1_793_552_400_000), f"got {b!r}")
+    check("bob null fable", b["fable"] is None and b["fableResetsAt"] is None, f"got {b!r}")
     check("not stale", a["stale"] is False and b["stale"] is False, f"got {accounts!r}")
+    check("fetchedAt now", all(before <= x["fetchedAt"] <= got["updatedAt"] for x in accounts),
+          f"got {accounts!r}")
 
 
-def test_failure_keeps_previous_values(tmp, url):
-    """A failed fetch keeps that account's last published values, marked
-    stale — it never blanks the bar or substitutes another source."""
-    db = os.path.join(tmp, "omp")
-    state = os.path.join(tmp, "state.json")
-    make_db(db, SHARED, [cred("alice@example.com", "tok-alice"), cred("bob@example.com", "tok-bob")])
-    StubApi.responses = {"tok-alice": usage_response(42, 11), "tok-bob": usage_response(72, 63)}
-    run_poller(db, state, url)
-
-    StubApi.responses = {"tok-alice": usage_response(43, 12), "tok-bob": 429}
-    got = run_poller(db, state, url)
-
-    accounts = {a["email"]: a for a in got["accounts"]}
-    bob = accounts["bob@example.com"]
-    check("bob keeps previous", (bob["weekly"], bob["fable"]) == (72, 63), f"got {bob!r}")
-    check("bob stale", bob["stale"] is True, f"got {bob!r}")
-    check("bob keeps fetch time", bob["fetchedAt"] is not None, f"got {bob!r}")
-    alice = accounts["alice@example.com"]
-    check("alice updated", (alice["weekly"], alice["fable"], alice["stale"]) == (43, 12, False),
-          f"got {alice!r}")
+def assert_kept_stale(name, first, got):
+    want = {a["email"]: a for a in first["accounts"]}
+    accounts = got["accounts"]
+    check(f"{name}: same accounts", [a["email"] for a in accounts] == sorted(want),
+          f"got {accounts!r}")
+    for a in accounts:
+        prev = want[a["email"]]
+        check(f"{name}: {a['email']} keeps values",
+              all(a[k] == prev[k] for k in
+                  ("weekly", "weeklyResetsAt", "fable", "fableResetsAt", "fetchedAt")),
+              f"got {a!r}, before {prev!r}")
+        check(f"{name}: {a['email']} stale", a["stale"] is True, f"got {a!r}")
 
 
-def test_failure_without_history_is_null(tmp, url):
-    """First run fails: the account is listed with null percents, stale."""
-    db = os.path.join(tmp, "omp")
-    state = os.path.join(tmp, "state.json")
-    make_db(db, SHARED, [cred("bob@example.com", "tok-bob")])
-    StubApi.responses = {}
+def test_server_error_keeps_previous_values(tmp, url):
+    """A 500 keeps every account's last published values (fetchedAt too),
+    marked stale — it never blanks the bar."""
+    key = write_key(tmp)
+    StubGateway.response = two_accounts()
+    first = run_poller(tmp, url, key)
 
-    bob = run_poller(db, state, url)["accounts"][0]
-    check("null percents", bob["weekly"] is None and bob["fable"] is None, f"got {bob!r}")
-    check("stale", bob["stale"] is True, f"got {bob!r}")
-
-
-def test_latest_expiring_token_across_dbs_wins(tmp, url):
-    """omp keeps logins in several agent.dbs (shared store, per-profile
-    stores, historical rows). A profile's expired copy must not shadow the
-    live token in another database — the regression that froze the bar."""
-    db = os.path.join(tmp, "omp")
-    state = os.path.join(tmp, "state.json")
-    make_db(db, AFK, [cred("alice@example.com", "tok-alice-afk", updated_at=300,
-                           expires_in_ms=-3_600_000)])
-    make_db(db, SHARED, [
-        cred("alice@example.com", "tok-alice-live", updated_at=200),
-        cred("alice@example.com", "tok-alice-older", updated_at=100, expires_in_ms=600_000),
-    ])
-    StubApi.responses = {
-        "tok-alice-afk": 429,
-        "tok-alice-older": usage_response(99, 99),
-        "tok-alice-live": usage_response(42, 11),
-    }
-
-    got = run_poller(db, state, url)
-
-    check("one account after dedupe", len(got["accounts"]) == 1, f"got {got['accounts']!r}")
-    alice = got["accounts"][0]
-    check("live token used", (alice["weekly"], alice["stale"]) == (42, False), f"got {alice!r}")
+    StubGateway.response = 500
+    assert_kept_stale("500", first, run_poller(tmp, url, key))
 
 
-def test_expired_account_not_queried(tmp, url):
-    """An account whose every token is expired is still listed with its
-    last values, stale, but the endpoint is never called for it."""
-    db = os.path.join(tmp, "omp")
-    state = os.path.join(tmp, "state.json")
-    make_db(db, SHARED, [cred("bob@example.com", "tok-bob")])
-    StubApi.responses = {"tok-bob": usage_response(72, 63)}
-    run_poller(db, state, url)
+def test_wrong_key_keeps_previous_values(tmp, url):
+    """A rejected key (401) is a failure like any other."""
+    StubGateway.response = two_accounts()
+    first = run_poller(tmp, url, write_key(tmp))
 
-    os.remove(os.path.join(db, SHARED))
-    make_db(db, SHARED, [cred("bob@example.com", "tok-bob-dead", expires_in_ms=-1)])
-    StubApi.requests.clear()
-    bob = run_poller(db, state, url)["accounts"][0]
+    assert_kept_stale("401", first, run_poller(tmp, url, write_key(tmp, "wrong")))
+    check("401: wrong key was sent", StubGateway.keys[-1] == "wrong", f"got {StubGateway.keys!r}")
 
-    check("no request for expired token", StubApi.requests == [], f"got {StubApi.requests!r}")
-    check("keeps values, stale", (bob["weekly"], bob["stale"]) == (72, True), f"got {bob!r}")
+
+def test_missing_key_file_keeps_previous_values(tmp, url):
+    """No key file: nothing is fetched, previous values stay, stale."""
+    StubGateway.response = two_accounts()
+    first = run_poller(tmp, url, write_key(tmp))
+
+    StubGateway.keys.clear()
+    got = run_poller(tmp, url, os.path.join(tmp, "absent"))
+    check("missing key: no request", StubGateway.keys == [], f"got {StubGateway.keys!r}")
+    assert_kept_stale("missing key", first, got)
+
+
+def test_bad_response_keeps_previous_values(tmp, url):
+    """A 200 without an accounts list is a failure, not "no accounts"."""
+    StubGateway.response = two_accounts()
+    first = run_poller(tmp, url, write_key(tmp))
+
+    StubGateway.response = {"currentAccount": None}
+    assert_kept_stale("no accounts list", first, run_poller(tmp, url, write_key(tmp)))
+
+
+def test_first_run_failure_has_no_accounts(tmp, url):
+    """Failing with nothing published yet: an empty account list."""
+    StubGateway.response = 500
+    got = run_poller(tmp, url, write_key(tmp))
+    check("first failure: version 3", got.get("version") == 3, f"got {got!r}")
+    check("first failure: no accounts", got["accounts"] == [], f"got {got!r}")
 
 
 def main():
-    server = HTTPServer(("127.0.0.1", 0), StubApi)
+    server = HTTPServer(("127.0.0.1", 0), StubGateway)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    url = f"http://127.0.0.1:{server.server_address[1]}/api/oauth/usage"
+    url = f"http://127.0.0.1:{server.server_address[1]}{STATUS_PATH}"
 
     tests = [
         test_happy_path_two_accounts,
-        test_failure_keeps_previous_values,
-        test_failure_without_history_is_null,
-        test_latest_expiring_token_across_dbs_wins,
-        test_expired_account_not_queried,
+        test_server_error_keeps_previous_values,
+        test_wrong_key_keeps_previous_values,
+        test_missing_key_file_keeps_previous_values,
+        test_bad_response_keeps_previous_values,
+        test_first_run_failure_has_no_accounts,
     ]
     for t in tests:
-        StubApi.responses = {}
-        StubApi.requests = []
+        StubGateway.response = 500
+        StubGateway.keys = []
         with tempfile.TemporaryDirectory() as tmp:
             t(tmp, url)
     print(f"PASS: {len(tests)} poller behavior test(s)")
