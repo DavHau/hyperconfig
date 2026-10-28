@@ -1,7 +1,8 @@
 # Agent slots: every agent with `agents.<name>.slot.enable` gets its own
 # container slot (../container-slots.nix, which the importing system enables
 # and wires to its network: uplink, egress, public IPv4 interface), named
-# after the agent, in isolated mode: the internet only, never the LAN, this
+# after the agent (or slot.name, for agent names over 11 chars), in
+# isolated mode: the internet only, never the LAN, this
 # host or another slot. The agent deploys whatever NixOS system it likes
 # into it, switches it on and off, and resets it when it locked itself
 # out. The how-to the agents read is ./SKILL.md; `slot info` prints the
@@ -39,9 +40,9 @@
 # refused, not trusted.
 #
 # On and off: the containers do not start at boot (autoStart off). Root-run
-# units do the work: agent-slot-{start,stop,reset,reset-hard}@<agent>
-# record the desired state in /var/lib/agent-slots/<agent>/state and act on
-# container@<agent>; agent-slots-restore starts at boot every slot whose
+# units do the work: agent-slot-{start,stop,reset,reset-hard}@<slot>
+# record the desired state in /var/lib/agent-slots/<slot>/state and act on
+# container@<slot>; agent-slots-restore starts at boot every slot whose
 # state is on, so a reboot returns each slot to where its agent left it.
 # The agents reach those units through one socket, /run/agent-slot-ctl.sock:
 # each connection runs a root service (Accept=yes) that reads one verb, takes
@@ -189,7 +190,10 @@ let
   legacyHostOf = name: "${name}.${cfg.legacyDomain}";
   legacyCert = "agent-slots-legacy";
   nginxUid = config.users.users.${nginxCfg.user}.uid;
+  # Agent names (hostnames, accounts) and the slots' container names
+  # (units, veths, state dirs; slot.name, the agent's name by default).
   names = lib.attrNames agents;
+  slotNames = map (a: a.slot.name) (lib.attrValues agents);
   iface = slotsCfg.publicIPv4Interface;
   publicIPv4 = exposure.publicIPv4;
 
@@ -227,7 +231,7 @@ let
       action=$1
       name=$2
       case "$name" in
-        ${lib.concatStringsSep "|" names}) ;;
+        ${lib.concatStringsSep "|" slotNames}) ;;
         *) echo "agent-slots: no slot named '$name'" >&2; exit 1 ;;
       esac
       dir=${stateDir}/$name
@@ -297,7 +301,7 @@ let
   };
 
   restore = pkgs.writeShellScript "agent-slots-restore" ''
-    for name in ${lib.escapeShellArgs names}; do
+    for name in ${lib.escapeShellArgs slotNames}; do
       if [ "$(cat ${stateDir}/$name/state 2>/dev/null)" = on ]; then
         echo "slot $name: on before, starting"
         ${systemctl} start --no-block "container@$name.service"
@@ -315,7 +319,7 @@ let
     import subprocess
     import sys
 
-    SLOTS = {${lib.concatStringsSep ", " (lib.mapAttrsToList (name: a: "${toString a.uid}: \"${name}\"") agents)}}
+    SLOTS = {${lib.concatStringsSep ", " (lib.mapAttrsToList (_: a: "${toString a.uid}: \"${a.slot.name}\"") agents)}}
     ACTIONS = {${lib.concatMapStringsSep ", " (a: "\"${a}\"") actions}}
 
     conn = socket.socket(fileno=0)
@@ -362,6 +366,7 @@ let
     name: a:
     ''
       ${name})
+        slot=${a.slot.name}
         v4=${ipv4Of a}
         v6=${ipv6Of a}
     ''
@@ -424,9 +429,9 @@ let
       }
 
       status() {
-        desired=$(cat ${stateDir}/"$me"/state 2>/dev/null || echo off)
-        actual=$(${systemctl} is-active "container@$me.service" || true)
-        echo "slot $me: desired $desired, container $actual"
+        desired=$(cat ${stateDir}/"$slot"/state 2>/dev/null || echo off)
+        actual=$(${systemctl} is-active "container@$slot.service" || true)
+        echo "slot $slot: desired $desired, container $actual"
       }
 
       run() {
@@ -442,7 +447,7 @@ let
 
       info() {
         cat <<EOF
-      slot:      $me (off by default; slot start|stop|reset [--hard]|status)
+      slot:      $slot (off by default; slot start|stop|reset [--hard]|status)
       ${infoV6}${infoWeb}deploy:    nixos-rebuild switch --flake .#<cfg> \\
                    --target-host root@$v4 --build-host root@$v4
       EOF
@@ -604,10 +609,19 @@ in
     agents = mkOption {
       type = types.attrsOf (
         types.submodule (
-          { config, ... }:
+          { config, name, ... }:
+          let
+            agentName = name;
+          in
           {
             options.slot = {
               enable = lib.mkEnableOption "the agent's own isolated container slot";
+              name = mkOption {
+                type = types.str;
+                default = agentName;
+                defaultText = lib.literalExpression "<agent name>";
+                description = "The slot's container name (container@<name>, its veth, state and host-key dirs), at most 11 chars (services.container-slots). Set it for an agent whose own name is longer; its hostname stays slot.<agent>.<domain>. Fixed like the id: renaming starts an empty slot.";
+              };
               id = mkOption {
                 type = types.ints.between 1 254;
                 description = "The slot id (services.container-slots); fixed forever, addresses and ports derive from it. Unique among all container slots of the host.";
@@ -664,9 +678,13 @@ in
             assertion = cfg.legacyDomain != null -> public;
             message = "services.hyperhermes.slots.legacyDomain needs exposure.mode = public.";
           }
+          {
+            assertion = lib.allUnique slotNames;
+            message = "services.hyperhermes.agents.<name>.slot.name must be unique.";
+          }
         ];
 
-        services.container-slots.slots = lib.mapAttrs (_: a: {
+        services.container-slots.slots = lib.mapAttrs' (_: a: lib.nameValuePair a.slot.name {
           inherit (a.slot) id memoryMax cpuQuota;
           mode = "isolated";
           autoStart = false;
@@ -693,7 +711,7 @@ in
         systemd.tmpfiles.rules = [ "d ${stateDir} 0755 root root -" ];
 
         systemd.services = lib.mkMerge [
-          (lib.genAttrs (map (name: "container@${name}") names) (_: {
+          (lib.genAttrs (map (name: "container@${name}") slotNames) (_: {
             # nixpkgs puts every container in machine.slice
             serviceConfig.Slice = lib.mkForce "agent-slots.slice";
             serviceConfig.TasksMax = cfg.limits.tasksMax / 4;
@@ -763,7 +781,7 @@ in
                 IdentityFile ${a.slot.identityFile}
                 IdentitiesOnly yes
                 StrictHostKeyChecking yes
-                UserKnownHostsFile ${slotsCfg.hostKeysDir}/${name}/known_hosts
+                UserKnownHostsFile ${slotsCfg.hostKeysDir}/${a.slot.name}/known_hosts
             ''
           ) agents
         );
@@ -802,8 +820,8 @@ in
                   in
                   ''
                     ip daddr ${ipv4Of a} ${other} jump refuse
-                    oifname "ve-${name}" meta nfproto ipv4 ${other} jump refuse
-                    oifname "ve-${name}" ip6 daddr != ${ipv6Of a} ${other} jump refuse
+                    oifname "ve-${a.slot.name}" meta nfproto ipv4 ${other} jump refuse
+                    oifname "ve-${a.slot.name}" ip6 daddr != ${ipv6Of a} ${other} jump refuse
                     ip6 daddr ${ipv6Of a} ${other} meta l4proto { tcp, udp } th dport 22 jump refuse
                     # From one of this host's own addresses (no IPV6_FREEBIND
                     # spoofing), and never from a veth's host side (the slots'

@@ -189,7 +189,7 @@ in
           "oauth2-proxy-serve.service"
         ]
         ++ map (agent: "hermes-agent-${agent}.service") (lib.attrNames agents)
-        ++ map (agent: "container@${agent}.service") (lib.attrNames slotAgents);
+        ++ lib.mapAttrsToList (_: a: "container@${a.slot.name}.service") slotAgents;
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
