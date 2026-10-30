@@ -35,10 +35,22 @@ in
       device.ipv4_address
       device.ipv6_address
     ];
-    # sg-sin WireGuard relays from api.mullvad.net/public/relays/wireguard/v1
-    # (2026-10-14), alternating the two hosting providers so a failover also
-    # leaves the provider.
+    # sg-sin WireGuard relays from api.mullvad.net/public/relays/wireguard/v1,
+    # alternating the two hosting providers so a failover also leaves the
+    # provider. 2026-10-30: 001, 002, 101 and 102 stopped answering som's
+    # handshakes (other relays, same key, did) and took the agents offline
+    # for two hours, so the list now holds all six, the answering ones first.
     relays = [
+      # sg-sin-wg-003
+      {
+        endpoint = "138.199.60.28:51820";
+        publicKey = "3HtGdhEXUPKQIDRW49wCUoTK2ZXfq+QfzjfYoldNchg=";
+      }
+      # sg-sin-wg-103
+      {
+        endpoint = "135.136.98.130:51820";
+        publicKey = "1YAc0lZSoqkzsO301Gmtnf43XwLWzchR8EcT5yGv9Qg=";
+      }
       # sg-sin-wg-001
       {
         endpoint = "138.199.60.2:51820";
@@ -53,6 +65,11 @@ in
       {
         endpoint = "138.199.60.15:51820";
         publicKey = "WM5I4IFwQcVysM4fF4NXZtQXNrSkqVWkQxNPPygOiF0=";
+      }
+      # sg-sin-wg-102
+      {
+        endpoint = "146.70.199.130:51820";
+        publicKey = "uxHoFo9rroja6doGDTDln5u5MLxnkKxDdu/vyLVrqD8=";
       }
     ];
   };
