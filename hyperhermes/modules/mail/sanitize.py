@@ -298,25 +298,23 @@ def _hides(style: dict[str, str]) -> bool:
 
 
 # A stylesheet rule hides what it selects when its values would hide it
-# inline (_hides), and also on what a single rule cannot be judged by:
-# colour and background (the background and the parent are unknown here:
-# `.c{color:#fff}` on a white body, `.d{background:#000}` under black text),
-# a tiny box or a clipping overflow (the other half may come from another
-# rule or the inline style), and positioning. Neutral values (inherit,
-# currentcolor, a transparent background, auto sizes, a 36px heading) hide
-# nothing: templates set them on every tag, and counting them hid whole
-# mails. Many HTML mails still lose more than a human would see; that is
-# the safe direction.
+# inline (_hides), and also on what a single rule cannot be judged by: a
+# tiny box or a clipping overflow (the other half may come from another
+# rule or the inline style), and positioning. Neutral values (auto sizes, a
+# 36px heading) hide nothing: templates set them on every tag, and counting
+# them hid whole mails. Colour and background hide no element: they decide
+# whether a run of text is readable, so _css_paint hands every colour a
+# rule could give a token to the renderer, which checks each text run
+# against every colour/background pair it may get (any unreadable or
+# unknown pair hides that text, the safe direction). Hiding whole elements
+# for paint emptied real mails: a black body with light paragraphs, a
+# mobile-only `.x{background:#f7f7f7}` on the outer table cell.
 _NEUTRAL_PAINT = {"", "inherit", "currentcolor"}
 _NEUTRAL_BACKGROUND = _NEUTRAL_PAINT | {"transparent", "none", "initial", "unset"}
 
 
 def _sheet_hides(style: dict[str, str]) -> bool:
     if _hides(style):
-        return True
-    if style.get("color", "") not in _NEUTRAL_PAINT:
-        return True
-    if any(style.get(p, "") not in _NEUTRAL_BACKGROUND for p in ("background", "background-color")):
         return True
     if any(_tiny(_length(style.get(p, ""))) for p in ("height", "max-height", "width", "max-width", "line-height")):
         return True
@@ -374,6 +372,32 @@ def _css_rules(css: str):
             seg = i + 1
 
 
+def _css_paint(css: str) -> dict[str, list[tuple[object, object]]]:
+    """token -> [(color, background)] of every rule that paints it."""
+    if len(css) > MAX_CSS:
+        return {}
+    css = _css_unescape(_strip_css_comments(css))
+    out: dict[str, list] = {}
+    for selectors, body in _css_rules(css):
+        st = _style(body)
+        c = st.get("color", "")
+        b = st.get("background-color") or (st.get("background", "").split() or [""])[0]
+        c = None if c in _NEUTRAL_PAINT else (_color(c) or "U")
+        b = None if b in _NEUTRAL_BACKGROUND else (_color(b) or "U")
+        if c is None and b is None:
+            continue
+        for sel in selectors.split(","):
+            sel = sel.strip().lower()
+            if not sel or sel.startswith("@"):
+                continue
+            last = re.split(r"[\s>+~]+", sel)[-1]
+            if _INTERACTIVE.search(last):
+                continue
+            for t in _selector_tokens(last):
+                out.setdefault(t, []).append((c, b))
+    return out
+
+
 def _css_hidden_selectors(css: str) -> set[str]:
     """Class (.x), id (#x), attribute ([x], [x=v]) and tag tokens that some
     <style> rule hides. Every rule counts, inside any @media too (except
@@ -400,9 +424,10 @@ def _css_hidden_selectors(css: str) -> set[str]:
 
 
 class _Renderer(html.parser.HTMLParser):
-    def __init__(self, hidden_selectors: set[str]):
+    def __init__(self, hidden_selectors: set[str], paint=None):
         super().__init__(convert_charrefs=True)
         self.sel = hidden_selectors
+        self.paint = paint or {}
         # (tag, hidden, color, background, closed <details>)
         self.stack: list[tuple[str, bool, object, object, bool]] = []
         # How often each tag is open, so an end tag never scans the stack.
@@ -421,7 +446,7 @@ class _Renderer(html.parser.HTMLParser):
     def _top(self):
         if self.stack:
             return self.stack[-1]
-        return ("", False, (0, 0, 0), (255, 255, 255), False)
+        return ("", False, frozenset({(0, 0, 0)}), frozenset({(255, 255, 255)}), False)
 
     def _selected(self, tag, attrs) -> bool:
         if not self.sel:
@@ -456,16 +481,28 @@ class _Renderer(html.parser.HTMLParser):
         if tag in _VOID:
             return
         style = _style(attrs.get("style"))
-        color = (
-            _color(style.get("color") or attrs.get("color") or (attrs.get("text") if tag == "body" else None))
-            or parent_color
-        )
-        bg = _color(
+        sheet = []
+        if self.paint:
+            toks = [tag] + ["." + c for c in (attrs.get("class") or "").lower().split()]
+            if attrs.get("id"):
+                toks.append("#" + attrs["id"].lower())
+            toks += [f"[{a}={v.lower()}]" for a, v in attrs.items()] + ["[" + a for a in attrs] + ["*"]
+            for t in toks:
+                sheet += self.paint.get(t, ())
+        inline_c = _color(style.get("color") or attrs.get("color") or (attrs.get("text") if tag == "body" else None))
+        color = frozenset({inline_c}) if inline_c is not None else parent_color
+        sc = {c for c, _ in sheet if c is not None}
+        if sc:
+            color = color | sc
+        inline_b = _color(
             style.get("background-color")
             or (style.get("background", "").split() or [None])[0]
             or attrs.get("bgcolor")
         )
-        bg = parent_bg if bg in (None, "T") else bg
+        bg = parent_bg if inline_b in (None, "T") else frozenset({inline_b})
+        sb = {b for _, b in sheet if b not in (None, "T")}
+        if sb:
+            bg = bg | sb
         hidden = parent_hidden
         if not hidden:
             low_contrast = (
@@ -480,8 +517,6 @@ class _Renderer(html.parser.HTMLParser):
                 # A closed <details> shows its <summary> only.
                 or (in_closed_details and tag != "summary")
                 or _hides(style)
-                or color == "T"
-                or low_contrast
                 or self._selected(tag, attrs)
             )
             if hidden:
@@ -537,6 +572,13 @@ class _Renderer(html.parser.HTMLParser):
         if in_closed_details:
             self.hidden_elements += 1
             return
+        _, _, color, bg, _ = self._top()
+        if data.strip() and any(
+            c in ("T", "U") or b == "U" or (isinstance(c, tuple) and isinstance(b, tuple)
+                and abs(_luminance(c) - _luminance(b)) < 0.12)
+            for c in color for b in bg):
+            self.hidden_elements += 1
+            return
         self._emit(data)
 
 
@@ -568,7 +610,7 @@ def html_to_text(markup: str) -> tuple[str, list[str], int, int]:
     """(visible text, hrefs of visible links, hidden elements, images).
     Callers keep `markup` under MAX_HTML (render() does)."""
     styles = _style_blocks(markup)
-    r = _Renderer({"*"} if styles is None else _css_hidden_selectors(styles))
+    r = _Renderer({"*"} if styles is None else _css_hidden_selectors(styles), None if styles is None else _css_paint(styles))
     try:
         r.feed(markup)
         r.close()

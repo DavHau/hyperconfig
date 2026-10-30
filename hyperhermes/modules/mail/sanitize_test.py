@@ -337,6 +337,8 @@ HIDDEN_CASES = {
     "stylesheet-overflow": '<style>.o{overflow:hidden}</style><div class=o style="height:1px">SECRET</div>',
     "star-attribute-value": '<style>*[class="gmail-fix"]{display:none}</style><div class="gmail-fix">SECRET</div>',
     "attribute-prefix": '<style>[data-x^="a"]{display:none}</style><div data-x="b">SECRET</div>',
+    "dark-box-default-text": '<div style="background:#000"><span>SECRET</span></div>',
+    "stylesheet-colour-on-light-cell": '<style>.w{color:#fafafa}</style><table><tr><td style="background:#fff" class=w>SECRET</td></tr></table>',
 }
 
 
@@ -393,6 +395,24 @@ class Hidden(unittest.TestCase):
         self.assertIn("Confirm email <https://api.lax.test/verify?code=abc>", text)
         self.assertNotIn("GONE", text)
         self.assertEqual(hrefs, ["https://api.lax.test/verify?code=abc"])
+
+    def test_paint_hides_text_not_containers(self):
+        # Real confirmation mails emptied by hiding whole elements for paint
+        # (2026-10): Resend's black body with light paragraphs, and Brevo's
+        # mobile-only background rule on the outer table cell.
+        for name, html in {
+            "dark-body-light-text": '<body style="background-color:#000000"><table><tr><td style="background-color:#000000">'
+            '<p style="color:#fdfdfd">SHOWN</p><a href="https://x.test/confirm" style="background-color:#fdfdfd;color:#000000">'
+            "<span>Confirm account</span></a></td></tr></table></body>",
+            "sheet-background-on-cell": "<style>@media (max-width:600px){.r1-i{background-color:#F7F7F7!important}}</style>"
+            '<table><tr><td class=r1-i style="background-color:#F7F7F7"><p style="color:#474747">SHOWN</p>'
+            '<a href="https://x.test/confirm">Confirm account</a></td></tr></table>',
+        }.items():
+            with self.subTest(name):
+                text, hrefs, _, _ = sanitize.html_to_text(html)
+                self.assertIn("SHOWN", text)
+                self.assertIn("Confirm account <https://x.test/confirm>", text)
+                self.assertEqual(hrefs, ["https://x.test/confirm"])
 
 
 def mime(content_type: str, body: str) -> object:
