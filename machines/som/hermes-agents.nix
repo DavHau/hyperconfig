@@ -123,6 +123,8 @@ in
         sshKeys = [
           "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICwDM+8310VQgkMpUu1Oz+ihDBBfCZ/akKMmUIPLgevR adambartnik@Adams-MacBook-Pro-2"
         ];
+        # Claude through the TeamClaude gateway, as client `adam`.
+        teamclaude.enable = true;
       };
 
       j = {
