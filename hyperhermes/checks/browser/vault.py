@@ -1,9 +1,12 @@
-"""Vault driver for the browser check (default.nix; patches/hermes-camofox-vault.patch), run as
-alice with hermes' own interpreter, through hermes' tool registry like the agent loop, against her
-real camofox-browser and the login page of site.py.
+"""Vault driver for the browser check (default.nix; patches/hermes-camofox-vault.patch and
+hermes-vault-generate-password.patch), run as alice with hermes' own interpreter, through hermes' tool
+registry like the agent loop, against her real camofox-browser and the login and signup pages of site.py.
 
   vault <site>   the vault tools read the page's origin and fill a saved password into the page's
-                 password field; on another origin the fill refuses and writes nothing.
+                 password field; on another origin the fill refuses and writes nothing. create_login
+                 generates a password, saves it for the signup page's origin and fills the password
+                 and its confirmation, never returning it; on a page without a password field it
+                 saves nothing.
 
 Exits 1 on the first failed check; every check prints a PASS/FAIL line.
 """
@@ -33,14 +36,19 @@ def check(cond, what):
 
 
 def call(name, **args):
-    out = registry.dispatch(name, args, task_id=T)
+    global last
+    last = out = registry.dispatch(name, args, task_id=T)
     print(f"--- {name}({json.dumps(args)}) -> {out[:800]}", flush=True)
     check(PASSWORD not in out, f"{name} does not echo the password")
     return json.loads(out)
 
 
+def field(expression):
+    return call("browser_console", expression=expression).get("result")
+
+
 def password_length():
-    return call("browser_console", expression="document.getElementById('pw').value.length").get("result")
+    return field("document.getElementById('pw').value.length")
 
 
 def vault(site):
@@ -62,6 +70,26 @@ def vault(site):
     out = call("browser_vault", action="fill", handle=meta.id)
     check(out.get("error_type") == "origin_mismatch", "the fill refuses another origin")
     check(password_length() == 0, "and writes nothing")
+
+    check(call("browser_navigate", url=site + "/signup").get("success") is True, "the signup page loads")
+    out = call("browser_vault", action="create_login", identifier="alice@example.com", label="signup")
+    check(out.get("success") is True and out.get("filled_fields") == 2 and out.get("origin") == site
+          and out.get("identifier") == "alice@example.com", "create_login fills two fields on the signup origin")
+    store = get_vault_store()
+    meta = store.get_meta(out.get("handle", ""))
+    check(meta is not None and meta.kind == "login" and meta.origin == site and meta.identifier == "alice@example.com",
+          "the vault holds the new login, bound to the signup origin and the identifier")
+    generated = store.resolve_secret(meta.id)["password"]
+    check(len(generated) == 24 and generated not in last, "the result carries no password")
+    check(password_length() == len(generated), "the password field holds the generated password")
+    check(field("document.getElementById('pw').value === document.getElementById('pw2').value") is True,
+          "the confirmation holds the same password")
+
+    saved = len(store.list_items())
+    check(call("browser_navigate", url=site + "/").get("success") is True, "a page without a password field loads")
+    out = call("browser_vault", action="create_login", identifier="alice@example.com")
+    check(out.get("error_type") == "no_password_field" and len(store.list_items()) == saved,
+          "create_login without a password field saves nothing")
 
     bc.requests.delete(f"{bc.get_camofox_url()}/sessions/{bc._get_session(T)['user_id']}",
                        headers=bc._auth_headers(), timeout=30)

@@ -2,7 +2,7 @@
 POST answered with an attachment, a form POST answered with a 302 to a file on
 another origin (APKSum's shape), and a script-built blob; plus a fetch() re-POST
 of the redirecting form and a file over browser_downloads' 50 MiB limit. /login is
-a login form for the vault test.
+a login form for the vault test, /signup a signup form (password and confirmation).
 
 Files are deterministic bytes; `site.py --sha <name>` prints a file's sha256.
 """
@@ -75,6 +75,15 @@ LOGIN = b"""<!doctype html><html><head><title>login</title></head><body>
 </form>
 </body></html>"""
 
+SIGNUP = b"""<!doctype html><html><head><title>sign up</title></head><body>
+<form method="post" action="/signup">
+  <label>Email <input id="email" name="email" type="email" autocomplete="email"></label>
+  <label>Password <input id="pw" name="password" type="password"></label>
+  <label>Confirm password <input id="pw2" name="confirm" type="password"></label>
+  <button type="submit">Create account</button>
+</form>
+</body></html>"""
+
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
@@ -96,12 +105,13 @@ class H(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(INDEX)))
             self.end_headers()
             self.wfile.write(INDEX)
-        elif self.path == "/login":
+        elif self.path in ("/login", "/signup"):
+            page = LOGIN if self.path == "/login" else SIGNUP
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
-            self.send_header("Content-Length", str(len(LOGIN)))
+            self.send_header("Content-Length", str(len(page)))
             self.end_headers()
-            self.wfile.write(LOGIN)
+            self.wfile.write(page)
         elif self.path == "/files/big.bin":
             self._file("big.bin", payload("big.bin", BIG))
         elif self.path.startswith("/files/") and self.path[7:] in FILES:

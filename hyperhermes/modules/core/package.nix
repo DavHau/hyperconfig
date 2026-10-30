@@ -34,6 +34,7 @@ let
     ./patches/hermes-camofox-vault.patch
     ./patches/hermes-hosted-ocr-url.patch
     ./patches/hermes-dashboard-oidc-allowed-groups.patch
+    ./patches/hermes-vault-generate-password.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {

@@ -22,10 +22,14 @@
 # and Verify, and the tool reports solved; on a page without a captcha it
 # reports no_captcha. Another camofox userId cannot solve on her tab.
 #
-# Vault: hermes' browser_vault_save_login and browser_vault_fill
+# Vault: hermes' browser_vault save_login and fill
 # (hermes-camofox-vault.patch) read the origin of alice's tab and
 # fill a saved password into the site's login form through her server;
-# on another origin the fill refuses and writes nothing.
+# on another origin the fill refuses and writes nothing. create_login
+# (hermes-vault-generate-password.patch) generates a password on the
+# site's signup form, saves it in her vault bound to that origin with the
+# given identifier and fills the password and its confirmation with it,
+# never returning it; on a page without a password field it saves nothing.
 { pkgs, self }:
 let
   inherit (pkgs) lib;
@@ -182,7 +186,7 @@ pkgs.testers.runNixOSTest {
         print(out)
         assert "ALL PASSED" in out
 
-    with subtest("the vault fills alice's saved password in her browser, only on its origin"):
+    with subtest("the vault fills alice's saved or generated password in her browser, only on its origin"):
         out = machine.succeed("${vaultDriver "alice" "vault http://127.0.0.1:8765"}")
         print(out)
         assert "ALL PASSED" in out
