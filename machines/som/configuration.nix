@@ -46,6 +46,8 @@ in
     ../../modules/nixos/zfs-ephemeral-tmp.nix
     ../../modules/nixos/zfs-arc-max.nix
     ../../modules/nixos/per-user-tmp
+    # git-lfs and LFS over SSH (git-lfs-transfer) for every user and agent.
+    ../../modules/nixos/git-lfs.nix
     inputs.hyperhermes.nixosModules.mail
     # Pooled Claude subscription gateway, https://teamclaude.davhau.com/.
     ../../modules/nixos/teamclaude-gateway
