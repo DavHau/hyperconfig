@@ -18,11 +18,13 @@
 # the desired state survives a reboot; a reset brings back a slot whose
 # deploy dropped sshd, a hard reset also drops its gc roots; the slots run
 # in agent-slots.slice; the public IPv4 reaches the right slot by port, by
-# Host (80) and by SNI (443) under slot.<agent>.<domain>, with the host's
-# own https site keeping the client address; the old names
-# <agent>.<legacyDomain> only answer this host's 301 to the new one, path
-# kept, and never reach a slot; each slot's hostname gets its A and AAAA,
-# each old name its A, in exposure.dnsRecords.
+# Host (80) and by SNI (443) under slot.<agent>.<domain> and alice's extra
+# names (slot.extraHostnames), while a name nobody listed stays with the
+# host's own nginx, with the host's own https site keeping the client
+# address; the old names <agent>.<legacyDomain> only answer this host's 301
+# to the new one, path kept, and never reach a slot; each slot's hostname
+# gets its A and AAAA, each old name its A, in exposure.dnsRecords (the
+# extra names none: their DNS is kept elsewhere).
 #
 # The agent registry is a stub (agentsStub): what slots reads of core
 # (uid, sshKeyFile, the PATH and skill collection points), without running
@@ -60,7 +62,7 @@ let
   cert = pkgs.runCommand "agent-slots-test-cert" { nativeBuildInputs = [ pkgs.openssl ]; } ''
     mkdir $out
     openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj /CN=test \
-      -addext "subjectAltName=DNS:server.test,DNS:slot.alice.example.test,DNS:slot.bob.example.test" \
+      -addext "subjectAltName=DNS:server.test,DNS:slot.alice.example.test,DNS:slot.bob.example.test,DNS:alice.example.org,DNS:www.alice.example.org" \
       -keyout $out/key.pem -out $out/cert.pem
   '';
 
@@ -262,6 +264,10 @@ pkgs.testers.runNixOSTest {
             enable = true;
             inherit id;
             deployKey = sshKeys.${name}.pub;
+            extraHostnames = lib.optionals (name == "alice") [
+              "alice.example.org"
+              "www.alice.example.org"
+            ];
           };
         }) { alice = 4; bob = 5; };
       };
@@ -367,12 +373,14 @@ pkgs.testers.runNixOSTest {
 
     with subtest("slot info names the ports, addresses and hostname"):
         info = server.succeed("runuser -u alice -- slot info")
-        for want in ["14040-14049", "slot.alice.example.test", alice6, "root@" + alice4, "${publicIPv4}"]:
+        for want in ["14040-14049", "slot.alice.example.test", alice6, "root@" + alice4, "${publicIPv4}", "alice.example.org www.alice.example.org"]:
             assert want in info, info
+        assert "example.org" not in server.succeed("runuser -u bob -- slot info")
 
     with subtest("the slots' hostnames are in exposure.dnsRecords"):
         records = json.load(open("${pkgs.writeText "dns-records.json" (builtins.toJSON nodes.server.services.hyperhermes.exposure.dnsRecords)}"))
         zone = {(r["name"], r["type"]): r["value"] for r in records if "slot" in r["name"]}
+        assert not [r for r in records if r["name"].endswith("example.org")], records
         on_link = lambda id: {"ipv6OnLink": {"interface": "br0", "suffix": f"::5107:{id}", "expectedPrefix": "${prefix}"}}
         assert zone == {
             ("slot.alice.example.test", "A"): "${publicIPv4}",
@@ -449,6 +457,18 @@ pkgs.testers.runNixOSTest {
         assert out.strip() == "alice-tls peer=10.43.4.1 xff=", out
         out = client.succeed(get + "-k --resolve slot.bob.example.test:443:${publicIPv4} https://slot.bob.example.test/")
         assert out.startswith("bob-tls"), out
+        # alice's extra names: the same way into her slot, on both ports
+        for host in ["alice.example.org", "www.alice.example.org"]:
+            out = client.succeed(get + f"-H 'Host: {host}' http://${publicIPv4}/")
+            assert out.strip() == "alice-http peer=10.43.4.1 xff=${clientIPv4}", (host, out)
+            out = client.succeed(get + f"-k --resolve {host}:443:${publicIPv4} https://{host}/")
+            assert out.strip() == "alice-tls peer=10.43.4.1 xff=", (host, out)
+        # a name nobody listed stays with this host's nginx: exposure's
+        # default server, its 301 to https on 80 and its 404 on 443
+        out = client.succeed(get + "-o /dev/null -w '%{http_code} %{redirect_url}' -H 'Host: carol.example.org' http://${publicIPv4}/")
+        assert out == "301 https://carol.example.org/", out
+        out = client.succeed(get + "-o /dev/null -w '%{http_code}' -k --resolve carol.example.org:443:${publicIPv4} https://carol.example.org/")
+        assert out == "404", out
         # the old names: this host answers, with a 301 to the new name (path
         # and query kept), over both ports; nothing reaches a slot
         where = "-o /dev/null -w '%{http_code} %{redirect_url}' "

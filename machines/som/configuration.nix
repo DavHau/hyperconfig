@@ -331,12 +331,22 @@ in
       slotNames = {
         thaigersprint = "thaiger";
       };
+      # Public names of a slot's owner, routed into the slot on the shared
+      # IPv4 like slot.<agent>.davhau.fyi (80 to its vhost, 443 by SNI). Their
+      # DNS is the owner's: A at the public IPv4, AAAA at the slot's v6.
+      slotHostnames = {
+        thaigersprint = [
+          "thaigersprint.org"
+          "www.thaigersprint.org"
+        ];
+      };
     in
     lib.mapAttrs (name: _: {
       slot = {
         enable = true;
         id =
           slotIds.${name} or (throw "machines/som: hermes agent ${name} has no slot id; add it to slotIds");
+        extraHostnames = slotHostnames.${name} or [ ];
       }
       // lib.optionalAttrs (slotNames ? ${name}) { name = slotNames.${name}; };
     }) (import ./hermes-agents-data.nix);

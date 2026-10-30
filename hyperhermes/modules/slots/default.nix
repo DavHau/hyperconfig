@@ -80,6 +80,16 @@
 #              proxies http://slot.<agent>.<domain>:<port>/ to the slot's
 #              port 80, as the public port-80 vhost below does.
 #            Without exposure the slot has no hostname.
+#   extra    slot.extraHostnames, public mode only: names outside the
+#            deployment's domains (the slot owner's own, a project's domain)
+#            that the admin routes into the slot exactly like its hostname
+#            on the public IPv4's 80/443 (below). Their DNS is not kept
+#            here (no exposure.dnsRecords): whoever holds them points A at
+#            exposure.publicIPv4 and AAAA at the slot's v6. Never under
+#            exposure's domain or a legacyDomain (the deployment's names,
+#            the slots' own included) and never on two slots. Local mode
+#            refuses them: its front answers *.localhost only, a public name
+#            would never get there.
 #   ports    public mode: TCP portBase + 10 * id .. +9 on the public IPv4,
 #            DNATed to the same port in the slot (../container-slots.nix
 #            publicIPv4Ports), client address kept. TCP only: IPv6 already
@@ -91,24 +101,26 @@
 #
 # Public mode: the public IPv4 on 80/443 (it arrives on
 # services.container-slots.publicIPv4Interface): by hostname,
-# slot.<agent>.<domain> goes to that agent's slot, everything else stays
-# with this host's nginx.
-#   80   nginx proxies a vhost per agent to 10.43.<id>.2:80 (Host kept,
-#        websockets, no buffering), so ACME HTTP-01 works inside the slot.
+# slot.<agent>.<domain> and the slot's extraHostnames go to that agent's
+# slot, everything else stays with this host's nginx.
+#   80   nginx proxies a vhost per agent (its hostname, the extras as
+#        aliases) to 10.43.<id>.2:80 (Host kept, websockets, no buffering),
+#        so ACME HTTP-01 works inside the slot for every one of its names.
 #        The slot sees this host as the peer, the client in X-Forwarded-For.
 #   443  redirected (nft, only on publicIPv4Interface) to an nginx stream
 #        server that reads the SNI without terminating TLS (ssl_preread).
-#        slot.<agent>.<domain> is passed through to 10.43.<id>.2:443, so TLS ends
-#        in the slot; the slot sees this host (10.43.<id>.1) as the peer and
-#        gets no PROXY header: plain TLS servers work unchanged, and the v4
-#        client address of an https connection is not visible in the slot
-#        (v6 clients arrive directly with their own address). Everything
-#        else goes to this host's own nginx https servers through an extra
-#        PROXY-protocol listener on a unix socket (defaultListen), and
-#        real_ip restores the client address there, so this host's sites
-#        keep seeing it as before. nginx stream proxy_protocol is one switch
-#        per server, so slot traffic takes a second hop that accepts and
-#        drops the PROXY header before dialling the slot.
+#        slot.<agent>.<domain> and the extras are passed through to
+#        10.43.<id>.2:443, so TLS ends in the slot; the slot sees this host
+#        (10.43.<id>.1) as the peer and gets no PROXY header: plain TLS
+#        servers work unchanged, and the v4 client address of an https
+#        connection is not visible in the slot (v6 clients arrive directly
+#        with their own address). Everything else goes to this host's own
+#        nginx https servers through an extra PROXY-protocol listener on a
+#        unix socket (defaultListen), and real_ip restores the client address
+#        there, so this host's sites keep seeing it as before. nginx stream
+#        proxy_protocol is one switch per server, so slot traffic takes a
+#        second hop that accepts and drops the PROXY header before dialling
+#        the slot.
 #   IPv6 is untouched: the AAAA points at the slot, not at this host.
 #
 # Resources: memoryMax/cpuQuota per slot (defaults below), and all slots
@@ -196,6 +208,24 @@ let
   slotNames = map (a: a.slot.name) (lib.attrValues agents);
   iface = slotsCfg.publicIPv4Interface;
   publicIPv4 = exposure.publicIPv4;
+  # Every name that reaches a slot on the public IPv4: its own, then the
+  # admin's extras (the header).
+  hostsOf = name: a: [ (hostOf name) ] ++ a.slot.extraHostnames;
+  extraHostnames = lib.concatMap (a: a.slot.extraHostnames) (lib.attrValues agents);
+  # The deployment's domains (the slots' own names are below the first): no
+  # extra name may be one of them or below one.
+  deploymentDomains = [
+    exposure.domain
+  ]
+  ++ lib.filter (d: d != null) (
+    [ cfg.legacyDomain ]
+    ++ lib.optional (
+      options ? services.hyperhermes.dashboards.legacyDomain
+    ) config.services.hyperhermes.dashboards.legacyDomain
+  );
+  atOrBelow = domain: host: host == domain || lib.hasSuffix ".${domain}" host;
+  label = "[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?";
+  isHostname = h: lib.stringLength h <= 253 && builtins.match "(${label}\\.)+${label}" h != null;
 
   # What the slot's port 80 gets through nginx (both modes).
   slotLocation = a: {
@@ -372,6 +402,16 @@ let
     ''
     + lib.optionalString exposed "  host=${hostOf name}\n"
     + lib.optionalString public "  ports=${portRange a}\n"
+    # The extra names' `slot info` lines, whole (empty without any).
+    + "  extra=${
+        lib.escapeShellArg (
+          lib.optionalString (public && a.slot.extraHostnames != [ ]) ''
+            also:      ${toString a.slot.extraHostnames}
+                       reach the slot like ${hostOf name} on ${publicIPv4} 80/443;
+                       their DNS is not kept here (A ${publicIPv4}, AAAA ${ipv6Of a})
+          ''
+        )
+      }\n"
     + "  ;;\n";
 
   # `slot info`'s ssh and IPv6 lines: public or private IPv6.
@@ -448,7 +488,7 @@ let
       info() {
         cat <<EOF
       slot:      $slot (off by default; slot start|stop|reset [--hard]|status)
-      ${infoV6}${infoWeb}deploy:    nixos-rebuild switch --flake .#<cfg> \\
+      ${infoV6}${infoWeb}''${extra}deploy:    nixos-rebuild switch --flake .#<cfg> \\
                    --target-host root@$v4 --build-host root@$v4
       EOF
       }
@@ -526,6 +566,13 @@ let
               - 10 TCP ports on the public IPv4 (`slot info`) forward to the same ports
                 in the slot, with the real client address. No UDP over IPv4; use IPv6.
             ''
+            + lib.optionalString (extraHostnames != [ ]) ''
+              - Extra names under `also:` in `slot info`, if any (names of your own
+                the admin routes here): ports 80 and 443 on the public IPv4 reach
+                the slot for them exactly as for `${you}`. Their DNS is not kept
+                here; whoever holds them points A at that IPv4 and AAAA at the slot's
+                IPv6.
+            ''
           else if local then
             ''
               - `${exposure.urlOf you}/`, from this host only: its web front passes
@@ -538,16 +585,25 @@ let
           else
             ""
         )
-        (lib.optionalString public ''
+        (
+          lib.optionalString public ''
 
-          For a website add nginx with `enableACME = true; forceSSL = true;` on a
-          virtualHost named `${you}`, plus
-          `security.acme.acceptTerms = true;` and `security.acme.defaults.email`.
-          That name shares its site (${exposure.domain}) with every agent's pages,
-          never with the deployment's own sites: do not rely on cookies for
-          `${exposure.domain}` or `<you>.${exposure.domain}`; keep yours host-only
-          (no Domain attribute).
-        '')
+            For a website add nginx with `enableACME = true; forceSSL = true;` on a
+            virtualHost named `${you}`, plus
+            `security.acme.acceptTerms = true;` and `security.acme.defaults.email`.
+            That name shares its site (${exposure.domain}) with every agent's pages,
+            never with the deployment's own sites: do not rely on cookies for
+            `${exposure.domain}` or `<you>.${exposure.domain}`; keep yours host-only
+            (no Domain attribute).
+          ''
+          + lib.optionalString (public && extraHostnames != [ ]) (
+            "\n"
+            + ''
+              Your extra names from `slot info` get certificates the same way (HTTP-01
+              through this host): a virtualHost of their own, or `serverAliases`.
+            ''
+          )
+        )
       ]
       (builtins.readFile ./SKILL.md);
   skill = import ../../lib/agent-skill.nix pkgs {
@@ -653,6 +709,15 @@ in
                 default = "400%";
                 description = "CPUQuota= of the slot.";
               };
+              extraHostnames = mkOption {
+                type = types.listOf types.str;
+                default = [ ];
+                example = [
+                  "example.org"
+                  "www.example.org"
+                ];
+                description = "Public mode: further public hostnames (lowercase, none under exposure's domain or a legacyDomain, none on two slots) that reach the slot on the public IPv4 exactly like slot.<agent>.<domain>: aliases of its port-80 vhost (ACME HTTP-01 works in the slot) and passed through by SNI on 443. Their DNS is managed elsewhere (A exposure.publicIPv4, AAAA the slot's v6); `slot info` lists them to the agent.";
+              };
             };
           }
         )
@@ -681,6 +746,10 @@ in
           {
             assertion = lib.allUnique slotNames;
             message = "services.hyperhermes.agents.<name>.slot.name must be unique.";
+          }
+          {
+            assertion = extraHostnames != [ ] -> public;
+            message = "services.hyperhermes.agents.<name>.slot.extraHostnames needs exposure.mode = public.";
           }
         ];
 
@@ -879,7 +948,30 @@ in
             assertion = iface != null && publicIPv4 != null;
             message = "services.hyperhermes slots in public mode need services.container-slots.publicIPv4Interface and exposure.publicIPv4.";
           }
-        ];
+        ]
+        # The extra names (the header): routed into one slot, so they must
+        # be names of nobody else here.
+        ++ (
+          let
+            bad = lib.filter (h: !isHostname h) extraHostnames;
+            twice = lib.unique (lib.filter (h: lib.count (x: x == h) extraHostnames > 1) extraHostnames);
+            ours = lib.filter (h: lib.any (d: atOrBelow d h) deploymentDomains) extraHostnames;
+          in
+          [
+            {
+              assertion = bad == [ ];
+              message = "services.hyperhermes.agents.<name>.slot.extraHostnames: not lowercase hostnames: ${toString bad}.";
+            }
+            {
+              assertion = twice == [ ];
+              message = "services.hyperhermes.agents.<name>.slot.extraHostnames: listed more than once (one slot each): ${toString twice}.";
+            }
+            {
+              assertion = ours == [ ];
+              message = "services.hyperhermes.agents.<name>.slot.extraHostnames: ${toString ours} at or below the deployment's domains (${toString deploymentDomains}), slot.<agent>.<domain> included.";
+            }
+          ]
+        );
 
         # Each name needs its own A: a wildcard A does not answer a name that
         # has records of its own (the AAAA); the agent's *.<agent>.<domain>
@@ -938,18 +1030,20 @@ in
             map $ssl_preread_server_name $agent_slots_hop {
               hostnames;
               default unix:${httpsSock};
-            ${lib.concatMapStrings (name: ''
-              ${hostOf name} unix:${hopSock};
-            '') names}
+            ${lib.concatStrings (
+              lib.mapAttrsToList (
+                name: a: lib.concatMapStrings (host: "  ${host} unix:${hopSock};\n") (hostsOf name a)
+              ) agents
+            )}
             }
             map $ssl_preread_server_name $agent_slots_backend {
               hostnames;
               # unreachable: the first hop sends only slot names here
               default 127.0.0.1:1;
             ${lib.concatStrings (
-              lib.mapAttrsToList (name: a: ''
-                ${hostOf name} ${ipv4Of a}:443;
-              '') agents
+              lib.mapAttrsToList (
+                name: a: lib.concatMapStrings (host: "  ${host} ${ipv4Of a}:443;\n") (hostsOf name a)
+              ) agents
             )}
             }
             server {
@@ -974,6 +1068,7 @@ in
               # (hermes*), so a request with an unknown Host never lands in a slot.
               lib.nameValuePair "slot-${name}" {
                 serverName = hostOf name;
+                serverAliases = a.slot.extraHostnames;
                 locations."/" = slotLocation a;
               }
             ) agents
