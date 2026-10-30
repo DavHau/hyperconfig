@@ -293,24 +293,58 @@ def _pascalcase_mcp_name(name: str) -> str:
     return _MCP_PREFIX + rest[0].upper() + rest[1:]
 
 
+# hyperhermes: hermes >= 0.21 puts its own OAuth wire form on every tool
+# before this module sees the request: ``mcp__<name>``, with ``memory`` and
+# ``session_search`` aliased to ``context_notes`` / ``chat_history_lookup``
+# (agent/anthropic_adapter.py _oauth_wire_namer). Stripping only ``mcp_``
+# left ``_<name>``, so every tool went out as ``mcp__hermes___<name>`` and
+# came back as ``_<name>``. hermes' fuzzy repair rescued ``_terminal`` and
+# friends, but ``_context_notes`` and ``_chat_history_lookup`` resemble no
+# registered tool: the memory and session_search tools always failed with
+# "Tool '_context_notes' does not exist". So the hermes wire prefix is
+# stripped whole, and the unwrapped name goes through hermes' own reverse
+# mapping (registry lookup, then the OAuth aliases).
+_HERMES_WIRE_PREFIX = "mcp__"
+
+
 def _wrap_tool_name(name: str) -> str:
     if not isinstance(name, str) or not name:
         return name
     if name.startswith(_MCP_HERMES_NAMESPACE):
         return name
-    base = name[len(_MCP_PREFIX):] if name.startswith(_MCP_PREFIX) else name
+    if name.startswith(_HERMES_WIRE_PREFIX):
+        base = name[len(_HERMES_WIRE_PREFIX):]
+    elif name.startswith(_MCP_PREFIX):
+        base = name[len(_MCP_PREFIX):]
+    else:
+        base = name
     return _MCP_HERMES_NAMESPACE + _uppercase_first(base)
+
+
+def _resolve_hermes_tool_name(base: str) -> str:
+    """hyperhermes: the registered hermes tool behind an unwrapped wire name
+    (``context_notes`` -> ``memory``, ``linear_get_issue`` ->
+    ``mcp_linear_get_issue``); the name itself when hermes has no mapping."""
+    try:
+        from agent.transports.anthropic import _unprefix_oauth_tool_name
+    except Exception:
+        return base
+    try:
+        resolved = _unprefix_oauth_tool_name(_HERMES_WIRE_PREFIX + base)
+    except Exception:
+        return base
+    return base if resolved == _HERMES_WIRE_PREFIX + base else resolved
 
 
 def _unwrap_tool_name(name: Any) -> Any:
     if not isinstance(name, str):
         return name
     if name.startswith(_MCP_HERMES_NAMESPACE):
-        return _lowercase_first(name[len(_MCP_HERMES_NAMESPACE):])
+        return _resolve_hermes_tool_name(_lowercase_first(name[len(_MCP_HERMES_NAMESPACE):]))
     # Hermes's transport may already strip ``mcp_``, leaving ``_hermes__<tool>``.
     fallback_prefix = _MCP_HERMES_NAMESPACE[len(_MCP_PREFIX):]  # "_hermes__"
     if name.startswith(fallback_prefix):
-        return _lowercase_first(name[len(fallback_prefix):])
+        return _resolve_hermes_tool_name(_lowercase_first(name[len(fallback_prefix):]))
     return name
 
 
