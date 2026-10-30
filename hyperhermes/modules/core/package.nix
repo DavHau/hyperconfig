@@ -27,7 +27,6 @@ let
   hermesInputs = hermes-agent.inputs;
   hermesPkgs = hermesInputs.nixpkgs.legacyPackages.${system};
   hermesWheelPatches = [
-    ./patches/hermes-auth-bare-named-provider.patch
     ./patches/hermes-gateway-restart-foreign-unit.patch
     ./patches/hermes-gateway-no-home-shutdown-broadcast.patch
     ./patches/hermes-camofox-browser-downloads.patch
@@ -90,7 +89,8 @@ let
         '') hermesWheelPatches
       );
 in
-hermesUpstream.packages.default.overrideAttrs (old: {
+# The node fix: ../../pkgs/hermes-agent-node.nix.
+(import ../../pkgs/hermes-agent-node.nix hermesPkgs hermesUpstream.packages.default).overrideAttrs (old: {
   postInstall = (old.postInstall or "") + ''
     ln -sfn ${patchedPlugins} $out/share/hermes-agent/plugins
   '';

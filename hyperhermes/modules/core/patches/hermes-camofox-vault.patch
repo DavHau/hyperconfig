@@ -1,10 +1,10 @@
-hermes v2026.9.14 (0.21.3): with the Camofox backend the vault tools never
+hermes v0.22.5: with the Camofox backend the vault tools never
 reach the page, so the agent cannot save or fill a login.
 
-Symptom: on any login page (GitHub, IPRoyal, GISTDA) browser_vault_save_login
-answers "Open the site's login page first; the login is saved for that page's
-origin." and browser_vault_fill answers "Could not determine the current page
-origin. Navigate to the login page first."
+Symptom: on any login page (GitHub, IPRoyal, GISTDA) browser_vault
+action=save_login answers "Open the site's login page first; the login is
+saved for that page's origin." and action=fill answers "Could not determine
+the current page origin. Navigate to the login page first."
 
 Cause: the vault reads the page origin, inspects the form and writes the
 password through tools/browser_vault_tool.py's _eval_js/_eval_js_secret, which
@@ -14,10 +14,13 @@ CLI is not installed ("agent-browser CLI not found"), so the origin read fails
 and both tools stop there. browser_console works because browser_tool routes
 it to Camofox's POST /tabs/<id>/evaluate.
 
-Upstream: NousResearch/hermes-agent#135204 (open) routes the vault's eval
-through that same Camofox route; the maintainer keeps it open waiting for a
-core seam since Camofox moved out of core into hermes-official-plugins
-(#143146). Nothing is merged.
+Upstream: NousResearch/hermes-agent#135204 routed the vault's eval through
+that same Camofox route; it was closed on 2026-10-29 as landed through a
+"browser page backend" seam in core (0a93a2341f) plus the Camofox plugin in
+hermes-official-plugins (#225), after Camofox moved out of core (#143146).
+None of that is in v0.22.5, where Camofox is still core
+(tools/browser_camofox.py) and the vault knows only the supervisor and the
+CLI. Drop this patch on the release that carries 0a93a2341f.
 
 Fix: in Camofox mode, _eval_js and _eval_js_secret evaluate on the task's
 Camofox tab through POST /tabs/<id>/evaluate; _focus_bound_origin (CDP tab
@@ -28,14 +31,19 @@ tab nothing is opened; a tab the server closed (404/410) is forgotten so the
 next browser_navigate opens a new one. Origin checks (pre-check and the
 in-page assert of the fill script) are unchanged.
 
+v0.22.5 folds the vault tools into one browser_vault tool (action=list,
+fill, save_login, enter_code, unlock); the new test also drives
+action=fill through it.
+
 The new test fails before this change: the origin read goes to the
 agent-browser CLI.
 
 diff --git a/tests/tools/test_browser_vault_camofox.py b/tests/tools/test_browser_vault_camofox.py
 new file mode 100644
+index 0000000000..74b6ccfca3
 --- /dev/null
 +++ b/tests/tools/test_browser_vault_camofox.py
-@@ -0,0 +1,116 @@
+@@ -0,0 +1,123 @@
 +"""Vault tools on the Camofox backend: page reads and the fill go to the task's Camofox tab.
 +
 +A fake camofox-browser answers POST /tabs/<id>/evaluate for one tab on https://example.com/login
@@ -152,10 +160,18 @@ new file mode 100644
 +    out = json.loads(bv.browser_vault_fill(_add(store).id, task_id="a"))
 +    assert out["success"] is False
 +    assert bc._sessions["a"]["tab_id"] is None
++
++
++def test_browser_vault_tool_fills_through_the_camofox_tab(camofox):
++    fake, store = camofox
++    out = json.loads(bv._handle_vault({"action": "fill", "handle": _add(store).id}, task_id="a"))
++    assert out["success"] is True and out["filled_fields"] == 1
++    assert any(PASSWORD in body["expression"] for _, body in fake.calls)
 diff --git a/tools/browser_vault_tool.py b/tools/browser_vault_tool.py
+index 9474435dc6..74e3156250 100644
 --- a/tools/browser_vault_tool.py
 +++ b/tools/browser_vault_tool.py
-@@ -53,14 +53,51 @@
+@@ -52,14 +52,51 @@ def _check_vault_available() -> bool:
  # JS evaluation plumbing (server-side; results never carry secret values)
  # ---------------------------------------------------------------------------
  
@@ -169,7 +185,7 @@ diff --git a/tools/browser_vault_tool.py b/tools/browser_vault_tool.py
 +    return bool(is_camofox_mode())
 +
 +
-+def _camofox_eval(task_id: str, expression: str) -> Dict[str, Any]:
++def _camofox_eval(task_id: str, expression: str) -> dict[str, Any]:
 +    """Evaluate on the task's Camofox tab (POST /tabs/<id>/evaluate, the route browser_console uses).
 +
 +    The expression rides in the JSON body of an authenticated request to the agent's own server, never in
@@ -193,7 +209,7 @@ diff --git a/tools/browser_vault_tool.py b/tools/browser_vault_tool.py
 +    return {"success": True, "result": resp.get("result") if isinstance(resp, dict) else resp}
 +
 +
- def _eval_js(task_id: str, expression: str) -> Dict[str, Any]:
+ def _eval_js(task_id: str, expression: str) -> dict[str, Any]:
      """Evaluate NON-SECRET JS on the current page (inspection, origin reads).
  
 -    Prefers the supervisor's persistent CDP WebSocket, falls back to the
@@ -211,16 +227,16 @@ diff --git a/tools/browser_vault_tool.py b/tools/browser_vault_tool.py
      try:
          from tools.browser_supervisor import SUPERVISOR_REGISTRY
  
-@@ -117,7 +154,7 @@
+@@ -116,7 +153,7 @@ def _ensure_supervisor(task_id: str):
  
  
- def _eval_js_secret(task_id: str, expression: str) -> Dict[str, Any]:
+ def _eval_js_secret(task_id: str, expression: str) -> dict[str, Any]:
 -    """Evaluate a SECRET-BEARING JS expression. Supervisor CDP-WS only.
 +    """Evaluate a SECRET-BEARING JS expression. Camofox tab or supervisor CDP-WS only.
  
      Fails closed: there is deliberately NO fallback to the agent-browser CLI
      ``eval`` path, because that places the expression — and therefore the
-@@ -125,6 +162,8 @@
+@@ -124,6 +161,8 @@ def _eval_js_secret(task_id: str, expression: str) -> dict[str, Any]:
      When no supervisor session is available the caller gets a typed refusal
      (``error_type='supervisor_required'``) and nothing is written.
      """
@@ -229,7 +245,7 @@ diff --git a/tools/browser_vault_tool.py b/tools/browser_vault_tool.py
      try:
          supervisor = _ensure_supervisor(task_id)
      except Exception as exc:
-@@ -192,6 +231,8 @@
+@@ -202,6 +241,8 @@ def _focus_bound_origin(task_id: str, origin: str, kind: str) -> Optional[str]:
      """Point the supervisor's page session at the open tab on ``origin`` that holds a ``kind`` form
      (browser_exec sessions open their own tabs, so the tab the supervisor attached to first is rarely the
      login page). Returns the origin when a tab was focused, else None (caller falls back to the current page)."""

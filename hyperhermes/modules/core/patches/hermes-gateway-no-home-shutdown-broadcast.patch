@@ -1,29 +1,58 @@
-hermes v2026.9.14 (0.21.3): every gateway shutdown broadcasts
-"⚠️ Gateway shutting down — Your current task will be interrupted." to
-each platform's home channel, whether or not any session is running.
-Where every deploy restarts all native agents, each user's home chat
-gets the notice on every deploy (two deploys in one evening: nine
-home-channel sends, all with active_at_start=0).
+hermes v0.22.5: every gateway shutdown broadcasts "⚠️ Gateway shutting
+down — Your current task will be interrupted." to the home channel of
+every served profile (one multiplexed gateway per OS user fans the notice
+out through each profile's own bot, #118233), whether or not any session
+is running. Where every deploy restarts all native agents, each user's
+home chat gets the notice on every deploy (two deploys in one evening:
+nine home-channel sends, all with active_at_start=0).
 
 The per-session notice to chats with a running agent stays; those
 sessions are marked resume_pending and auto-continue on the next boot.
 A chat without a running agent loses nothing to a restart, so the
-home-channel broadcast goes. The drain marker's suppress_notification
-flag only ever gated that broadcast and is now inert.
+home-channel pass in GatewayShutdownMixin._notify_active_sessions_of_shutdown
+(gateway/run_shutdown.py) goes. The drain marker's suppress_notification
+flag only ever gated that pass and is now inert; _notice_allowed's
+platform_cfg parameter (served-profile opt-out, home pass only) goes too.
 
-The two tests that pinned the broadcast become its negation: no session
--> nothing sent (restart and shutdown), and an active session is pinged
-while the home channel is not. Both fail without this change.
+Upstream status (v0.22.5): no knob suppresses only the broadcast.
+gateway_restart_notification=false and display.suppress_warning_notifications
+also silence the per-session interrupt notice; the drain marker's
+suppress_notification only applies to a dashboard-requested drain.
 
- gateway/run_shutdown.py                      | 44 ++++------------------------
- tests/gateway/test_restart_resume_pending.py | 19 +++++-------
- 2 files changed, 12 insertions(+), 51 deletions(-)
+The tests that pinned the broadcast become its negation: no session ->
+nothing sent (restart and shutdown), an active session is pinged while the
+home channel is not (also for the interim-marker and warning-policy
+tests), and no served profile's home channel is pinged without a running
+agent. All fail without this change.
+
+ gateway/run_shutdown.py                            | 66 +++-------------------
+ .../gateway/test_grid_sweep_gateway_diagnostics.py |  4 +-
+ ...test_multiplex_notice_egress_profile_adapter.py | 17 +++---
+ tests/gateway/test_restart_notification.py         | 10 ++--
+ tests/gateway/test_restart_resume_pending.py       | 19 +++----
+ 5 files changed, 32 insertions(+), 84 deletions(-)
 
 diff --git a/gateway/run_shutdown.py b/gateway/run_shutdown.py
-index 52bf07449a..b259f8264a 100644
+index 9cc69130b5..c8676411ff 100644
 --- a/gateway/run_shutdown.py
 +++ b/gateway/run_shutdown.py
-@@ -902,8 +902,7 @@ class GatewayShutdownMixin:
+@@ -890,12 +890,9 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
+         platform_cfg = self.config.platforms.get(platform)
+         return platform_cfg is None or bool(platform_cfg.gateway_restart_notification)
+ 
+-    def _notice_allowed(self, platform: Platform, what: str, platform_cfg=None) -> bool:
+-        """``_restart_notification_allowed`` with the INFO suppression line for shutdown notices.
+-        ``platform_cfg`` is a SERVED profile's own platform entry; ``self.config`` is the launch profile's."""
+-        allowed = (self._restart_notification_allowed(platform) if platform_cfg is None
+-                   else bool(platform_cfg.gateway_restart_notification))
+-        if allowed:
++    def _notice_allowed(self, platform: Platform, what: str) -> bool:
++        """``_restart_notification_allowed`` with the INFO suppression line for shutdown notices."""
++        if self._restart_notification_allowed(platform):
+             return True
+         logger.info(
+             "Shutdown notification suppressed for %s: %s has gateway_restart_notification=false", what, platform.value,
+@@ -994,8 +991,7 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
          self, adapter, chat_id: str, msg: str, kind: str, platform_str: str, **send_kwargs
      ) -> bool:
          """Send one shutdown notice; True when delivered. Failures are debug-logged, never raised."""
@@ -33,7 +62,7 @@ index 52bf07449a..b259f8264a 100644
          if not await self._send_notice_logged(adapter, chat_id, msg, platform_str, fail_fmt, **send_kwargs):
              return False
          logger.info("Sent shutdown notification to %s %s:%s", kind, platform_str, chat_id)
-@@ -926,7 +925,10 @@ class GatewayShutdownMixin:
+@@ -1021,7 +1017,10 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
          return True
  
      async def _notify_active_sessions_of_shutdown(self) -> None:
@@ -41,14 +70,15 @@ index 52bf07449a..b259f8264a 100644
 +        """Send shutdown/restart notifications to the chats of active sessions.
 +
 +        No home-channel broadcast: a chat without a running agent loses nothing to a restart, and
-+        every routine deploy would otherwise ping every home channel.
++        every routine deploy would otherwise ping every served profile's home channel.
  
          Called at the start of stop() while adapters are connected; send failures never block shutdown.
          """
-@@ -976,42 +978,6 @@ class GatewayShutdownMixin:
-                 continue
-             if await self._send_shutdown_notice(adapter, chat_id, msg, "active chat", platform_str, metadata=metadata):
-                 notified.add(dedup_key)
+@@ -1080,54 +1079,7 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
+             async with scope:
+                 presented = await present_notification(_send_active, platform=platform, diagnostic=restart_key != dedup_key)
+             if not presented:
+-                notified.add(dedup_key)  # suppressed: latch so the home-channel pass does not re-target it
 -        if self._restart_requested and restart_source is not None:
 -            logger.debug("Skipping home-channel shutdown notifications for in-chat restart")
 -            return
@@ -61,15 +91,21 @@ index 52bf07449a..b259f8264a 100644
 -                    "Home-channel shutdown broadcast suppressed by drain marker (suppress_notification=true)"
 -                )
 -                return
--        # Snapshot adapters: adapter.send() can hit a fatal path (_handle_fatal) that pops the adapter
--        # from self.adapters -> ``RuntimeError: dictionary changed size during iteration``.
--        for platform, adapter in list(self.adapters.items()):
--            home = self.config.get_home_channel(platform)
+-        # EVERY served profile's home channel, through that profile's OWN bot: ``self.adapters`` and
+-        # ``self.config`` are the launch profile's alone, so iterating them left the secondaries'
+-        # channels silent (#118233). ``list(...)`` snapshots the adapter maps: adapter.send() can hit
+-        # a fatal path (_handle_fatal) that pops the adapter -> "dictionary changed size during iteration".
+-        profile_adapters = getattr(self, "_profile_adapters", None) or {}
+-        for profile, platform, platform_cfg in list(self._served_home_channel_configs()):
+-            home = platform_cfg.home_channel
 -            if not home or not home.chat_id:
 -                continue
--            if not self._notice_allowed(platform, "home channel"):
+-            adapter = (self.adapters if profile is None else profile_adapters.get(profile) or {}).get(platform)
+-            if adapter is None:
 -                continue
--            dedup_key = _notice_target_key(platform.value, home.chat_id, home.thread_id)
+-            if not self._notice_allowed(platform, "home channel", platform_cfg):
+-                continue
+-            dedup_key = _delivery_target_key(platform.value, home.chat_id, home.thread_id, profile=profile)
 -            if dedup_key in notified:
 -                continue
 -            try:
@@ -79,20 +115,110 @@ index 52bf07449a..b259f8264a 100644
 -                    "Failed to send shutdown notification to home channel %s:%s: %s", platform.value, home.chat_id, e,
 -                )
 -                continue
--            # Home channels omit ``metadata=`` when empty (adapter doubles may not accept the kwarg).
--            if await self._send_shutdown_notice(
--                adapter, str(home.chat_id), msg, "home channel", platform.value,
--                **({"metadata": metadata} if metadata else {}),
--            ):
--                notified.add(dedup_key)
+-            async def _send_home(adapter=adapter, home=home, platform=platform, metadata=metadata):
+-                if await self._send_shutdown_notice(
+-                    adapter, str(home.chat_id), msg, "home channel", platform.value, metadata=metadata,
+-                ):
+-                    notified.add(dedup_key)
+-            from gateway.warning_notifications import present_notification
+-            from gateway.run import _async_profile_runtime_scope
+-            # present_notification reads the ACTIVE profile's display settings: bind the served one's.
+-            profile_home = (getattr(self, "_served_profile_homes", None) or {}).get(profile) if profile else None
+-            async with _async_profile_runtime_scope(profile_home) if profile_home else nullcontext():
+-                await present_notification(_send_home, platform=platform)
++                notified.add(dedup_key)  # suppressed: latch so another session in this chat does not re-target it
  
      # Agent finalization / resource cleanup
      @staticmethod
+diff --git a/tests/gateway/test_grid_sweep_gateway_diagnostics.py b/tests/gateway/test_grid_sweep_gateway_diagnostics.py
+index 786180ee83..cbc8aea075 100644
+--- a/tests/gateway/test_grid_sweep_gateway_diagnostics.py
++++ b/tests/gateway/test_grid_sweep_gateway_diagnostics.py
+@@ -29,7 +29,7 @@ MODES = (None, False, True)
+ 
+ @pytest.mark.asyncio
+ @pytest.mark.parametrize("setting", MODES)
+-async def test_shutdown_notice_to_active_chats_and_home_channel_honors_policy(tmp_path, monkeypatch, setting):
++async def test_shutdown_notice_to_active_chats_honors_policy_and_skips_home_channel(tmp_path, monkeypatch, setting):
+     _configure(tmp_path, monkeypatch, setting)
+     runner, adapter = make_restart_runner()
+     source = make_restart_source(thread_id="42")
+@@ -45,7 +45,7 @@ async def test_shutdown_notice_to_active_chats_and_home_channel_honors_policy(tm
+     if setting is True:
+         assert chats == [], adapter.sent_calls
+     else:
+-        assert sorted(chats) == sorted([source.chat_id, "home-chat"])
++        assert chats == [source.chat_id]
+         assert all("Hermes is shutting down" in m for _c, m, _meta in adapter.sent_calls)
+ 
+ 
+diff --git a/tests/gateway/test_multiplex_notice_egress_profile_adapter.py b/tests/gateway/test_multiplex_notice_egress_profile_adapter.py
+index 693c99116a..a4a8e9f8f1 100644
+--- a/tests/gateway/test_multiplex_notice_egress_profile_adapter.py
++++ b/tests/gateway/test_multiplex_notice_egress_profile_adapter.py
+@@ -125,15 +125,12 @@ def _home_config(platform: Platform, chat_id: str, *, notify: bool = True) -> Ga
+ 
+ 
+ @pytest.mark.asyncio
+-async def test_shutdown_notice_reaches_every_served_profiles_home_channel(monkeypatch):
+-    """The home-channel shutdown broadcast covers EVERY served profile, through its own bot.
++async def test_shutdown_without_running_agents_reaches_no_served_profiles_home_channel():
++    """No served profile's home channel hears a shutdown when no agent is running there.
+ 
+-    ``self.adapters``/``self.config`` are the launch profile's alone, so a served profile's home
+-    channel never heard the gateway was going down (#118233). Two bots with the same positive
+-    Telegram id are two private conversations: both are owed a notice. A served profile's own
+-    ``gateway_restart_notification=false`` opt-out is honoured from ITS config.
++    A chat without a running agent loses nothing to a restart; only active sessions get the
++    notice (through their own profile's bot), so every bot's home channel stays quiet.
+     """
+-    monkeypatch.setattr("gateway.drain_control.drain_notification_suppressed", lambda: False)
+     r = _runner()
+     r.config = _home_config(Platform.TELEGRAM, "8776018003")
+     r._profile_configs = {
+@@ -146,6 +143,6 @@ async def test_shutdown_notice_reaches_every_served_profiles_home_channel(monkey
+ 
+     await r._notify_active_sessions_of_shutdown()
+ 
+-    assert r.adapters[Platform.TELEGRAM].sent == ["8776018003"]
+-    assert r._profile_adapters["sec"][Platform.TELEGRAM].sent == ["8776018003"], "own bot, own conversation"
+-    assert r._profile_adapters["quiet"][Platform.DISCORD].sent == [], "served profile's opt-out is its own"
++    assert r.adapters[Platform.TELEGRAM].sent == []
++    assert r._profile_adapters["sec"][Platform.TELEGRAM].sent == []
++    assert r._profile_adapters["quiet"][Platform.DISCORD].sent == []
+diff --git a/tests/gateway/test_restart_notification.py b/tests/gateway/test_restart_notification.py
+index b2278f9a3b..f626a82aa1 100644
+--- a/tests/gateway/test_restart_notification.py
++++ b/tests/gateway/test_restart_notification.py
+@@ -341,10 +341,10 @@ async def test_shutdown_notifications_use_cached_live_thread_source_when_origin_
+ 
+ 
+ @pytest.mark.asyncio
+-async def test_shutdown_home_channel_broadcast_carries_interim_marker():
+-    """Active-chat and home-channel shutdown sends are interim sends (#98432): a
+-    stream-is-the-message adapter must not seal an in-flight answer with the advisory,
+-    including when the home channel has no thread routing metadata."""
++async def test_shutdown_notice_carries_interim_marker_and_skips_home_channel():
++    """Active-chat shutdown sends are interim sends (#98432): a stream-is-the-message
++    adapter must not seal an in-flight answer with the advisory. The home channel,
++    with no running agent, gets nothing."""
+     runner, adapter = make_restart_runner()
+     source = make_restart_source(chat_id="active-42", chat_type="dm")
+     session_key = build_session_key(source)
+@@ -361,7 +361,7 @@ async def test_shutdown_home_channel_broadcast_carries_interim_marker():
+     await runner._notify_active_sessions_of_shutdown()
+ 
+     targets = [c.args[0] for c in adapter.send.await_args_list]
+-    assert targets == ["active-42", "home-42"]
++    assert targets == ["active-42"]
+     for call in adapter.send.await_args_list:
+         assert call.kwargs["metadata"]["_interim_send"] is True
+ 
 diff --git a/tests/gateway/test_restart_resume_pending.py b/tests/gateway/test_restart_resume_pending.py
-index 89ee4705cd..45a680aac4 100644
+index 8c1c533cfe..e6a4d09a6d 100644
 --- a/tests/gateway/test_restart_resume_pending.py
 +++ b/tests/gateway/test_restart_resume_pending.py
-@@ -864,9 +864,10 @@ async def test_warmup_disabled_by_nonpositive_timeout(monkeypatch):
+@@ -981,9 +981,10 @@ async def test_warmup_disabled_by_nonpositive_timeout(monkeypatch):
  
  
  @pytest.mark.asyncio
@@ -105,14 +231,12 @@ index 89ee4705cd..45a680aac4 100644
      runner.config.platforms[Platform.TELEGRAM].home_channel = HomeChannel(
          platform=Platform.TELEGRAM,
          chat_id="home-42",
-@@ -875,16 +876,12 @@ async def test_restart_notifies_home_channel_even_without_active_sessions():
+@@ -992,14 +993,12 @@ async def test_restart_notifies_home_channel_even_without_active_sessions():
  
      await runner._notify_active_sessions_of_shutdown()
  
--    assert adapter.sent == [
--        "⚠️ Gateway restarting — Your current task will be interrupted. "
--        "Send any message after restart and I'll try to resume where you left off."
--    ]
+-    assert len(adapter.sent) == 1
+-    assert "restarting" in adapter.sent[0] and "Send any message" in adapter.sent[0]
 +    assert adapter.sent == []
  
  
@@ -124,7 +248,7 @@ index 89ee4705cd..45a680aac4 100644
      session_key = "agent:main:telegram:group:999"
      runner.session_store._entries[session_key] = MagicMock(
          origin=SessionSource(
-@@ -898,15 +895,13 @@ async def test_restart_home_channel_notification_not_deduped_across_threads():
+@@ -1013,15 +1012,15 @@ async def test_restart_home_channel_notification_not_deduped_across_threads():
      runner._running_agents[session_key] = MagicMock()
      runner.config.platforms[Platform.TELEGRAM].home_channel = HomeChannel(
          platform=Platform.TELEGRAM,
@@ -136,9 +260,11 @@ index 89ee4705cd..45a680aac4 100644
      await runner._notify_active_sessions_of_shutdown()
  
 -    assert len(adapter.sent) == 2
--    assert adapter.sent_calls[0][2] == {"thread_id": "topic-7"}
--    assert adapter.sent_calls[1][2] is None
-+    assert [(chat_id, meta) for chat_id, _msg, meta in adapter.sent_calls] == [("999", {"thread_id": "topic-7"})]
+-    assert adapter.sent_calls[0][2] == {"thread_id": "topic-7", "_interim_send": True}
+-    assert adapter.sent_calls[1][2] == {"_interim_send": True}
++    assert [(chat_id, meta) for chat_id, _msg, meta in adapter.sent_calls] == [
++        ("999", {"thread_id": "topic-7", "_interim_send": True})
++    ]
  
  
  # ---------------------------------------------------------------------------

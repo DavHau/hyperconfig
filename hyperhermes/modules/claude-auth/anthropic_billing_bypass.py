@@ -1092,7 +1092,9 @@ def _identity_cache_control(
 # ---------------------------------------------------------------------------
 
 
-def apply_claude_code_bypass(api_kwargs: Dict[str, Any], version: str) -> None:
+def apply_claude_code_bypass(
+    api_kwargs: Dict[str, Any], version: str, *, context_management: bool = True
+) -> None:
     """Apply all OAuth bypass transforms in place.
 
     Idempotent: stale billing headers are dropped before injecting the new
@@ -1206,11 +1208,21 @@ def apply_claude_code_bypass(api_kwargs: Dict[str, Any], version: str) -> None:
     # Only inject when thinking is enabled — the clear_thinking strategy
     # requires thinking to be active, and auxiliary calls (vision, etc.)
     # don't use thinking mode.
+    #
+    # hyperhermes: only on the native host.  The body field needs the
+    # context-management beta, which hermes puts in the CLIENT's
+    # anthropic-beta header (with the betas this module appends to
+    # _OAUTH_ONLY_BETAS) only for an OAuth client on api.anthropic.com.
+    # Another Anthropic-protocol host (a TeamClaude gateway) gets the plain
+    # common betas while build_anthropic_kwargs still runs with
+    # is_oauth=True, so the field went out without its beta and Anthropic
+    # answered every thinking request with 400 "context_management: Extra
+    # inputs are not permitted".
     thinking = api_kwargs.get("thinking")
     has_thinking = isinstance(thinking, dict) and thinking.get("type") in (
         "adaptive", "enabled",
     )
-    if has_thinking and "context_management" not in api_kwargs:
+    if context_management and has_thinking and "context_management" not in api_kwargs:
         extra_body = api_kwargs.setdefault("extra_body", {})
         if isinstance(extra_body, dict) and "context_management" not in extra_body:
             extra_body["context_management"] = {
@@ -1230,6 +1242,19 @@ def apply_claude_code_bypass(api_kwargs: Dict[str, Any], version: str) -> None:
 # ---------------------------------------------------------------------------
 # Monkey-patch installation
 # ---------------------------------------------------------------------------
+
+
+def _is_native_anthropic_base_url(base_url: Any) -> bool:
+    """hyperhermes: True for api.anthropic.com or no base_url (the SDK's
+    default host), the only route whose client header carries the betas
+    this module appends (see context_management in apply_claude_code_bypass)."""
+    text = str(base_url or "").strip()
+    if not text:
+        return True
+    from urllib.parse import urlparse
+
+    host = urlparse(text if "://" in text else f"https://{text}").hostname or ""
+    return host.lower().rstrip(".") == "api.anthropic.com"
 
 
 def _get_version_safely(aa_module: Any) -> str:
@@ -1944,8 +1969,11 @@ def _install_pool_select_hook() -> None:
 
     original_select = CredentialPool.select
 
-    def hooked_select(self: Any) -> Any:
-        entry = original_select(self)
+    # hyperhermes: pass arguments through; hermes 0.22 calls
+    # select(model=...), which a bare (self) wrapper turned into a TypeError
+    # on every request through the pool.
+    def hooked_select(self: Any, *args: Any, **kwargs: Any) -> Any:
+        entry = original_select(self, *args, **kwargs)
         if entry is not None and getattr(self, "provider", None) == "anthropic":
             uuid_val = getattr(entry, "account_uuid", None)
             if isinstance(uuid_val, str) and uuid_val:
@@ -2023,12 +2051,18 @@ def apply_patches(anthropic_adapter_module: Any = None) -> bool:
             bound = sig.bind_partial(*args, **kwargs)
             bound.apply_defaults()
             is_oauth = bool(bound.arguments.get("is_oauth", False))
+            base_url = bound.arguments.get("base_url")
         except TypeError:
             is_oauth = bool(kwargs.get("is_oauth", False))
+            base_url = kwargs.get("base_url")
 
         if is_oauth and isinstance(result, dict):
             try:
-                apply_claude_code_bypass(result, _get_version_safely(aa))
+                apply_claude_code_bypass(
+                    result,
+                    _get_version_safely(aa),
+                    context_management=_is_native_anthropic_base_url(base_url),
+                )
             except Exception as exc:
                 logger.warning(
                     "apply_claude_code_bypass raised %s: %s",

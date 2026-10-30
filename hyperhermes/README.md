@@ -111,7 +111,7 @@ evaluation-only `client-features` and `clan-eval`.
 
 ## hermes patches
 
-`core`'s package is upstream hermes v2026.9.14 with these wheel patches
+`core`'s package is upstream hermes v0.22.5 with these wheel patches
 (`modules/core/patches`; each file's header has symptom, cause and fix):
 
 - `hermes-dashboard-oidc-allowed-groups`: the dashboard's OIDC login admits
@@ -119,8 +119,6 @@ evaluation-only `client-features` and `clan-eval`.
   claim against `allowed_groups` at sign-in, refresh and every request. Needed
   because dex (and any issuer without per-client groups) would let every
   account into every dashboard. Upstream: NousResearch/hermes-agent#55648.
-- `hermes-auth-bare-named-provider`: a bare named provider in `model.provider`
-  left the dashboard on "Setup Required".
 - `hermes-gateway-restart-foreign-unit`: `hermes gateway restart`/`stop`
   broke a gateway supervised by a unit not named `hermes-gateway*`
   (here `hermes-agent-<agent>`).

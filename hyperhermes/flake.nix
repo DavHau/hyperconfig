@@ -6,7 +6,7 @@
     # that one instead.
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
-    hermes-agent.url = "github:NousResearch/hermes-agent/v2026.9.14";
+    hermes-agent.url = "github:NousResearch/hermes-agent/v0.22.5";
     hermes-agent.inputs.nixpkgs.follows = "nixpkgs";
     # hermes-agent uses home-manager only for its own checks (its flake.nix
     # says so); pointing the input at this flake keeps home-manager out of

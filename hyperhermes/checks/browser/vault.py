@@ -45,20 +45,21 @@ def password_length():
 
 def vault(site):
     check(call("browser_navigate", url=site + "/login").get("success") is True, "the login page loads")
-    out = call("browser_vault_save_login", label="test")
+    # hermes 0.22 merged the vault tools into one `browser_vault` tool with an `action`.
+    out = call("browser_vault", action="save_login", label="test")
     check(out.get("error_type") == "prompt_unavailable" and site in out.get("error", ""),
           "save_login reads the page's origin (headless: asks for no login)")
 
     meta = get_vault_store().add_item("login", "test", {"identifier_type": "username", "identifier": "alice",
                                                         "password": PASSWORD}, origin=site)
-    out = call("browser_vault_fill", handle=meta.id)
+    out = call("browser_vault", action="fill", handle=meta.id)
     check(out.get("success") is True and out.get("filled_fields") == 1 and out.get("origin") == site,
-          "browser_vault_fill fills one field on the bound origin")
+          "browser_vault fill fills one field on the bound origin")
     check(password_length() == len(PASSWORD), "the password field holds the saved password")
 
     other = site.replace("127.0.0.1", "localhost")
     check(call("browser_navigate", url=other + "/login").get("success") is True, "the same page on another origin loads")
-    out = call("browser_vault_fill", handle=meta.id)
+    out = call("browser_vault", action="fill", handle=meta.id)
     check(out.get("error_type") == "origin_mismatch", "the fill refuses another origin")
     check(password_length() == 0, "and writes nothing")
 

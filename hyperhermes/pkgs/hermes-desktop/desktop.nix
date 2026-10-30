@@ -1,36 +1,48 @@
 # Hermes Desktop (Electron) app build + wrapper.
 #
-# Copied from spaces (modules/nixos/hermes/desktop.nix, spaces-os rev
-# 6d744780), itself vendored from hermes-agent nix/desktop.nix, last
-# diffed at v2026.9.14 (identical to v2026.8.16 upstream); diff against
-# upstream when bumping the input. Two changes: node-pty headers come
-# from `electron.headers` (upstream's pinned fetchurl hash breaks under
-# nixpkgs follows, and the headers output cannot drift from
-# `electron.version`), and the XDG icon/desktop-entry files come from
-# the injected hermesSrc (upstream's ../ sibling paths resolve to
-# nothing here). Two more are marked below: the tests/fixtures dir, and
-# the `hermes://session/<id>` deep link
-# (./patches/desktop-session-deeplink.patch).
+# Vendored from hermes-agent nix/desktop.nix, last diffed at v0.22.5;
+# diff against upstream when bumping the input. Upstream now takes the
+# node-pty headers from `electron.headers` itself, which is what lets this
+# copy build against the caller's electron. What differs:
+#   - the desktop-entry script comes from the injected hermesSrc (upstream's
+#     ../ sibling paths resolve to nothing here);
+#   - the `hermes://session/<id>` deep link
+#     (./patches/desktop-session-deeplink.patch);
+#   - the wrapper symlinks the renderer instead of copying it (below);
+#   - no extraEnv/extraRun: nothing here sets them.
 #
 # `hermesAgent` is the fully-built `.#default` package — it ships the
 # `hermes` binary with the venv, runtime PATH, bundled skills/plugins, etc.
 # already wired up.  We point the desktop at it via the existing
 # `HERMES_DESKTOP_HERMES` override env var, so the desktop's resolver
-# uses our fully wrapped binary at step 4 ("existing Hermes CLI").
+# uses our fully wrapped binary before the mutable managed install.
 # No reimplementation of the agent resolution in this wrapper.
 {
-  pkgs,
   lib,
   stdenv,
   makeWrapper,
   hermesNpmLib,
   electron,
   hermesAgent,
+  installStampFile,
+  generatedIcons,
   hermesSrc,
   python3,
   ...
 }:
 let
+  wrapperArgs = [
+    "--add-flags"
+    "--enable-features=WaylandWindowDecorations"
+    "--add-flags"
+    "${placeholder "out"}/share/hermes-desktop"
+    "--set"
+    "HERMES_DESKTOP_HERMES"
+    (lib.getExe hermesAgent)
+    "--set"
+    "ELECTRON_IS_DEV"
+    "0"
+  ];
 
   # node-pty ships no Electron-tagged prebuild we can trust to match this
   # exact nixpkgs electron version, so it's always compiled from source
@@ -56,56 +68,50 @@ let
     dirs = [
       "apps/desktop"
       "apps/shared"
-      # Third change: tsc -b compiles a test importing a repo-root
-      # fixture; without this dir upstream's own desktop cannot build.
-      "tests/fixtures"
+      "scripts/build/desktop.mjs"
+      "scripts/build/freshness.mjs"
+      "scripts/build/frontend-common.mjs"
+      # product-identity.cjs resolves the channel request through the
+      # packaging helper (and its content-types table).
+      "scripts/msix-shared.mjs"
+      "scripts/release-content-types.json"
     ];
     pname = "hermes-desktop-renderer";
 
     doCheck = true;
 
-    # Fourth change: `hermes-desktop hermes://session/<id>` opens that chat,
-    # and a second launch switches the running window to it. The patch
-    # header names what upstream lacks; building packages.hermes-desktop
-    # proves it applies to the pinned input.
+    # `hermes-desktop hermes://session/<id>` opens that chat, and a second
+    # launch switches the running window to it. The patch header names what
+    # upstream lacks; building packages.hermes-desktop proves it applies to
+    # the pinned input.
     patches = [ ./patches/desktop-session-deeplink.patch ];
 
     buildPhase = ''
       runHook preBuild
 
-      mkdir -p apps/desktop/build
-
       patchShebangs .
 
-      pushd apps/desktop
-        # typecheck :3
-        npm exec -- tsc -b
+      # Compile node-pty against the exact Electron runtime this derivation
+      # ships. `electron.headers` cannot drift from `electron.version`; the
+      # sandbox has no network for node-gyp's --disturl path.
+      ${lib.getExe hermesNpmLib.node-gyp} rebuild \
+        --directory=node_modules/node-pty \
+        --build-from-source \
+        --runtime=electron \
+        --target=${electron.version} \
+        --arch=${targetArch} \
+        --nodedir=${electron.headers} \
+        --disturl="" \
+        --offline
 
-        # build the renderer bundle
-        # vite's emptyOutDir wipes dist/ on every run
-        # so it has to be first
-        npm exec -- vite build
-
-        # build the electron bundle
-        node scripts/bundle-electron-main.mjs
-
-
-        # Compile node-pty against Electron's actual ABI. `electron.headers`
-        # cannot drift from `electron.version`; the sandbox has no network
-        # for node-gyp's --disturl path.
-        ${lib.getExe hermesNpmLib.node-gyp} rebuild \
-          --directory=../../node_modules/node-pty \
-          --build-from-source \
-          --runtime=electron \
-          --target=${electron.version} \
-          --nodedir=${electron.headers} \
-          --disturl="" \
-          --offline
-
-        # Target platform/arch come from stdenv.hostPlatform, not the
-        # build host's own process.platform/arch.
-        node scripts/stage-native-deps.mjs ${targetPlatform} ${targetArch}
-      popd
+      node apps/desktop/scripts/stage-native-deps.mjs \
+        --source "$PWD" --out "$TMPDIR/desktop-native-deps" \
+        --platform ${targetPlatform} --arch ${targetArch}
+      node scripts/build/desktop.mjs \
+        --source "$PWD" --out "$PWD/apps/desktop/dist" \
+        --icons ${generatedIcons} --stamp ${installStampFile} \
+        --native-deps "$TMPDIR/desktop-native-deps" \
+        --platform ${targetPlatform} --typecheck
 
       runHook postBuild
     '';
@@ -115,7 +121,7 @@ let
 
       pushd apps/desktop
 
-        npm run postbuild
+        node scripts/assert-dist-built.mjs
 
         # validate staged node-pty native binary is present.
         STAGED_PTY_NODE="./dist/node_modules/node-pty/build/Release/pty.node"
@@ -125,7 +131,7 @@ let
           echo "node-pty must be compiled natively"
           exit 1
         fi
-        
+
       popd
 
       runHook postCheck
@@ -134,14 +140,10 @@ let
     installPhase = ''
       runHook preInstall
       mkdir -p $out
-      # vite writes to apps/desktop/dist/ (we cd'd there in buildPhase).
-      # stage-native-deps.mjs stages node-pty into dist/node_modules/node-pty,
-      # so copying dist/ wholesale carries the native dep along with the
-      # esbuild bundle that require()s it. apps/desktop/build was created
-      # before the cd.
+      # The shared product contains renderer, main/preload, and native deps.
       cp -rn apps/desktop/dist $out/
 
-      echo '{"schemaVersion":1,"commit":"nix-dummy-commit","branch":"nix","dirty":false,"source":"nix"}' > $out/install-stamp.json
+      cp ${installStampFile} $out/install-stamp.json
 
       cp -n apps/desktop/package.json $out/
       runHook postInstall
@@ -187,26 +189,20 @@ stdenv.mkDerivation {
     substituteInPlace $out/share/hermes-desktop/dist/electron-main.mjs \
       --replace-fail "process.resourcesPath" "'$out/share/hermes-desktop'"
 
-    # Wrap the nixpkgs electron binary to launch our app.  Set
-    # HERMES_DESKTOP_HERMES to the absolute path of the nix-built `hermes`
-    # binary so the desktop's resolver step 4 ("existing Hermes CLI on
-    # PATH") uses our fully wrapped binary — venv with all deps,
-    # bundled skills/plugins, runtime PATH (ripgrep/git/ffmpeg/etc).
-    # No reimplementation of the agent resolver in the wrapper.
+    # Wrap the nixpkgs electron binary to launch our app.
     makeWrapper ${lib.getExe electron} $out/bin/hermes-desktop \
-      --add-flags "$out/share/hermes-desktop" \
-      --set HERMES_DESKTOP_HERMES "${lib.getExe hermesAgent}" \
-      --set ELECTRON_IS_DEV 0
+      ${lib.escapeShellArgs wrapperArgs}
 
     # XDG launcher entry
     mkdir -p $out/share/applications $out/share/icons/hicolor/1024x1024/apps
-    install -m 0644 ${hermesSrc}/apps/desktop/assets/icon.png \
+    install -m 0644 ${generatedIcons}/apps/desktop/assets/icon.png \
       $out/share/icons/hicolor/1024x1024/apps/hermes.png
     export PYTHONPATH=$(mktemp -d)
     cp ${hermesSrc}/hermes_cli/linux_desktop_entry.py "$PYTHONPATH/linux_desktop_entry.py"
     export DESKTOP_EXEC="$out/bin/hermes-desktop"
     export DESKTOP_ICON="$out/share/icons/hicolor/1024x1024/apps/hermes.png"
-    python3 -c 'import os; from linux_desktop_entry import render_desktop_entry; print(render_desktop_entry(os.environ["DESKTOP_EXEC"], os.environ["DESKTOP_ICON"]))' > $out/share/applications/hermes.desktop
+    entry_name=$(python3 -c 'from linux_desktop_entry import DESKTOP_ENTRY_NAME; print(DESKTOP_ENTRY_NAME)')
+    python3 -c 'import os; from linux_desktop_entry import render_desktop_entry; print(render_desktop_entry(os.environ["DESKTOP_EXEC"], os.environ["DESKTOP_ICON"]))' > "$out/share/applications/$entry_name"
     runHook postInstall
   '';
 

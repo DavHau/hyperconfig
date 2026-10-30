@@ -88,7 +88,9 @@ in
       # registry ids and loopback base_urls as "configured". With a bare
       # `p0` every dashboard TUI session parked on "Setup Required" while
       # the chat itself worked. Already-seeded states were edited in place
-      # (2026-09-22); the seed only writes once.
+      # (2026-09-22); the seed only writes once. Since v0.22 hermes accepts
+      # the bare name there too (upstream 907bf871d2), so either spelling
+      # works now; `custom:p0` stays for the already-seeded states.
       initialModel = {
         provider = "custom:p0";
         base_url = "https://inference.p0.contact/v1";

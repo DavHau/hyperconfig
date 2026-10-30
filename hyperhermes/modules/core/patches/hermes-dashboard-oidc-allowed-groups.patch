@@ -1,36 +1,40 @@
-hermes v2026.9.14 (0.21.3): the dashboard's self-hosted OIDC provider
-admits every identity the issuer vouches for. Nothing in hermes checks
-group membership (plugins/dashboard_auth/self_hosted: the `groups` claim
-only becomes Session.org_id, a display string; still so on origin/main,
-NousResearch/hermes-agent#55648), so the issuer's own per-client
-restriction is the only authorization. An issuer without one (dex) lets
-every account it knows into every agent's dashboard.
+hermes v0.22.5: the dashboard's self-hosted OIDC provider admits every
+identity the issuer vouches for. Nothing in hermes checks group
+membership (plugins/dashboard_auth/self_hosted: the `groups` claim only
+becomes Session.org_id, a display string; still so in v0.22.5, no
+allowed-groups option upstream, NousResearch/hermes-agent#55648), so the
+issuer's own per-client restriction is the only authorization. An issuer
+without one (dex) lets every account it knows into every agent's
+dashboard.
 
 Fix: `allowed_groups` (HERMES_DASHBOARD_OIDC_ALLOWED_GROUPS, or
 dashboard.oauth.self_hosted.allowed_groups; comma list). When set, the
 verified ID token's `groups` claim must name one of them. The check sits
-in _verify_id_token, which every path that makes a Session goes
-through: the login callback (400, no session cookie), each refresh
-(RefreshExpiredError: the session ends) and the per-request
-re-verification of the stored ID token (None: refresh, then re-login).
-The issuer emits `groups` only for the `groups` scope, so the deployment
-asks for it. Unset, nothing changes.
+in _verify_id_token (= _claims_for), which every path that makes a
+Session goes through: the login callback (JwtOAuthProvider.complete_login
+-> _grant: 400, no session cookie), each refresh (refresh_session ->
+_grant: RefreshExpiredError, the session ends) and the per-request
+re-verification of the stored ID token (verify_session -> _claims_for:
+None, refresh, then re-login). The issuer emits `groups` only for the
+`groups` scope, so the deployment asks for it. Unset, nothing changes.
 
- plugins/dashboard_auth/self_hosted/__init__.py     | 57 +++++++++++++++---
- .../dashboard_auth/test_self_hosted_provider.py    | 70 ++++++++++++++++++++++
- 2 files changed, 119 insertions(+), 8 deletions(-)
+ plugins/dashboard_auth/self_hosted/__init__.py     | 55 ++++++++++++++---
+ .../dashboard_auth/test_self_hosted_provider.py    | 71 ++++++++++++++++++++++
+ 2 files changed, 117 insertions(+), 9 deletions(-)
 
 diff --git a/plugins/dashboard_auth/self_hosted/__init__.py b/plugins/dashboard_auth/self_hosted/__init__.py
-index 75e2542..5be1353 100644
+index f65a24ec34..c8130def68 100644
 --- a/plugins/dashboard_auth/self_hosted/__init__.py
 +++ b/plugins/dashboard_auth/self_hosted/__init__.py
-@@ -5,7 +5,13 @@ endpoints from ``{issuer}/.well-known/openid-configuration``, builds the PKCE (S
+@@ -5,9 +5,14 @@ endpoints from ``{issuer}/.well-known/openid-configuration``, builds the PKCE (S
  URL, exchanges the code, and verifies the **ID token** (the access token is opaque per spec)
  against the discovered ``jwks_uri`` with ``iss``/``aud`` pinned. Public and confidential
  (``client_secret`` layered on top of PKCE, never replacing it) clients both work. Config:
--``dashboard.oauth.self_hosted.{issuer,client_id,scopes,client_secret}`` or ``HERMES_DASHBOARD_OIDC_*``.
-+``dashboard.oauth.self_hosted.{issuer,client_id,scopes,client_secret,allowed_groups}`` or
-+``HERMES_DASHBOARD_OIDC_*``.
+-``dashboard.oauth.self_hosted.{issuer,client_id,scopes,client_secret,id_token_leeway}`` or
+-``HERMES_DASHBOARD_OIDC_*`` (leeway is config.yaml-only; default 60s of clock-skew tolerance
++``dashboard.oauth.self_hosted.{issuer,client_id,scopes,client_secret,allowed_groups,id_token_leeway}``
++or ``HERMES_DASHBOARD_OIDC_*`` (leeway is config.yaml-only; default 60s of clock-skew tolerance
+ for the ID token's time claims, ``0`` restores strict verification).
 +
 +Authorization: with ``allowed_groups`` (comma-separated) set, an identity is admitted only when
 +the verified ID token's ``groups`` claim names at least one of them — on login, on every
@@ -39,16 +43,16 @@ index 75e2542..5be1353 100644
  """
  
  from __future__ import annotations
-@@ -19,7 +25,7 @@ from typing import Any, Dict, Optional
+@@ -21,7 +26,7 @@ from typing import Any, Dict, Optional
  
  import httpx
  
 -from hermes_cli.dashboard_auth import LoginStart, ProviderError, Session
 +from hermes_cli.dashboard_auth import InvalidCodeError, LoginStart, ProviderError, Session
  from plugins.dashboard_auth._shared import (
+     DEFAULT_TOKEN_LEEWAY_SECONDS,
      JSON_HEADERS,
-     TOKEN_ENDPOINT_TIMEOUT_SEC as _TOKEN_ENDPOINT_TIMEOUT_SEC,
-@@ -55,6 +61,15 @@ _DISCOVERY_CACHE_TTL_SEC = 3600
+@@ -59,6 +64,15 @@ _DISCOVERY_CACHE_TTL_SEC = 3600
  LAST_SKIP_REASON: str = ""
  
  
@@ -64,19 +68,16 @@ index 75e2542..5be1353 100644
  def _require_https_or_loopback(url: str, *, field: str) -> str:
      """Reject non-HTTPS endpoint URLs (loopback http allowed) so a misconfigured
      issuer can't ship auth codes / refresh tokens in cleartext."""
-@@ -70,7 +85,10 @@ class SelfHostedOIDCProvider(JwtOAuthProvider):
-     name = "self-hosted"
-     display_name = "Self-Hosted OIDC"
+@@ -89,7 +103,7 @@ class SelfHostedOIDCProvider(JwtOAuthProvider):
  
--    def __init__(self, *, issuer: str, client_id: str, scopes: str = _DEFAULT_SCOPES, client_secret: str = "") -> None:
-+    def __init__(
-+        self, *, issuer: str, client_id: str, scopes: str = _DEFAULT_SCOPES, client_secret: str = "",
-+        allowed_groups: str = "",
-+    ) -> None:
+     def __init__(
+         self, *, issuer: str, client_id: str, scopes: str = _DEFAULT_SCOPES, client_secret: str = "",
+-        id_token_leeway: float = DEFAULT_TOKEN_LEEWAY_SECONDS,
++        id_token_leeway: float = DEFAULT_TOKEN_LEEWAY_SECONDS, allowed_groups: str = "",
+     ) -> None:
          if not issuer:
              raise ValueError("issuer is required")
-         if not client_id:
-@@ -84,6 +102,9 @@ class SelfHostedOIDCProvider(JwtOAuthProvider):
+@@ -107,6 +121,9 @@ class SelfHostedOIDCProvider(JwtOAuthProvider):
          # Empty/whitespace secret ⇒ public client, so a provisioned-but-blank secret
          # can't flip us into a broken confidential mode.
          self._client_secret = (client_secret or "").strip()
@@ -85,8 +86,8 @@ index 75e2542..5be1353 100644
 +        self._allowed_groups = _parse_groups(allowed_groups)
          # Discovery + JWKS resolve lazily so registration never hits the network
          # (the IDP may be down at boot; fail per-request instead).
-         self._discovery: Dict[str, Any] | None = None
-@@ -160,7 +181,11 @@ class SelfHostedOIDCProvider(JwtOAuthProvider):
+         self._discovery: dict[str, Any] | None = None
+@@ -183,7 +200,11 @@ class SelfHostedOIDCProvider(JwtOAuthProvider):
                  "OIDC token response missing id_token — ensure the 'openid' "
                  "scope is configured and the client is allowed to receive an "
                  "ID token."))
@@ -99,18 +100,18 @@ index 75e2542..5be1353 100644
          # Prefer a freshly-issued RT, else keep the previous (some IDPs don't rotate).
          return self._session(id_token, refresh_token_from(payload, previous_refresh_token), claims)
  
-@@ -231,9 +256,23 @@ class SelfHostedOIDCProvider(JwtOAuthProvider):
+@@ -263,9 +284,23 @@ class SelfHostedOIDCProvider(JwtOAuthProvider):
  
-     def _verify_id_token(self, id_token: str) -> Dict[str, Any]:
+     def _verify_id_token(self, id_token: str) -> dict[str, Any]:
          issuer = self._get_discovery()["issuer"]
 -        return verify_jwt(
 +        claims = verify_jwt(
              id_token, self._get_jwks_client(), algorithms=list(_ALLOWED_ID_TOKEN_ALGS),
-             audience=self._client_id, issuer=issuer, label="ID token")
+             audience=self._client_id, issuer=issuer, label="ID token", leeway=self._id_token_leeway)
 +        self._require_allowed_group(claims)
 +        return claims
 +
-+    def _require_allowed_group(self, claims: Dict[str, Any]) -> None:
++    def _require_allowed_group(self, claims: dict[str, Any]) -> None:
 +        """Admit only members of an allowed group (module docstring). Runs on verified claims
 +        only, and on every path that turns a token into a Session."""
 +        if not self._allowed_groups:
@@ -124,33 +125,38 @@ index 75e2542..5be1353 100644
  
      _claims_for = _verify_id_token
  
-@@ -281,7 +320,8 @@ def _settings() -> dict:
-         "issuer": issuer, "client_id": client_id,
-         "scopes": setting("HERMES_DASHBOARD_OIDC_SCOPES", "scopes") or _DEFAULT_SCOPES,
+@@ -314,7 +349,8 @@ def _settings() -> dict:
          # Credential: canonical home is the env var / ~/.hermes/.env. Empty ⇒ public client.
--        "client_secret": setting("HERMES_DASHBOARD_OIDC_CLIENT_SECRET", "client_secret")}
-+        "client_secret": setting("HERMES_DASHBOARD_OIDC_CLIENT_SECRET", "client_secret"),
+         "client_secret": setting("HERMES_DASHBOARD_OIDC_CLIENT_SECRET", "client_secret"),
+         # Clock-skew tolerance for ID-token exp/nbf/iat (config.yaml only; default 60s, 0 = strict).
+-        "id_token_leeway": parse_leeway(oidc_cfg.get("id_token_leeway"))}
++        "id_token_leeway": parse_leeway(oidc_cfg.get("id_token_leeway")),
 +        "allowed_groups": setting("HERMES_DASHBOARD_OIDC_ALLOWED_GROUPS", "allowed_groups")}
  
  
  def register(ctx) -> None:
-@@ -291,8 +331,9 @@ def register(ctx) -> None:
-     kw, LAST_SKIP_REASON = register_provider(ctx, logger, _TAG, SelfHostedOIDCProvider, _settings)
+@@ -325,5 +361,6 @@ def register(ctx) -> None:
      if kw is not None:
          logger.info(
--            "dashboard-auth-self-hosted: registered provider (issuer=%s, client_id=%s, scopes=%r, confidential=%s)",
--            kw["issuer"], kw["client_id"], kw["scopes"], bool(kw["client_secret"]))  # never log the secret itself
-+            "dashboard-auth-self-hosted: registered provider (issuer=%s, client_id=%s, scopes=%r, confidential=%s, "
-+            "allowed_groups=%r)",
-+            kw["issuer"], kw["client_id"], kw["scopes"], bool(kw["client_secret"]), kw["allowed_groups"])  # never log the secret itself
- 
- 
- # ---- BEGIN PLUGIN-COMPAT (revert-scheduled; see COMPAT_MANIFEST.md) ----
+             "dashboard-auth-self-hosted: registered provider "
+-            "(issuer=%s, client_id=%s, scopes=%r, confidential=%s, id_token_leeway=%ss)",
+-            kw["issuer"], kw["client_id"], kw["scopes"], bool(kw["client_secret"]), kw["id_token_leeway"])  # never log the secret itself
++            "(issuer=%s, client_id=%s, scopes=%r, confidential=%s, id_token_leeway=%ss, allowed_groups=%r)",
++            kw["issuer"], kw["client_id"], kw["scopes"], bool(kw["client_secret"]), kw["id_token_leeway"],
++            kw["allowed_groups"])  # never log the secret itself
 diff --git a/tests/plugins/dashboard_auth/test_self_hosted_provider.py b/tests/plugins/dashboard_auth/test_self_hosted_provider.py
-index 9660130..6c24e25 100644
+index 19b8601864..9f36b8f963 100644
 --- a/tests/plugins/dashboard_auth/test_self_hosted_provider.py
 +++ b/tests/plugins/dashboard_auth/test_self_hosted_provider.py
-@@ -133,6 +133,7 @@ def _make_provider(
+@@ -32,6 +32,7 @@ import plugins.dashboard_auth.self_hosted as oidc_plugin
+ from hermes_cli.dashboard_auth import (
+     InvalidCodeError,
+     ProviderError,
++    RefreshExpiredError,
+     Session,
+     assert_protocol_compliance,
+ )
+@@ -129,6 +130,7 @@ def _make_provider(
      *,
      scopes: str | None = None,
      client_secret: str | None = None,
@@ -158,7 +164,7 @@ index 9660130..6c24e25 100644
      auth_methods: Any = "__unset__",
  ):
      """Construct a provider with discovery + JWKS stubbed (no network).
-@@ -147,6 +148,8 @@ def _make_provider(
+@@ -143,6 +145,8 @@ def _make_provider(
          kwargs["scopes"] = scopes
      if client_secret is not None:
          kwargs["client_secret"] = client_secret
@@ -167,8 +173,8 @@ index 9660130..6c24e25 100644
      p = oidc_plugin.SelfHostedOIDCProvider(**kwargs)
      # Pre-seed discovery so nothing hits the network.
      disco = dict(_DISCOVERY_DOC)
-@@ -604,6 +607,62 @@ class TestRefreshAndRevoke:
-         return _make_provider(rsa_keypair)
+@@ -720,6 +724,62 @@ class TestVerifySession:
+ 
  
  
 +# ---------------------------------------------------------------------------
@@ -230,7 +236,7 @@ index 9660130..6c24e25 100644
  # ---------------------------------------------------------------------------
  # Plugin entry point: env + config.yaml precedence
  # ---------------------------------------------------------------------------
-@@ -617,6 +676,7 @@ class TestPluginRegister:
+@@ -733,6 +793,7 @@ class TestPluginRegister:
              "HERMES_DASHBOARD_OIDC_CLIENT_ID",
              "HERMES_DASHBOARD_OIDC_SCOPES",
              "HERMES_DASHBOARD_OIDC_CLIENT_SECRET",
@@ -238,7 +244,7 @@ index 9660130..6c24e25 100644
          ):
              monkeypatch.delenv(var, raising=False)
  
-@@ -682,6 +742,16 @@ class TestPluginRegister:
+@@ -798,6 +859,16 @@ class TestPluginRegister:
          ctx.register_dashboard_auth_provider.assert_not_called()
  
  

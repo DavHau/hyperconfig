@@ -58,6 +58,14 @@
 # hermes lacks on the wire (billing-header signature, Claude Code
 # identity/system-prompt layout, Stainless headers, tool-name
 # namespacing, thinking-replay and 429 handling).
+#
+# Local change to the vendored patch (marked `hyperhermes:` in
+# ./anthropic_billing_bypass.py): its Claude-Code `context_management` body
+# field goes out only on api.anthropic.com, the one route whose client
+# header carries the context-management beta. Through a TeamClaude gateway
+# (teamclaude.nix) it went out without the beta, and every request with
+# `agent.reasoning_effort` set failed with HTTP 400 "context_management:
+# Extra inputs are not permitted".
 {
   config,
   lib,

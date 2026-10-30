@@ -10,7 +10,7 @@
 # http://localhost:<port>, not at a name below the domain. hermes accepts
 # a plain-HTTP issuer only on the exact host names localhost, 127.0.0.1 and
 # ::1 (plugins/dashboard_auth/self_hosted/__init__.py,
-# _require_https_or_loopback, v2026.9.14), so http://id.<domain> would
+# _require_https_or_loopback, still in v0.22.5), so http://id.<domain> would
 # leave the dashboard without a login provider. Inside this machine
 # localhost is nginx's own listener; from a container host, the forwarded
 # loopback port lands on the same nginx.

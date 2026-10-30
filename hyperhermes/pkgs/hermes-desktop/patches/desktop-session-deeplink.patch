@@ -1,9 +1,10 @@
-What upstream lacks (hermes-agent v2026.8.16, apps/desktop/electron/main.ts):
+What upstream lacks (hermes-agent v0.22.5, apps/desktop/electron/main.ts):
 renderer routing for a `hermes://session/<id>` deep link. main.ts already
 finds a hermes:// token in the cold-start argv and in a second launch's
 argv, parses it and queues it until the renderer is ready, but the
-renderer's deep-link listener handles only the `blueprint` and `mcp`
-kinds, so a `session` payload is dropped. This hunk sends a `session`
+renderer's deep-link listener (use-desktop-integrations.ts,
+lib/deeplink-routes.ts) handles mcp, blueprint, connections, plugin and
+skill links, not `session`, so a `session` payload is dropped. This hunk sends a `session`
 payload to 'hermes:focus-session' instead, the notification-click channel
 the renderer answers by opening that chat.
 
@@ -14,10 +15,10 @@ Chromium's switches-first re-serialisation of a second launch's argv.
 
 --- a/apps/desktop/electron/main.ts
 +++ b/apps/desktop/electron/main.ts
-@@ -14192,7 +14192,11 @@
-     }
+@@ -17777,7 +17777,11 @@ function handleDeepLink(url) {
+     // #130810 un-hide a tray-hidden window; #83998 no foreground re-pump.
+     activateWindow(mainWindow)
  
-     mainWindow.focus()
 -    mainWindow.webContents.send('hermes:deep-link', payload)
 +    if (kind === 'session') {
 +      mainWindow.webContents.send('hermes:focus-session', name)
