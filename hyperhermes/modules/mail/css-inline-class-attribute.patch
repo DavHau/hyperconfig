@@ -1,0 +1,25 @@
+Match attribute selectors on `class` (`*[class="gmail-fix"]`), which
+css-inline 0.23.0 never matches. Upstream commit 395169d (in 0.23.1),
+without its attribute-index half, which 0.23.0 does not have.
+
+diff --git a/crates/css-inline/src/html/element.rs b/crates/css-inline/src/html/element.rs
+index 6e4e6bf..37cdffc 100644
+--- a/crates/css-inline/src/html/element.rs
++++ b/crates/css-inline/src/html/element.rs
+@@ -169,6 +169,16 @@ impl selectors::Element for Element<'_> {
+         operation: &AttrSelectorOperation<&AttrValue>,
+     ) -> bool {
+         let attrs = self.attributes();
++        // `class` is stored outside of `attributes`
++        if *local_name.as_inner() == local_name!("class") {
++            return match *ns {
++                NamespaceConstraint::Specific(ns_url) if *ns_url != ns!() => false,
++                _ => attrs
++                    .class
++                    .as_ref()
++                    .is_some_and(|class| operation.eval_str(&class.value)),
++            };
++        }
+         match *ns {
+             NamespaceConstraint::Any => attrs
+                 .attributes

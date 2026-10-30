@@ -23,8 +23,11 @@ sender's domain, its links and its codes as data like everything else.
 - **INBOX**: only mail from a sender on your allowlist whose domain signed
   it (DMARC pass and a DKIM signature by exactly that domain). Read it with
   `mailgate inbox` (id, from, to, subject, date; newest first), then
-  `mailgate read <id>`: the full text (HTML converted to text, hidden text
-  and images removed) and every link in `links`. Attachments are withheld
+  `mailgate read <id>`: the full text (HTML converted to text as a desktop
+  mail client shows it, hidden text and images removed) and every link in
+  `links`. `lenient: true` means the strict rendering hid almost all text,
+  so only text the HTML hides outright was removed: some of what you read
+  may be invisible to a human reader. Attachments are withheld
   until you fetch one. Mail stays readable for @INBOX_DAYS@ days.
 - **Quarantine**: everything else (unknown senders, failed authentication,
   mail too large or too complex to render). You cannot read these mails.

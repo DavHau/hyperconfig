@@ -18,6 +18,7 @@ import subprocess
 import sys
 import textwrap
 import unittest
+from unittest import mock
 
 import sanitize
 
@@ -317,8 +318,12 @@ HIDDEN_CASES = {
     "clip-path-51": '<p style="clip-path:inset(51%)">SECRET</p>',
     "transform-scale": '<p style="transform:scale(0.01)">SECRET</p>',
     "stylesheet-font-size": "<style>#x{font-size:4px}</style><div id=x>SECRET</div>",
-    "stylesheet-position": "<style>.p{position:absolute}</style><div class=p>SECRET</div>",
+    # A stylesheet's position alone moves nothing out of view; an offset does.
+    "stylesheet-position": "<style>.p{position:absolute;left:-9999px}</style><div class=p>SECRET</div>",
     "stylesheet-in-media": "<style>@media screen{.m{color:#fefefe}}</style><div class=m>SECRET</div>",
+    "stylesheet-in-desktop-media": "<style>@media only screen and (min-width:600px){.m{display:none}}</style><div class=m>SECRET</div>",
+    "descendant-selector": "<style>.a .b{display:none}</style><div class=a><p class=b>SECRET</p></div>",
+    "stylesheet-beats-inline-important": '<style>p.i{display:none!important}</style><p class=i style="display:block">SECRET</p>',
     # G5: the cascade and value forms a mail client honours.
     "important-wins": '<p style="display:none!important;display:block">SECRET</p>',
     "important-spaced": '<p style="display:none ! important;display:block">SECRET</p>',
@@ -336,7 +341,7 @@ HIDDEN_CASES = {
     "stylesheet-tiny-box": "<style>.t{height:1px}</style><div class=t style=overflow:hidden>SECRET</div>",
     "stylesheet-overflow": '<style>.o{overflow:hidden}</style><div class=o style="height:1px">SECRET</div>',
     "star-attribute-value": '<style>*[class="gmail-fix"]{display:none}</style><div class="gmail-fix">SECRET</div>',
-    "attribute-prefix": '<style>[data-x^="a"]{display:none}</style><div data-x="b">SECRET</div>',
+    "attribute-prefix": '<style>[data-x^="a"]{display:none}</style><div data-x="ab">SECRET</div>',
     "dark-box-default-text": '<div style="background:#000"><span>SECRET</span></div>',
     "stylesheet-colour-on-light-cell": '<style>.w{color:#fafafa}</style><table><tr><td style="background:#fff" class=w>SECRET</td></tr></table>',
 }
@@ -346,12 +351,18 @@ class Hidden(unittest.TestCase):
     """F6: text a reader would not see never reaches the agent."""
 
     def test_cases(self):
-        for name, html in HIDDEN_CASES.items():
-            with self.subTest(name):
-                text, _, hidden, _ = sanitize.html_to_text(f"<html><body><p>visible</p>{html}</body></html>")
-                self.assertIn("visible", text)
-                self.assertNotIn("SECRET", text)
-                self.assertGreater(hidden, 0)
+        # Each case on its own, and with a stylesheet that touches every
+        # element, so css-inline merges into the inline styles above.
+        for sheet in ("", "<style>*{font-family:serif}</style>"):
+            for name, html in HIDDEN_CASES.items():
+                with self.subTest(name, sheet=sheet):
+                    text, _, hidden, _, lenient = sanitize.html_to_text(
+                        f"<html><head>{sheet}</head><body><p>visible</p>{html}</body></html>"
+                    )
+                    self.assertIn("visible", text)
+                    self.assertNotIn("SECRET", text)
+                    self.assertGreater(hidden, 0)
+                    self.assertFalse(lenient)
 
     def test_open_details_stays(self):
         text, *_ = sanitize.html_to_text("<details open><summary>S</summary><p>shown</p></details>")
@@ -375,6 +386,8 @@ class Hidden(unittest.TestCase):
         # Rules every email template carries (these from a Stripo one): a
         # neutral or large value hides nothing, and `*[class="x"]` selects
         # only class x. Counting them once hid entire sign-up mails.
+        # .es-hidden is hidden on phones only (max-width): a desktop reader
+        # sees it, and so does the agent.
         css = (
             "a[x-apple-data-detectors]{color:inherit!important;font-size:inherit!important}"
             "h1{font-size:36px} .es-content-body p,.es-content-body a{font-size:16px}"
@@ -384,14 +397,15 @@ class Hidden(unittest.TestCase):
             '*[class="gmail-fix"]{display:none!important}'
             "@media only screen and (max-width:600px){.es-mobile-hidden,.es-hidden{display:none!important}}"
         )
-        text, hrefs, _, _ = sanitize.html_to_text(
+        text, hrefs, _, _, _ = sanitize.html_to_text(
             f"<html><head><style>{css}</style></head><body><table class=es-content-body><tr><td>"
             "<h1>Confirm</h1><p class=x>SHOWN</p>"
             '<a class="es-button" href="https://api.lax.test/verify?code=abc">Confirm email</a>'
-            '<div class="gmail-fix">GONE</div><div class="es-hidden">GONE</div>'
+            '<div class="gmail-fix">GONE</div><div class="es-hidden">DESKTOP</div>'
             "</td></tr></table></body></html>"
         )
         self.assertIn("SHOWN", text)
+        self.assertIn("DESKTOP", text)
         self.assertIn("Confirm email <https://api.lax.test/verify?code=abc>", text)
         self.assertNotIn("GONE", text)
         self.assertEqual(hrefs, ["https://api.lax.test/verify?code=abc"])
@@ -409,10 +423,121 @@ class Hidden(unittest.TestCase):
             '<a href="https://x.test/confirm">Confirm account</a></td></tr></table>',
         }.items():
             with self.subTest(name):
-                text, hrefs, _, _ = sanitize.html_to_text(html)
+                text, hrefs, _, _, _ = sanitize.html_to_text(html)
                 self.assertIn("SHOWN", text)
                 self.assertIn("Confirm account <https://x.test/confirm>", text)
                 self.assertEqual(hrefs, ["https://x.test/confirm"])
+
+
+class Stylesheet(unittest.TestCase):
+    """<style> rules as a desktop webmail client in light mode applies them."""
+
+    def text(self, html: str) -> str:
+        return sanitize.html_to_text(html)[0]
+
+    def test_descendant_hides_only_the_match(self):
+        text = self.text(
+            "<style>.a .b{display:none}</style>"
+            "<div class=a><p class=b>GONE</p></div><p class=b>SHOWN_B</p><div class=a><p>SHOWN_A</p></div>"
+        )
+        self.assertNotIn("GONE", text)
+        self.assertIn("SHOWN_B", text)
+        self.assertIn("SHOWN_A", text)
+
+    def test_media_a_desktop_reader_does_not_get(self):
+        # Phone layouts (max-width), dark mode and print are not what the
+        # owner's desktop client shows, so their rules change nothing.
+        for css in (
+            "@media (max-width:600px){.desktop{display:none}}",
+            "@media only screen and (max-width: 480px), only screen and (max-device-width: 480px){.desktop{display:none!important}}",
+            "@media (prefers-color-scheme: dark){.desktop{color:#fff!important;background:#fff}}",
+            "@media print{.desktop{display:none}}",
+            "@media screen and (min-width:1200px){.desktop{display:none}}",
+            "@media (hover:none){.desktop{display:none}}",
+        ):
+            with self.subTest(css):
+                self.assertIn("DESKTOP", self.text(f"<style>{css}</style><p class=desktop>DESKTOP</p>"))
+
+    def test_media_a_desktop_reader_gets(self):
+        for css in (
+            "@media screen{.x{display:none}}",
+            "@media all and (min-width:480px){.x{display:none}}",
+            "@media only screen and (min-width:600px) and (orientation:landscape){.x{display:none}}",
+            "@media not print{.x{display:none}}",
+            "@media (prefers-color-scheme: light){.x{display:none}}",
+            "@supports (display:grid){@media screen{.x{display:none}}}",
+        ):
+            with self.subTest(css):
+                self.assertNotIn("SECRET", self.text(f"<style>{css}</style><p>visible</p><p class=x>SECRET</p>"))
+
+    def test_interactive_states_do_not_count(self):
+        self.assertIn("SHOWN", self.text("<style>a:hover{display:none} p:focus{color:#fff}</style><p><a href=x>SHOWN</a></p>"))
+
+    def test_desktop_css(self):
+        self.assertEqual(
+            sanitize._desktop_css(
+                "@import url(x.css); @charset 'x';"
+                "/* {comment} */ a{color:red} @media screen{b{color:blue}} @media (max-width:600px){c{color:red}}"
+                "@font-face{font-family:x} d{color:red; &:hover{color:blue} margin:0}"
+            ),
+            "a{color:red}b{color:blue}d{color:red; margin:0}",
+        )
+
+    def test_inliner_failure_keeps_inline_styles(self):
+        # When css-inline fails, the stylesheet counts for nothing and the
+        # inline styles alone decide; the mail is not hidden as a whole.
+        html = '<style>.x{display:none}</style><p class=x>SHOWN</p><p style="display:none">GONE</p>'
+        with mock.patch.object(sanitize.css_inline, "CSSInliner", side_effect=ValueError("boom")):
+            text = self.text(html)
+        self.assertIn("SHOWN", text)
+        self.assertNotIn("GONE", text)
+        self.assertNotIn("SHOWN", self.text(html))
+
+    def test_too_deep_for_the_inliner(self):
+        depth = sanitize.MAX_DEPTH + 10
+        html = "<style>.x{display:none}</style>" + "<div>" * depth + "<p class=x>SHOWN</p><p style=display:none>GONE</p>"
+        text = self.text(html)
+        self.assertIn("SHOWN", text)
+        self.assertNotIn("GONE", text)
+
+
+class Lenient(unittest.TestCase):
+    """A strict rendering that leaves (almost) nothing falls back to hiding
+    only what the HTML hides outright, and says so."""
+
+    PALE = (
+        '<html><body style="background:#ffffff"><table><tr><td style="color:#f4f4f4">'
+        "Please confirm your email address to finish signing up for the service.</td></tr>"
+        '<tr><td style="color:#f4f4f4"><a href="https://x.test/confirm">Confirm</a></td></tr>'
+        '<tr><td style="display:none">PREHEADER</td></tr></table></body></html>'
+    )
+
+    def test_empty_strict_render_falls_back(self):
+        text, hrefs, _, _, lenient = sanitize.html_to_text(self.PALE)
+        self.assertTrue(lenient)
+        self.assertIn("Please confirm your email address", text)
+        self.assertIn("Confirm <https://x.test/confirm>", text)
+        self.assertNotIn("PREHEADER", text)
+        self.assertEqual(hrefs, ["https://x.test/confirm"])
+        r = sanitize.reading(msg("From: <boss@lax.test>\nSubject: s\n", html=self.PALE))
+        self.assertTrue(r["lenient"])
+        self.assertIn("Please confirm your email address", r["text"])
+
+    def test_enough_strict_text_stays_strict(self):
+        html = self.PALE.replace("<table>", "<p>Your account is ready, here is how to confirm it below.</p><table>")
+        text, _, _, _, lenient = sanitize.html_to_text(html)
+        self.assertFalse(lenient)
+        self.assertNotIn("Please confirm", text)
+
+    def test_structural_hiding_stays(self):
+        # Nothing but hidden markup: the lenient rendering would show
+        # nothing more, so the strict empty one stands.
+        text, _, hidden, _, lenient = sanitize.html_to_text(
+            '<div style="display:none">' + "SECRET " * 50 + "</div><p hidden>" + "SECRET " * 50 + "</p>"
+        )
+        self.assertFalse(lenient)
+        self.assertEqual(text, "")
+        self.assertGreater(hidden, 0)
 
 
 def mime(content_type: str, body: str) -> object:
@@ -478,6 +603,8 @@ class Linear(unittest.TestCase):
         "comments": "'<!--' * (N // 4)",
         "long-style-attr": "'<p style=\"' + '1' * N + '\">x</p>'",
         "deep-nesting": "'<div>' * (N // 5)",
+        "deep-nesting-with-style": "'<style>p{color:red}</style>' + '<div>' * (N // 5)",
+        "many-elements-with-style": "'<style>.a .b{color:red} div p:first-child{display:none}</style>' + '<div class=a><p class=b>x</p></div>' * (N // 40)",
         "long-digit-value": "'<p style=\"font-size:' + '1' * N + '\">x</p>'",
         "long-digit-exponent": "'<p style=\"opacity:' + '1' * N + '.' + '1' * N + 'x\">x</p>'",
     }
@@ -509,7 +636,7 @@ class Linear(unittest.TestCase):
 
     def test_oversized_css_hides_everything(self):
         css = ".a{color:red}" * (sanitize.MAX_CSS // 10)
-        text, _, hidden, _ = sanitize.html_to_text(f"<style>{css}</style><p>SECRET</p>")
+        text, _, hidden, _, _ = sanitize.html_to_text(f"<style>{css}</style><p>SECRET</p>")
         self.assertNotIn("SECRET", text)
 
 

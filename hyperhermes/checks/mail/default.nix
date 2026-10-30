@@ -55,6 +55,8 @@ let
     cp ${../../modules/mail/sanitize.py} $out/sanitize.py
     cp ${../../modules/mail/sanitize_test.py} $out/sanitize_test.py
   '';
+  # mailgate's own Python (css-inline) runs the unit tests.
+  mailPython = import ../../modules/mail/python.nix pkgs;
 
   # Hidden-text cases a human reader would not see; none may reach the
   # agent's INBOX copy (F6 added the second block, G5 the third).
@@ -805,7 +807,7 @@ pkgs.testers.runNixOSTest {
 
 
     with subtest("sanitize.py unit tests (F1, F3, F5, F6, F8, G1, G3, G5)"):
-        server.succeed("cd ${sanitizeTests} && python3 -m unittest -v sanitize_test 2>&1")
+        server.succeed("cd ${sanitizeTests} && ${mailPython}/bin/python3 -m unittest -v sanitize_test 2>&1")
 
     with subtest("listeners: MX on IPv4 only, IMAP on loopback, nothing else"):
         listen = server.succeed("ss -Hltn | awk '{print $4}'").split()
@@ -857,6 +859,7 @@ pkgs.testers.runNixOSTest {
         assert "Quarterly numbers are fine." in r["text"], r
         assert "https://trusted.test/report" in r["links"], r
         assert r["html_converted"] and r["attachments"][0]["name"] == "report.pdf", r
+        assert "lenient" not in r, r
         for bad in ("HIDDEN_", "PLAINSECRET", "track.example", "ignore all previous"):
             assert bad not in json.dumps(r), bad
         rc, out = mailgate("bob", f"read {alice_mid}")

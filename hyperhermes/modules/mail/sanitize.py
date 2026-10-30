@@ -18,6 +18,8 @@ import re
 import unicodedata
 import urllib.parse
 
+import css_inline
+
 # Characters that render as nothing but still reach a model: zero-width
 # joiners and spaces, bidi overrides, soft hyphen, variation selectors and the
 # Unicode tag block ("ASCII smuggling").
@@ -251,15 +253,21 @@ _SIZE_PROPS = (
 )
 
 
+def _hides_structurally(style: dict[str, str]) -> bool:
+    """display:none, visibility:hidden and Outlook's mso-hide: what hides an
+    element in every client, whatever its size or colours."""
+    return (
+        style.get("display") == "none"
+        or style.get("visibility") in ("hidden", "collapse")
+        or style.get("mso-hide") == "all"
+    )
+
+
 def _hides(style: dict[str, str]) -> bool:
     """True when these declarations make an element invisible to a reader."""
     if not style:
         return False
-    if style.get("display") == "none":
-        return True
-    if style.get("visibility") in ("hidden", "collapse"):
-        return True
-    if style.get("mso-hide") == "all":
+    if _hides_structurally(style):
         return True
     if any(_COMPUTED.search(style.get(p, "")) for p in _SIZE_PROPS):
         return True
@@ -297,137 +305,190 @@ def _hides(style: dict[str, str]) -> bool:
     return False
 
 
-# A stylesheet rule hides what it selects when its values would hide it
-# inline (_hides), and also on what a single rule cannot be judged by: a
-# tiny box or a clipping overflow (the other half may come from another
-# rule or the inline style), and positioning. Neutral values (auto sizes, a
-# 36px heading) hide nothing: templates set them on every tag, and counting
-# them hid whole mails. Colour and background hide no element: they decide
-# whether a run of text is readable, so _css_paint hands every colour a
-# rule could give a token to the renderer, which checks each text run
-# against every colour/background pair it may get (any unreadable or
-# unknown pair hides that text, the safe direction). Hiding whole elements
-# for paint emptied real mails: a black body with light paragraphs, a
-# mobile-only `.x{background:#f7f7f7}` on the outer table cell.
-_NEUTRAL_PAINT = {"", "inherit", "currentcolor"}
-_NEUTRAL_BACKGROUND = _NEUTRAL_PAINT | {"transparent", "none", "initial", "unset"}
-
-
-def _sheet_hides(style: dict[str, str]) -> bool:
-    if _hides(style):
-        return True
-    if any(_tiny(_length(style.get(p, ""))) for p in ("height", "max-height", "width", "max-width", "line-height")):
-        return True
-    if any(style.get(p, "").split()[:1] in (["hidden"], ["clip"]) for p in ("overflow", "overflow-x", "overflow-y")):
-        return True
-    return style.get("position", "static") not in ("static", "relative", "inherit")
-
-
-# Pseudo-classes that apply only while the reader interacts; text such a
-# rule hides is visible at rest.
-_INTERACTIVE = re.compile(r":(?:hover|active|focus|focus-within|focus-visible)\b")
-# The tokens of a selector's last compound: class, id, tag, a bare `*`, and
-# attributes: `[a=v]` (an exact value) or `[a` (any other test, read as
-# presence: over-hides).
-_SELECTOR_TOKEN = re.compile(
-    r"""[.#][-\w]+|\[\s*([-\w]+)\s*(?:=\s*(?:"([^"]*)"|'([^']*)'|([-\w]+))\s*(?:[is]\s*)?\])?|^[a-z][a-z0-9]*"""
-)
-
-
-def _selector_tokens(compound: str) -> set[str]:
-    if compound == "*":
-        return {"*"}
-    tokens = set()
-    for m in _SELECTOR_TOKEN.finditer(compound):
-        if m.group(1) is None:
-            tokens.add(m.group(0))
-        elif m.group(0).endswith("]"):
-            value = next(v for v in m.group(2, 3, 4) if v is not None)
-            tokens.add(f"[{m.group(1)}={value}]")
-        else:
-            tokens.add("[" + m.group(1))
-    return tokens
-
-
+# ---------------------------------------------------------------- stylesheets
+#
+# <style> rules are resolved the way a desktop webmail client in light mode
+# shows the mail: css-inline matches every selector (descendants,
+# attributes, specificity, !important) and writes the outcome into style
+# attributes, which the renderer reads like any inline style. :hover and
+# the like never match a document at rest, so they change nothing here.
 
 # Caps that keep rendering linear in practice: more CSS than this hides
-# the whole body; more HTML than this is not rendered at all.
+# the whole body; more HTML than this is not rendered at all. css-inline
+# recurses once per nesting level (about 7000 levels overflow an 8 MiB
+# stack and kill the process), so deeper markup keeps only its inline
+# styles.
 MAX_CSS = 65_536
 MAX_HTML = 2_000_000
+MAX_DEPTH = 1_000
+
+# The reading pane a media query is evaluated against: a condition holds
+# when it holds for every pane width from 800 to 1024 px (min-width up to
+# 800px, max-width from 1024px), on a screen, in light mode, in landscape,
+# at one device pixel per CSS pixel. Print, dark mode, mobile max-width
+# breakpoints and features not known here do not apply.
+_PANE = (800, 1024)
+_MEDIA_FEATURE = re.compile(r"\(\s*([-a-z]+)\s*(?::\s*([^)]*?)\s*)?\)")
+_MEDIA_TYPES = {"all", "screen", "print", "speech", "tv", "projection", "handheld", "aural", "braille", "embossed", "tty"}
+_PX = {"px": 1, "": 1, "em": 16, "rem": 16, "pt": 4 / 3}
 
 
-def _css_rules(css: str):
-    """(prelude, block) of every block in one left-to-right pass. Nested
-    blocks (@media, @supports) yield their inner rules and then themselves
-    with an @-prelude, which callers skip."""
-    preludes: list[str] = []
+def _px(value: str):
+    m = _LENGTH.fullmatch(value)
+    if not m or m.group(2) not in _PX or (not m.group(2) and float(m.group(1)) != 0):
+        return None
+    return float(m.group(1)) * _PX[m.group(2)]
+
+
+def _media_feature(name: str, value: str | None) -> bool | None:
+    """Whether `(name: value)` holds for the pane; None when unknown."""
+    name = re.sub(r"^-(?:webkit|moz|o)-", "", name)
+    if name in ("min-width", "max-width", "min-device-width", "max-device-width"):
+        px = _px(value or "")
+        if px is None:
+            return None
+        return px <= _PANE[0] if name.startswith("min") else px >= _PANE[1]
+    if name in ("min-device-pixel-ratio", "max-device-pixel-ratio"):
+        try:
+            ratio = float(value or "")
+        except ValueError:
+            return None
+        return ratio <= 1 if name.startswith("min") else ratio >= 1
+    if name == "prefers-color-scheme":
+        return value in (None, "light")
+    if name == "orientation":
+        return value == "landscape"
+    return None
+
+
+def _media_query(query: str) -> bool:
+    ok = True
+    for m in _MEDIA_FEATURE.finditer(query):
+        got = _media_feature(m.group(1), m.group(2))
+        if got is None:
+            return False
+        ok = ok and got
+    words = _MEDIA_FEATURE.sub(" ", query).split()
+    negated = words[:1] == ["not"]
+    rest = [w for w in words if w not in ("only", "not", "and")]
+    if len(rest) > 1 or (rest and rest[0] not in _MEDIA_TYPES):
+        return False
+    if rest and rest[0] not in ("all", "screen"):
+        ok = False
+    return ok != negated
+
+
+def _media_applies(queries: str) -> bool:
+    """Whether an @media query list (lowercase, after "@media") applies."""
+    return any(_media_query(q.strip()) for q in queries.split(","))
+
+
+def _desktop_css(css: str) -> str:
+    """The rules of a stylesheet that apply in the pane, without at-rules:
+    the rules of an @media that applies and of every @supports move to the
+    top level; other at-rules and nested blocks are dropped. One pass."""
+    css = _strip_css_comments(css)
+    out: list[str] = []
+    stack: list[str] = []  # "rule" or "group" per open block
+    skip = 0  # depth inside a dropped block
     seg = 0
-    for i, ch in enumerate(css):
-        if ch == "{":
-            preludes.append(css[seg:i])
-            seg = i + 1
-        elif ch == "}":
-            if preludes:
-                yield preludes.pop(), css[seg:i]
-            seg = i + 1
+    for m in re.finditer(r"[{};]", css):
+        i, ch = m.start(), m.group()
+        if skip:
+            skip += 1 if ch == "{" else -1 if ch == "}" else 0
+        elif ch == ";":
+            # Declarations of a rule stay; an at-statement (@import) or junk
+            # between rules goes.
+            if stack and stack[-1] == "rule":
+                out.append(css[seg : i + 1])
+        elif ch == "{":
+            prelude = css[seg:i].strip()
+            at = re.match(r"@([-a-z]+)(.*)", _css_unescape(prelude).lower(), re.S) if prelude.startswith("@") else None
+            if stack and stack[-1] == "rule":
+                skip = 1
+            elif at is None and not prelude.startswith("@"):
+                out.append(prelude + "{")
+                stack.append("rule")
+            elif at and (at.group(1) == "supports" or (at.group(1) == "media" and _media_applies(at.group(2)))):
+                stack.append("group")
+            else:
+                skip = 1
+        elif stack and stack.pop() == "rule":
+            out.append(css[seg:i] + "}")
+        seg = i + 1
+    if stack and stack[-1] == "rule":
+        out.append(css[seg:] + "}")
+    return "".join(out)
 
 
-def _css_paint(css: str) -> dict[str, list[tuple[object, object]]]:
-    """token -> [(color, background)] of every rule that paints it."""
-    if len(css) > MAX_CSS:
-        return {}
-    css = _css_unescape(_strip_css_comments(css))
-    out: dict[str, list] = {}
-    for selectors, body in _css_rules(css):
-        st = _style(body)
-        c = st.get("color", "")
-        b = st.get("background-color") or (st.get("background", "").split() or [""])[0]
-        c = None if c in _NEUTRAL_PAINT else (_color(c) or "U")
-        b = None if b in _NEUTRAL_BACKGROUND else (_color(b) or "U")
-        if c is None and b is None:
-            continue
-        for sel in selectors.split(","):
-            sel = sel.strip().lower()
-            if not sel or sel.startswith("@"):
-                continue
-            last = re.split(r"[\s>+~]+", sel)[-1]
-            if _INTERACTIVE.search(last):
-                continue
-            for t in _selector_tokens(last):
-                out.setdefault(t, []).append((c, b))
-    return out
+class _TooDeep(Exception):
+    pass
 
 
-def _css_hidden_selectors(css: str) -> set[str]:
-    """Class (.x), id (#x), attribute ([x], [x=v]) and tag tokens that some
-    <style> rule hides. Every rule counts, inside any @media too (except
-    :hover and similar), and only the last compound of a selector matters:
-    this over-hides, which is the safe side. Stylesheets above MAX_CSS hide
-    everything ("*").
-    """
-    if len(css) > MAX_CSS:
-        return {"*"}
-    css = _css_unescape(_strip_css_comments(css))
-    tokens: set[str] = set()
-    for selectors, body in _css_rules(css):
-        if not _sheet_hides(_style(body)):
-            continue
-        for sel in selectors.split(","):
-            sel = sel.strip().lower()
-            if not sel or sel.startswith("@"):
-                continue
-            last = re.split(r"[\s>+~]+", sel)[-1]
-            if _INTERACTIVE.search(last):
-                continue
-            tokens |= _selector_tokens(last)
-    return tokens
+class _Depth(html.parser.HTMLParser):
+    """Raises _TooDeep once elements nest more than MAX_DEPTH deep."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self.stack: list[str] = []
+        self.open: dict[str, int] = {}
+
+    def handle_starttag(self, tag, attrs):
+        if tag in _VOID:
+            return
+        self.stack.append(tag)
+        self.open[tag] = self.open.get(tag, 0) + 1
+        if len(self.stack) > MAX_DEPTH:
+            raise _TooDeep
+
+    def handle_startendtag(self, tag, attrs):
+        pass
+
+    def handle_endtag(self, tag):
+        if not self.open.get(tag):
+            return
+        while self.stack:
+            t = self.stack.pop()
+            self.open[t] -= 1
+            if t == tag:
+                break
+
+
+def _inline_stylesheet(markup: str, css: str) -> str | None:
+    """`markup` with `css` resolved into style attributes and without its
+    <style> and <link> elements, or None when css-inline cannot do that:
+    it failed, or the markup nests too deep for it. Nothing is fetched."""
+    depth = _Depth()
+    try:
+        depth.feed(markup)
+        depth.close()
+    except _TooDeep:
+        return None
+    except Exception:  # noqa: BLE001 - css-inline parses it its own way
+        pass
+    try:
+        return css_inline.CSSInliner(
+            inline_style_tags=False,
+            keep_style_tags=False,
+            keep_link_tags=False,
+            keep_at_rules=False,
+            load_remote_stylesheets=False,
+            extra_css=css,
+        ).inline(markup)
+    except Exception:  # noqa: BLE001 - InlineError, pathological CSS or markup
+        return None
 
 
 class _Renderer(html.parser.HTMLParser):
-    def __init__(self, hidden_selectors: set[str], paint=None):
+    """Visible text of markup whose stylesheet is already inline. `lenient`
+    hides only structurally (display, visibility, the hidden attribute,
+    closed <details>, tags that never render), without the size and contrast
+    rules; `hide_all` hides every element."""
+
+    def __init__(self, *, lenient: bool = False, hide_all: bool = False):
         super().__init__(convert_charrefs=True)
-        self.sel = hidden_selectors
-        self.paint = paint or {}
+        self.lenient = lenient
+        self.hide_all = hide_all
         # (tag, hidden, color, background, closed <details>)
         self.stack: list[tuple[str, bool, object, object, bool]] = []
         # How often each tag is open, so an end tag never scans the stack.
@@ -446,19 +507,7 @@ class _Renderer(html.parser.HTMLParser):
     def _top(self):
         if self.stack:
             return self.stack[-1]
-        return ("", False, frozenset({(0, 0, 0)}), frozenset({(255, 255, 255)}), False)
-
-    def _selected(self, tag, attrs) -> bool:
-        if not self.sel:
-            return False
-        if "*" in self.sel or tag in self.sel:
-            return True
-        for c in (attrs.get("class") or "").lower().split():
-            if "." + c in self.sel:
-                return True
-        if attrs.get("id") and "#" + attrs["id"].lower() in self.sel:
-            return True
-        return any("[" + a in self.sel or f"[{a}={v.lower()}]" in self.sel for a, v in attrs.items())
+        return ("", False, (0, 0, 0), (255, 255, 255), False)
 
     def handle_starttag(self, tag, attrs_list):
         tag = tag.lower()
@@ -481,43 +530,29 @@ class _Renderer(html.parser.HTMLParser):
         if tag in _VOID:
             return
         style = _style(attrs.get("style"))
-        sheet = []
-        if self.paint:
-            toks = [tag] + ["." + c for c in (attrs.get("class") or "").lower().split()]
-            if attrs.get("id"):
-                toks.append("#" + attrs["id"].lower())
-            toks += [f"[{a}={v.lower()}]" for a, v in attrs.items()] + ["[" + a for a in attrs] + ["*"]
-            for t in toks:
-                sheet += self.paint.get(t, ())
-        inline_c = _color(style.get("color") or attrs.get("color") or (attrs.get("text") if tag == "body" else None))
-        color = frozenset({inline_c}) if inline_c is not None else parent_color
-        sc = {c for c, _ in sheet if c is not None}
-        if sc:
-            color = color | sc
-        inline_b = _color(
+        color = _color(style.get("color") or attrs.get("color") or (attrs.get("text") if tag == "body" else None))
+        if color is None:
+            color = parent_color
+        bg = _color(
             style.get("background-color")
             or (style.get("background", "").split() or [None])[0]
             or attrs.get("bgcolor")
         )
-        bg = parent_bg if inline_b in (None, "T") else frozenset({inline_b})
-        sb = {b for _, b in sheet if b not in (None, "T")}
-        if sb:
-            bg = bg | sb
+        if bg in (None, "T"):
+            bg = parent_bg
         hidden = parent_hidden
         if not hidden:
-            low_contrast = (
-                isinstance(color, tuple)
-                and isinstance(bg, tuple)
-                and abs(_luminance(color) - _luminance(bg)) < 0.12
-            )
             hidden = (
-                tag in _DROP
+                self.hide_all
+                or tag in _DROP
                 or "hidden" in attrs
-                or attrs.get("aria-hidden", "").lower() == "true"
                 # A closed <details> shows its <summary> only.
                 or (in_closed_details and tag != "summary")
-                or _hides(style)
-                or self._selected(tag, attrs)
+                or (
+                    _hides_structurally(style)
+                    if self.lenient
+                    else attrs.get("aria-hidden", "").lower() == "true" or _hides(style)
+                )
             )
             if hidden:
                 self.hidden_elements += 1
@@ -566,17 +601,21 @@ class _Renderer(html.parser.HTMLParser):
                 break
 
     def handle_data(self, data):
-        _, hidden, _, _, in_closed_details = self._top()
+        _, hidden, color, bg, in_closed_details = self._top()
         if hidden:
             return
         if in_closed_details:
             self.hidden_elements += 1
             return
-        _, _, color, bg, _ = self._top()
-        if data.strip() and any(
-            c in ("T", "U") or b == "U" or (isinstance(c, tuple) and isinstance(b, tuple)
-                and abs(_luminance(c) - _luminance(b)) < 0.12)
-            for c in color for b in bg):
+        # Colours decide per run of text, not per element: a dark box can
+        # hold a light paragraph.
+        if (
+            not self.lenient
+            and data.strip()
+            and isinstance(color, tuple)
+            and isinstance(bg, tuple)
+            and abs(_luminance(color) - _luminance(bg)) < 0.12
+        ):
             self.hidden_elements += 1
             return
         self._emit(data)
@@ -606,17 +645,50 @@ def _style_blocks(markup: str) -> str | None:
     return "\n".join(out)
 
 
-def html_to_text(markup: str) -> tuple[str, list[str], int, int]:
-    """(visible text, hrefs of visible links, hidden elements, images).
-    Callers keep `markup` under MAX_HTML (render() does)."""
-    styles = _style_blocks(markup)
-    r = _Renderer({"*"} if styles is None else _css_hidden_selectors(styles), None if styles is None else _css_paint(styles))
+def _render_html(markup: str, **kw) -> _Renderer:
+    r = _Renderer(**kw)
     try:
         r.feed(markup)
         r.close()
     except Exception:  # noqa: BLE001 - malformed markup degrades, never crashes
         pass
-    return clean_text("".join(r.out)), r.hrefs, r.hidden_elements, r.images
+    return r
+
+
+# A strict rendering with fewer visible characters than this, of a mail
+# whose structural rendering has at least this many more, is replaced by
+# the structural one (`lenient`): an allowlisted sender's template that the
+# size and contrast rules empty is more likely a misjudged layout than a
+# hidden message.
+LENIENT_BELOW = 40
+
+
+def _visible(text: str) -> int:
+    return len("".join(text.split()))
+
+
+def html_to_text(markup: str) -> tuple[str, list[str], int, int, bool]:
+    """(visible text, hrefs of visible links, hidden elements, images,
+    lenient). Callers keep `markup` under MAX_HTML (render() does)."""
+    styles = _style_blocks(markup)
+    if styles is None:
+        # Too much CSS to judge: nothing shows, not even leniently.
+        r = _render_html(markup, hide_all=True)
+        return clean_text("".join(r.out)), r.hrefs, r.hidden_elements, r.images, False
+    css = _desktop_css(styles)
+    if "{" in css:
+        # When css-inline fails, the <style> elements count for nothing:
+        # the renderer drops them and judges the inline styles alone.
+        markup = _inline_stylesheet(markup, css) or markup
+    r = _render_html(markup)
+    text = clean_text("".join(r.out))
+    lenient = False
+    if r.hidden_elements and _visible(text) < LENIENT_BELOW:
+        loose = _render_html(markup, lenient=True)
+        loose_text = clean_text("".join(loose.out))
+        if _visible(loose_text) >= _visible(text) + LENIENT_BELOW:
+            r, text, lenient = loose, loose_text, True
+    return text, r.hrefs, r.hidden_elements, r.images, lenient
 
 
 # ---------------------------------------------------------------- MIME
@@ -682,16 +754,17 @@ def body_and_attachments(msg):
 
 def render(msg) -> dict:
     """The visible text of a message plus what was dropped. HTML above
-    MAX_HTML is not rendered at all (`too_large`)."""
+    MAX_HTML is not rendered at all (`too_large`); `lenient` says the text
+    is html_to_text's structural fallback."""
     body, attachments = body_and_attachments(msg)
-    text, hrefs, hidden, images, too_large = "", [], 0, 0, False
+    text, hrefs, hidden, images, lenient, too_large = "", [], 0, 0, False, False
     if body is not None:
         content = _part_text(body)
         if body.get_content_type() == "text/html":
             if len(content) > MAX_HTML:
                 too_large = True
             else:
-                text, hrefs, hidden, images = html_to_text(content)
+                text, hrefs, hidden, images, lenient = html_to_text(content)
         else:
             # clean_text keeps MAX_TEXT anyway; do not walk megabytes for it.
             text = clean_text(content[: 4 * MAX_TEXT])
@@ -702,6 +775,7 @@ def render(msg) -> dict:
         "images": images,
         "html": body is not None and body.get_content_type() == "text/html",
         "too_large": too_large,
+        "lenient": lenient,
         "attachments": attachments,
     }
 
@@ -1257,6 +1331,7 @@ def analyze(msg, raw: bytes, authserv_id: str, psl: Psl) -> dict:
         "attachment_count": len(r["attachments"]),
         "html": r["html"],
         "hidden": r["hidden"],
+        "lenient": r["lenient"],
         "images": r["images"],
         "too_large": r["too_large"],
         "_verdict": v,
@@ -1295,6 +1370,7 @@ def reading(msg) -> dict:
         "links": all_links(r["hrefs"], r["text"]),
         "html": r["html"],
         "hidden": r["hidden"],
+        "lenient": r["lenient"],
         "images": r["images"],
         "too_large": r["too_large"],
     }

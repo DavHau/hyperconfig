@@ -304,6 +304,13 @@ async def analyze(raw: bytes):
 # ------------------------------------------------------------------ delivery
 
 
+LENIENT_NOTE = (
+    "Rendered leniently: the strict rendering hid almost all text, so only what the "
+    "HTML hides outright (display:none, visibility, hidden) was dropped. Some of this text may "
+    "be invisible to a human reader."
+)
+
+
 def footer(mid: str, a: dict) -> str:
     lines = [
         "", "----",
@@ -319,6 +326,8 @@ def footer(mid: str, a: dict) -> str:
         dropped.append(f"{a['images']} image(s) dropped")
     if dropped:
         lines.append("[mailgate] " + "; ".join(dropped) + ".")
+    if a.get("lenient"):
+        lines.append(f"[mailgate] {LENIENT_NOTE}")
     atts = a["_attachments"]
     if atts:
         lines.append(
@@ -1022,6 +1031,9 @@ async def read_message(agent: str, mid: str) -> dict:
     }
     if got["too_large"]:
         out["text_withheld"] = "HTML body too large to render"
+    if got["lenient"]:
+        out["lenient"] = True
+        out["lenient_note"] = LENIENT_NOTE
     if attachments:
         out["attachments_hint"] = f"mailgate attachment {row['id']} <index> --out <file>"
     return out

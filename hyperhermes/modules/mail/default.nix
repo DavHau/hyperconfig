@@ -96,7 +96,7 @@ let
       ./client.py
     ];
   };
-  python = pkgs.python3.withPackages (ps: [ ps.aiohttp ]);
+  python = import ./python.nix pkgs;
   package = pkgs.symlinkJoin {
     name = "mailgate";
     paths = [
