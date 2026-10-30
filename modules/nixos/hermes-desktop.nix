@@ -8,7 +8,7 @@
 # The app dials the agents as <agent>@hermes.davhau.com (som's public
 # name) with the shared clan var hermes-desktop-ssh, copied for dave plus
 # grmpf where that account exists (amy). som authorizes its public half
-# on dave-hermes and joe with `restrict` + loopback port-forwarding only.
+# on dave-hermes, joe and thaigersprint with `restrict` + loopback port-forwarding only.
 # BatchMode cannot answer a TOFU prompt, so the host is verified as
 # `som.d`: som presents its clan sshd CA certificate (principal som.d) on
 # every address, and the sshd client role trusts that CA for `*.d` in
@@ -34,6 +34,7 @@
     agents = {
       dave-hermes = "dave-hermes";
       joe = "joe";
+      thaigersprint = "thaigersprint";
     };
     primary = "dave-hermes";
     users = [ "dave" ] ++ lib.optional (config.users.users ? grmpf) "grmpf";

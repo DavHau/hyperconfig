@@ -204,10 +204,11 @@ in
       };
 
       # thaigersprint: no vault access (./hermes-agents-data.nix); logs in
-      # with the admin keys, dave signs in to its dashboard.
+      # with the admin keys, dave signs in to its dashboard and dials it
+      # from hermes-desktop.
       thaigersprint = {
         description = "thaigersprint - hermes agent, no vault access";
-        sshKeys = adminKeys;
+        sshKeys = adminKeys ++ [ desktopKey ];
       };
 
       # momentum: OpenRouter brain, and a Telegram bot in ONE group chat where
