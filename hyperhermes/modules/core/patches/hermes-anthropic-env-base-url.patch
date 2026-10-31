@@ -1,0 +1,478 @@
+hermes v0.22.5: a profile whose config.yaml carries the stock
+`model.base_url: https://api.anthropic.com` sends its Anthropic credential
+to api.anthropic.com even when the environment points that credential at
+a gateway (ANTHROPIC_TOKEN + ANTHROPIC_BASE_URL, e.g. TeamClaude).
+
+Symptom: every turn of such a profile fails with `HTTP 401: OAuth access
+token is invalid`: Anthropic rejects the gateway's client key. Profiles
+without a base_url line in config.yaml work. hermes' model picker writes
+that line whenever anthropic is chosen
+(hermes_cli/model_setup_flows_common.py), so any profile set up through
+it is affected.
+
+Cause: hermes_cli/runtime_provider.py _anthropic_cfg_base_url() returns
+config.yaml's model.base_url for provider anthropic, and every native
+Anthropic runtime path prefers it to everything else: the credential-pool
+row (_pool_entry_mode_and_url; the env:ANTHROPIC_TOKEN row carries
+ANTHROPIC_BASE_URL but loses to the config), the env runtime
+(_anthropic_env_runtime, which ignores ANTHROPIC_BASE_URL altogether) and
+--api-key (_explicit_anthropic). The auxiliary client (_try_anthropic)
+applies the same config override. Three side call sites never look at
+ANTHROPIC_BASE_URL and send the token to api.anthropic.com regardless:
+the model picker's live catalog (_anthropic_catalog), `hermes doctor`
+(_probe_anthropic) and the OAuth usage read (_fetch_anthropic_account_usage,
+`/usage`).
+
+Fix: agent/anthropic_credentials.py gains is_stock_anthropic_base_url()
+(https + api.anthropic.com, optional :443, `/v1` and trailing slash),
+anthropic_env_base_url() (ANTHROPIC_BASE_URL through the secret scope, so
+a multiplexed profile reads its own .env) and
+effective_anthropic_base_url(): an empty or stock configured base_url
+yields to ANTHROPIC_BASE_URL when that is set; any other configured
+endpoint (another proxy) still wins. _anthropic_cfg_base_url() and the
+auxiliary client's config override go through it; the env runtime and
+--api-key fall back to ANTHROPIC_BASE_URL before api.anthropic.com; the
+catalog and doctor query ANTHROPIC_BASE_URL; the OAuth usage read reports
+"unavailable" instead of sending a token routed through a non-Anthropic
+endpoint (the runtime base_url, else ANTHROPIC_BASE_URL) to Anthropic's
+usage endpoint. Without ANTHROPIC_BASE_URL nothing changes.
+
+Upstream status: not reported upstream; main (c2f14e48b8, 2026-10-31)
+still prefers the config base_url and ignores ANTHROPIC_BASE_URL there.
+
+The regression tests fail before this change: the stock base_url (or none,
+for the env and --api-key paths) beats ANTHROPIC_BASE_URL on every
+runtime path, the auxiliary client, catalog and doctor, and the usage
+read calls api.anthropic.com with the gateway token.
+
+diff --git a/agent/account_usage.py b/agent/account_usage.py
+index 6f648870d7..d904108137 100644
+--- a/agent/account_usage.py
++++ b/agent/account_usage.py
+@@ -9,7 +9,9 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
+ 
+ import httpx
+ 
+-from agent.anthropic_credentials import _is_oauth_token, resolve_anthropic_token
++from agent.anthropic_credentials import (
++    _is_oauth_token, anthropic_env_base_url, is_native_anthropic_host, resolve_anthropic_token,
++)
+ from hermes_cli.auth import AuthError, _read_codex_tokens, resolve_codex_runtime_credentials
+ from hermes_cli.auth_codex import _codex_pool_route_base_url
+ from hermes_cli.runtime_provider import resolve_runtime_provider
+@@ -855,6 +857,12 @@ def _fetch_anthropic_account_usage(
+     if not _is_oauth_token(token):
+         return _snapshot("anthropic", "oauth_usage_api", [], [],
+                          unavailable_reason="Anthropic account limits are only available for OAuth-backed Claude accounts.")
++    # The usage endpoint is api.anthropic.com's own; a token routed through another Anthropic
++    # endpoint (ANTHROPIC_BASE_URL gateway, proxy) belongs to that endpoint, not to Anthropic.
++    if not is_native_anthropic_host(str(base_url or "").strip() or anthropic_env_base_url()):
++        return _snapshot("anthropic", "oauth_usage_api", [], [],
++                         unavailable_reason="Anthropic account limits are only available for a direct api.anthropic.com login, "
++                                            "not through a custom Anthropic endpoint.")
+     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json", "Content-Type": "application/json",
+                "anthropic-beta": "oauth-2025-04-20", "User-Agent": "claude-code/2.1.0"}
+     payload = _get_json("https://api.anthropic.com/api/oauth/usage", headers, timeout=15.0)
+diff --git a/agent/anthropic_credentials.py b/agent/anthropic_credentials.py
+index be1df48e29..096f481c4d 100644
+--- a/agent/anthropic_credentials.py
++++ b/agent/anthropic_credentials.py
+@@ -25,6 +25,7 @@ import time
+ from collections import OrderedDict
+ from pathlib import Path
+ from typing import Any, Dict, Optional
++from urllib.parse import urlparse
+ 
+ from hermes_constants import get_hermes_home
+ from utils import atomic_json_write, base_url_hostname
+@@ -75,6 +76,35 @@ def is_native_anthropic_host(base_url: Any) -> bool:
+     return not text or base_url_hostname(text) == "api.anthropic.com"
+ 
+ 
++def is_stock_anthropic_base_url(base_url: Any) -> bool:
++    """True for the stock endpoint the model picker writes as ``model.base_url``:
++    ``https://api.anthropic.com``, with or without ``/v1`` and a trailing slash."""
++    try:
++        parsed = urlparse(str(base_url or "").strip())
++        port = parsed.port
++    except ValueError:
++        return False
++    return (parsed.scheme.lower() == "https" and (parsed.hostname or "").rstrip(".") == "api.anthropic.com"
++            and port in (None, 443) and parsed.path.rstrip("/") in ("", "/v1")
++            and not (parsed.query or parsed.fragment or parsed.params))
++
++
++def anthropic_env_base_url() -> str:
++    """``ANTHROPIC_BASE_URL`` from the active secret scope (no trailing slash), or ``""``."""
++    return str(_get_secret("ANTHROPIC_BASE_URL", "") or "").strip().rstrip("/")
++
++
++def effective_anthropic_base_url(configured: Any) -> str:
++    """Endpoint for a configured Anthropic ``base_url``: a deliberate endpoint (another proxy)
++    wins; an empty one or the stock default yields to ``ANTHROPIC_BASE_URL`` when set, so a
++    gateway the environment points the Anthropic credentials at is not bypassed by the
++    ``https://api.anthropic.com`` the model picker persists."""
++    configured = str(configured or "").strip().rstrip("/")
++    if configured and not is_stock_anthropic_base_url(configured):
++        return configured
++    return anthropic_env_base_url() or configured
++
++
+ def anthropic_route_is_oauth(base_url: Any, credential: Any, *, provider: Optional[str] = None) -> bool:
+     """Claude Code OAuth identity for one Anthropic Messages route (#114967).
+ 
+diff --git a/agent/auxiliary_client.py b/agent/auxiliary_client.py
+index 88f1fa59b5..39f6500aa2 100644
+--- a/agent/auxiliary_client.py
++++ b/agent/auxiliary_client.py
+@@ -3048,7 +3048,9 @@ def _try_anthropic(explicit_api_key: Optional[str | Callable[[], str]] = None,
+                    explicit_base_url: Optional[str] = None) -> tuple[Optional[Any], Optional[str]]:
+     try:
+         from agent.anthropic_adapter import build_anthropic_client
+-        from agent.anthropic_credentials import resolve_anthropic_token
++        from agent.anthropic_credentials import (
++            anthropic_env_base_url, effective_anthropic_base_url, resolve_anthropic_token,
++        )
+     except ImportError:
+         return None, None
+     pool_present, entry = _select_pool_entry("anthropic")
+@@ -3062,7 +3064,9 @@ def _try_anthropic(explicit_api_key: Optional[str | Callable[[], str]] = None,
+         return None, None
+     # Honor config.yaml model.base_url only when provider is anthropic AND the URL is
+     # Anthropic-compatible; a foreign host (Codex, OpenRouter) would 401 every aux call.
+-    base_url = _pool_runtime_base_url(entry, _ANTHROPIC_DEFAULT_BASE_URL) if pool_present else _ANTHROPIC_DEFAULT_BASE_URL
++    # The stock https://api.anthropic.com yields to ANTHROPIC_BASE_URL, as on the main runtime.
++    base_url = (_pool_runtime_base_url(entry, _ANTHROPIC_DEFAULT_BASE_URL) if entry is not None
++                else anthropic_env_base_url() or _ANTHROPIC_DEFAULT_BASE_URL)
+     with contextlib.suppress(Exception):
+         from hermes_cli.config import load_config_readonly
+         cfg = load_config_readonly()
+@@ -3072,7 +3076,7 @@ def _try_anthropic(explicit_api_key: Optional[str | Callable[[], str]] = None,
+             if cfg_provider == "anthropic":
+                 cfg_base_url = (model_cfg.get("base_url") or "").strip().rstrip("/")
+                 if cfg_base_url and _is_anthropic_compatible_host(cfg_base_url):
+-                    base_url = cfg_base_url
++                    base_url = effective_anthropic_base_url(cfg_base_url)
+     # A caller-supplied endpoint (fallback_providers entry, custom_providers entry) wins over
+     # both the pool row and config.yaml, under the same Anthropic-compatible host rule the
+     # primary path applies. A foreign host is REFUSED outright rather than silently demoted to
+diff --git a/hermes_cli/doctor_connectivity.py b/hermes_cli/doctor_connectivity.py
+index 43382d00d7..55e040e409 100644
+--- a/hermes_cli/doctor_connectivity.py
++++ b/hermes_cli/doctor_connectivity.py
+@@ -158,11 +158,12 @@ def _probe_anthropic() -> ProbeResult:
+     try:
+         import httpx
+         from agent.anthropic_adapter import _COMMON_BETAS, _OAUTH_ONLY_BETAS, _CONTEXT_1M_BETA
+-        from agent.anthropic_credentials import _is_oauth_token
++        from agent.anthropic_credentials import _is_oauth_token, anthropic_env_base_url
+         is_oauth = _is_oauth_token(key)
+         headers = {"anthropic-version": "2023-06-01", **({"Authorization": f"Bearer {key}", "anthropic-beta": ",".join(_COMMON_BETAS + _OAUTH_ONLY_BETAS)}
+                                                          if is_oauth else {"x-api-key": key})}
+-        url = "https://api.anthropic.com/v1/models"
++        base = anthropic_env_base_url() or "https://api.anthropic.com"
++        url = base + ("/models" if base.endswith("/v1") else "/v1/models")
+         r = httpx.get(url, headers=headers, timeout=10)
+         # OAuth subscriptions without 1M context reject with 400 "long context beta is not yet available";
+         # retry once with that beta stripped so doctor doesn't falsely report Anthropic as unreachable.
+diff --git a/hermes_cli/models.py b/hermes_cli/models.py
+index 6b194375ba..11120e2a92 100644
+--- a/hermes_cli/models.py
++++ b/hermes_cli/models.py
+@@ -1524,7 +1524,8 @@ def _anthropic_catalog(normalized: str, force_refresh: bool) -> list[str]:
+     if normalize_provider(str(model_cfg.get("provider", "") or "")) == "anthropic":
+         cfg_base_url = str(model_cfg.get("base_url", "") or "").strip()
+         cfg_api_key = str(model_cfg.get("api_key", "") or "").strip()
+-    live = _fetch_anthropic_models(base_url=cfg_base_url or None, api_key=cfg_api_key or None)
++    from agent.anthropic_credentials import effective_anthropic_base_url
++    live = _fetch_anthropic_models(base_url=effective_anthropic_base_url(cfg_base_url) or None, api_key=cfg_api_key or None)
+     curated = list(_PROVIDER_MODELS.get("anthropic", []))
+     if not live:
+         # A placeholder for the outage, not this account/proxy's catalog: the disk cache must
+diff --git a/hermes_cli/runtime_provider.py b/hermes_cli/runtime_provider.py
+index 6ca7ec061c..fc804fe748 100644
+--- a/hermes_cli/runtime_provider.py
++++ b/hermes_cli/runtime_provider.py
+@@ -22,6 +22,7 @@ from agent.credential_pool import (  # custom_provider_pool_key_candidates is re
+     CredentialPool, PooledCredential, credential_pool_matches_provider, custom_provider_pool_key_candidates,
+     load_pool,
+ )
++from agent.anthropic_credentials import anthropic_env_base_url, effective_anthropic_base_url
+ from agent.secret_scope import get_secret_str
+ from hermes_cli.auth import (  # resolve_external_process_provider_credentials is read via origin by runtime_provider_backends
+     ACTUAL_LOCAL_NOAUTH_PLACEHOLDER, AuthError, DEFAULT_CODEX_BASE_URL, DEFAULT_QWEN_BASE_URL, DEFAULT_XAI_OAUTH_BASE_URL,
+@@ -394,9 +395,12 @@ def _anthropic_base_url_override_ok(base_url: str) -> bool:
+ 
+ 
+ def _anthropic_cfg_base_url(model_cfg: dict[str, Any]) -> str:
+-    """Config base_url for native Anthropic, or "" when absent/untrustworthy."""
++    """Config base_url for native Anthropic, or "" when absent/untrustworthy. The stock
++    ``https://api.anthropic.com`` (what the model picker persists) yields to ``ANTHROPIC_BASE_URL``,
++    so a gateway the env points the Anthropic credentials at is not bypassed; any other
++    configured endpoint still wins over the env."""
+     cfg_base_url = _config_base_url_for_provider(model_cfg, "anthropic")
+-    return cfg_base_url if _anthropic_base_url_override_ok(cfg_base_url) else ""
++    return effective_anthropic_base_url(cfg_base_url) if _anthropic_base_url_override_ok(cfg_base_url) else ""
+ 
+ 
+ def _anthropic_token_or_raise(*, model: str | None = None) -> str:
+@@ -717,7 +721,7 @@ def _resolve_from_pool(provider: str, requested_provider: str, model_cfg: dict[s
+ 
+ 
+ def _explicit_anthropic(requested_provider, model_cfg, api_key, base_url, target_model):
+-    base_url = base_url or _anthropic_cfg_base_url(model_cfg) or _ANTHROPIC_DEFAULT_BASE_URL
++    base_url = base_url or _anthropic_cfg_base_url(model_cfg) or anthropic_env_base_url() or _ANTHROPIC_DEFAULT_BASE_URL
+     api_key = api_key or _anthropic_token_or_raise(model=target_model)
+     return _runtime("anthropic", "anthropic_messages", base_url, api_key, source="explicit", requested_provider=requested_provider)
+ 
+@@ -874,8 +878,9 @@ def _azure_anthropic_env_key(model_cfg: dict[str, Any]) -> str:
+ 
+ def _anthropic_env_runtime(requested_provider: str, model_cfg: dict[str, Any], target_model: str | None = None) -> dict[str, Any]:
+     """Native Anthropic (Messages API) from env/auth store; ``model.base_url`` honoured only when
+-    the configured provider is anthropic (else a Codex endpoint would leak into Anthropic requests)."""
+-    base_url = _anthropic_cfg_base_url(model_cfg) or _ANTHROPIC_DEFAULT_BASE_URL
++    the configured provider is anthropic (else a Codex endpoint would leak into Anthropic requests),
++    then ``ANTHROPIC_BASE_URL``, then the Anthropic default."""
++    base_url = _anthropic_cfg_base_url(model_cfg) or anthropic_env_base_url() or _ANTHROPIC_DEFAULT_BASE_URL
+     # Microsoft Foundry endpoints reject Claude Code OAuth tokens, which resolve_anthropic_token()
+     # would return first — use the env key directly.
+     if base_url_host_matches(base_url, "azure.com"):
+diff --git a/tests/agent/test_anthropic_env_base_url_call_sites.py b/tests/agent/test_anthropic_env_base_url_call_sites.py
+new file mode 100644
+index 0000000000..9259fc5d7c
+--- /dev/null
++++ b/tests/agent/test_anthropic_env_base_url_call_sites.py
+@@ -0,0 +1,124 @@
++"""Anthropic side call sites must not send an ANTHROPIC_BASE_URL-routed token to api.anthropic.com.
++
++Companion to tests/hermes_cli/test_runtime_provider_anthropic_env_base_url.py: the auxiliary
++client, the model-picker catalog, ``hermes doctor`` and the OAuth usage read follow the same
++rule as the main runtime — the stock ``model.base_url: https://api.anthropic.com`` yields to
++ANTHROPIC_BASE_URL, a deliberately configured proxy wins over it.
++"""
++from types import SimpleNamespace
++from unittest.mock import MagicMock, patch
++
++import pytest
++
++import hermes_yaml as yaml
++
++GATEWAY = "https://teamclaude.example.org"
++PROXY = "https://proxy.example.org/anthropic"
++TOKEN = "sk-ant-oat01-gateway-client-key"
++
++
++@pytest.fixture
++def gateway_env(monkeypatch):
++    monkeypatch.setenv("ANTHROPIC_TOKEN", TOKEN)
++    monkeypatch.setenv("ANTHROPIC_BASE_URL", GATEWAY)
++
++
++def _aux_base_url(tmp_path, monkeypatch, cfg_base_url, *, pool_entry=None):
++    from agent.auxiliary_client import _try_anthropic
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    (tmp_path / "config.yaml").write_text(yaml.safe_dump({"model": {
++        "provider": "anthropic", "model": "claude-haiku-4-5-20251001", "base_url": cfg_base_url}}))
++    pool = (True, pool_entry) if pool_entry is not None else (False, None)
++    with (
++        patch("agent.auxiliary_client._select_pool_entry", return_value=pool),
++        patch("agent.auxiliary_client._pool_runtime_api_key", return_value=TOKEN),
++        patch("agent.anthropic_credentials.resolve_anthropic_token", return_value=TOKEN),
++        patch("agent.anthropic_adapter.build_anthropic_client", return_value=MagicMock()) as build,
++    ):
++        client, _model = _try_anthropic()
++    assert client is not None
++    return build.call_args.args[1]
++
++
++class TestAuxiliaryClient:
++    def test_stock_config_yields_to_env_gateway_without_pool(self, gateway_env, tmp_path, monkeypatch):
++        assert _aux_base_url(tmp_path, monkeypatch, "https://api.anthropic.com") == GATEWAY
++
++    def test_stock_config_yields_to_env_gateway_with_pool_entry(self, gateway_env, tmp_path, monkeypatch):
++        entry = SimpleNamespace(provider="anthropic", runtime_base_url=GATEWAY)
++        assert _aux_base_url(tmp_path, monkeypatch, "https://api.anthropic.com/v1", pool_entry=entry) == GATEWAY
++
++    def test_custom_proxy_wins_over_env(self, gateway_env, tmp_path, monkeypatch):
++        assert _aux_base_url(tmp_path, monkeypatch, PROXY) == PROXY
++
++    def test_without_env_stock_default_is_unchanged(self, tmp_path, monkeypatch):
++        monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
++        assert _aux_base_url(tmp_path, monkeypatch, "https://api.anthropic.com") == "https://api.anthropic.com"
++
++
++def _catalog_base_url(monkeypatch, model_cfg):
++    from hermes_cli import models as M
++    monkeypatch.setattr(M, "_get_model_config_dict", lambda: model_cfg)
++    with patch.object(M, "_fetch_anthropic_models", return_value=["claude-x"]) as fetch:
++        M._anthropic_catalog("anthropic", True)
++    return fetch.call_args.kwargs["base_url"]
++
++
++class TestModelCatalog:
++    def test_stock_config_yields_to_env_gateway(self, gateway_env, monkeypatch):
++        assert _catalog_base_url(monkeypatch, {"provider": "anthropic", "base_url": "https://api.anthropic.com"}) == GATEWAY
++
++    def test_unconfigured_uses_env_gateway(self, gateway_env, monkeypatch):
++        assert _catalog_base_url(monkeypatch, {}) == GATEWAY
++
++    def test_custom_proxy_wins_over_env(self, gateway_env, monkeypatch):
++        assert _catalog_base_url(monkeypatch, {"provider": "anthropic", "base_url": PROXY}) == PROXY
++
++    def test_without_env_unchanged(self, monkeypatch):
++        monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
++        assert _catalog_base_url(monkeypatch, {}) is None
++
++
++def _doctor_url(monkeypatch):
++    import httpx
++    from hermes_cli import doctor_connectivity
++    seen = []
++    monkeypatch.setattr("hermes_cli.auth.get_anthropic_key", lambda: TOKEN)
++    monkeypatch.setattr(httpx, "get", lambda url, **_kw: seen.append(url) or SimpleNamespace(status_code=200, text=""))
++    doctor_connectivity._probe_anthropic()
++    return seen[0]
++
++
++def test_doctor_probes_env_gateway(gateway_env, monkeypatch):
++    assert _doctor_url(monkeypatch) == GATEWAY + "/v1/models"
++
++
++def test_doctor_probes_anthropic_without_env(monkeypatch):
++    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
++    assert _doctor_url(monkeypatch) == "https://api.anthropic.com/v1/models"
++
++
++class TestOAuthUsage:
++    @staticmethod
++    def _fetch(monkeypatch, **kwargs):
++        from agent import account_usage
++        calls = []
++        monkeypatch.setattr(account_usage, "resolve_anthropic_token", lambda: TOKEN)
++        monkeypatch.setattr(account_usage, "_get_json", lambda url, *a, **k: calls.append(url) or {})
++        snapshot = account_usage._fetch_anthropic_account_usage(**kwargs)
++        return snapshot, calls
++
++    def test_env_gateway_token_never_reaches_anthropic_usage_endpoint(self, gateway_env, monkeypatch):
++        snapshot, calls = self._fetch(monkeypatch)
++        assert calls == []
++        assert "custom Anthropic endpoint" in snapshot.unavailable_reason
++
++    def test_gateway_runtime_base_url_skips_usage_endpoint(self, monkeypatch):
++        monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
++        snapshot, calls = self._fetch(monkeypatch, base_url=GATEWAY, api_key=TOKEN)
++        assert calls == [] and snapshot.unavailable_reason
++
++    def test_direct_login_still_reads_usage(self, monkeypatch):
++        monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
++        _snapshot, calls = self._fetch(monkeypatch)
++        assert calls == ["https://api.anthropic.com/api/oauth/usage"]
+diff --git a/tests/hermes_cli/test_runtime_provider_anthropic_env_base_url.py b/tests/hermes_cli/test_runtime_provider_anthropic_env_base_url.py
+new file mode 100644
+index 0000000000..31ef011f9a
+--- /dev/null
++++ b/tests/hermes_cli/test_runtime_provider_anthropic_env_base_url.py
+@@ -0,0 +1,103 @@
++"""ANTHROPIC_BASE_URL vs the stock ``model.base_url: https://api.anthropic.com``.
++
++The model picker persists ``model.base_url = https://api.anthropic.com`` when anthropic is chosen.
++A profile whose environment points its Anthropic credential at a gateway (ANTHROPIC_TOKEN +
++ANTHROPIC_BASE_URL) must keep using the gateway: the stock default yields to the env on every
++native Anthropic runtime path (credential pool, env runtime, explicit --api-key). A deliberately
++configured non-default endpoint (another proxy) still wins over the env, and without the env
++the stock default is unchanged.
++"""
++import pytest
++
++from hermes_cli import runtime_provider as rp
++
++GATEWAY = "https://teamclaude.example.org"
++PROXY = "https://proxy.example.org/anthropic"
++TOKEN = "sk-ant-oat01-gateway-client-key"
++
++
++def _cfg(base_url=None):
++    cfg = {"provider": "anthropic", "default": "claude-sonnet-4-6"}
++    if base_url is not None:
++        cfg["base_url"] = base_url
++    return cfg
++
++
++@pytest.fixture
++def anthropic_profile(monkeypatch):
++    """provider=anthropic with ANTHROPIC_TOKEN in the env; returns a setter for config/env URL."""
++    monkeypatch.setenv("ANTHROPIC_TOKEN", TOKEN)
++    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
++    monkeypatch.setattr(rp, "resolve_provider", lambda *a, **k: "anthropic")
++
++    def configure(*, cfg_base_url=None, env_base_url=None):
++        monkeypatch.setattr(rp, "_get_model_config", lambda: _cfg(cfg_base_url))
++        if env_base_url is not None:
++            monkeypatch.setenv("ANTHROPIC_BASE_URL", env_base_url)
++
++    return configure
++
++
++@pytest.mark.parametrize("url", [
++    "https://api.anthropic.com", "https://api.anthropic.com/", "https://api.anthropic.com/v1",
++    "https://api.anthropic.com/v1/", "HTTPS://API.ANTHROPIC.COM", "https://api.anthropic.com:443",
++])
++def test_stock_anthropic_base_url_variants(url):
++    from agent.anthropic_credentials import is_stock_anthropic_base_url
++    assert is_stock_anthropic_base_url(url)
++
++
++@pytest.mark.parametrize("url", [
++    "", "http://api.anthropic.com", "https://api.anthropic.com/anthropic", "https://api.anthropic.com:8443",
++    "https://api.anthropic.com.attacker.test", "https://proxy.test/api.anthropic.com/v1", PROXY,
++])
++def test_non_stock_anthropic_base_urls(url):
++    from agent.anthropic_credentials import is_stock_anthropic_base_url
++    assert not is_stock_anthropic_base_url(url)
++
++
++def test_effective_base_url_without_env_is_unchanged(monkeypatch):
++    from agent.anthropic_credentials import effective_anthropic_base_url
++    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
++    assert effective_anthropic_base_url("https://api.anthropic.com/") == "https://api.anthropic.com"
++    assert effective_anthropic_base_url("") == ""
++
++
++@pytest.mark.parametrize("path", ["env", "explicit", "pool"])
++class TestAnthropicRuntimeHonoursEnvBaseUrl:
++    """Each native Anthropic runtime rung: env runtime (no pool), explicit --api-key, credential pool."""
++
++    @staticmethod
++    def _resolve(path, monkeypatch):
++        if path == "env":
++            monkeypatch.setattr(rp, "load_pool", lambda provider: None)
++            runtime = rp.resolve_runtime_provider(requested="anthropic")
++            assert runtime["source"] == "env"
++        elif path == "explicit":
++            runtime = rp.resolve_runtime_provider(requested="anthropic", explicit_api_key=TOKEN)
++            assert runtime["source"] == "explicit"
++        else:
++            runtime = rp.resolve_runtime_provider(requested="anthropic")
++            assert runtime["source"] == "env:ANTHROPIC_TOKEN"
++        assert runtime["provider"] == "anthropic"
++        assert runtime["api_mode"] == "anthropic_messages"
++        assert runtime["api_key"] == TOKEN
++        return runtime
++
++    @pytest.mark.parametrize("cfg_base_url", ["https://api.anthropic.com", "https://api.anthropic.com/v1/"])
++    def test_stock_config_base_url_yields_to_env_gateway(self, path, cfg_base_url, anthropic_profile, monkeypatch):
++        anthropic_profile(cfg_base_url=cfg_base_url, env_base_url=GATEWAY + "/")
++        assert self._resolve(path, monkeypatch)["base_url"] == GATEWAY
++
++    def test_no_config_base_url_uses_env_gateway(self, path, anthropic_profile, monkeypatch):
++        anthropic_profile(env_base_url=GATEWAY)
++        assert self._resolve(path, monkeypatch)["base_url"] == GATEWAY
++
++    def test_custom_config_proxy_wins_over_env(self, path, anthropic_profile, monkeypatch):
++        anthropic_profile(cfg_base_url=PROXY, env_base_url=GATEWAY)
++        assert self._resolve(path, monkeypatch)["base_url"] == PROXY
++
++    @pytest.mark.parametrize("cfg_base_url", [None, "https://api.anthropic.com"])
++    def test_without_env_stock_default_is_unchanged(self, path, cfg_base_url, anthropic_profile, monkeypatch):
++        anthropic_profile(cfg_base_url=cfg_base_url)
++        assert self._resolve(path, monkeypatch)["base_url"] == "https://api.anthropic.com"

@@ -14,12 +14,15 @@
 #
 # Both must come from the environment: hermes seeds an `env:ANTHROPIC_TOKEN`
 # credential-pool entry whose base_url is ANTHROPIC_BASE_URL
-# (hermes_cli/auth.py); a base_url in config.yaml's `model` alone still sends
-# the token to api.anthropic.com. env:ANTHROPIC_TOKEN ranks first among the
-# seeded anthropic sources (agent/credential_pool.py, _ANTHROPIC_SOURCE_RANK),
-# but a `manual:*` entry (an interactive `hermes auth` login) ranks above
-# every seeded one, so an agent switched over must not keep such an entry in
-# its auth.json.
+# (hermes_cli/auth.py). A config.yaml `model.base_url` of
+# https://api.anthropic.com (what hermes' model picker writes) yields to
+# ANTHROPIC_BASE_URL in every profile (core's
+# hermes-anthropic-env-base-url patch); any other anthropic base_url there
+# is taken as a deliberate proxy and wins over the gateway.
+# env:ANTHROPIC_TOKEN ranks first among the seeded anthropic sources
+# (agent/credential_pool.py, _ANTHROPIC_SOURCE_RANK), but a `manual:*`
+# entry (an interactive `hermes auth` login) ranks above every seeded one,
+# so an agent switched over must not keep such an entry in its auth.json.
 #
 # A gateway pooling Claude subscriptions needs the key to carry the
 # `sk-ant-oat01-` prefix (the clan generator mints it so): hermes, with

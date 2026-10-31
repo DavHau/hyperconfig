@@ -129,3 +129,7 @@ evaluation-only `client-features` and `clan-eval`.
   captcha solving and the password vault with the Camofox browser backend.
 - `hermes-hosted-ocr-url`: scanned-PDF OCR against a self-hosted endpoint
   (`browser.ocr.baseUrl`) instead of Firecrawl.
+- `hermes-anthropic-env-base-url`: a config.yaml `model.base_url` of
+  `https://api.anthropic.com` (what the model picker writes) yields to
+  `ANTHROPIC_BASE_URL`, so a TeamClaude agent's profiles keep using the
+  gateway; another configured endpoint still wins.
