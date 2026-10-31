@@ -13,7 +13,9 @@
 # extensions), so this wrapper only adds what afk does NOT ship:
 #
 # - the models.yml with the p0 provider and the TeamClaude anthropic
-#   override (omp-common.nix),
+#   override (omp-common.nix); `OMP_TEAMCLAUDE=0 afk` starts with omp's
+#   builtin anthropic provider instead (api.anthropic.com, own Claude
+#   logins), see the preHook,
 # - the host-specific always-apply rule (repo layout) and the top-level
 #   AGENTS.md,
 # - the jobs-hub extension (background-jobs widget, Ctrl+J / /bashjobs),
@@ -59,7 +61,18 @@ in
         # HERDR_SOCKET_PATH, HERDR_PANE_ID). Vendored verbatim from what
         # `herdr integration install omp` writes; see herdr-omp-agent-state/.
         ln -sf ${common.herdrOmpExtension} "$config_dir/extensions/herdr-omp-agent-state.ts"
-        ${lib.optionalString common.models-needed ''ln -sf ${common.modelsFile} "$config_dir/models.yml"''}
+      ''
+      # TeamClaude or not, per start: omp reads models.yml once and reloads
+      # it only when its mtime changes. Both files are store paths (mtime 1),
+      # so relinking never makes a running session (or its subagents, which
+      # share its registry) switch; each session keeps what it started with.
+      + lib.optionalString common.models-needed ''
+        if [ "''${OMP_TEAMCLAUDE:-1}" = 0 ]; then
+          ln -sf ${common.modelsFileDirect} "$config_dir/models.yml"
+          ${lib.optionalString common.teamclaude-enabled ''echo "afk: OMP_TEAMCLAUDE=0, anthropic models go to api.anthropic.com with your own login" >&2''}
+        else
+          ln -sf ${common.modelsFile} "$config_dir/models.yml"
+        fi
       '';
     })
   ];

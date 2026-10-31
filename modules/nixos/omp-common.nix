@@ -96,14 +96,17 @@
     "    baseUrl: https://teamclaude.davhau.com"
     "    apiKey: \"!teamclaude-api-key\""
   ];
-  modelProviderBlocks =
-    lib.optional llama-swap-enabled llamaSwapProvider
-    ++ [ p0Provider ]
-    ++ lib.optional teamclaude-enabled teamclaudeProvider;
+  baseProviderBlocks = lib.optional llama-swap-enabled llamaSwapProvider ++ [ p0Provider ];
+  modelProviderBlocks = baseProviderBlocks ++ lib.optional teamclaude-enabled teamclaudeProvider;
+  renderModels = blocks: pkgs.writeText "models.yml" (lib.concatStringsSep "\n" ([ "providers:" ] ++ blocks) + "\n");
 in rec {
+  inherit teamclaude-enabled;
   models-needed = modelProviderBlocks != [ ];
-  modelsFile = pkgs.writeText "models.yml"
-    (lib.concatStringsSep "\n" ([ "providers:" ] ++ modelProviderBlocks) + "\n");
+  modelsFile = renderModels modelProviderBlocks;
+  # The same without the TeamClaude override: omp's builtin anthropic
+  # provider (api.anthropic.com, the user's own logins). afk links it for
+  # `OMP_TEAMCLAUDE=0 afk` (afk.nix).
+  modelsFileDirect = renderModels baseProviderBlocks;
   # herdr <-> omp agent-state extension, shared by afk (afk.nix) and bare omp
   # (omp-p0.nix). Verbatim copy of what `herdr integration install omp`
   # (herdr 0.9.1, HERDR_INTEGRATION_VERSION=10) writes; refresh it from
