@@ -1,6 +1,6 @@
 ---
 name: serve-ports
-description: How to publish anything you serve over HTTP (web app, preview, file server, API, dev server, notebook, report) so a person can open it at @SCHEME@://<port>.<your account>.@DOMAIN@@LISTEN_PORT@/. Every account owns 5 private ports (only its owner, after login) and 5 public ports (anyone with the link). Use it every time you start a listening server that someone else should open.
+description: How to publish anything you serve over HTTP (web app, preview, file server, API, dev server, notebook, report) so a person can open it at @SCHEME@://<port>.<your account>.@DOMAIN@@LISTEN_PORT@/. Every account owns 50 private ports (only its owner, after login) and 50 public ports (anyone with the link). Use it every time you start a listening server that someone else should open.
 ---
 
 # Publishing pages at @SCHEME@://<port>.<account>.@DOMAIN@@LISTEN_PORT@/
@@ -16,7 +16,7 @@ open the page:
 - **public port**: anyone with the link can open it, no login. Use it only
   when your owner asks you to share something publicly.
 
-Your account name is `id -un`. Your ports:
+Your account name is `id -un`. Your ports (ranges, both ends included):
 
 | account | private ports | public ports |
 | --- | --- | --- |

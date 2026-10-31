@@ -256,6 +256,9 @@ in
   };
   services.hyperhermes.dashboards.enable = true;
   services.hyperhermes.publish.enable = true;
+  # Reload, not restart, on a config change: a restart drops every open
+  # dashboard Chat websocket and serve-port connection mid-session.
+  services.nginx.enableReload = true;
 
   # ssh.nix sets ControlPath ~/.ssh/control/%C fleet-wide; without the
   # directory every ssh fails. hermes runs with HOME = the account home, so

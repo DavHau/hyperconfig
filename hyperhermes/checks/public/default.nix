@@ -36,9 +36,9 @@ let
   legacyDomain = "old.example.test";
   issuer = "https://id.${frontDoor}";
   secrets = "/var/lib/public-secrets";
-  # alice is uid 1001: published ports 30010-30014 private, 30015- public.
-  alicePrivate = 30010;
-  alicePublic = 30015;
+  # alice is uid 1001: published ports 33100-33149 private, 33150- public.
+  alicePrivate = 33100;
+  alicePublic = 33150;
   portHost = p: "${toString p}.alice.${domain}";
   echoService = p: {
     wantedBy = [ "multi-user.target" ];

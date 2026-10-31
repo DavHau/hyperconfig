@@ -32,11 +32,11 @@ let
     ps.bcrypt
     ps.requests
   ]);
-  # uid 1001: 30010-30014 private, 30015-30019 public; uid 1002: 30020-.
-  alicePrivate = 30010;
-  alicePrivate2 = 30011;
-  alicePublic = 30015;
-  bobPrivate = 30020;
+  # uid 1001: 33100-33149 private, 33150-33199 public; uid 1002: 33200-.
+  alicePrivate = 33100;
+  alicePrivate2 = 33101;
+  alicePublic = 33150;
+  bobPrivate = 33200;
   urlOf = p: agent: "http://${toString p}.${agent}.${domain}:${toString port}";
   echoPorts = [
     alicePrivate
@@ -291,8 +291,8 @@ pkgs.testers.runNixOSTest (
           skill = machine.succeed(" ".join(["cat"] + [f"$(ls {d}/serve-ports/SKILL.md 2>/dev/null)" for d in skill_dirs]))
           print(skill)
           assert "http://<port>.<account>.${domain}:${toString port}/" in skill, skill
-          assert "| alice | 30010, 30011, 30012, 30013, 30014 | 30015, 30016, 30017, 30018, 30019 |" in skill, skill
-          assert "| bob | 30020, 30021, 30022, 30023, 30024 | 30025, 30026, 30027, 30028, 30029 |" in skill, skill
+          assert "| alice | 33100-33149 | 33150-33199 |" in skill, skill
+          assert "| bob | 33200-33249 | 33250-33299 |" in skill, skill
           assert "https" not in skill and "TLS" not in skill, skill
           assert certs == [] and dns_records == [], (certs, dns_records)
     '';

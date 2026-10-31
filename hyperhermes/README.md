@@ -17,7 +17,7 @@ store path.
 | `exposure` | nginx routing by host name below `domain`; `mode = "local"` (HTTP on `127.0.0.1:8473`, `hermes.localhost`) or `"public"` (HTTPS, ACME DNS-01, `dnsRecords`) |
 | `sso` | OIDC sign-in: the issuer, client secrets, which account owns which agent; local mode runs dex with password users |
 | `dashboards` | each agent's hermes dashboard at `<agent>.<domain>`, group-checked, plus an optional front door |
-| `publish` | ten ports per agent at `<port>.<agent>.<domain>`, private ones behind their own login |
+| `publish` | 100 ports per agent at `<port>.<agent>.<domain>`, 50 private ones behind their own login and 50 public; moves the ephemeral port range to 49152-65535 |
 | `slots` | a NixOS container per agent (`agents.<name>.slot`), reachable at `slot.<agent>.<domain>` |
 | `container-slots` | the generic container-slot machinery `slots` builds on (`services.container-slots`) |
 | `browser` | Camofox browser, web extract, SearXNG, captcha and OCR clients |
@@ -55,7 +55,7 @@ names) and the Python venv helpers.
 - password of the account `alice` (generated at the container's first boot):
   `sudo nixos-container run hyperhermes -- cat /var/lib/hyperhermes-local/dex/alice.password`
 - dashboard: <http://alice.hermes.localhost:8473>, sign in as `alice@hermes.localhost`
-- a port the agent serves on `127.0.0.1:30010`: <http://30010.alice.hermes.localhost:8473>
+- a port the agent serves on `127.0.0.1:33100`: <http://33100.alice.hermes.localhost:8473>
 - the slot's port 80: <http://slot.alice.hermes.localhost:8473>; the agent drives
   its slot with the `slot` command (skill `container-slot`)
 

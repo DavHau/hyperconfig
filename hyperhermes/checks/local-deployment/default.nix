@@ -10,7 +10,7 @@
 # - alice signs in to her dashboard at dex (browser and app sign-in) and
 #   ends on authenticated dashboard API calls,
 # - an app alice publishes on her first private port answers at
-#   http://30010.alice.hermes.localhost:8473/ after her sign-in there,
+#   http://33100.alice.hermes.localhost:8473/ after her sign-in there,
 # - a peer on the host's LAN routing to the container's address reaches
 #   it (ping), but not its web front.
 # On `machine`:
@@ -27,7 +27,7 @@ let
   domain = "hermes.localhost";
   port = 8473;
   name = "hyperhermes";
-  alicePrivate = 30010;
+  alicePrivate = 33100;
   slot4 = "10.43.1.2";
   python = pkgs.python3.withPackages (ps: [ ps.requests ]);
   localAddress = "10.233.73.2";

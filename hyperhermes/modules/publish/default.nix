@@ -7,13 +7,15 @@
 # Suffix List entry for the domain would make every agent a site of its own
 # without further changes.
 #
-# Ports: each agent owns 10 loopback ports, servePortBase + (uid - 1000) *
-# 10 .. +9, disjoint per uid and below the kernel's ephemeral range. The
-# first five are PRIVATE: a login per host, and only the agent's own
-# account (sso.accounts.<agent>) gets through. The last five are PUBLIC: no
-# login. The agent picks the mode by picking the port; the URL cannot
-# upgrade a private port to public, and a port under another agent's name
-# is no server at all (exposure's catch-all answers 404).
+# Ports: each agent owns 2 * portsPerKind (100) loopback ports,
+# servePortBase + (uid - 1000) * 100 .. +99, disjoint per uid and below
+# the ephemeral range, which this module moves to 49152-65535 (the window
+# reaches past the kernel's default 32768). The first 50 are PRIVATE: a
+# login per host, and only the agent's own account (sso.accounts.<agent>)
+# gets through. The last 50 are PUBLIC: no login. The agent picks the mode
+# by picking the port; the URL cannot upgrade a private port to public,
+# and a port under another agent's name is no server at all (exposure's
+# catch-all answers 404).
 #
 # Private ports, per host:
 #   - their own oauth2-proxy (`oauth2-proxy-serve`, its own cookie secret
@@ -145,17 +147,18 @@ let
   # serves these names on.
   forwardedHost = "$host${hostPort}";
 
-  servePortBase = 30000;
+  servePortBase = 33000;
+  portsPerKind = 50;
   portsOf =
     name:
     let
-      from = servePortBase + (agents.${name}.uid - 1000) * 10;
+      from = servePortBase + (agents.${name}.uid - 1000) * 2 * portsPerKind;
     in
     {
       inherit from;
-      private = lib.genList (i: from + i) 5;
-      public = lib.genList (i: from + 5 + i) 5;
-      to = from + 9;
+      private = lib.genList (i: from + i) portsPerKind;
+      public = lib.genList (i: from + portsPerKind + i) portsPerKind;
+      to = from + 2 * portsPerKind - 1;
     };
   accountOf = name: sso.accounts.${name};
   hostOf = name: port: "${toString port}.${name}.${domain}";
@@ -264,7 +267,7 @@ let
     }
     // exposure.virtualHost (certOf name);
 
-  portList = ps: lib.concatMapStringsSep ", " toString ps;
+  portList = ps: "${toString (lib.head ps)}-${toString (lib.last ps)}";
   skill = import ../../lib/agent-skill.nix pkgs {
     name = "serve-ports";
     src = pkgs.writeTextDir "SKILL.md" (
@@ -295,7 +298,7 @@ let
 in
 {
   options.services.hyperhermes.publish = {
-    enable = lib.mkEnableOption "10 published loopback ports per agent at <port>.<agent>.<domain>, 5 behind the owner's login, 5 public";
+    enable = lib.mkEnableOption "${toString (2 * portsPerKind)} published loopback ports per agent at <port>.<agent>.<domain>, ${toString portsPerKind} behind the owner's login, ${toString portsPerKind} public";
 
     cookieSecretFile = lib.mkOption {
       type = lib.types.str;
@@ -317,7 +320,7 @@ in
             # The bridge would accept a self-connect inside the ephemeral
             # range (lib/core.nix, ephemeralPortLow).
             assertion = a.uid >= 1000 && (portsOf name).to < ephemeralPortLow config.boot.kernel.sysctl;
-            message = "services.hyperhermes.agents.${name}: its serve ports (${toString servePortBase} + (uid - 1000) * 10 .. +9) must stay below the ephemeral port range (${toString (ephemeralPortLow config.boot.kernel.sysctl)}+); uid must be 1000 or above and low enough.";
+            message = "services.hyperhermes.agents.${name}: its serve ports (${toString servePortBase} + (uid - 1000) * ${toString (2 * portsPerKind)} .. +${toString (2 * portsPerKind - 1)}) must stay below the ephemeral port range (${toString (ephemeralPortLow config.boot.kernel.sysctl)}+); uid must be 1000 or above and low enough.";
           }) agents
           ++ [
             {
@@ -338,6 +341,13 @@ in
               message = "services.hyperhermes.publish.legacyFrontDoorPorts needs exposure.mode = public and sso.frontDoor.host.";
             }
           ];
+
+        # The serve-port window (servePortBase + (uid - 1000) * 100) runs
+        # past the kernel's default ephemeral start 32768 from uid 1000 on
+        # (uid 1114 ends at 44499). Move the ephemeral range to IANA's
+        # dynamic ports, which leaves uids up to 1160; the assertion above
+        # still guards a host that overrides the range.
+        boot.kernel.sysctl."net.ipv4.ip_local_port_range" = lib.mkDefault "49152 65535";
 
         services.hyperhermes.skillDirs = [ "${skill}/share/skills" ];
 
@@ -364,7 +374,7 @@ in
 
         # The sockets nginx dials, held by systemd for the whole uptime, and
         # per connection a bridge as the port's owner (the header). The
-        # bridge dials base + 10 * its euid: this port, for the owner's uid.
+        # bridge dials base + its euid: this port, for the owner's uid.
         # No trigger limit, a raised poll limit and a deliberate
         # MaxConnections, as the dashboards' (core's forwards say why): a
         # public port takes a request flood from anyone, and nginx opens one
@@ -632,8 +642,8 @@ in
                 serviceConfig = {
                   User = name;
                   ExecStart = "${tcpOwnerBridgeBin}/bin/hermes-tcp-owner-bridge ${
-                    toString (port - 10 * agents.${name}.uid)
-                  } 10";
+                    toString (port - agents.${name}.uid)
+                  }";
                   StandardInput = "socket";
                   StandardError = "journal";
                 };

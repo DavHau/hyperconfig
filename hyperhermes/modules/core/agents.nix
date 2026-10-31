@@ -277,6 +277,11 @@ let
             "${venv.unitName}.service"
           ];
           unitConfig.RequiresMountsFor = mounts;
+          # A switch must not cut running sessions and their subagents
+          # short: a changed unit keeps the old process, and the new one
+          # takes over on the next drain (`hermes gateway restart`) or
+          # crash.
+          restartIfChanged = false;
           environment = unitEnv;
           path = rt.path;
           preStart = agentPreStart;
@@ -319,6 +324,9 @@ let
             "hermes-agent-${user}.service"
           ];
           unitConfig.RequiresMountsFor = mounts;
+          # Its Chat tab runs hermes sessions in this unit's cgroup: no
+          # restart on switch either (the gateway's reason).
+          restartIfChanged = false;
           environment = unitEnv;
           path = rt.path;
           # The agent may have written keys the dashboard must not see
