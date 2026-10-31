@@ -313,5 +313,9 @@ in
   services.hyperhermes.settings = {
     group_sessions_per_user = false;
     gateway.platforms.telegram.extra.group_sessions_per_user = false;
+    # delegate_task runs at most this many subagents at once (hermes
+    # tools/delegate_tool_config.py, default 10); background delegations
+    # share the same cap.
+    delegation.max_concurrent_children = 20;
   };
 }
