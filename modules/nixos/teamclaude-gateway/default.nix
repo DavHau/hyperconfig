@@ -35,6 +35,10 @@
 # Add an account (as root on som; open the printed URL, sign in with the
 # Claude account being contributed, paste the callback back):
 #   sudo -u teamclaude -H env TEAMCLAUDE_CONFIG=/var/lib/teamclaude/teamclaude.json teamclaude login
+# Give an account a cap of its own, below the fleet default (as root on
+# som; applies at once and survives restarts, see usageCap below):
+#   teamclaude-accounts list
+#   teamclaude-accounts cap <name> 80% | unified5h=0.8,unified7d=0.9 | default
 {
   config,
   lib,
@@ -61,7 +65,10 @@ let
   # maxUsage lives on each account entry, which is runtime state, so preStart
   # stamps it onto every account; one enrolled by `teamclaude login` gets it
   # on the next service restart (switchThreshold covers it until then).
+  # An account with a cap of its own (teamclaude-accounts cap, kept in
+  # capsFile) gets that one instead.
   usageCap = 0.98;
+  capsFile = "/var/lib/teamclaude/account-caps.json";
   # Everything but the proxy key, which is the only secret in the config. A
   # change here reaches the service on its next restart via preStart.
   settingsFile = pkgs.writeText "teamclaude-settings.json" (
@@ -86,6 +93,16 @@ let
       ${pkgs.coreutils}/bin/env TEAMCLAUDE_CONFIG=${stateFile} \
       ${pkgs.nodejs}/bin/node ${./keys.mjs} \
       ${config.services.teamclaude.package}/share/teamclaude/src "$@"
+  '';
+  teamclaudeAccounts = pkgs.writeShellScriptBin "teamclaude-accounts" ''
+    if [ "$(${pkgs.coreutils}/bin/id -u)" -ne 0 ]; then
+      echo "teamclaude-accounts: run as root" >&2
+      exit 1
+    fi
+    exec ${pkgs.util-linux}/bin/runuser -u teamclaude -- \
+      ${pkgs.coreutils}/bin/env TEAMCLAUDE_CONFIG=${stateFile} \
+      ${pkgs.nodejs}/bin/node ${./accounts.mjs} \
+      ${config.services.teamclaude.package}/share/teamclaude/src ${capsFile} ${toString usageCap} "$@"
   '';
 in
 {
@@ -195,7 +212,8 @@ in
     # generated config (a rotated key) would ever reach the service. So merge
     # on every start: the Nix settings, then the secret, win over the live
     # file, except two runtime lists. `accounts` stays as the service left it
-    # but for its maxUsage, which is set to usageCap. `proxy.clientKeys` keeps
+    # but for its maxUsage: the account's own cap from capsFile
+    # (teamclaude-accounts), else usageCap. `proxy.clientKeys` keeps
     # every runtime-minted entry and gets the secret's static entries on top,
     # replacing a live entry of the same name (a rotated static key). Runs as
     # root (PermissionsStartOnly), after the module's own copy-if-missing.
@@ -221,11 +239,13 @@ in
           sleep 0.025
         done
         tmp=$(mktemp "$live.merged.XXXXXX")
-        ${pkgs.jq}/bin/jq -s --argjson cap ${builtins.toJSON usageCap} '
+        caps='{}'
+        [ ! -s ${capsFile} ] || caps=$(cat ${capsFile})
+        ${pkgs.jq}/bin/jq -s --argjson cap ${builtins.toJSON usageCap} --argjson caps "$caps" '
           .[0] as $live
           | (.[2].proxy.clientKeys // []) as $static
           | $live * .[1] * (.[2] | del(.accounts) | del(.proxy.clientKeys))
-          | .accounts = ((.accounts // []) | map(.maxUsage = $cap))
+          | .accounts = ((.accounts // []) | map(.maxUsage = ($caps[.name] // $cap)))
           | .proxy.clientKeys = (
               [ ($live.proxy.clientKeys // [])[] | select(.name as $n | $static | all(.name != $n)) ]
               + $static)
@@ -237,7 +257,10 @@ in
       fi
     '';
 
-    environment.systemPackages = [ teamclaudeKeys ];
+    environment.systemPackages = [
+      teamclaudeKeys
+      teamclaudeAccounts
+    ];
 
     services.nginx = {
       # The key a request presents: x-api-key, else the bearer.
