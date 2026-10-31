@@ -23,6 +23,7 @@ store path.
 | `browser` | Camofox browser, web extract, SearXNG, captcha and OCR clients |
 | `mail` | receive-only, sanitized mail per agent, read through a read-only IMAP CLI (public mode only) |
 | `wallet` | one shared phoenixd Lightning wallet for agents with `wallet.enable` |
+| `rea` | REA reverse engineering for agents with `rea.enable`: its MCP server, the `rea` CLI with Ghidra and the other analysis tools, its skill |
 | `teamclaude` | an agent's Anthropic traffic through a TeamClaude gateway |
 | `claude-auth` | Claude Pro/Max OAuth for the agents (vendored hermes-claude-auth) |
 | `desktop` | the hermes-desktop app and TUI launchers on a workstation |

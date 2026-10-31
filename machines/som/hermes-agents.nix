@@ -73,6 +73,9 @@ in
     inputs.hyperhermes.nixosModules.browser
     inputs.hyperhermes.nixosModules.publish
     inputs.hyperhermes.nixosModules.wallet
+    # REA reverse engineering for every agent below: its MCP server, the
+    # `rea` CLI with Ghidra and the other analysis tools, its skill.
+    inputs.hyperhermes.nixosModules.rea
     # stefan's account (uid, vault-ro) is shared with vit.
     ../../modules/nixos/users/stefan-vault.nix
     # Agents with `teamclaude.enable` reach Claude through som's TeamClaude.
@@ -100,6 +103,7 @@ in
   services.hyperhermes.agents = lib.mkMerge [
     (lib.mapAttrs (_: a: { inherit (a) uid; }) data)
     (lib.mapAttrs (_: _: { wallet.enable = true; }) data)
+    (lib.mapAttrs (_: _: { rea.enable = true; }) data)
     {
       # Account and description from users/stefan-vault.nix.
       stefan = { };

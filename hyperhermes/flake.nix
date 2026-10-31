@@ -40,6 +40,7 @@
         sso = ./modules/sso.nix;
         browser = ./modules/browser;
         wallet = ./modules/wallet;
+        rea = ./modules/rea;
         teamclaude = ./modules/teamclaude.nix;
         claude-auth = ./modules/claude-auth;
         # Not lib.modules.importApply: its wrapper module moves these
@@ -62,6 +63,7 @@
             self.nixosModules.sso
             self.nixosModules.browser
             self.nixosModules.wallet
+            self.nixosModules.rea
             self.nixosModules.teamclaude
             self.nixosModules.claude-auth
             self.nixosModules.desktop
@@ -102,6 +104,9 @@
         camoufox-python = pkgs.python3Packages.callPackage ./pkgs/camoufox/python.nix { };
         captchakraken-python = pkgs.python3Packages.callPackage ./pkgs/captchakraken/python.nix { };
         hermes-desktop = import ./pkgs/hermes-desktop { inherit pkgs hermes-agent; };
+        # REA, the CLI and MCP server of nixosModules.rea (which calls it
+        # with the host's pkgs).
+        rea-agents = pkgs.callPackage ./pkgs/rea-agents { };
       };
 
       # For consumers that must name an agent's paths, ports or units
@@ -144,8 +149,8 @@
         mail = import ./checks/mail { inherit pkgs self; };
         slots = import ./checks/slots { inherit pkgs self; };
         slots-local = import ./checks/slots/local.nix { inherit pkgs self; };
-        # Evaluation only: teamclaude, claude-auth and desktop on a system
-        # without clan, secrets as runtime paths.
+        # Evaluation only: teamclaude, claude-auth, desktop and rea on a
+        # system without clan, secrets as runtime paths.
         client-features = import ./checks/client-features { inherit pkgs self; };
         # Evaluation only: nixosModules.clan's generator names and the
         # secret paths they fill, against a stub clan.core.vars.

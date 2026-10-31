@@ -187,6 +187,16 @@ let
         # The managed scope pins these keys and wins over this file. The
         # merge keeps them in the file the dashboard's raw editor shows.
         ${configMergeScript} ${settingsFor user ucfg} ${hermesHome}/config.yaml
+        # Named profiles (profiles/<name>/config.yaml) get the same merge:
+        # hermes overlays the managed scope on a profile's config too, but
+        # its skills loader reads the profile's file alone
+        # (agent/skill_utils.py, _load_raw_config), so without this a
+        # profile never sees skills.external_dirs. A profile hermes has
+        # not written a config.yaml for yet is left alone.
+        for profile_config in ${hermesHome}/profiles/*/config.yaml; do
+          [ -f "$profile_config" ] || continue
+          ${configMergeScript} ${settingsFor user ucfg} "$profile_config"
+        done
         # The same keys as the managed .env. Hermes loads that file after
         # this one, so the managed values win; this copy lets the
         # dashboard list them. Strip, then append, like the credential

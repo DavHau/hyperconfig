@@ -1,4 +1,4 @@
-# Evaluation-only check of teamclaude, claude-auth and desktop: each
+# Evaluation-only check of teamclaude, claude-auth, desktop and rea: each
 # module evaluates on a plain NixOS system (no clan; nixosModules.clan
 # imported anyway, where it must do nothing) with its secrets as runtime
 # path strings, and produces what its header promises. A Nix path literal
@@ -120,6 +120,15 @@ let
   desktopStoreKey = desktopWith { sshKeyFile = "${pkgs.writeText "key" ""}"; };
   desktopPathKey = desktopWith { sshKeyFile = ./default.nix; };
 
+  rea = evalWith [
+    self.nixosModules.core
+    withAgents
+    self.nixosModules.rea
+    { services.hyperhermes.agents.alice.rea.enable = true; }
+  ];
+  reaPackage = rea.config.services.hyperhermes.rea.package;
+  reaServer = (agentCfg rea "alice").settings.mcp_servers.rea;
+
   # Everything imported, nothing enabled: no agent, no launcher.
   idle = evalWith [ self.nixosModules.default ];
 
@@ -170,6 +179,24 @@ let
     desktop-key-copied = lib.hasInfix "install -m 0400 -o carol -g root ${desktopKey} /run/hermes-desktop-ssh/carol" activation;
     desktop-refuses-store-key = failedAssertions desktopStoreKey != [ ];
     desktop-refuses-path-literal = refused desktopPathKey.config.services.hyperhermes.desktop.sshKeyFile;
+
+    rea-evaluates = evaluates rea && failedAssertions rea == [ ];
+    # node on REA's entry script; every tool setting is a store path.
+    rea-mcp-server =
+      lib.hasSuffix "/bin/node" reaServer.command
+      && reaServer.args == [
+        reaPackage.entrypoint
+        "mcp"
+      ]
+      && reaServer.env.GHIDRA_INSTALL_DIR == "${pkgs.ghidra}/lib/ghidra"
+      && lib.all (lib.hasPrefix builtins.storeDir) (
+        lib.attrValues (removeAttrs reaServer.env [ "REA_ANALYSIS_PROVIDER" ])
+      );
+    rea-skill-and-cli =
+      lib.any (d: lib.hasSuffix "-agent-skill-reverse-engineer-anything/share/skills" d) (agentCfg rea "alice").skillDirs
+      && lib.any (p: p.name == "rea-${reaPackage.version}") (agentCfg rea "alice").extraPackages;
+    rea-other-agent-untouched =
+      !((agentCfg rea "bob").settings ? mcp_servers) && (agentCfg rea "bob").skillDirs == [ ];
 
     idle-evaluates = evaluates idle && failedAssertions idle == [ ];
     idle-adds-nothing =
