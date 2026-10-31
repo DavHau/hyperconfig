@@ -319,6 +319,12 @@ in
     # delegate_task runs at most this many subagents at once (hermes
     # tools/delegate_tool_config.py, default 10); background delegations
     # share the same cap.
-    delegation.max_concurrent_children = 20;
+    delegation = {
+      max_concurrent_children = 20;
+      # Each background task returns as soon as it finishes instead of one
+      # message after the whole call (tools/delegate_tool_dispatch.py); the
+      # model can still bundle tasks with a shared `group`.
+      independent_completions = true;
+    };
   };
 }
