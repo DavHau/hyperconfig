@@ -7,15 +7,16 @@
 # Suffix List entry for the domain would make every agent a site of its own
 # without further changes.
 #
-# Ports: each agent owns 2 * portsPerKind (100) loopback ports,
-# servePortBase + (uid - 1000) * 100 .. +99, disjoint per uid and below
-# the ephemeral range, which this module moves to 49152-65535 (the window
-# reaches past the kernel's default 32768). The first 50 are PRIVATE: a
-# login per host, and only the agent's own account (sso.accounts.<agent>)
-# gets through. The last 50 are PUBLIC: no login. The agent picks the mode
-# by picking the port; the URL cannot upgrade a private port to public,
-# and a port under another agent's name is no server at all (exposure's
-# catch-all answers 404).
+# Ports: each agent owns 100 loopback ports, servePortBase + (uid - 1000)
+# * 100 .. +99, disjoint per uid and below the ephemeral range, which this
+# module moves to 49152-65535 (the window reaches past the kernel's
+# default 32768). The first 50 are PRIVATE: a login per host, and only the
+# agent's own account (sso.accounts.<agent>) gets through. The last 50 are
+# PUBLIC: no login. `extraPortWindows` adds more windows of the same shape
+# (a deployment keeping an older layout's ports up). The agent picks the
+# mode by picking the port; the URL cannot upgrade a private port to
+# public, and a port under another agent's name is no server at all
+# (exposure's catch-all answers 404).
 #
 # Private ports, per host:
 #   - their own oauth2-proxy (`oauth2-proxy-serve`, its own cookie secret
@@ -149,17 +150,33 @@ let
 
   servePortBase = 33000;
   portsPerKind = 50;
-  portsOf =
-    name:
+  # One window: `portsPerKind` private ports, then as many public ones.
+  windowOf =
+    uid:
+    { base, portsPerKind }:
     let
-      from = servePortBase + (agents.${name}.uid - 1000) * 2 * portsPerKind;
+      from = base + (uid - 1000) * 2 * portsPerKind;
     in
     {
       inherit from;
+      to = from + 2 * portsPerKind - 1;
       private = lib.genList (i: from + i) portsPerKind;
       public = lib.genList (i: from + portsPerKind + i) portsPerKind;
-      to = from + 2 * portsPerKind - 1;
     };
+  portsOf =
+    name:
+    let
+      windows = map (windowOf agents.${name}.uid) (
+        [ { base = servePortBase; inherit portsPerKind; } ] ++ cfg.extraPortWindows
+      );
+    in
+    {
+      inherit windows;
+      private = lib.concatMap (w: w.private) windows;
+      public = lib.concatMap (w: w.public) windows;
+      to = lib.foldl' lib.max 0 (map (w: w.to) windows);
+    };
+  allPorts = lib.concatMap (name: (portsOf name).private ++ (portsOf name).public) names;
   accountOf = name: sso.accounts.${name};
   hostOf = name: port: "${toString port}.${name}.${domain}";
   certOf = name: "hermes-publish-${name}";
@@ -267,7 +284,8 @@ let
     }
     // exposure.virtualHost (certOf name);
 
-  portList = ps: "${toString (lib.head ps)}-${toString (lib.last ps)}";
+  portList =
+    kind: p: lib.concatMapStringsSep ", " (w: "${toString (lib.head w.${kind})}-${toString (lib.last w.${kind})}") p.windows;
   skill = import ../../lib/agent-skill.nix pkgs {
     name = "serve-ports";
     src = pkgs.writeTextDir "SKILL.md" (
@@ -286,7 +304,7 @@ let
             let
               p = portsOf name;
             in
-            "| ${name} | ${portList p.private} | ${portList p.public} |"
+            "| ${name} | ${portList "private" p} | ${portList "public" p} |"
           ) names)
           scheme
           hostPort
@@ -299,6 +317,31 @@ in
 {
   options.services.hyperhermes.publish = {
     enable = lib.mkEnableOption "${toString (2 * portsPerKind)} published loopback ports per agent at <port>.<agent>.<domain>, ${toString portsPerKind} behind the owner's login, ${toString portsPerKind} public";
+
+    extraPortWindows = lib.mkOption {
+      type = lib.types.listOf (
+        lib.types.submodule {
+          options = {
+            base = lib.mkOption {
+              type = lib.types.port;
+              description = "Port of uid 1000's window; each uid above it starts 2 * portsPerKind later.";
+            };
+            portsPerKind = lib.mkOption {
+              type = lib.types.ints.positive;
+              description = "Private ports, then as many public ones, per agent.";
+            };
+          };
+        }
+      );
+      default = [ ];
+      example = [
+        {
+          base = 30000;
+          portsPerKind = 5;
+        }
+      ];
+      description = "More serve-port windows per agent, published like the main one: base + (uid - 1000) * 2 * portsPerKind, the first portsPerKind private, the rest public. For a deployment keeping the ports of an older layout reachable.";
+    };
 
     cookieSecretFile = lib.mkOption {
       type = lib.types.str;
@@ -320,7 +363,7 @@ in
             # The bridge would accept a self-connect inside the ephemeral
             # range (lib/core.nix, ephemeralPortLow).
             assertion = a.uid >= 1000 && (portsOf name).to < ephemeralPortLow config.boot.kernel.sysctl;
-            message = "services.hyperhermes.agents.${name}: its serve ports (${toString servePortBase} + (uid - 1000) * ${toString (2 * portsPerKind)} .. +${toString (2 * portsPerKind - 1)}) must stay below the ephemeral port range (${toString (ephemeralPortLow config.boot.kernel.sysctl)}+); uid must be 1000 or above and low enough.";
+            message = "services.hyperhermes.agents.${name}: its serve ports (up to ${toString (portsOf name).to}, from servePortBase ${toString servePortBase} and extraPortWindows) must stay below the ephemeral port range (${toString (ephemeralPortLow config.boot.kernel.sysctl)}+); uid must be 1000 or above and low enough.";
           }) agents
           ++ [
             {
@@ -339,6 +382,10 @@ in
             {
               assertion = cfg.legacyFrontDoorPorts -> public && sso.frontDoor.host != null;
               message = "services.hyperhermes.publish.legacyFrontDoorPorts needs exposure.mode = public and sso.frontDoor.host.";
+            }
+            {
+              assertion = lib.length (lib.unique allPorts) == lib.length allPorts;
+              message = "services.hyperhermes.publish: the serve-port windows (the main one and extraPortWindows) overlap; every agent's ports must be its own.";
             }
           ];
 
@@ -361,14 +408,17 @@ in
         systemd.services.hermes-firewall.script = lib.mkAfter (
           lib.concatMapStrings (
             name:
-            let
-              ports = "${toString (portsOf name).from}:${toString (portsOf name).to}";
-            in
-            ''
-              iptables -w -A ${chain} -p tcp --dport ${ports} -m owner --uid-owner ${name} -j RETURN
-              iptables -w -A ${chain} -p tcp --dport ${ports} -m owner --uid-owner 0 -j RETURN
-              iptables -w -A ${chain} -p tcp --dport ${ports} -j REJECT --reject-with tcp-reset
-            ''
+            lib.concatMapStrings (
+              w:
+              let
+                ports = "${toString w.from}:${toString w.to}";
+              in
+              ''
+                iptables -w -A ${chain} -p tcp --dport ${ports} -m owner --uid-owner ${name} -j RETURN
+                iptables -w -A ${chain} -p tcp --dport ${ports} -m owner --uid-owner 0 -j RETURN
+                iptables -w -A ${chain} -p tcp --dport ${ports} -j REJECT --reject-with tcp-reset
+              ''
+            ) (portsOf name).windows
           ) names
         );
 

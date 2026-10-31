@@ -37,11 +37,14 @@ let
   alicePrivate2 = 33101;
   alicePublic = 33150;
   bobPrivate = 33200;
+  # extraPortWindows below: uid 1001's 30010-30014 private, 30015- public.
+  alicePublicExtra = 30015;
   urlOf = p: agent: "http://${toString p}.${agent}.${domain}:${toString port}";
   echoPorts = [
     alicePrivate
     alicePrivate2
     alicePublic
+    alicePublicExtra
   ];
 in
 pkgs.testers.runNixOSTest (
@@ -81,6 +84,12 @@ pkgs.testers.runNixOSTest (
         publish = {
           enable = true;
           cookieSecretFile = "${secrets}/serve-cookie";
+          extraPortWindows = [
+            {
+              base = 30000;
+              portsPerKind = 5;
+            }
+          ];
         };
       };
       # The agents' own units are not under test.
@@ -172,7 +181,7 @@ pkgs.testers.runNixOSTest (
       start_all()
       machine.wait_for_unit("dex.service")
       machine.wait_for_unit("nginx.service")
-      for p in (${toString alicePrivate}, ${toString alicePrivate2}, ${toString alicePublic}):
+      for p in (${toString alicePrivate}, ${toString alicePrivate2}, ${toString alicePublic}, ${toString alicePublicExtra}):
           machine.wait_for_unit(f"echo-{p}.service")
           machine.wait_for_open_port(p)
       machine.wait_until_succeeds("curl -sf -o /dev/null --unix-socket /run/oauth2-proxy-serve.sock http://localhost/ping", timeout=120)
@@ -215,6 +224,8 @@ pkgs.testers.runNixOSTest (
       with subtest("public port without login; wrong agent's name is no server"):
           code, body = curl("${urlOf alicePublic "alice"}/pub")
           assert code == "200" and body == "backend ${toString alicePublic}\n", (code, body)
+          code, body = curl("${urlOf alicePublicExtra "alice"}/pub")
+          assert code == "200" and body == "backend ${toString alicePublicExtra}\n", (code, body)
           assert curl("${urlOf alicePrivate "bob"}/")[0] == "404"
           assert curl("${urlOf alicePublic "bob"}/")[0] == "404"
 
@@ -291,8 +302,8 @@ pkgs.testers.runNixOSTest (
           skill = machine.succeed(" ".join(["cat"] + [f"$(ls {d}/serve-ports/SKILL.md 2>/dev/null)" for d in skill_dirs]))
           print(skill)
           assert "http://<port>.<account>.${domain}:${toString port}/" in skill, skill
-          assert "| alice | 33100-33149 | 33150-33199 |" in skill, skill
-          assert "| bob | 33200-33249 | 33250-33299 |" in skill, skill
+          assert "| alice | 33100-33149, 30010-30014 | 33150-33199, 30015-30019 |" in skill, skill
+          assert "| bob | 33200-33249, 30020-30024 | 33250-33299, 30025-30029 |" in skill, skill
           assert "https" not in skill and "TLS" not in skill, skill
           assert certs == [] and dns_records == [], (certs, dns_records)
     '';

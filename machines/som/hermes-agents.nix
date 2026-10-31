@@ -255,7 +255,18 @@ in
     }) config.services.hyperhermes.sso.oidcClients;
   };
   services.hyperhermes.dashboards.enable = true;
-  services.hyperhermes.publish.enable = true;
+  services.hyperhermes.publish = {
+    enable = true;
+    # The serve ports before hyperhermes' 100-port window (30000 + (uid -
+    # 1000) * 10: 5 private, 5 public): apps and links on som's agents
+    # still use them.
+    extraPortWindows = [
+      {
+        base = 30000;
+        portsPerKind = 5;
+      }
+    ];
+  };
   # Reload, not restart, on a config change: a restart drops every open
   # dashboard Chat websocket and serve-port connection mid-session.
   services.nginx.enableReload = true;
