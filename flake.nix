@@ -166,8 +166,8 @@
     wrappers.inputs.nixpkgs.follows = "nixpkgs";
 
     # TeamClaude: pooled Claude subscription gateway on som
-    # (modules/nixos/teamclaude-gateway.nix), the setup project-zero runs on
-    # pubproxy01. Locked to project-zero's revision.
+    # (modules/nixos/teamclaude-gateway). Versioned here, independently of
+    # any other deployment: `nix flake update teamclaude`.
     teamclaude.url = "github:KarpelesLab/teamclaude";
     teamclaude.inputs.nixpkgs.follows = "nixpkgs";
 
