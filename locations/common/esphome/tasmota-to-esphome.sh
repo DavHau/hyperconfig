@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# Migrate the Gosund SW9 from Tasmota to ESPHome over the air.
+# Migrate a Gosund SW9 from Tasmota to ESPHome over the air.
 #
 # Usage:
-#   ./flash.sh                                              # default: rolladen-wz @ 192.168.10.183
-#   DEVICE_IP=192.168.10.177 ESPHOME_NAME=rolladen-sz ./flash.sh   # the bedroom unit
-# Builds <ESPHOME_NAME>.yaml (which !includes rolladen-generic.yaml) and flashes DEVICE_IP.
+#   DEVICE_IP=<ip[:port]> tasmota-to-esphome.sh <location>/esphome/<node>.yaml
+# e.g.
+#   DEVICE_IP=192.168.10.177 locations/common/esphome/tasmota-to-esphome.sh locations/playa/esphome/rolladen-sz.yaml
+# Builds the given device config (which includes ./gosund-sw9.yaml as a package) and
+# flashes DEVICE_IP. Everything per device stays next to that config: secrets.yaml, the
+# .esphome/ build tree, the Tasmota config backup and the transient tasmota-minimal image.
+# The file name must equal the node's `name` substitution (it locates the build output).
 #
 # Resumable. Detects starting state automatically:
 #   - full Tasmota (e.g. release-tasmota-DE)  -> may need the 2-step path (see below)
@@ -41,10 +45,11 @@
 set -euo pipefail
 
 # --- knobs (env-overridable) -----------------------------------------------
-# Per-device selection — override these two for a different unit, e.g.:
-#   DEVICE_IP=192.168.10.177 ESPHOME_NAME=rolladen-sz ./flash.sh
-ESPHOME_NAME="${ESPHOME_NAME:-rolladen-wz}"   # which <name>.yaml to build + flash
-DEVICE_IP="${DEVICE_IP:-192.168.10.183}"      # the device's current IP
+[[ $# -eq 1 ]] || { echo "usage: DEVICE_IP=<ip[:port]> $0 <device>.yaml" >&2; exit 2; }
+YAML="$(realpath "$1")"
+DEVICE_DIR="$(dirname "$YAML")"
+ESPHOME_NAME="${ESPHOME_NAME:-$(basename "$YAML" .yaml)}"
+DEVICE_IP="${DEVICE_IP:?set DEVICE_IP to the current device address, ip or host:port}"
 # Safety guard: the running Tasmota hostname must start with this (case-insensitive) so we
 # never flash the wrong box. Defaults to ESPHOME_NAME — Tasmota hostnames here are e.g.
 # rolladen-WZ-5351 / rolladen-SZ-0154, a case-insensitive prefix of the node name.
@@ -55,11 +60,9 @@ TASMOTA_MINIMAL_URL="${TASMOTA_MINIMAL_URL:-http://ota.tasmota.com/tasmota/relea
 # margin that avoids the "Nicht genug Speicherplatz" edge case at the boundary.
 FIT_MARGIN_BYTES="${FIT_MARGIN_BYTES:-32768}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-YAML="${YAML:-$SCRIPT_DIR/$ESPHOME_NAME.yaml}"
-SECRETS="${SECRETS:-$SCRIPT_DIR/secrets.yaml}"
-BIN="$SCRIPT_DIR/.esphome/build/$ESPHOME_NAME/.pioenvs/$ESPHOME_NAME/firmware.bin"
-MINIMAL_GZ="$SCRIPT_DIR/tasmota-minimal.bin.gz"
+SECRETS="${SECRETS:-$DEVICE_DIR/secrets.yaml}"
+BIN="$DEVICE_DIR/.esphome/build/$ESPHOME_NAME/.pioenvs/$ESPHOME_NAME/firmware.bin"
+MINIMAL_GZ="$DEVICE_DIR/tasmota-minimal.bin.gz"
 
 # --- helpers ---------------------------------------------------------------
 log()  { printf '\n>>> %s\n' "$*"; }
@@ -218,6 +221,33 @@ print(f"OK: ESP8266 firmware, entry=0x{entry:08x}")
 PY
 }
 
+# Check that secrets.yaml's wifi_ssid/wifi_password are a pair the running Tasmota uses.
+# A wrong pair bricks the unit remotely: ESPHome comes up, never joins, and only someone
+# on site can reach its fallback AP. Tasmota's /dl dump is XOR-obfuscated (byte i ^=
+# 0x5A + i, from i = 2); its settings text pool stores STASSID1, STASSID2, STAPWD1,
+# STAPWD2 back to back as NUL-terminated strings, so a password sits two entries after
+# its SSID. The password goes through the environment, not argv.
+verify_wifi_in_backup() {
+  WIFI_SSID="$(secret wifi_ssid)" WIFI_PASSWORD="$(secret wifi_password)" \
+    python3 - "$1" <<'PY'
+import os, sys
+buf = bytearray(open(sys.argv[1], "rb").read())
+for i in range(2, len(buf)):
+    buf[i] ^= (0x5A + i) & 0xFF
+ssid, pw = os.environ["WIFI_SSID"].encode(), os.environ["WIFI_PASSWORD"].encode()
+if not ssid or not pw:
+    sys.exit("wifi_ssid / wifi_password missing from secrets.yaml")
+strings = bytes(buf).split(b"\0")
+for k, s in enumerate(strings[:-2]):
+    if s == ssid:
+        if strings[k + 2] == pw:
+            print(f"OK: Tasmota joins {ssid.decode()} with the password in secrets.yaml")
+            sys.exit(0)
+        sys.exit(f"Tasmota's password for {ssid.decode()} differs from secrets.yaml wifi_password")
+sys.exit(f"Tasmota has no stored network {ssid.decode()} (secrets.yaml wifi_ssid)")
+PY
+}
+
 # --- 0. pre-flight ---------------------------------------------------------
 need curl
 need gzip
@@ -257,25 +287,29 @@ case "$MODE" in
     printf 'target ok: Tasmota %s, hostname prefix %s\n' "$ver" "$EXPECTED_HOSTNAME_PREFIX"
 
     # Backup config — only available on full Tasmota; minimal strips /dl.
-    backup="$SCRIPT_DIR/Config_pre-esphome_$(date +%Y%m%dT%H%M%S).dmp"
+    backup="$DEVICE_DIR/Config_${ESPHOME_NAME}_pre-esphome_$(date +%Y%m%dT%H%M%S).dmp"
     curl --fail --silent --show-error --max-time 15 \
          --user "$TASMOTA_USER:$TASMOTA_PASS" \
          -o "$backup" "http://$DEVICE_IP/dl" \
       || die "Tasmota config backup failed; aborting before any irreversible step"
     [[ -s "$backup" ]] || die "Tasmota config backup is empty"
     printf 'backup saved: %s (%s bytes)\n' "$backup" "$(stat -c '%s' "$backup")"
+    if [[ "${SKIP_WIFI_CHECK:-0}" != 1 ]]; then
+      verify_wifi_in_backup "$backup" \
+        || die "Wi-Fi credentials unverified; fix secrets.yaml (SKIP_WIFI_CHECK=1 if the unit moves networks)"
+    fi
     ;;
   minimal)
     # /dl, Status N, and most commands are stripped in minimal builds; we can't introspect
     # further. The only thing we still need is /up + /u2, and both work.
-    printf 'already on tasmota-minimal — backup + version check skipped (not supported by minimal)\n'
+    printf 'already on tasmota-minimal — backup, version and Wi-Fi checks skipped (not supported by minimal)\n'
     printf 'will go straight to the ESPHome upload after compile+gzip.\n'
     ;;
 esac
 
 # --- 1. compile ------------------------------------------------------------
 log "Step 1/5: compiling firmware from $YAML"
-( cd "$SCRIPT_DIR" && nix run nixpkgs#esphome -- compile "$YAML" ) \
+( cd "$DEVICE_DIR" && nix run nixpkgs#esphome -- compile "$YAML" ) \
   || die "esphome compile failed"
 [[ -f "$BIN" ]] || die "firmware.bin not produced at $BIN"
 size=$(stat -c '%s' "$BIN")

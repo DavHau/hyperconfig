@@ -5,8 +5,8 @@
 #   Tasmota backup (Config_rolladen_WZ_*.dmp) + snapshot (tasmota-config-snapshot-wz.json)
 #   kept alongside this file.
 #
-# All hardware + behaviour lives in rolladen-generic.yaml; this file only sets what is
-# unique to this unit. Travel times are Tasmota ShutterOpenDuration1 / ShutterCloseDuration1.
+# All hardware + behaviour lives in ../../common/esphome/gosund-sw9.yaml; this file only sets
+# what is unique to this unit. Travel times are Tasmota ShutterOpenDuration1 / ShutterCloseDuration1.
 
 substitutions:
   name: rolladen-wz
@@ -15,4 +15,4 @@ substitutions:
   close_duration: 22.3s
 
 packages:
-  generic: !include rolladen-generic.yaml
+  generic: !include ../../common/esphome/gosund-sw9.yaml

@@ -1,0 +1,24 @@
+# Gosund SW9 roller-shutter — casa, guest room / Gästezimmer.
+#
+# Migrated from Tasmota 13.4.0 at http://192.168.20.31 (casa LAN, Wi-Fi "Parasit").
+#   FriendlyName "Tasmota Gaestezimmer", Topic "gaestezimmer", hostname gaestezimmer-0301,
+#   MAC 2C:F4:32:87:A1:2D. Tasmota backup (Config_rolladen-gz_*.dmp) + snapshot
+#   (tasmota-config-snapshot-gz.json) kept alongside this file.
+#
+# Same hardware and Tasmota shutter settings as the playa units; only the travel times
+# differ (ShutterOpenDuration1 33.0 s / ShutterCloseDuration1 33.0 s, ShutterMotorDelay1 0).
+#
+# casa is not reachable from outside its LAN, so migrate through an ssh tunnel via nas:
+#   ssh -N -L 8031:192.168.20.31:80 -L 8266:192.168.20.31:8266 root@nas.d &
+#   DEVICE_IP=localhost:8031 EXPECTED_HOSTNAME_PREFIX=gaestezimmer \
+#     locations/common/esphome/tasmota-to-esphome.sh locations/casa/esphome/rolladen-gz.yaml
+# Later updates: `esphome upload --device localhost rolladen-gz.yaml` through the same tunnel.
+
+substitutions:
+  name: rolladen-gz
+  friendly_name: "Rolladen Gästezimmer"
+  open_duration: 33.0s
+  close_duration: 33.0s
+
+packages:
+  generic: !include ../../common/esphome/gosund-sw9.yaml

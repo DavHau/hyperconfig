@@ -17,4 +17,4 @@ substitutions:
   close_duration: 17.6s
 
 packages:
-  generic: !include rolladen-generic.yaml
+  generic: !include ../../common/esphome/gosund-sw9.yaml

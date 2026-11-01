@@ -11,8 +11,9 @@
 # programmed in Tasmota (ShutterOpenDuration1 17.8 s / ShutterCloseDuration1 17.5 s).
 #
 # Flashing note: the device still reports the old Tasmota hostname (rolladen-EZ-*), so
-# override the safety guard when running flash.sh:
-#   DEVICE_IP=192.168.10.155 ESPHOME_NAME=rolladen-gz EXPECTED_HOSTNAME_PREFIX=rolladen-EZ ./flash.sh
+# override the safety guard when migrating:
+#   DEVICE_IP=192.168.10.155 EXPECTED_HOSTNAME_PREFIX=rolladen-EZ \
+#     locations/common/esphome/tasmota-to-esphome.sh locations/playa/esphome/rolladen-gz.yaml
 
 substitutions:
   name: rolladen-gz
@@ -21,4 +22,4 @@ substitutions:
   close_duration: 17.5s
 
 packages:
-  generic: !include rolladen-generic.yaml
+  generic: !include ../../common/esphome/gosund-sw9.yaml

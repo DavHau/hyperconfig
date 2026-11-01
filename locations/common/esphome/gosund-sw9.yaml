@@ -1,8 +1,8 @@
 # Gosund SW9 — 2-button roller-shutter switch: shared ESPHome package.
 #
-# This file holds everything common to every Gosund SW9 shutter in this location.
-# Per-device files (rolladen-wz.yaml, rolladen-sz.yaml, …) `!include` it as a package
-# and supply the substitutions that differ:
+# This file holds everything common to every Gosund SW9 shutter, at any location.
+# Per-device files (locations/<location>/esphome/rolladen-*.yaml) `!include` it as a
+# package and supply the substitutions that differ:
 #
 #   name           device/node name      (e.g. rolladen-wz)
 #   friendly_name  HA display name        (e.g. "Rolladen Wohnzimmer")
@@ -32,6 +32,10 @@
 #   Switch1/2 = SwitchMode 3 (pushbutton): same-direction press = stop, opposite/idle = move
 #   SwitchDebounce 50 ms            -> binary_sensor delayed_on/off filters
 # Only ShutterOpenDuration1 / ShutterCloseDuration1 differ per device (the substitutions).
+#
+# `!secret` values resolve from the including device's directory: ESPHome falls back to the
+# main config's secrets.yaml, so this directory must not get one of its own.
+# Migrating a unit off Tasmota: ./tasmota-to-esphome.sh.
 #
 # NOT reproduced: Tasmota's non-linear travel calibration (ShutterCalibration1 /
 #   ShutterSetHalfway1). time_based covers are linear; full open/close are exact, only
