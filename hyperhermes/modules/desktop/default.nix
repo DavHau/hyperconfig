@@ -4,36 +4,20 @@
 # "Hermes TUI (<agent>)" entry per agent for app launchers. Independent of
 # core: the agents run elsewhere, this machine only dials them.
 #
-# Desktop app: every agent is an `ssh` connection, reached as
-# <agent>@<host>. The SSH connection kind needs no token: the app runs
-# `hermes serve --isolated` as the agent over ssh, tunnels the ephemeral
-# port and adopts the token the remote mints. On the agents' host the
-# command lands in the `hermes` shim of core, which exports the account's
-# real HERMES_HOME, so it serves the same state the gateway and dashboard
-# use. The managed dashboard.public_url does not gate it: hermes exempts
-# the loopback backend the desktop spawns (HERMES_DESKTOP=1 plus its
-# session token). ./connections.py merges the entries into the app's files
-# on every launch.
-#
-# Identity: one passphrase-less ed25519 key (sshKeyFile, root-only; the
-# clan module makes it the shared var hermes-desktop-ssh), never an admin
-# key. Activation copies it to /run/hermes-desktop-ssh/<user>, owner-only,
-# for each of `users`. Per-uid owners, not a shared group: a group added at
-# deploy time is missing from every session that was already running. The
-# agents' host should authorize the public half with `restrict` +
-# loopback port-forwarding only: exactly the app's bootstrap
-# (`-L 127.0.0.1:*:127.0.0.1:<port>`); no pty, so the desktop's
-# remote-terminal tab is deliberately not served.
-#
-# The app drives the system `ssh` with BatchMode and an `-i` at most, never
-# IdentitiesOnly, so with the default config every connect would first offer
-# every agent identity (an ssh-agent prompting per use would prompt). So
-# the app dials an alias whose Host block pins the restricted key; ssh
-# resolves it to `host`. BatchMode cannot answer a TOFU prompt, so the host
-# key must already be trusted, under `hostKeyAlias` if set.
+# Desktop app: every agent is a `remote` connection to its always-on
+# hosted dashboard, https://<agent>.<domain> (the dashboards module's
+# public scheme), with OAuth: the dashboard advertises auth_required and
+# its self-hosted provider, and the app signs in through it. The user signs
+# in once per agent inside the app; the sessions live in the app's cookie
+# partitions, so the managed entries can be rewritten freely.
+# ./connections.py merges the entries into the app's files on every launch.
+# Chats run in the dashboard unit on the agents' host, not in a process
+# the app owns, so quitting the app leaves running sessions and subagents
+# alone.
 #
 # TUI: a plain `ssh -t <agent>@<host> hermes` with the user's normal
-# identities and a real pty.
+# identities and a real pty, the host key trusted under `hostKeyAlias` if
+# set.
 #
 # `hermes-agent` is this flake's input, the source of the app.
 { hermes-agent }:
@@ -45,28 +29,26 @@
 }:
 let
   cfg = config.services.hyperhermes.desktop;
-  inStore = path: lib.hasPrefix builtins.storeDir (toString path);
-
-  # What the app dials; only ssh_config below knows it.
-  alias = "hermes-desktop-${cfg.hostLabel}";
-  keyDir = "/run/hermes-desktop-ssh";
 
   icon = "${cfg.package}/share/hermes-desktop/dist/hermes.png";
 
   spec = pkgs.writeText "hermes-desktop-connections.json" (
     builtins.toJSON {
       inherit (cfg) primary;
-      remotes = lib.mapAttrs (user: label: {
-        inherit label user;
-        host = alias;
+      remotes = lib.mapAttrs (agent: label: {
+        inherit label;
+        url = "https://${agent}.${cfg.domain}";
       }) cfg.agents;
     }
   );
 
-  hermesDesktop = pkgs.writeShellScriptBin "hermes-desktop" ''
-    ${pkgs.python3}/bin/python3 ${./connections.py} ${spec}
-    exec ${cfg.package}/bin/hermes-desktop "$@"
-  '';
+  # passthru.spec: what ./connections.py merges, for checks to inspect.
+  hermesDesktop =
+    (pkgs.writeShellScriptBin "hermes-desktop" ''
+      ${pkgs.python3}/bin/python3 ${./connections.py} ${spec}
+      exec ${cfg.package}/bin/hermes-desktop "$@"
+    '').overrideAttrs
+      { passthru = { inherit spec; }; };
 
   hostKeyArg = lib.optionalString (cfg.hostKeyAlias != null) "-o HostKeyAlias=${cfg.hostKeyAlias} ";
 
@@ -125,15 +107,14 @@ in
     host = mkOption {
       type = types.str;
       example = "hermes.example.org";
-      description = "SSH host name of the machine the agents run on.";
+      description = "SSH host name of the machine the agents run on; the TUI entries dial it.";
     };
     hostLabel = mkOption {
       type = types.str;
       default = cfg.host;
       defaultText = literalExpression "config.services.hyperhermes.desktop.host";
       description = ''
-        Short name of the agents' host: the ssh alias the app dials is
-        `hermes-desktop-<hostLabel>`, and the launcher entries name it.
+        Short name of the agents' host, used in the launcher entries.
       '';
     };
     hostKeyAlias = mkOption {
@@ -141,8 +122,15 @@ in
       default = null;
       description = ''
         ssh HostKeyAlias under which the host key is already trusted
-        (ssh_known_hosts, a @cert-authority line, ...). The app connects
-        in BatchMode and cannot accept an unknown host key.
+        (ssh_known_hosts, a @cert-authority line, ...), for the TUI.
+      '';
+    };
+    domain = mkOption {
+      type = types.str;
+      example = "example.org";
+      description = ''
+        Domain of the agents' hosted dashboards: the app connects to
+        `https://<agent>.<domain>` with OAuth.
       '';
     };
     agents = mkOption {
@@ -155,19 +143,6 @@ in
     primary = mkOption {
       type = types.str;
       description = "The agent (a key of `agents`) the first window opens on.";
-    };
-    users = mkOption {
-      type = types.listOf types.str;
-      default = [ ];
-      description = "Local accounts that get an owner-only copy of the key and may launch the app.";
-    };
-    sshKeyFile = mkOption {
-      type = types.str;
-      description = ''
-        Runtime path (outside the Nix store) of the passphrase-less ssh
-        private key the app dials the agents with. The clan module fills it
-        from the shared var hermes-desktop-ssh.
-      '';
     };
     desktopEntryExec = mkOption {
       type = types.nullOr types.str;
@@ -186,33 +161,7 @@ in
         assertion = cfg.agents ? ${cfg.primary};
         message = "services.hyperhermes.desktop.primary (${cfg.primary}) must be one of services.hyperhermes.desktop.agents.";
       }
-      {
-        assertion = !inStore cfg.sshKeyFile;
-        message = "services.hyperhermes.desktop.sshKeyFile must be a runtime path outside the Nix store; the store is world-readable.";
-      }
     ];
-
-    # /run is tmpfs and a secret store may rewrite the key on every
-    # activation (clan's setupSecrets, boot included), so the copies are
-    # refreshed right after it.
-    system.activationScripts.hermes-desktop-ssh =
-      lib.stringAfter (lib.optional (config.system.activationScripts ? setupSecrets) "setupSecrets")
-        ''
-          rm -rf ${keyDir}
-          install -d -m 0755 -o root -g root ${keyDir}
-          ${lib.concatMapStrings (u: ''
-            install -m 0400 -o ${u} -g root ${cfg.sshKeyFile} ${keyDir}/${u}
-          '') cfg.users}
-        '';
-
-    programs.ssh.extraConfig = ''
-      Host ${alias}
-        HostName ${cfg.host}
-        IdentityFile ${keyDir}/%u
-        IdentitiesOnly yes
-        IdentityAgent none
-    ''
-    + lib.optionalString (cfg.hostKeyAlias != null) "  HostKeyAlias ${cfg.hostKeyAlias}\n";
 
     environment.systemPackages = [
       hermesDesktop

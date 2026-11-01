@@ -1,19 +1,22 @@
-"""Merge the Nix-managed ssh agents into the hermes desktop connection files.
+"""Merge the Nix-managed agent dashboards into the hermes desktop connection files.
 
 The hermes-desktop launcher (./default.nix) runs this before it execs the
 app. Two files under $XDG_CONFIG_HOME/Hermes decide what the app connects
 to:
 
 - connections.json (v2), the Connections registry the user edits in
-  Settings. Entries with a `nix-` id are managed: they snap back to the
-  spec on every launch, and one the spec no longer names is dropped.
-  Every other entry survives, as does the user's primary while it still
-  names an entry; otherwise the spec's primary becomes it.
-- connection.json (v1), the window backend. Written when absent, when it
-  still carries the bytes this script last wrote (the sidecar records the
-  sha256), or on first adoption (no sidecar of this version: the file then
-  pointed at the retired local microVM). A gateway the user saved in
-  Settings stays.
+  Settings. Entries with a `nix-` id are managed: each is a `remote`
+  connection to the agent's hosted dashboard (`url`) with `authMode`
+  oauth. They snap back to the spec on every launch, and one the spec no
+  longer names is dropped. Every other entry survives, as does the user's
+  primary while it still names an entry; otherwise the spec's primary
+  becomes it. OAuth sessions live in the app's cookie partitions, not
+  here, so rewriting the entries keeps the user signed in.
+- connection.json (v1), the window backend: `remote` mode on the primary
+  agent's url with oauth. Written when absent, when it still carries the
+  bytes this script last wrote (the sidecar records the sha256), or on
+  first adoption (no sidecar of this version: the file then pointed at the
+  retired ssh connection). A gateway the user saved in Settings stays.
 
 Every write is a regular 0600 file, tmp + rename in the same directory.
 """
@@ -27,7 +30,7 @@ from pathlib import Path
 
 LOCAL_ENTRY = {"id": "local", "kind": "local", "label": "This device"}
 REGISTRY_VERSION = 2
-SIDECAR_VERSION = 2
+SIDECAR_VERSION = 3
 
 
 def load_json(path: Path) -> object:
@@ -66,7 +69,7 @@ def main() -> int:
     sidecar_path = hermes_dir / "nix-managed-connections.json"
 
     managed = [dict(LOCAL_ENTRY)] + [
-        {"id": f"nix-{name}", "kind": "ssh", "label": r["label"], "host": r["host"], "user": r["user"]}
+        {"id": f"nix-{name}", "kind": "remote", "label": r["label"], "url": r["url"], "authMode": "oauth"}
         for name, r in sorted(spec["remotes"].items())
     ]
     managed_ids = {e["id"] for e in managed}
@@ -90,8 +93,8 @@ def main() -> int:
     target = spec["remotes"][spec["primary"]]
     rendered = render(
         {
-            "mode": "ssh",
-            "remote": {"mode": "ssh", "host": target["host"], "user": target["user"]},
+            "mode": "remote",
+            "remote": {"url": target["url"], "authMode": "oauth"},
             "profiles": {},
         }
     )

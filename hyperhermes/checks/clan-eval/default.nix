@@ -93,12 +93,11 @@ let
     agents
   ];
 
-  # Every feature with a generator enabled.
+  # Every feature with a generator enabled, and desktop, which has none.
   enabled = evalWith [
     self.nixosModules.default
     agents
     {
-      users.users.carol.isNormalUser = true;
       services.hyperhermes = {
         wallet.enable = true;
         teamclaude.gatewayUrl = "https://teamclaude.example.org";
@@ -107,9 +106,9 @@ let
           enable = true;
           host = "agents.example.org";
           hostLabel = "agents";
+          domain = "example.org";
           agents.alice = "Alice";
           primary = "alice";
-          users = [ "carol" ];
         };
       };
     }
@@ -216,7 +215,6 @@ let
       genNames enabled == [
         "hermes-agent-ssh-alice"
         "hermes-agent-ssh-bob"
-        "hermes-desktop-ssh"
         "phoenixd-api"
         "phoenixd-seed"
         "teamclaude-hermes-alice"
@@ -228,12 +226,8 @@ let
     teamclaude-key-file =
       (hyper enabled).agents.alice.teamclaude.keyFile
       == (gens enabled).teamclaude-hermes-alice.files.key.path;
-    desktop-key-file =
-      (hyper enabled).desktop.sshKeyFile == (gens enabled).hermes-desktop-ssh.files.key.path
-      && (gens enabled).hermes-desktop-ssh.share;
-    # No generator, no default: bob has no teamclaude, `idle` no desktop.
+    # No generator, no default: bob has no teamclaude.
     teamclaude-key-file-only-enabled = (hyper enabled).agents.bob.teamclaude.keyFile == null;
-    desktop-key-file-only-enabled = !(builtins.tryEval (hyper idle).desktop.sshKeyFile).success;
 
     published-evaluates = evaluates published && failedAssertions published == [ ];
     published-generator-names =

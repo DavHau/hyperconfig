@@ -5,29 +5,25 @@
 # one "Hermes TUI (<agent>)" entry per agent. The module's header has the
 # connection mechanics; this file has som's side of them.
 #
-# The app dials the agents as <agent>@hermes.davhau.com (som's public
-# name) with the shared clan var hermes-desktop-ssh, copied for dave plus
-# grmpf where that account exists (amy). som authorizes its public half
-# on dave-hermes, joe and thaigersprint with `restrict` + loopback port-forwarding only.
-# BatchMode cannot answer a TOFU prompt, so the host is verified as
-# `som.d`: som presents its clan sshd CA certificate (principal som.d) on
-# every address, and the sshd client role trusts that CA for `*.d` in
-# ssh_known_hosts. The TUI entries use the user's normal identities (the
-# agent accounts take the admin keys).
-{
-  config,
-  inputs,
-  lib,
-  ...
-}:
+# The app opens each agent's always-on dashboard on som,
+# https://<agent>.davhau.fyi (../../machines/som/hermes-dashboards.nix),
+# and signs in through pocket-id: dave signs in once per agent inside the
+# app. Chats run in som's dashboard units, so quitting the app leaves them
+# running.
+#
+# The TUI entries dial <agent>@hermes.davhau.com (som's public name) with
+# the user's normal identities (the agent accounts take the admin keys),
+# the host verified as `som.d`: som presents its clan sshd CA certificate
+# (principal som.d) on every address, and the sshd client role trusts that
+# CA for `*.d` in ssh_known_hosts.
+{ config, ... }:
 {
   # hyperhermes' desktop module itself is imported next to this file in
-  # ./dave.nix; its clan module fills sshKeyFile.
-  imports = [ inputs.hyperhermes.nixosModules.clan ];
-
+  # ./dave.nix.
   services.hyperhermes.desktop = {
     enable = true;
     host = "hermes.davhau.com";
+    domain = (import ../../machines/som/hermes-dashboards.nix).domain;
     hostLabel = "som";
     hostKeyAlias = "som.d";
     # Agent account on som -> label; the first window opens on `primary`.
@@ -37,7 +33,6 @@
       thaigersprint = "thaigersprint";
     };
     primary = "dave-hermes";
-    users = [ "dave" ] ++ lib.optional (config.users.users ? grmpf) "grmpf";
     # spaces-hermes runs `hermes-desktop` and turns a failure into a
     # desktop notification, as the keybind and the bar button do.
     desktopEntryExec = "${config.services.spaces.commands.hermes}/bin/spaces-hermes";

@@ -36,7 +36,6 @@ let
 
   agentsKey = "/run/keys/alice-teamclaude";
   gateway = "https://teamclaude.example.org";
-  desktopKey = "/run/keys/hermes-desktop";
 
   agents = {
     alice.uid = 1001;
@@ -99,26 +98,21 @@ let
     host = "agents.example.org";
     hostLabel = "agents";
     hostKeyAlias = "agents.internal";
+    domain = "example.org";
     agents = {
       alice = "Alice";
       bob = "Bob";
     };
     primary = "alice";
-    users = [ "carol" ];
-    sshKeyFile = desktopKey;
   };
-  desktopWith =
-    extra:
-    evalWith [
-      self.nixosModules.desktop
-      {
-        users.users.carol.isNormalUser = true;
-        services.hyperhermes.desktop = desktopConfig // extra;
-      }
-    ];
-  desktop = desktopWith { };
-  desktopStoreKey = desktopWith { sshKeyFile = "${pkgs.writeText "key" ""}"; };
-  desktopPathKey = desktopWith { sshKeyFile = ./default.nix; };
+  desktop = evalWith [
+    self.nixosModules.desktop
+    { services.hyperhermes.desktop = desktopConfig; }
+  ];
+  desktopLauncher = lib.findFirst (
+    p: (p.name or "") == "hermes-desktop"
+  ) null desktop.config.environment.systemPackages;
+  desktopSpec = builtins.fromJSON desktopLauncher.spec.text;
 
   rea = evalWith [
     self.nixosModules.core
@@ -135,7 +129,6 @@ let
   hasPackageNamed =
     sys: name: lib.any (p: (p.pname or p.name or "") == name) sys.config.environment.systemPackages;
   agentCfg = sys: name: sys.config.services.hyperhermes.agents.${name};
-  activation = desktop.config.system.activationScripts.hermes-desktop-ssh.text;
 
   expectations = {
     teamclaude-evaluates = evaluates teamclaude && failedAssertions teamclaude == [ ];
@@ -173,12 +166,24 @@ let
       && hasPackageNamed desktop "hermes-desktop.desktop"
       && hasPackageNamed desktop "hermes-tui-alice.desktop"
       && hasPackageNamed desktop "hermes-tui-bob.desktop";
-    desktop-ssh-alias =
-      lib.hasInfix "Host hermes-desktop-agents\n  HostName agents.example.org\n" desktop.config.programs.ssh.extraConfig
-      && lib.hasInfix "  HostKeyAlias agents.internal\n" desktop.config.programs.ssh.extraConfig;
-    desktop-key-copied = lib.hasInfix "install -m 0400 -o carol -g root ${desktopKey} /run/hermes-desktop-ssh/carol" activation;
-    desktop-refuses-store-key = failedAssertions desktopStoreKey != [ ];
-    desktop-refuses-path-literal = refused desktopPathKey.config.services.hyperhermes.desktop.sshKeyFile;
+    # The app dials each agent's hosted dashboard with OAuth.
+    desktop-dashboard-urls = desktopSpec == {
+      primary = "alice";
+      remotes = {
+        alice = {
+          label = "Alice";
+          url = "https://alice.example.org";
+        };
+        bob = {
+          label = "Bob";
+          url = "https://bob.example.org";
+        };
+      };
+    };
+    # No ssh plumbing for the app: no key copy, no alias.
+    desktop-no-app-ssh =
+      !(desktop.config.system.activationScripts ? hermes-desktop-ssh)
+      && !(lib.hasInfix "hermes-desktop-" desktop.config.programs.ssh.extraConfig);
 
     rea-evaluates = evaluates rea && failedAssertions rea == [ ];
     # node on REA's entry script; every tool setting is a store path.

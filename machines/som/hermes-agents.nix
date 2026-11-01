@@ -36,22 +36,6 @@ let
   # The clan sshd instance fills root's list; accounts without keys of their
   # own reuse it.
   adminKeys = config.users.users.root.openssh.authorizedKeys.keys;
-  # hermes-desktop on the dave machines dials dave-hermes and joe over ssh
-  # with a shared restricted key (../../modules/nixos/hermes-desktop.nix,
-  # hyperhermes' desktop module and its shared clan var hermes-desktop-ssh,
-  # read from the vars store so this does not depend on som running the
-  # desktop itself). Its bootstrap needs
-  # command execution plus one loopback -L forward to the port
-  # `hermes serve --port 0` picks, nothing else: no pty, no agent/X11
-  # forwarding.
-  desktopKey = ''restrict,port-forwarding,permitopen="127.0.0.1:*" ${
-    # No machine: the shared var.
-    inputs.clan-core.clanLib.getPublicValue {
-      flake = config.clan.core.settings.directory;
-      generator = inputs.hyperhermes.lib.clan.desktopSshGenerator;
-      file = "key.pub";
-    }
-  }'';
 
   gpuHost = "vit.d";
   gpuSkill = inputs.hyperhermes.lib.mkAgentSkill pkgs {
@@ -194,7 +178,7 @@ in
       # untrusted and native mode gives it everything the owning uid has.
       dave-hermes = {
         description = "dave's hermes agent";
-        sshKeys = adminKeys ++ [ desktopKey ];
+        sshKeys = adminKeys;
         # Claude through the TeamClaude gateway, not a login of its own.
         teamclaude.enable = true;
       };
@@ -204,7 +188,7 @@ in
       # dave-hermes, so its own account; dave signs in to its dashboard.
       joe = {
         description = "joe - dave's hermes agent (ex amy microVM)";
-        sshKeys = adminKeys ++ [ desktopKey ];
+        sshKeys = adminKeys;
       };
 
       # thaigersprint: no vault access (./hermes-agents-data.nix); logs in
@@ -212,7 +196,7 @@ in
       # from hermes-desktop.
       thaigersprint = {
         description = "thaigersprint - hermes agent, no vault access";
-        sshKeys = adminKeys ++ [ desktopKey ];
+        sshKeys = adminKeys;
       };
 
       # momentum: OpenRouter brain, and a Telegram bot in ONE group chat where

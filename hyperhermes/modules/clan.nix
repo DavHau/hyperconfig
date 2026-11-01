@@ -20,11 +20,6 @@
 # agents.<agent>.teamclaude.keyFile; the gateway's configuration declares
 # the same var as client `<agent>`.
 #
-# desktop, the shared generator hermes-desktop-ssh: the one restricted
-# ssh key every workstation's app dials the agents with, root-only, and
-# its public half for the agents' host to authorize. Its path becomes
-# desktop.sshKeyFile.
-#
 # wallet, with services.hyperhermes.wallet on (./wallet): phoenixd-seed
 # (`seed`, phoenixd's only; back it up with
 # `clan vars get <machine> phoenixd-seed/seed`) and phoenixd-api
@@ -67,7 +62,7 @@ let
   # Feature modules this system imports.
   hasCore = options ? services.hyperhermes.package;
   hasTeamclaude = options ? services.hyperhermes.teamclaude;
-  hasDesktop = options ? services.hyperhermes.desktop;
+  hasSso = options ? services.hyperhermes.sso.frontDoor;
   hasWallet = options ? services.hyperhermes.wallet;
   hasMail = options ? services.hyperhermes.mail;
   mailOn = hasMail && cfg.mail.enable;
@@ -75,10 +70,9 @@ let
   random = len: ''openssl rand -hex ${toString len} | tr -d '\n' '';
   hasSlots = options ? services.hyperhermes.slots;
   walletOn = hasWallet && cfg.wallet.enable;
-  inherit (import ../lib/clan.nix) agentSshGenerator teamclaudeGenerator desktopSshGenerator;
+  inherit (import ../lib/clan.nix) agentSshGenerator teamclaudeGenerator;
   generators = config.clan.core.vars.generators;
   ssoLib = import ../lib/sso.nix { inherit lib; };
-  hasSso = options ? services.hyperhermes.sso.frontDoor;
   frontDoor = hasSso && cfg.sso.enable && cfg.sso.frontDoor.host != null;
   hasPublish = options ? services.hyperhermes.publish;
   publishOn = hasPublish && cfg.publish.enable;
@@ -149,18 +143,6 @@ in
             ) (lib.filterAttrs (_: a: a.teamclaude.enable) cfg.agents)
           ))
 
-          (lib.optionalAttrs hasDesktop {
-            ${desktopSshGenerator} = lib.mkIf cfg.desktop.enable {
-              share = true;
-              files.key = { };
-              files."key.pub".secret = false;
-              runtimeInputs = [ pkgs.openssh ];
-              script = ''
-                ssh-keygen -q -t ed25519 -N "" -C hermes-desktop -f "$out"/key
-              '';
-            };
-          })
-
           (lib.mkIf frontDoor {
             hermes-oauth2-proxy = {
               files.cookie_secret = { };
@@ -213,12 +195,6 @@ in
       (lib.optionalAttrs hasSso {
         services.hyperhermes.sso.frontDoor.cookieSecretFile = lib.mkIf frontDoor (
           lib.mkDefault generators.hermes-oauth2-proxy.files.cookie_secret.path
-        );
-      })
-
-      (lib.optionalAttrs hasDesktop {
-        services.hyperhermes.desktop.sshKeyFile = lib.mkIf cfg.desktop.enable (
-          lib.mkDefault generators.${desktopSshGenerator}.files.key.path
         );
       })
 

@@ -8,6 +8,4 @@
   agentSshGenerator = agent: "hermes-agent-ssh-${agent}";
   # `key`: the agent's TeamClaude gateway client key.
   teamclaudeGenerator = agent: "teamclaude-hermes-${agent}";
-  # Shared: `key` and `key.pub` of the desktop app's ssh key.
-  desktopSshGenerator = "hermes-desktop-ssh";
 }
