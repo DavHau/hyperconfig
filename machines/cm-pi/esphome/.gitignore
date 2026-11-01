@@ -1,2 +1,4 @@
+# Written from clan vars by ../../../locations/common/esphome/esphome-secrets.sh (with its temp file).
 secrets.yaml
+.secrets.yaml.*
 .esphome

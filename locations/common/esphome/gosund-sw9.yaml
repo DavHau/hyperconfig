@@ -34,7 +34,8 @@
 # Only ShutterOpenDuration1 / ShutterCloseDuration1 differ per device (the substitutions).
 #
 # `!secret` values resolve from the including device's directory: ESPHome falls back to the
-# main config's secrets.yaml, so this directory must not get one of its own.
+# main config's secrets.yaml (written from clan vars by ./esphome-secrets.sh), so this
+# directory must not get one of its own; esphome-secrets.sh refuses to write one here.
 # Migrating a unit off Tasmota: ./tasmota-to-esphome.sh.
 #
 # NOT reproduced: Tasmota's non-linear travel calibration (ShutterCalibration1 /

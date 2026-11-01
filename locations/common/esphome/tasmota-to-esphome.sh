@@ -2,12 +2,16 @@
 # Migrate a Gosund SW9 from Tasmota to ESPHome over the air.
 #
 # Usage:
-#   DEVICE_IP=<ip[:port]> tasmota-to-esphome.sh <location>/esphome/<node>.yaml
+#   DEVICE_IP=<ip[:port]> TASMOTA_USER=<user> TASMOTA_PASS=<password> \
+#     tasmota-to-esphome.sh <location>/esphome/<node>.yaml
 # e.g.
-#   DEVICE_IP=192.168.10.177 locations/common/esphome/tasmota-to-esphome.sh locations/playa/esphome/rolladen-sz.yaml
+#   DEVICE_IP=192.168.10.177 TASMOTA_USER=admin TASMOTA_PASS=... \
+#     locations/common/esphome/tasmota-to-esphome.sh locations/playa/esphome/rolladen-sz.yaml
 # Builds the given device config (which includes ./gosund-sw9.yaml as a package) and
-# flashes DEVICE_IP. Everything per device stays next to that config: secrets.yaml, the
-# .esphome/ build tree, the Tasmota config backup and the transient tasmota-minimal image.
+# flashes DEVICE_IP. TASMOTA_USER / TASMOTA_PASS are the running Tasmota's web login.
+# Everything per device stays next to that config: secrets.yaml (written from clan vars by
+# ./esphome-secrets.sh), the .esphome/ build tree, the Tasmota config backup and the
+# transient tasmota-minimal image.
 # The file name must equal the node's `name` substitution (it locates the build output).
 #
 # Resumable. Detects starting state automatically:
@@ -40,7 +44,7 @@
 # `ex_compatibility_check` in tasmota_types.h — deprecated, no longer referenced by the OTA
 # upload path. The script does not touch it.
 #
-# Hard requirements: bash, curl, gzip, awk, python3, nix (for `nix run nixpkgs#esphome`).
+# Hard requirements: bash, curl, gzip, python3, nix (for `nix run nixpkgs#esphome`).
 
 set -euo pipefail
 
@@ -68,20 +72,6 @@ MINIMAL_GZ="$DEVICE_DIR/tasmota-minimal.bin.gz"
 log()  { printf '\n>>> %s\n' "$*"; }
 die()  { printf 'FATAL: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"; }
-
-# Read one top-level scalar from secrets.yaml. Strips trailing comments and optional
-# surrounding double-quotes. Returns empty if the key is absent.
-secret() {
-  awk -v k="$1" '
-    $0 ~ "^[[:space:]]*"k"[[:space:]]*:" {
-      sub(/^[^:]*:[[:space:]]*/, "")
-      sub(/[[:space:]]+#.*$/, "")
-      gsub(/^"|"$/, "")
-      print
-      exit
-    }
-  ' "$SECRETS"
-}
 
 # Issue a Tasmota /cm command. Echoes response body. On minimal builds, most commands
 # return {"Command":"Unknown",...} — that is a valid HTTP 200, so callers must inspect
@@ -226,15 +216,19 @@ PY
 # on site can reach its fallback AP. Tasmota's /dl dump is XOR-obfuscated (byte i ^=
 # 0x5A + i, from i = 2); its settings text pool stores STASSID1, STASSID2, STAPWD1,
 # STAPWD2 back to back as NUL-terminated strings, so a password sits two entries after
-# its SSID. The password goes through the environment, not argv.
+# its SSID. esphome-secrets.sh writes every value as a JSON string (a YAML double-quoted
+# scalar), so json.loads reads it back exactly.
 verify_wifi_in_backup() {
-  WIFI_SSID="$(secret wifi_ssid)" WIFI_PASSWORD="$(secret wifi_password)" \
-    python3 - "$1" <<'PY'
-import os, sys
+  python3 - "$1" "$SECRETS" <<'PY'
+import json, re, sys
 buf = bytearray(open(sys.argv[1], "rb").read())
 for i in range(2, len(buf)):
     buf[i] ^= (0x5A + i) & 0xFF
-ssid, pw = os.environ["WIFI_SSID"].encode(), os.environ["WIFI_PASSWORD"].encode()
+secrets = {
+    m[1]: json.loads(m[2])
+    for m in re.finditer(r'^(\w+): (".*")$', open(sys.argv[2], encoding="utf-8").read(), re.M)
+}
+ssid, pw = secrets.get("wifi_ssid", "").encode(), secrets.get("wifi_password", "").encode()
 if not ssid or not pw:
     sys.exit("wifi_ssid / wifi_password missing from secrets.yaml")
 strings = bytes(buf).split(b"\0")
@@ -251,17 +245,14 @@ PY
 # --- 0. pre-flight ---------------------------------------------------------
 need curl
 need gzip
-need awk
 need python3
 need nix
 
 [[ -f "$YAML"    ]] || die "ESPHome config not found: $YAML"
-[[ -f "$SECRETS" ]] || die "secrets.yaml not found: $SECRETS"
+[[ -f "$SECRETS" ]] || die "secrets.yaml not found: $SECRETS (write it with $(dirname "$0")/esphome-secrets.sh)"
 
-TASMOTA_USER="${TASMOTA_USER:-$(secret tasmota_user)}"
-TASMOTA_PASS="${TASMOTA_PASS:-$(secret tasmota_password)}"
-[[ -n "$TASMOTA_USER" ]] || die "tasmota_user missing from secrets.yaml (or set TASMOTA_USER)"
-[[ -n "$TASMOTA_PASS" ]] || die "tasmota_password missing from secrets.yaml (or set TASMOTA_PASS)"
+[[ -n "${TASMOTA_USER:-}" ]] || die "set TASMOTA_USER to the running Tasmota's web user"
+[[ -n "${TASMOTA_PASS:-}" ]] || die "set TASMOTA_PASS to the running Tasmota's web password"
 
 log "Step 0/5: pre-flight"
 MODE=$(device_mode)
@@ -296,7 +287,7 @@ case "$MODE" in
     printf 'backup saved: %s (%s bytes)\n' "$backup" "$(stat -c '%s' "$backup")"
     if [[ "${SKIP_WIFI_CHECK:-0}" != 1 ]]; then
       verify_wifi_in_backup "$backup" \
-        || die "Wi-Fi credentials unverified; fix secrets.yaml (SKIP_WIFI_CHECK=1 if the unit moves networks)"
+        || die "Wi-Fi credentials unverified; fix the clan vars esphome-<loc>/wifi_* and re-run esphome-secrets.sh (SKIP_WIFI_CHECK=1 if the unit moves networks)"
     fi
     ;;
   minimal)

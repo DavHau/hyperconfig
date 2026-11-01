@@ -8,8 +8,11 @@
 #
 # Serves GET /adv and POST /rec/<kid> on TCP port 7654 (clevis URL:
 # http://<device>:7654). The private JWKs come from the device's gitignored
-# secrets.yaml; create them with ./tang-keygen.sh, check a running device with
-# ./tang-check.sh. Component source and design notes: components/tang/.
+# secrets.yaml, written by ./esphome-secrets.sh from the clan vars
+# esphome-<loc>/tang_exchange_key and tang_signing_key (generator in
+# modules/nixos/esphome-secrets.nix, which also keeps the advertisement and
+# signing thumbprint as public vars tang_adv / tang_thp). Check a running device
+# with ./tang-check.sh. Component source and design notes: components/tang/.
 #
 # The `path:` is resolved against the *device* file's directory (ESPHome does not
 # rebase paths inside packages), so this works for every

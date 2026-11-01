@@ -30,6 +30,7 @@
     ../../modules/nixos/vault-nfs-client.nix
     ../../modules/nixos/router-ais.nix
     ../../modules/nixos/router-cm-beryl.nix
+    ../../modules/nixos/esphome-secrets.nix
     ../../modules/nixos/disk-hygiene
     ../../modules/nixos/rust-build-cache.nix
     ../../modules/nixos/cloudflare-warp

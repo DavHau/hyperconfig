@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Turn tang-keygen.sh's secrets.yaml entries into host_config.h for host_server.
+"""Turn the tang private JWKs into host_config.h for host_server.
 
 Uses the component's own build-time code (components/tang/jose.py): the same key
 validation, thumbprints and advertisement signing that to_code() runs, so the
@@ -7,12 +7,11 @@ host server serves what the firmware would. Also writes the advertisement to
 <out-dir>/adv.jws and the public signing JWK to <out-dir>/sig.pub.jwk for
 `jose jws ver`, and the kids to <out-dir>/kids.txt.
 
-    gen_host_config.py <secrets.yaml> <out-dir>
+    gen_host_config.py <exchange.jwk> <signing.jwk> <out-dir>
 """
 
 import json
 import pathlib
-import re
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -22,11 +21,11 @@ from jose import build_advertisement, thumbprints, validate_private_ec_jwk  # no
 
 
 def main():
-    secrets, out = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
-    entries = dict(re.findall(r"^(tang_\w+): '(.*)'$", secrets.read_text(), re.M))
-    exc, crv, d = validate_private_ec_jwk(entries["tang_exchange_key"])
+    exc_file, sig_file, out = map(pathlib.Path, sys.argv[1:4])
+    # Passed as the JSON strings !secret hands the component.
+    exc, crv, d = validate_private_ec_jwk(exc_file.read_text())
     assert crv == "P-256", crv
-    sig, _, _ = validate_private_ec_jwk(entries["tang_signing_key"])
+    sig, _, _ = validate_private_ec_jwk(sig_file.read_text())
 
     adv = build_advertisement([exc], sig)
     kid256, kid1 = thumbprints(crv, exc["x"], exc["y"])

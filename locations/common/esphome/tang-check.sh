@@ -14,7 +14,7 @@
 #   2. clevis encrypt tang: with <thp> given, clevis fetches <url>/adv/<thp> itself and
 #      trusts it only if <thp> signed it; without, the advertisement fetched in step 1 is
 #      trusted as-is ({"adv": ...}, trust on first use; compare the printed thp against
-#      tang-keygen.sh's output or the device's dump_config log).
+#      the clan var esphome-<loc>/tang_thp or the device's dump_config log).
 #   3. clevis decrypt, REPEAT times (default 1), printing the wall-clock time of each; the
 #      device logs the multiply time of each /rec at INFO ("P-256 multiply <n> us").
 #   4. Compare the decrypted secret with the original; exit 1 on any mismatch/failure.

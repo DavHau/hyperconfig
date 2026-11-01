@@ -59,7 +59,7 @@ def _validate_exchange_jwk(value):
         # with the soft watchdog armed.
         raise cv.Invalid(
             f"The exchange key must be on P-256 on the ESP8266, got {crv}. "
-            "Generate one with tang-keygen.sh"
+            "Generate one with modules/nixos/esphome-secrets.nix (clan vars)"
         )
     return {"jwk": jwk, "d": d, "kids": thumbprints(crv, jwk["x"], jwk["y"])}
 

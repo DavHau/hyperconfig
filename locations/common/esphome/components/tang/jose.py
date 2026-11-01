@@ -153,7 +153,7 @@ def validate_private_ec_jwk(value):
         if not isinstance(jwk.get(member), str):
             raise ValueError(
                 f"Key is missing the '{member}' member; a *private* JWK is required "
-                "(see tang-keygen.sh)"
+                "(see modules/nixos/esphome-secrets.nix)"
             )
     try:
         d = b64d(jwk["d"])

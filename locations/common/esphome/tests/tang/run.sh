@@ -3,8 +3,9 @@
 #
 # Usage: locations/common/esphome/tests/tang/run.sh
 #
-# 1. tang-keygen.sh makes a throwaway key pair; tangd (nixpkgs#tang) serves it and
-#    tang-check.sh round-trips a secret through stock clevis: the key format works.
+# 1. jose makes a throwaway key pair the way modules/nixos/esphome-secrets.nix does;
+#    tangd (nixpkgs#tang) serves it and tang-check.sh round-trips a secret through
+#    stock clevis: the key format works.
 # 2. gen_host_config.py runs the component's build-time code (jose.py) on those keys:
 #    the advertisement verifies with `jose jws ver`, the kids match `jose jwk thp`
 #    (S256 and S1), the payload carries exactly the one deriveKey key.
@@ -54,30 +55,31 @@ check() { if [[ $2 == "$3" ]]; then ok "$1"; else bad "$1 (expected '$2', got '$
 free_port() { "$python" -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])'; }
 wait_port() { for _ in $(seq 50); do curl -s -o /dev/null "http://127.0.0.1:$1/adv" && return 0; sleep 0.1; done; return 1; }
 
-echo "== keygen + stock tangd"
-"$esphome_dir/tang-keygen.sh" "$work/secrets.yaml" "$work/keys" >"$work/keygen.out"
-sig_thp=$(sed -n 's/^signing key thumbprint (clevis thp): //p' "$work/keygen.out")
-exc_kid=$(sed -n 's/^exchange key kid (S256): *//p' "$work/keygen.out")
-check "keygen: secrets file mode 0600" 600 "$(stat -c %a "$work/secrets.yaml")"
-check "keygen: tangd key dir holds both keys" 2 "$(find "$work/keys" -name '*.jwk' | wc -l)"
+echo "== jose keys + stock tangd"
+# The keys modules/nixos/esphome-secrets.nix generates for tang_exchange_key / tang_signing_key.
+mkdir "$work/keys"
+exc_jwk=$work/keys/exc.jwk
+sig_jwk=$work/keys/sig.jwk
+jose jwk gen -i '{"alg":"ECMR","crv":"P-256"}' -o "$exc_jwk"
+jose jwk gen -i '{"alg":"ES512"}' -o "$sig_jwk"
+sig_thp=$(jose jwk thp -i "$sig_jwk" -a S256)
 port=$(free_port)
 "$tangd" -l -p "$port" "$work/keys" >"$work/tangd.log" 2>&1 &
 pids+=($!)
 wait_port "$port"
 if "$esphome_dir/tang-check.sh" "http://127.0.0.1:$port" "$sig_thp" >"$work/check-tangd.out" 2>&1; then
-    ok "tang-check.sh against tangd with keygen keys (thp pinned)"
+    ok "tang-check.sh against tangd with jose keys (thp pinned)"
 else
     bad "tang-check.sh against tangd: $(cat "$work/check-tangd.out")"
 fi
 
 echo "== build-time advertisement (jose.py)"
-"$python" "$here/gen_host_config.py" "$work/secrets.yaml" "$work"
+"$python" "$here/gen_host_config.py" "$exc_jwk" "$sig_jwk" "$work"
 { read -r kid256; read -r kid1; read -r adv_thp; } <"$work/kids.txt"
-exc_jwk=$work/keys/$exc_kid.jwk
 if jose jws ver -i "$work/adv.jws" -k "$work/sig.pub.jwk"; then ok "jose jws ver accepts the advertisement"; else bad "jose jws ver"; fi
 check "kid S256 matches jose jwk thp" "$(jose jwk thp -i "$exc_jwk" -a S256)" "$kid256"
 check "kid S1 matches jose jwk thp" "$(jose jwk thp -i "$exc_jwk" -a S1)" "$kid1"
-check "signing thumbprint matches keygen" "$sig_thp" "$adv_thp"
+check "signing thumbprint matches jose jwk thp" "$sig_thp" "$adv_thp"
 jose fmt -j "$work/adv.jws" -g payload -y -o- >"$work/payload.json"
 check "payload: one deriveKey key, the exchange key" "$kid256" \
     "$(jose jwk use -i "$work/payload.json" -r -u deriveKey -o- | jose jwk thp -i- -a S256)"
