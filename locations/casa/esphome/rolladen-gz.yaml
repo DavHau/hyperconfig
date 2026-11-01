@@ -13,6 +13,9 @@
 #   DEVICE_IP=localhost:8031 EXPECTED_HOSTNAME_PREFIX=gaestezimmer \
 #     locations/common/esphome/tasmota-to-esphome.sh locations/casa/esphome/rolladen-gz.yaml
 # Later updates: `esphome upload --device localhost rolladen-gz.yaml` through the same tunnel.
+# Tang server (../../common/esphome/tang.yaml, port 7654) for the NAS' clevis unlock; check it
+# through the tunnel with `-L 7654:192.168.20.31:7654` and
+#   ../../common/esphome/tang-check.sh http://localhost:7654 <thp>
 
 substitutions:
   name: rolladen-gz
@@ -22,3 +25,6 @@ substitutions:
 
 packages:
   generic: !include ../../common/esphome/gosund-sw9.yaml
+  # Tang server for the NAS' clevis unlock; needs tang_exchange_key / tang_signing_key in
+  # secrets.yaml (../../common/esphome/tang-keygen.sh secrets.yaml).
+  tang: !include ../../common/esphome/tang.yaml

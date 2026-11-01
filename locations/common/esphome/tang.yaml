@@ -1,0 +1,33 @@
+# Tang server (clevis "tang" pin) on an ESP8266 ESPHome device: optional package.
+#
+# Include it from a device file next to the gosund-sw9 package:
+#
+#   packages:
+#     generic: !include ../../common/esphome/gosund-sw9.yaml
+#     tang: !include ../../common/esphome/tang.yaml
+#
+# Serves GET /adv and POST /rec/<kid> on TCP port 7654 (clevis URL:
+# http://<device>:7654). The private JWKs come from the device's gitignored
+# secrets.yaml; create them with ./tang-keygen.sh, check a running device with
+# ./tang-check.sh. Component source and design notes: components/tang/.
+#
+# The `path:` is resolved against the *device* file's directory (ESPHome does not
+# rebase paths inside packages), so this works for every
+# locations/<location>/esphome/<device>.yaml.
+
+external_components:
+  - source:
+      type: local
+      path: ../../common/esphome/components
+    components: [tang]
+
+tang:
+  port: 7654
+  exchange_key: !secret tang_exchange_key
+  signing_key: !secret tang_signing_key
+  multiply_time:
+    name: Tang multiply time
+  rec_ok:
+    name: Tang recoveries served
+  rec_fail:
+    name: Tang recoveries refused
