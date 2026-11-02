@@ -43,10 +43,10 @@
     nil.url = "github:oxalica/nil";
     nil.inputs.nixpkgs.follows = "nixpkgs";
 
-    # Local nix build with parallel chunked substituter downloads
-    # (parallel-downloads bookmark; see modules/nixos/nix-parallel-downloads.nix).
+    # Nix with parallel chunked substituter downloads (DavHau/nix branch
+    # parallel-downloads; see modules/nixos/nix-parallel-downloads.nix).
     # nix.url = "https://flakehub.com/f/NixOS/nix/2.*.*.tar.gz";
-    nix.url = "git+file:///home/grmpf/projects/nix?ref=parallel-downloads&shallow=1";
+    nix.url = "github:DavHau/nix/parallel-downloads";
     # nix builds on its own pinned nixpkgs: against nixpkgs 2026-09-22
     # (boost 1.91) its URL-parsing unit tests fail (IPv6 cases).
     nix.inputs.nixpkgs-23-11.follows = "nixpkgs";
@@ -84,10 +84,6 @@
 
     srvos.url = "github:nix-community/srvos";
     srvos.inputs.nixpkgs.follows = "nixpkgs";
-
-    vibepn.url = "git+file:///home/grmpf/projects/VibePN";
-    vibepn.inputs.nixpkgs.follows = "nixpkgs";
-    vibepn.inputs.clan-core.follows = "clan-core";
 
     # nether.url = "github:Lassulus/nether";
     # nether.inputs.nixpkgs.follows = "nixpkgs";
@@ -131,9 +127,7 @@
 
     sbox.url = "github:DavHau/sbox";
 
-    # DavHau's fork (branch prune-stale-auto-roots). Locked to the local
-    # checkout via `nix flake lock --override-input fast-nix-gc
-    # 'git+file:///home/grmpf/synced/projects/fast-nix-gc?ref=prune-stale-auto-roots'`.
+    # DavHau's fork (branch prune-stale-auto-roots).
     fast-nix-gc.url = "github:DavHau/fast-nix-gc/prune-stale-auto-roots";
     fast-nix-gc.inputs.nixpkgs.follows = "nixpkgs";
 
@@ -146,18 +140,15 @@
     llm-agents.inputs.flake-parts.follows = "flake-parts";
     llm-agents.inputs.systems.follows = "systems";
 
-    afk.url = "git+file:///home/grmpf/synced/projects/afk?rev=4e3d6ac33f57fa25aa493e7c6ca3996803f7099f";
+    afk.url = "github:DavHau/afk/4e3d6ac33f57fa25aa493e7c6ca3996803f7099f";
     afk.inputs.nixpkgs.follows = "nixpkgs";
     afk.inputs.llm-agents.follows = "llm-agents";
 
-    # ntop: nix-native htop (live builds, transfers, store, remotes) from the
-    # local checkout. git+file: rather than path: — the worktree carries a
-    # ~520M cargo target/ that a path: input would copy into the store on
-    # every eval, while git+file honours .gitignore and still picks up
-    # uncommitted work. Price: while that checkout is dirty nix refuses to
-    # write a lock entry for it (and thus to rewrite flake.lock at all), so
-    # commit there before re-locking here.
-    ntop.url = "git+file:///home/grmpf/synced/projects/ntop";
+    # ntop: nix-native htop (live builds, transfers, store, remotes).
+    # Every input is fetchable (no git+file:): som's nightly nixpkgs bump
+    # (machines/som) evaluates the fleet from GitHub; local work goes in
+    # with --override-input.
+    ntop.url = "github:DavHau/ntop";
     ntop.inputs.nixpkgs.follows = "nixpkgs";
 
     wrappers.url = "github:lassulus/wrappers";

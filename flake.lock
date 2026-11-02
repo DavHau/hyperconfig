@@ -14,16 +14,16 @@
       "locked": {
         "lastModified": 1792925664,
         "narHash": "sha256-u47FF3Jd+1Jxxh1+Z/56JOxyiwb4Umgph9iIws4bDxU=",
-        "ref": "master",
+        "owner": "DavHau",
+        "repo": "afk",
         "rev": "4e3d6ac33f57fa25aa493e7c6ca3996803f7099f",
-        "revCount": 51,
-        "type": "git",
-        "url": "file:///home/grmpf/synced/projects/afk"
+        "type": "github"
       },
       "original": {
+        "owner": "DavHau",
+        "repo": "afk",
         "rev": "4e3d6ac33f57fa25aa493e7c6ca3996803f7099f",
-        "type": "git",
-        "url": "file:///home/grmpf/synced/projects/afk"
+        "type": "github"
       }
     },
     "base16": {
@@ -392,11 +392,10 @@
       "locked": {
         "lastModified": 1792124652,
         "narHash": "sha256-Am9H4O18QFHXOIRr0IROljltq4trObHcyabh6YxG+hc=",
-        "ref": "prune-stale-auto-roots",
+        "owner": "DavHau",
+        "repo": "fast-nix-gc",
         "rev": "75f3fd88373edf6048970145de897eb9810fee88",
-        "revCount": 216,
-        "type": "git",
-        "url": "file:///home/grmpf/synced/projects/fast-nix-gc"
+        "type": "github"
       },
       "original": {
         "owner": "DavHau",
@@ -1180,17 +1179,16 @@
       "locked": {
         "lastModified": 1793006458,
         "narHash": "sha256-iCR26hle4wYiXeNiQwlYWQ/reu5xIwtnfcFuMyC13Us=",
-        "ref": "parallel-downloads",
+        "owner": "DavHau",
+        "repo": "nix",
         "rev": "a5ef70a406403f5f882e7944efc25a95d2868fe3",
-        "shallow": true,
-        "type": "git",
-        "url": "file:///home/grmpf/projects/nix"
+        "type": "github"
       },
       "original": {
+        "owner": "DavHau",
         "ref": "parallel-downloads",
-        "shallow": true,
-        "type": "git",
-        "url": "file:///home/grmpf/projects/nix"
+        "repo": "nix",
+        "type": "github"
       }
     },
     "nix-darwin": {
@@ -1663,14 +1661,15 @@
       "locked": {
         "lastModified": 1788076816,
         "narHash": "sha256-UCXCgMIiyoNBRIRHZlXa2eN0IhJouJAQ1jlt7WhgvZI=",
+        "owner": "DavHau",
+        "repo": "ntop",
         "rev": "e54a8a9309e1bd1554529f6182fd1b1c224158b4",
-        "revCount": 38,
-        "type": "git",
-        "url": "file:///home/grmpf/synced/projects/ntop"
+        "type": "github"
       },
       "original": {
-        "type": "git",
-        "url": "file:///home/grmpf/synced/projects/ntop"
+        "owner": "DavHau",
+        "repo": "ntop",
+        "type": "github"
       }
     },
     "nur": {
@@ -1889,7 +1888,6 @@
         "stylix": "stylix",
         "systems": "systems_9",
         "teamclaude": "teamclaude",
-        "vibepn": "vibepn",
         "wrappers": "wrappers_2"
       }
     },
@@ -1897,10 +1895,10 @@
       "locked": {
         "lastModified": 1791436422,
         "narHash": "sha256-YUnrVup2we9FUbEBYt/F87Bc6MWAVBaI43LJOlt9lB0=",
+        "owner": "DavHau",
+        "repo": "sbox",
         "rev": "b0652b3249cf7db364a386c21a3393ec23ab0350",
-        "revCount": 114,
-        "type": "git",
-        "url": "file:///home/grmpf/synced/projects/sbox"
+        "type": "github"
       },
       "original": {
         "owner": "DavHau",
@@ -2499,28 +2497,6 @@
         "owner": "pyproject-nix",
         "repo": "uv2nix",
         "type": "github"
-      }
-    },
-    "vibepn": {
-      "inputs": {
-        "clan-core": [
-          "clan-core"
-        ],
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1784447049,
-        "narHash": "sha256-QPT71IFt1Zjyh9o4hnh5ol5CqhQFJb3dUzUrNsLZJzk=",
-        "rev": "28c83ec15ebd671a67c6902dfa9a92f5d9672722",
-        "revCount": 120,
-        "type": "git",
-        "url": "file:///home/grmpf/projects/VibePN"
-      },
-      "original": {
-        "type": "git",
-        "url": "file:///home/grmpf/projects/VibePN"
       }
     },
     "voxtype": {
