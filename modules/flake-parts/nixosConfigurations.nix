@@ -73,10 +73,11 @@ in {
             installer.tags = [ "wifi-home" ];
             cm-pi.tags = [ "wifi-home" ];
             som.deploy.targetHost = "root@som.d";
-            # `clan machines update edi` builds on the machine running it and
-            # copies the closure over; edi never evaluates or builds the
-            # flake itself.
+            # `clan machines update edi`/`sgp` builds on the machine running
+            # it and copies the closure over; neither machine evaluates or
+            # builds the flake itself (sgp has 1 vCPU, 1G RAM).
             edi.deploy.buildHost = "localhost";
+            sgp.deploy.buildHost = "localhost";
             # joy.deploy.targetHost = "joy.dave";
           };
 
