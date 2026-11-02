@@ -37,6 +37,7 @@
     ../../modules/nixos/houses-grmpf.nix
     # nix-housing needs Landlock ABI 9 (Linux >= 7.1); 6.18 LTS only has ABI 7.
     ../../modules/nixos/kernel-latest-zfs.nix
+    ../../modules/nixos/oomd.nix
     ./disko.nix
   ];
 
