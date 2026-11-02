@@ -1,7 +1,8 @@
 # The publish module in local mode, end to end, on one machine: dex (the
-# sso module's local issuer) with three accounts, alice and bob owning one
-# agent each and carol none, and echo apps standing in for what alice
-# publishes (hermes itself does not run: its units are off). Everything is
+# sso module's local issuer) with three accounts, alice owning one agent,
+# bob two (bob, and dan, which publishes nothing) and carol none, and echo
+# apps standing in for what alice publishes (hermes itself does not run:
+# its units are off). Everything is
 # reached the way a browser on the host does, at
 # http://<port>.<agent>.hermes.localhost:8473/.
 #
@@ -21,7 +22,9 @@
 #   sockets nginx dials, or the login's socket; a squatter on alice's port
 #   gets nothing and the visitor gets 502,
 # - the rendered skill shows the local URLs and the port table; no ACME
-#   certificate and no DNS record in local mode.
+#   certificate and no DNS record in local mode,
+# - dan opted out (publish.enable = false): no port sockets, no skill, not
+#   in the table.
 { pkgs, self }:
 let
   inherit (pkgs) lib;
@@ -37,6 +40,8 @@ let
   alicePrivate2 = 33101;
   alicePublic = 33150;
   bobPrivate = 33200;
+  # uid 1003, opted out: would be 33300-.
+  danPrivate = 33300;
   # extraPortWindows below: uid 1001's 30010-30014 private, 30015- public.
   alicePublicExtra = 30015;
   urlOf = p: agent: "http://${toString p}.${agent}.${domain}:${toString port}";
@@ -65,6 +70,10 @@ pkgs.testers.runNixOSTest (
         agents = {
           alice.uid = 1001;
           bob.uid = 1002;
+          dan = {
+            uid = 1003;
+            publish.enable = false;
+          };
         };
         exposure.enable = true;
         sso = {
@@ -72,8 +81,9 @@ pkgs.testers.runNixOSTest (
           accounts = {
             alice = "alice";
             bob = "bob";
+            dan = "bob";
           };
-          clients = lib.genAttrs [ "hermes-alice" "hermes-bob" "hermes-serve" ] (id: {
+          clients = lib.genAttrs [ "hermes-alice" "hermes-bob" "hermes-dan" "hermes-serve" ] (id: {
             secretFile = "${secrets}/${id}";
           });
           dex.users = lib.genAttrs [ "alice" "bob" "carol" ] (account: {
@@ -98,7 +108,7 @@ pkgs.testers.runNixOSTest (
           "hermes-agent-${agent}"
           "hermes-dashboard-${agent}"
           "hermes-python-venv-${agent}"
-        ]) [ "alice" "bob" ]) (_: { enable = false; }))
+        ]) [ "alice" "bob" "dan" ]) (_: { enable = false; }))
 
         # alice's apps.
         (lib.listToAttrs (
@@ -135,7 +145,7 @@ pkgs.testers.runNixOSTest (
             };
             script = ''
               install -d -m 700 ${secrets}
-              for id in hermes-alice hermes-bob hermes-serve; do
+              for id in hermes-alice hermes-bob hermes-dan hermes-serve; do
                 echo -n "client-secret-$id" > ${secrets}/$id
               done
               echo -n 0123456789abcdef0123456789abcdef > ${secrets}/serve-cookie
@@ -154,7 +164,8 @@ pkgs.testers.runNixOSTest (
     testScript = ''
       import json
 
-      skill_dirs = ${builtins.toJSON nodes.machine.services.hyperhermes.skillDirs}
+      skill_dirs = ${builtins.toJSON nodes.machine.services.hyperhermes.agents.alice.skillDirs}
+      dan_skill_dirs = ${builtins.toJSON nodes.machine.services.hyperhermes.agents.dan.skillDirs}
       certs = ${builtins.toJSON (lib.attrNames nodes.machine.security.acme.certs)}
       dns_records = ${builtins.toJSON nodes.machine.services.hyperhermes.exposure.dnsRecords}
 
@@ -306,6 +317,11 @@ pkgs.testers.runNixOSTest (
           assert "| bob | 33200-33249, 30020-30024 | 33250-33299, 30025-30029 |" in skill, skill
           assert "https" not in skill and "TLS" not in skill, skill
           assert certs == [] and dns_records == [], (certs, dns_records)
+
+      with subtest("dan opted out: no ports, no skill"):
+          assert not any("serve-ports" in d for d in dan_skill_dirs), dan_skill_dirs
+          machine.fail("test -e /run/hermes-serve/${toString danPrivate}.sock")
+          assert "| dan |" not in skill, skill
     '';
   }
 )

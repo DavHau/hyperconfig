@@ -31,6 +31,8 @@ in
     ../../modules/nixos/vault-nfs-client.nix
     ../../modules/nixos/users/hsjobeki-vault.nix
     ./hermes-agents.nix
+    # The nixpkgs bump: its pipeline and bumper, its agent.
+    ./bumper.nix
     # Claude subscription OAuth for every agent (enabled in ./hermes-agents.nix).
     inputs.hyperhermes.nixosModules.claude-auth
     ../../modules/nixos/public-ipv6-token.nix
@@ -328,6 +330,7 @@ in
         b3x = 15;
         joe = 16;
         thaigersprint = 17;
+        # 18: bumper (./bumper.nix), not in hermes-agents-data.nix.
       };
       # Container names are capped at 11 chars (nspawn veth names,
       # hyperhermes container-slots); longer agent names get a short one
@@ -387,7 +390,14 @@ in
     ]
     ++ lib.optionals (mullvadStage >= 2) ([ "searx" ] ++ agents);
     dns.services = lib.optionals (mullvadStage >= 2) (
-      [ "searx" ] ++ lib.concatMap hermesLib.agentUnits agents
+      [ "searx" ]
+      # An agent without the web tools (bumper) has no Camofox unit.
+      ++ lib.concatMap (
+        a:
+        lib.filter (
+          u: u != "hermes-camofox-${a}" || config.services.hyperhermes.agents.${a}.browser.enable
+        ) (hermesLib.agentUnits a)
+      ) agents
     );
     # The LAN's public /64: on-link, and inference.p0.contact lives on it
     # (../../modules/nixos/virtualisation.nix). p0 is our own authenticated

@@ -12,6 +12,21 @@ let
   envFile = "/var/lib/hermes-searxng/env";
 in
 {
+  # web_search's backend, per agent (./options.nix says why not host-wide).
+  options.services.hyperhermes.agents = lib.mkOption {
+    type = lib.types.attrsOf (
+      lib.types.submodule (
+        { config, ... }:
+        {
+          config = lib.mkIf (cfg.browser.enable && config.browser.enable) {
+            environment.SEARXNG_URL = lib.mkDefault "http://127.0.0.1:${toString port}";
+            settings.web.search_backend = lib.mkDefault "searxng";
+          };
+        }
+      )
+    );
+  };
+
   config = lib.mkIf cfg.browser.enable {
     services.searx = {
       enable = true;
@@ -82,12 +97,6 @@ in
       # warns when it is missing. The file only has to exist (the module
       # writes none for empty settings), so it restates one default.
       limiterSettings.botdetection.ipv4_prefix = 32;
-    };
-
-    # Env and settings stay operator-overridable.
-    services.hyperhermes = {
-      environment.SEARXNG_URL = lib.mkDefault "http://127.0.0.1:${toString port}";
-      settings.web.search_backend = lib.mkDefault "searxng";
     };
 
     # SearXNG exits at startup while server.secret_key is the upstream

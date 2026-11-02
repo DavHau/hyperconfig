@@ -30,7 +30,7 @@ let
           _: fwd:
           ownerOnlyRules (fwd.portFor user) user
           + ownerOnlyRules "$((${toString fwd.backendBase} + $(id -u ${user})))" user
-        ) cfg.forwards
+        ) (lib.filterAttrs (_: fwd: fwd.enabledFor user) cfg.forwards)
       ) cfg.agents
     )
   );

@@ -34,11 +34,21 @@ let
   };
 in
 {
-  config = lib.mkIf (cfg.browser.enable && cfg.browser.ocr.baseUrl != null) {
-    services.hyperhermes = {
-      settings.file_tools.hosted_ocr_url = cfg.browser.ocr.baseUrl;
-      skillDirs = [ "${skill}/share/skills" ];
-      extraPackages = [ ocrCli ];
-    };
+  # Per agent (./options.nix says why not host-wide).
+  options.services.hyperhermes.agents = lib.mkOption {
+    type = lib.types.attrsOf (
+      lib.types.submodule (
+        { config, ... }:
+        {
+          config =
+            lib.mkIf (cfg.browser.enable && cfg.browser.ocr.baseUrl != null && config.browser.enable)
+              {
+                settings.file_tools.hosted_ocr_url = cfg.browser.ocr.baseUrl;
+                skillDirs = [ "${skill}/share/skills" ];
+                extraPackages = [ ocrCli ];
+              };
+        }
+      )
+    );
   };
 }

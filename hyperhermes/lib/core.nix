@@ -20,7 +20,8 @@ rec {
   workspace = user: "${hermesDir user}/workspace";
 
   # The long-running system units that run as the agent's uid: core's
-  # gateway and dashboard, and the browser feature's Camofox server.
+  # gateway and dashboard, and the browser feature's Camofox server (which
+  # an agent with browser.enable = false does not have).
   agentUnits = user: [
     "hermes-agent-${user}"
     "hermes-dashboard-${user}"

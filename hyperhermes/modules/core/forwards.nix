@@ -16,11 +16,16 @@
 let
   cfg = config.services.hyperhermes;
 
-  # Static top-level option keys only (see agents.nix).
+  # Static top-level option keys only (see agents.nix). An agent gets the
+  # forwards whose enabledFor admits it.
   forEachForward =
     f:
     lib.mkMerge (
-      lib.concatLists (lib.mapAttrsToList (user: _: lib.mapAttrsToList (f user) cfg.forwards) cfg.agents)
+      lib.concatLists (
+        lib.mapAttrsToList (
+          user: _: lib.mapAttrsToList (f user) (lib.filterAttrs (_: fwd: fwd.enabledFor user) cfg.forwards)
+        ) cfg.agents
+      )
     );
 in
 {

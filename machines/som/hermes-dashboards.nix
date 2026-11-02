@@ -35,5 +35,6 @@
     joe = "dave";
     thaigersprint = "dave";
     momentum = "momentum";
+    bumper = "dave";
   };
 }

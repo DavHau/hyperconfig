@@ -1,4 +1,5 @@
-# Evaluation-only check of teamclaude, claude-auth, desktop and rea: each
+# Evaluation-only check of teamclaude, claude-auth, desktop, rea and the
+# browser's per-agent opt-out: each
 # module evaluates on a plain NixOS system (no clan; nixosModules.clan
 # imported anyway, where it must do nothing) with its secrets as runtime
 # path strings, and produces what its header promises. A Nix path literal
@@ -123,6 +124,26 @@ let
   reaPackage = rea.config.services.hyperhermes.rea.package;
   reaServer = (agentCfg rea "alice").settings.mcp_servers.rea;
 
+  # bob opts out of the web tools; alice keeps them.
+  browser = evalWith [
+    self.nixosModules.core
+    withAgents
+    self.nixosModules.browser
+    {
+      services.hyperhermes = {
+        browser = {
+          enable = true;
+          ocr.baseUrl = "http://ocr.example.org:8098";
+        };
+        agents.bob.browser.enable = false;
+      };
+    }
+  ];
+  browserUnits = sys: name: [
+    (sys.config.systemd.services ? "hermes-camofox-${name}")
+    (sys.config.systemd.sockets ? "hermes-camofox-fwd-${name}")
+  ];
+
   # Everything imported, nothing enabled: no agent, no launcher.
   idle = evalWith [ self.nixosModules.default ];
 
@@ -202,6 +223,40 @@ let
       && lib.any (p: p.name == "rea-${reaPackage.version}") (agentCfg rea "alice").extraPackages;
     rea-other-agent-untouched =
       !((agentCfg rea "bob").settings ? mcp_servers) && (agentCfg rea "bob").skillDirs == [ ];
+
+    browser-evaluates = evaluates browser && failedAssertions browser == [ ];
+    browser-agent-gets-the-tools =
+      let
+        a = agentCfg browser "alice";
+      in
+      a.settings.browser.cloud_provider == "camofox"
+      && a.settings.web.search_backend == "searxng"
+      && a.settings.plugins.enabled == [ "web-local-extract" ]
+      && a.settings.file_tools.hosted_ocr_url == "http://ocr.example.org:8098"
+      && a.environment ? SEARXNG_URL
+      && lib.length a.skillDirs == 2
+      && lib.any (p: p.name == "ocr") a.extraPackages
+      && browserUnits browser "alice" == [
+        true
+        true
+      ];
+    browser-opted-out-agent-gets-none =
+      let
+        b = agentCfg browser "bob";
+      in
+      lib.all (k: !(b.settings ? ${k})) [
+        "browser"
+        "web"
+        "plugins"
+        "file_tools"
+      ]
+      && !(b.environment ? SEARXNG_URL)
+      && b.skillDirs == [ ]
+      && b.extraPackages == [ ]
+      && browserUnits browser "bob" == [
+        false
+        false
+      ];
 
     idle-evaluates = evaluates idle && failedAssertions idle == [ ];
     idle-adds-nothing =

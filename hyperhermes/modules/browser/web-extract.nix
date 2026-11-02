@@ -38,20 +38,31 @@ let
     substituteInPlace $out/__init__.py --replace-fail '@python@' '${python}/bin/python3'
     substituteInPlace $out/fetch.py --replace-fail '@camoufox@' '${camoufox}/lib/camoufox/camoufox'
   '';
+  browserAgents = lib.filterAttrs (_: a: a.browser.enable) cfg.agents;
 in
 {
-  config = lib.mkIf cfg.browser.enable {
-    services.hyperhermes.settings = {
-      # User plugins load only when listed; the list concatenates with
-      # an operator's entries.
-      plugins.enabled = [ "web-local-extract" ];
-      web.extract_backend = lib.mkDefault "local-extract";
-      # On failure hermes would retry through free third-party services
-      # (Exa, Parallel, Firecrawl), sending the agent's URLs and queries
-      # off-host. SearXNG and the local extractor cover both paths.
-      web.keyless_rescue = lib.mkDefault false;
-    };
+  # Per agent (./options.nix says why not host-wide).
+  options.services.hyperhermes.agents = lib.mkOption {
+    type = lib.types.attrsOf (
+      lib.types.submodule (
+        { config, ... }:
+        {
+          config.settings = lib.mkIf (cfg.browser.enable && config.browser.enable) {
+            # User plugins load only when listed; the list is a union with
+            # the host's and the operator's entries (core's settingsFor).
+            plugins.enabled = [ "web-local-extract" ];
+            web.extract_backend = lib.mkDefault "local-extract";
+            # On failure hermes would retry through free third-party services
+            # (Exa, Parallel, Firecrawl), sending the agent's URLs and queries
+            # off-host. SearXNG and the local extractor cover both paths.
+            web.keyless_rescue = lib.mkDefault false;
+          };
+        }
+      )
+    );
+  };
 
+  config = lib.mkIf cfg.browser.enable {
     # Hermes discovers user plugins only under $HERMES_HOME/plugins. The
     # link is renewed before every start, after core's preStart created
     # the directory.
@@ -60,7 +71,7 @@ in
         "hermes-agent-${user}".preStart = lib.mkAfter ''
           ln -sfn ${plugin} ${hlib.stateDir user}/.hermes/plugins/web-local-extract
         '';
-      }) cfg.agents
+      }) browserAgents
     );
   };
 }

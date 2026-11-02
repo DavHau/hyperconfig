@@ -1,6 +1,25 @@
 # Options of the agents' web tools (./default.nix).
 { lib, ... }:
 {
+  # Per agent, with the host's browser.enable: on for every agent unless it
+  # opts out. An agent that opts out gets none of it: no Camofox server,
+  # port or key, no web_extract plugin, no web-access or ocr skill, no
+  # `ocr` CLI, and none of the web, browser or OCR keys in its
+  # config.yaml or .env. Those keys are per agent for that reason, so an
+  # operator overrides them per agent (agents.<name>.settings), where they
+  # win over these defaults.
+  options.services.hyperhermes.agents = lib.mkOption {
+    type = lib.types.attrsOf (
+      lib.types.submodule {
+        options.browser.enable = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = "Whether this agent gets the host's web tools (services.hyperhermes.browser).";
+        };
+      }
+    );
+  };
+
   options.services.hyperhermes.browser = with lib; {
     enable = mkEnableOption "the agents' web tools (search, extract, Camofox browser, OCR client)";
 

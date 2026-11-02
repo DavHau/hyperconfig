@@ -4,7 +4,8 @@
 # carry what differs per agent; the uids are in ./hermes-agents-data.nix,
 # which vit's GPU host reads too. Who signs in to which agent's dashboard,
 # and the front door: ./hermes-dashboards.nix. The brain:
-# ./hermes-inference.nix.
+# ./hermes-inference.nix. bumper, the nixpkgs-bump agent, is apart
+# (./bumper.nix): of the site shape below it has only the dashboard.
 #
 # Site shape on top of hyperhermes, per agent:
 #   - reader on /vault/parquet (`vault-ro`, ../../modules/nixos/vault-ids.nix),
@@ -88,6 +89,8 @@ in
     (lib.mapAttrs (_: a: { inherit (a) uid; }) data)
     (lib.mapAttrs (_: _: { wallet.enable = true; }) data)
     (lib.mapAttrs (_: _: { rea.enable = true; }) data)
+    # The gpu-host skill: the agents with an account on vit.
+    (lib.mapAttrs (_: _: { skillDirs = [ "${gpuSkill}/share/skills" ]; }) data)
     {
       # Account and description from users/stefan-vault.nix.
       stefan = { };
@@ -274,9 +277,9 @@ in
   # GPU jobs on vit, each agent as its own user with its own key.
   services.hyperhermes.sshKeyHosts = [ gpuHost ];
   # Every harness, not only hermes: spaces links it into each user's
-  # skill roots (pi, omp, claude-code) and hermes reads it as a root.
+  # skill roots (pi, omp, claude-code); hermes agents read it as a root
+  # (the agents above).
   spaces.agentHarnesses.skills = [ gpuSkill ];
-  services.hyperhermes.skillDirs = [ "${gpuSkill}/share/skills" ];
 
   # The agents' private /tmp, as in their own sessions
   # (../../modules/nixos/per-user-tmp).

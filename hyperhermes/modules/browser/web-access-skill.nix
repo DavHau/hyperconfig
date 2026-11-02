@@ -10,8 +10,9 @@
 #
 # Host-scoped: it names tools only this module sets up, so it is its own
 # skills root (a second entry in skills.external_dirs), not part of the
-# host's other skill roots. Its name must stay unique across every root, hermes'
-# bundled skills included, or skill_view refuses both copies as
+# host's other skill roots, and only the agents with the web tools
+# (./options.nix) read it. Its name must stay unique across every root,
+# hermes' bundled skills included, or skill_view refuses both copies as
 # ambiguous.
 {
   config,
@@ -31,7 +32,16 @@ let
   };
 in
 {
-  config = lib.mkIf cfg.browser.enable {
-    services.hyperhermes.skillDirs = [ "${skill}/share/skills" ];
+  options.services.hyperhermes.agents = lib.mkOption {
+    type = lib.types.attrsOf (
+      lib.types.submodule (
+        { config, ... }:
+        {
+          config.skillDirs = lib.mkIf (cfg.browser.enable && config.browser.enable) [
+            "${skill}/share/skills"
+          ];
+        }
+      )
+    );
   };
 }

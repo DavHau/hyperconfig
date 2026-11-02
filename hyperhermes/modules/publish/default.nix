@@ -128,7 +128,9 @@
 }:
 let
   cfg = config.services.hyperhermes.publish;
-  agents = config.services.hyperhermes.agents;
+  # The agents that publish (agents.<name>.publish.enable, on by default);
+  # the others get no ports, hosts, certificate, DNS or skill.
+  agents = lib.filterAttrs (_: a: a.publish.enable) config.services.hyperhermes.agents;
   names = lib.attrNames agents;
   inherit (config.services.hyperhermes) exposure sso;
   inherit (exposure) domain;
@@ -315,6 +317,26 @@ let
   };
 in
 {
+  options.services.hyperhermes.agents = lib.mkOption {
+    type = lib.types.attrsOf (
+      lib.types.submodule (
+        { config, ... }:
+        {
+          options.publish.enable = lib.mkOption {
+            type = lib.types.bool;
+            default = true;
+            description = "Whether this agent publishes ports (services.hyperhermes.publish); off: no ports, hosts, certificate or serve-ports skill.";
+          };
+          # The skill's port table is the host's, so it is rendered here
+          # once and handed only to the agents that publish.
+          config.skillDirs = lib.mkIf (cfg.enable && config.publish.enable) [
+            "${skill}/share/skills"
+          ];
+        }
+      )
+    );
+  };
+
   options.services.hyperhermes.publish = {
     enable = lib.mkEnableOption "${toString (2 * portsPerKind)} published loopback ports per agent at <port>.<agent>.<domain>, ${toString portsPerKind} behind the owner's login, ${toString portsPerKind} public";
 
@@ -396,7 +418,7 @@ in
         # still guards a host that overrides the range.
         boot.kernel.sysctl."net.ipv4.ip_local_port_range" = lib.mkDefault "49152 65535";
 
-        services.hyperhermes.skillDirs = [ "${skill}/share/skills" ];
+        # The serve-ports skill: per agent, in the option above.
 
         # The client's callbacks, one per private host (../sso.nix).
         services.hyperhermes.sso.publishHosts = lib.genAttrs names (

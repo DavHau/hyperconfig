@@ -151,6 +151,16 @@ in
                 type = types.port;
                 description = "The owner's backend listens on backendBase + uid.";
               };
+              enabledFor = mkOption {
+                type = types.functionTo types.bool;
+                default = _: true;
+                defaultText = literalExpression "_: true";
+                description = ''
+                  Agent name -> whether that agent gets this forward (its
+                  socket, bridge and owner gates). A feature an agent opted
+                  out of passes its per-agent switch here.
+                '';
+              };
             };
           }
         );
@@ -281,7 +291,10 @@ in
         ++ lib.concatLists (
           lib.mapAttrsToList (name: fwd: [
             {
-              assertion = lib.count (u: fwd.portFor u == fwd.portFor user) (lib.attrNames cfg.agents) == 1;
+              assertion =
+                lib.count (u: fwd.portFor u == fwd.portFor user) (
+                  lib.filter fwd.enabledFor (lib.attrNames cfg.agents)
+                ) == 1;
               message = "services.hyperhermes: the ${name} port of ${user} (${toString (fwd.portFor user)}) collides with another agent's in its 1000-port window; widen the window in lib/core.nix.";
             }
             {
@@ -297,7 +310,7 @@ in
               assertion = fwd.backendBase + a.uid < hlib.ephemeralPortLow config.boot.kernel.sysctl;
               message = "services.hyperhermes: the ${name} backend of ${user} (${toString fwd.backendBase} + uid) must stay below the ephemeral port range (${toString (hlib.ephemeralPortLow config.boot.kernel.sysctl)}+); pick a lower uid or move the window in lib/core.nix.";
             }
-          ]) cfg.forwards
+          ]) (lib.filterAttrs (_: fwd: fwd.enabledFor user) cfg.forwards)
         )
       ) cfg.agents
     );

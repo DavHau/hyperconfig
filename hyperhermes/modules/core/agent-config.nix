@@ -15,20 +15,26 @@ rec {
   hermesPackage = cfg.package;
 
   # cfg.settings arrives fully merged, the agent's own settings go over
-  # it. One leaf is special: skills.external_dirs is the union of every
-  # skill root (host-wide and the agent's own skillDirs, then any list an
-  # operator set directly), not operator-wins. `lib.recursiveUpdate`
-  # replaces lists, so one list would otherwise drop the others.
+  # it. Two leaves are special, unions rather than operator-wins:
+  # skills.external_dirs (every skill root: host-wide and the agent's own
+  # skillDirs, then any list an operator set directly) and plugins.enabled
+  # (host-wide and per-agent features both list their plugins).
+  # `lib.recursiveUpdate` replaces lists, so one list would otherwise drop
+  # the others.
   settingsFor =
     acfg:
     let
       merged = lib.recursiveUpdate cfg.settings acfg.settings;
+      plugins = lib.unique ((cfg.settings.plugins.enabled or [ ]) ++ (acfg.settings.plugins.enabled or [ ]));
     in
-    lib.recursiveUpdate merged {
-      skills.external_dirs = lib.unique (
-        cfg.skillDirs ++ acfg.skillDirs ++ (merged.skills.external_dirs or [ ])
-      );
-    };
+    lib.recursiveUpdate merged (
+      {
+        skills.external_dirs = lib.unique (
+          cfg.skillDirs ++ acfg.skillDirs ++ (merged.skills.external_dirs or [ ])
+        );
+      }
+      // lib.optionalAttrs (plugins != [ ]) { plugins.enabled = plugins; }
+    );
 
   basePackages = with pkgs; [
     git

@@ -87,23 +87,39 @@ let
     exit 1
   '';
 
-  forEachUser = f: lib.mkMerge (lib.mapAttrsToList (user: _: f user) cfg.agents);
+  # The agents with the web tools (./options.nix).
+  forEachUser =
+    f:
+    lib.mkMerge (
+      lib.mapAttrsToList (user: _: f user) (lib.filterAttrs (_: a: a.browser.enable) cfg.agents)
+    );
 in
 {
+  # Per agent (./options.nix says why not host-wide).
+  options.services.hyperhermes.agents = lib.mkOption {
+    type = lib.types.attrsOf (
+      lib.types.submodule (
+        { config, ... }:
+        {
+          config.settings.browser = lib.mkIf (cfg.browser.enable && config.browser.enable) {
+            cloud_provider = lib.mkDefault "camofox";
+            # A stable per-agent userId: Camofox keeps that profile's cookies.
+            camofox.managed_persistence = lib.mkDefault true;
+            # Tab creation, which carries the first navigation, may take its
+            # route budget (60 s with the challenge wait) before it answers.
+            command_timeout = lib.mkDefault 65;
+          };
+        }
+      )
+    );
+  };
+
   config = lib.mkIf cfg.browser.enable {
     services.hyperhermes.forwards.camofox = {
       label = "Camofox";
       portFor = hlib.camofoxPortFor;
       backendBase = hlib.camofoxBackendBase;
-    };
-
-    services.hyperhermes.settings.browser = {
-      cloud_provider = lib.mkDefault "camofox";
-      # A stable per-agent userId: Camofox keeps that profile's cookies.
-      camofox.managed_persistence = lib.mkDefault true;
-      # Tab creation, which carries the first navigation, may take its
-      # route budget (60 s with the challenge wait) before it answers.
-      command_timeout = lib.mkDefault 65;
+      enabledFor = user: cfg.agents.${user}.browser.enable;
     };
 
     systemd.services = forEachUser (
@@ -199,8 +215,8 @@ in
       }
     );
 
-    systemd.tmpfiles.rules = lib.mapAttrsToList (
-      user: _: "d ${hlib.camofoxDir user} 0700 ${user} users - -"
-    ) cfg.agents;
+    systemd.tmpfiles.rules = lib.mapAttrsToList (user: _: "d ${hlib.camofoxDir user} 0700 ${user} users - -") (
+      lib.filterAttrs (_: a: a.browser.enable) cfg.agents
+    );
   };
 }
