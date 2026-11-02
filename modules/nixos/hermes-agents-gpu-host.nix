@@ -7,7 +7,7 @@
 # Per account: reader on /vault/parquet (`vault-ro`, unless the agent's data
 # entry says `vault = false`), linger (detached
 # jobs survive the ssh session), bash, and a writable python venv at
-# ~/.venv over a CUDA python set (torch etc. from cache.nixos-cuda.org),
+# ~/.venv over a CUDA python set (torch etc.),
 # first on PATH in login shells. The venv is --system-site-packages, so it
 # only holds what the agent pip-installs on top.
 {

@@ -34,8 +34,8 @@ let
     file = "address";
   };
 
-  # Same import as ./hermes-agents-gpu-host.nix, so llama-cpp comes from
-  # cache.nixos-cuda.org instead of a local CUDA build.
+  # Same import as ./hermes-agents-gpu-host.nix, so both share one llama-cpp
+  # CUDA build.
   pkgsCuda = import pkgs.path {
     inherit (pkgs.stdenv.hostPlatform) system;
     inherit (pkgs) overlays;

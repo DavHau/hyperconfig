@@ -43,8 +43,8 @@ let
     file = "address";
   };
 
-  # Same import as ../captchakraken-server.nix, so llama-cpp comes from
-  # cache.nixos-cuda.org instead of a local CUDA build.
+  # Same import as ../captchakraken-server.nix, so both share one llama-cpp
+  # CUDA build.
   pkgsCuda = import pkgs.path {
     inherit (pkgs.stdenv.hostPlatform) system;
     inherit (pkgs) overlays;

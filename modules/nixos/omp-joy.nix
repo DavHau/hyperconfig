@@ -5,9 +5,8 @@
   ...
 }: let
   sys = pkgs.stdenv.hostPlatform.system;
-  # llm-agents keeps upstream's own nixpkgs (see flake.nix), so both of these
-  # substitute straight from cache.numtide.com; joy's laptop must update fast
-  # and takes them as-is.
+  # llm-agents keeps upstream's own nixpkgs (see flake.nix); joy takes these
+  # packages as-is.
   agents = inputs.llm-agents.packages.${sys};
   # Upstream claude-desktop is a prebuilt Electron app. At GPU init its ANGLE
   # backend dlopens libEGL.so.1 -- the GLVND *dispatch* loader -- by soname.
@@ -17,8 +16,8 @@
   # renderer paints nothing -> the white window joy saw (verified on joy
   # 2026-07-29: "ANGLE Display::initialize error 12289: Could not dlopen
   # native EGL: libEGL.so.1"; gone once both dirs are on LD_LIBRARY_PATH).
-  # symlinkJoin + wrapProgram only mints a tiny wrapper -- the big Electron
-  # closure still substitutes from cache.numtide.com.
+  # symlinkJoin + wrapProgram only mints a tiny wrapper around the Electron
+  # closure.
   claude-desktop = pkgs.symlinkJoin {
     name = "claude-desktop-glwrapped";
     paths = [ agents.claude-desktop ];

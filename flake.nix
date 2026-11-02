@@ -137,10 +137,8 @@
     fast-nix-gc.url = "github:DavHau/fast-nix-gc/prune-stale-auto-roots";
     fast-nix-gc.inputs.nixpkgs.follows = "nixpkgs";
 
-    # llm-agents keeps its OWN nixpkgs on purpose: its derivations then
-    # hash-match what numtide's CI pushed to cache.numtide.com and substitute
-    # instead of building, and upstream tracks nixpkgs faster than spaces
-    # does (2026-09: omp 18.2.10 needs bun >= 1.3.14, t3code electron_44;
+    # llm-agents keeps its OWN nixpkgs on purpose: upstream tracks nixpkgs
+    # faster than spaces does (2026-09: omp 18.2.10 needs bun >= 1.3.14, t3code electron_44;
     # spaces' pin has neither). Following our nixpkgs would rebuild every
     # agent from source on each bump and currently cannot build at all.
     # afk (the omp harness) shares this pin so its patch set and omp agree.

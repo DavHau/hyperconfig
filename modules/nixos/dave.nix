@@ -27,7 +27,6 @@ in
     # ./hyprspace
     ./nrb
     ./clan-unlock
-    ./nix-caches.nix
     # niri compositor is vendored from spaces (upstream moved to COSMIC in
     # 0434912e), the noctalia v5 bar is our own (./noctalia);
     # ./niri-spaces/desktop-profile.nix wires both and keeps cosmic off. Host-local

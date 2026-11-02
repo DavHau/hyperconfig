@@ -14,7 +14,6 @@
       ../../modules/nixos/role-parasit.nix
       ../../modules/nixos/role-sshuttle-server
       ../../modules/nixos/role-iodine/default.nix
-      ../../modules/nixos/nix-caches.nix
       ./porkbun.nix
       ./automount
       ./hardware-configuration.nix

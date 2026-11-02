@@ -6,13 +6,6 @@
   ...
 }:
 {
-  imports = [
-    # nixos-install runs on this machine, so its nix.conf governs how the
-    # target's closure is fetched. Without the clan caches every clan-built
-    # path is a miss here and has to arrive over the ssh push instead.
-    ../../modules/nixos/nix-caches.nix
-  ];
-
   # Stock Nix throttles that install badly: 16 parallel substitutions over 25
   # HTTP connections, sharing a 1 MiB download buffer that stalls workers as
   # soon as a few NARs decompress slower than they arrive.
