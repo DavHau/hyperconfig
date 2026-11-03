@@ -39,6 +39,18 @@
 # som; applies at once and survives restarts, see usageCap below):
 #   teamclaude-accounts list
 #   teamclaude-accounts cap <name> 80% | unified5h=0.8,unified7d=0.9 | default
+#
+# Other gateways join the pool as accounts of last resort, declared in
+# hyper.teamclaudeGateway.upstreamAccounts: one so far, `fallback`. Each is
+# a TeamClaude API-key account whose `upstream` is the other gateway, at
+# priority 100, so rotation reaches it only once every own account is past
+# its cap, and leaves it as soon as one has quota again. The other gateway
+# relays Anthropic's quota headers of whichever of its accounts served the
+# request, so its maxUsage reads against those (`fallback`: 0.6, that
+# gateway's own switchThreshold, so we never eat into the share its owners
+# keep). Its URL and key are both prompted vars on som, so this repo names
+# neither:
+#   clan vars generate som --generator teamclaude-fallback-gateway
 {
   config,
   lib,
@@ -53,6 +65,18 @@ let
   configFile = config.clan.core.vars.generators.teamclaude-config.files."config.json".path;
   # Ordered once, so the jq arguments and the array line up.
   staticClients = lib.mapAttrsToList (name: generator: { inherit name generator; }) cfg.clientKeys;
+  # Likewise; the non-secret part of each entry goes to preStart as is, the
+  # URL and key arrive through the config var.
+  upstreamAccounts = lib.mapAttrsToList (name: a: a // { inherit name; }) cfg.upstreamAccounts;
+  declaredAccounts = builtins.toJSON (
+    map (a: {
+      inherit (a) name priority;
+      type = "apikey";
+      # Both relay to Anthropic, which holds the thread state.
+      messageThreads = true;
+      maxUsage = if a.maxUsage == null then usageCap else a.maxUsage;
+    }) upstreamAccounts
+  );
   # Each enrolled account serves up to 98% of every quota bucket (5h, 7d,
   # per-model 7d), as a ratio, like TeamClaude itself spells it. Two settings
   # carry it (docs/quota.md):
@@ -126,10 +150,63 @@ in
     '';
   };
 
+  options.hyper.teamclaudeGateway.upstreamAccounts = lib.mkOption {
+    type = lib.types.attrsOf (
+      lib.types.submodule {
+        options = {
+          generator = lib.mkOption {
+            type = lib.types.str;
+            description = ''
+              Clan vars generator with two files: `url`, the other gateway's
+              base URL, and `key`, our key for it (sent as x-api-key).
+            '';
+          };
+          priority = lib.mkOption {
+            type = lib.types.int;
+            default = 100;
+            description = "TeamClaude rotation priority, lower = preferred; own accounts sit at 0.";
+          };
+          maxUsage = lib.mkOption {
+            type = lib.types.nullOr lib.types.float;
+            default = null;
+            description = "Hard cap on the quota the gateway reports; null = the fleet's usageCap.";
+          };
+        };
+      }
+    );
+    default = { };
+    description = ''
+      Other gateways as accounts of this one: account name -> the var that
+      holds where it is and the key. preStart keeps each in `accounts` on every
+      start, replacing a live entry of the same name but keeping its runtime
+      fields.
+    '';
+  };
+
   config = {
     hyper.teamclaudeGateway.clientKeys.hyperconfig = "teamclaude-api-key";
 
+    hyper.teamclaudeGateway.upstreamAccounts.fallback = {
+      generator = "teamclaude-fallback-gateway";
+      maxUsage = 0.6;
+    };
+
     clan.core.vars.generators = {
+      # The fallback gateway: its URL, and our key for it. A persisted prompt
+      # IS the file, so each holds exactly the value.
+      teamclaude-fallback-gateway.prompts = {
+        url = {
+          description = "Base URL of the fallback TeamClaude gateway (https://…)";
+          type = "hidden";
+          persist = true;
+        };
+        key = {
+          description = "Our key for the fallback TeamClaude gateway";
+          type = "hidden";
+          persist = true;
+        };
+      };
+
       # The operator key (proxy.apiKey): the control plane on loopback and
       # teamclaude-keys' reload call. Clients get their own runtime keys.
       # Shared, so a fleet machine can still present it as a client. The
@@ -146,7 +223,11 @@ in
         '';
       };
       teamclaude-config = {
-        dependencies = [ "teamclaude-gateway-key" ] ++ map (c: c.generator) staticClients;
+        dependencies = [
+          "teamclaude-gateway-key"
+        ]
+        ++ map (c: c.generator) staticClients
+        ++ map (a: a.generator) upstreamAccounts;
         files."config.json" = {
           secret = true;
           restartUnits = [ "teamclaude.service" ];
@@ -161,6 +242,12 @@ in
                 "--arg n${toString i} ${lib.escapeShellArg c.name} --rawfile k${toString i} \"$in/${c.generator}/key\""
               ) staticClients
             } \
+            ${
+              lib.concatImapStringsSep " \\\n  " (
+                i: a:
+                "--arg an${toString i} ${lib.escapeShellArg a.name} --rawfile ak${toString i} \"$in/${a.generator}/key\" --rawfile au${toString i} \"$in/${a.generator}/url\""
+              ) upstreamAccounts
+            } \
             '{ proxy: {
                 apiKey: ($apiKey | rtrimstr("\n")),
                 clientKeys: [ ${
@@ -168,7 +255,13 @@ in
                     i: _: "{ name: $n${toString i}, key: ($k${toString i} | rtrimstr(\"\\n\")) }"
                   ) staticClients
                 } ]
-              } }' > "$out/config.json"
+              },
+              accounts: [ ${
+                lib.concatImapStringsSep ", " (
+                  i: _:
+                  "{ name: $an${toString i}, apiKey: ($ak${toString i} | rtrimstr(\"\\n\")), upstream: ($au${toString i} | rtrimstr(\"\\n\") | rtrimstr(\"/\")) }"
+                ) upstreamAccounts
+              } ] }' > "$out/config.json"
         '';
       };
     };
@@ -210,10 +303,14 @@ in
     # when nothing is there yet, because that file also holds the enrolled
     # accounts and their refreshed OAuth tokens; no later change to the
     # generated config (a rotated key) would ever reach the service. So merge
-    # on every start: the Nix settings, then the secret, win over the live
     # file, except two runtime lists. `accounts` stays as the service left it
     # but for its maxUsage: the account's own cap from capsFile
-    # (teamclaude-accounts), else usageCap. `proxy.clientKeys` keeps
+    # (teamclaude-accounts), else usageCap. The upstreamAccounts are the
+    # exception: each is rebuilt from the Nix declaration plus the URL and
+    # key from the secret on top of its live entry (which keeps runtime
+    # fields such as its id), and gets its own maxUsage unless capsFile has
+    # one.
+    # `proxy.clientKeys` keeps
     # every runtime-minted entry and gets the secret's static entries on top,
     # replacing a live entry of the same name (a rotated static key). Runs as
     # root (PermissionsStartOnly), after the module's own copy-if-missing.
@@ -241,11 +338,19 @@ in
         tmp=$(mktemp "$live.merged.XXXXXX")
         caps='{}'
         [ ! -s ${capsFile} ] || caps=$(cat ${capsFile})
-        ${pkgs.jq}/bin/jq -s --argjson cap ${builtins.toJSON usageCap} --argjson caps "$caps" '
+        ${pkgs.jq}/bin/jq -s --argjson cap ${builtins.toJSON usageCap} --argjson caps "$caps" \
+          --argjson declared ${lib.escapeShellArg declaredAccounts} '
           .[0] as $live
           | (.[2].proxy.clientKeys // []) as $static
+          | ([ (.[2].accounts // [])[] | { key: .name, value: { apiKey, upstream } } ] | from_entries) as $secret
           | $live * .[1] * (.[2] | del(.accounts) | del(.proxy.clientKeys))
-          | .accounts = ((.accounts // []) | map(.maxUsage = ($caps[.name] // $cap)))
+          | .accounts = (
+              [ (.accounts // [])[] | select(.name as $n | $declared | all(.name != $n))
+                | .maxUsage = ($caps[.name] // $cap) ]
+              + [ $declared[] as $d
+                  | ([ ($live.accounts // [])[] | select(.name == $d.name) ][0] // {})
+                    + $d + $secret[$d.name]
+                  | .maxUsage = ($caps[$d.name] // $d.maxUsage) ])
           | .proxy.clientKeys = (
               [ ($live.proxy.clientKeys // [])[] | select(.name as $n | $static | all(.name != $n)) ]
               + $static)
