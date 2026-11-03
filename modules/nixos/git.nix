@@ -22,12 +22,6 @@ let
     diff.tool = "difftastic";
     difftool.difftastic.cmd = ''${pkgs.difftastic}/bin/difft "$LOCAL" "$REMOTE"'';
     difftool.prompt = false;
-    # gi-infra's private agave inputs (agave, agave-marketplace,
-    # agave-vm-host) are https URLs; fetch them over SSH with my key.
-    # Scoped to the agave repos so other git.geninf.io https remotes
-    # keep their token auth.
-    url."ssh://gitea@git.geninf.io/generational-infrastructure/agave".insteadOf =
-      "https://git.geninf.io/generational-infrastructure/agave";
     alias = {
       cl = "clone";
       gh-cl = "gh-clone";
@@ -91,6 +85,22 @@ let
   };
 in
 {
+  # System-wide /etc/gitconfig: read by EVERY git binary, not just the
+  # wrapper. Nix's git fetcher runs whatever git is first on PATH (often a
+  # plain nixpkgs git in devshells/agent shells), which never sees the
+  # wrapper's GIT_CONFIG_GLOBAL.
+  programs.git = {
+    enable = true;
+    # Keep the wrapped git as the one programs.git puts on PATH.
+    package = git;
+    # gi-infra's private agave inputs (agave, agave-marketplace,
+    # agave-vm-host) are https URLs; fetch them over SSH with my key.
+    # Scoped to the agave repos so other git.geninf.io https remotes
+    # keep their token auth.
+    config.url."ssh://gitea@git.geninf.io/generational-infrastructure/agave".insteadOf =
+      "https://git.geninf.io/generational-infrastructure/agave";
+  };
+
   environment.systemPackages = [
     (lib.hiPrio git)
     pkgs.difftastic
