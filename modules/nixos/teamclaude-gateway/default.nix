@@ -46,9 +46,9 @@
 # priority 100, so rotation reaches it only once every own account is past
 # its cap, and leaves it as soon as one has quota again. The other gateway
 # relays Anthropic's quota headers of whichever of its accounts served the
-# request, so its maxUsage reads against those (`fallback`: 0.6, that
-# gateway's own switchThreshold, so we never eat into the share its owners
-# keep). Its URL and key are both prompted vars on som, so this repo names
+# request, so its maxUsage reads against those (`fallback`: uncapped; the
+# other gateway enforces its own limits). Its URL and key are both prompted
+# vars on som, so this repo names
 # neither:
 #   clan vars generate som --generator teamclaude-fallback-gateway
 {
@@ -74,7 +74,7 @@ let
       type = "apikey";
       # Both relay to Anthropic, which holds the thread state.
       messageThreads = true;
-      maxUsage = if a.maxUsage == null then usageCap else a.maxUsage;
+      inherit (a) maxUsage;
     }) upstreamAccounts
   );
   # Each enrolled account serves up to 98% of every quota bucket (5h, 7d,
@@ -168,8 +168,8 @@ in
           };
           maxUsage = lib.mkOption {
             type = lib.types.nullOr lib.types.float;
-            default = null;
-            description = "Hard cap on the quota the gateway reports; null = the fleet's usageCap.";
+            default = usageCap;
+            description = "Hard cap on the quota the gateway reports; null = uncapped.";
           };
         };
       }
@@ -188,7 +188,7 @@ in
 
     hyper.teamclaudeGateway.upstreamAccounts.fallback = {
       generator = "teamclaude-fallback-gateway";
-      maxUsage = 0.6;
+      maxUsage = null;
     };
 
     clan.core.vars.generators = {
@@ -309,7 +309,7 @@ in
     # exception: each is rebuilt from the Nix declaration plus the URL and
     # key from the secret on top of its live entry (which keeps runtime
     # fields such as its id), and gets its own maxUsage unless capsFile has
-    # one.
+    # one; a null maxUsage drops the key, which TeamClaude reads as uncapped.
     # `proxy.clientKeys` keeps
     # every runtime-minted entry and gets the secret's static entries on top,
     # replacing a live entry of the same name (a rotated static key). Runs as
@@ -350,7 +350,8 @@ in
               + [ $declared[] as $d
                   | ([ ($live.accounts // [])[] | select(.name == $d.name) ][0] // {})
                     + $d + $secret[$d.name]
-                  | .maxUsage = ($caps[$d.name] // $d.maxUsage) ])
+                  | .maxUsage = ($caps[$d.name] // $d.maxUsage)
+                  | if .maxUsage == null then del(.maxUsage) else . end ])
           | .proxy.clientKeys = (
               [ ($live.proxy.clientKeys // [])[] | select(.name as $n | $static | all(.name != $n)) ]
               + $static)
