@@ -38,6 +38,7 @@ let
     inboundPerIpHour = 1000;
     inboundPerSenderDomainHour = 25;
     quarantineMessages = 20;
+    pendingRequests = 5;
     # Small enough that 11 big messages overflow it before the G3 fix.
     quarantineBytes = 16777216;
     quarantineSourceMessages = 8;
@@ -1141,7 +1142,7 @@ pkgs.testers.runNixOSTest {
 
     with subtest("requests are rate-limited; root decides with mailgate-admin"):
         ids = []
-        for i in range(5):
+        for i in range(${toString limits.pendingRequests}):
             rc, r = mailgate("bob", f"allowlist request user{i}@trusted.test --reason r{i}")
             assert rc == 0, r
             ids.append(r["request"])
@@ -1151,6 +1152,21 @@ pkgs.testers.runNixOSTest {
         assert {p["request"] for p in pending} == set(ids), pending
         server.succeed(f"mailgate-admin deny {ids[0]}")
         server.fail(f"runuser -u bob -- mailgate-admin confirm {ids[1]}")
+        # Confirm all: exactly the requests the page showed, not one filed after it loaded.
+        code, page = owner("bob-owner")
+        found = re.search(r'name="csrf" value="([0-9a-f]+)"', page)
+        shown = re.search(r'name="ids" value="([0-9,]+)"', page)
+        assert code == "200" and found and shown, page
+        assert {int(i) for i in shown.group(1).split(",")} == set(ids[1:]), shown.group(1)
+        server.succeed(f"mailgate-admin deny {ids[1]}")
+        rc, late = mailgate("bob", "allowlist request late@trusted.test --reason late")
+        assert rc == 0, late
+        assert owner("bob-owner", "POST", {"csrf": found.group(1), "agent": "bob", "op": "confirm-all", "ids": shown.group(1)})[0] == "303"
+        pending = json.loads(server.succeed("mailgate-admin requests"))
+        assert [p["request"] for p in pending] == [late["request"]], pending
+        rc, r = mailgate("bob", "allowlist")
+        entries = {e["entry"] for e in r["allowlist"]}
+        assert {f"user{i}@trusted.test" for i in (2, 3, 4)} <= entries and "user1@trusted.test" not in entries, r
 
     with subtest("F2: no login cookie reaches an agent backend; the owner page has its own login"):
         def proxy_up(sock):

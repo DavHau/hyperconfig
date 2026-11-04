@@ -395,8 +395,8 @@ in
           workerSeconds = limit 60 "Hard timeout of one parse of a message (analyze.py), after which it is killed.";
           workerMemoryBytes = limit 671088640 "Address-space limit of one parse.";
           agentConnections = limit 4 "Per agent: open connections to agent.sock; more are refused at once.";
-          pendingRequests = limit 5 "Per agent: open allowlist requests.";
-          requestsPerDay = limit 10 "Per agent: allowlist requests per day.";
+          pendingRequests = limit 100 "Per agent: open allowlist requests.";
+          requestsPerDay = limit 100 "Per agent: allowlist requests per day.";
           activeAliases = limit 200 "Per agent: live aliases.";
           aliasesPerDay = limit 20 "Per agent: aliases created per day.";
           summariesPerAgentDay = limit 50 "Per agent: summaries per day.";

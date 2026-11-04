@@ -1362,14 +1362,21 @@ async def owner_page(request: web.Request) -> web.Response:
     ]
     for agent in agents:
         out.append(f"<h2>{e(agent)} &lt;{e(agent)}@{e(DOMAIN)}&gt;</h2><h3>Pending allowlist requests</h3><table>")
-        for r in requests_of([agent]):
+        pending = requests_of([agent])
+        for r in pending:
             out.append(
                 f"<tr><td>#{r['request']}</td><td><b>{e(r['entry'])}</b></td><td>{e(r['reason'])}</td><td>"
                 + form(token, agent, "confirm", "Confirm", id=r["request"])
                 + form(token, agent, "deny", "Deny", id=r["request"])
                 + "</td></tr>"
             )
-        out.append("</table><h3>Allowlist</h3><table>")
+        out.append("</table>")
+        if len(pending) > 1:
+            # The ids shown here, not "whatever is pending at submit time":
+            # a request filed after the page loaded needs its own look.
+            ids = ",".join(str(r["request"]) for r in pending)
+            out.append(form(token, agent, "confirm-all", f"Confirm all {len(pending)} shown", ids=ids))
+        out.append("<h3>Allowlist</h3><table>")
         for a in allowlist(agent):
             btn = form(token, agent, "remove", "Remove", entry=a["entry"]) if a["removable"] else "(Nix)"
             out.append(f"<tr><td>{e(a['entry'])}</td><td>{e(a['source'])}</td><td>{btn}</td></tr>")
@@ -1425,6 +1432,11 @@ async def owner_action(request: web.Request) -> web.Response:
     try:
         if op in ("confirm", "deny"):
             await decide_request(int(data.get("id", "0")), op == "confirm", actor, [agent])
+        elif op == "confirm-all":
+            shown = {int(i) for i in data.get("ids", "").split(",") if i.strip()}
+            for r in requests_of([agent]):
+                if r["request"] in shown:
+                    await decide_request(r["request"], True, actor, [agent])
         elif op == "allow":
             await allow_add(agent, data.get("entry", ""), actor)
         elif op == "remove":
