@@ -49,6 +49,10 @@
     }
   '';
 
+  # captive-browser (../../modules/nixos/encrypted-dns.nix) asks the
+  # hotspot's DHCP DNS through the wifi card.
+  hyper.encryptedDns.captiveInterface = "wlp192s0";
+
   networking.extraHosts = "10.0.0.1 127.0.0.0";
 
   networking.firewall.allowedTCPPorts = [ 8085 ];

@@ -21,7 +21,8 @@ in
     ./ssh-tpm-agent.nix
     ./etc-hosts.nix
     ./nix-development.nix
-    ./dns.nix
+    # DNS only via DoH (dnscrypt-proxy -> Quad9), plus captive-browser.
+    ./encrypted-dns.nix
     ./nix.nix
     ./nix-parallel-downloads.nix
     # ./hyprspace

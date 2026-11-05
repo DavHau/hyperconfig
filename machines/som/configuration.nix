@@ -147,6 +147,10 @@ in
     via = "vit";
   };
 
+  # The router's DHCP/RA DNS stays unused: lookups go through
+  # ../../modules/nixos/encrypted-dns.nix.
+  hyper.encryptedDns.networkdUplinks = [ "40-br0" ];
+
   # No wifi on this desktop: it sits on the LAN cable. The AX210 stays
   # unbound (no wlan0, no supplicant, no initrd PSK); nixos-facter's
   # wlan0 network unit just never matches.
