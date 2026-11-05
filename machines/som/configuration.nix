@@ -56,6 +56,9 @@ in
     # Strict sandbox and internet-only fetchers: this daemon builds for
     # untrusted agents, slots and remote clients.
     ../../modules/nixos/nix-sandbox-strict.nix
+    # Tool caches and package stores into ~/.cache (scratch), for the
+    # sessions and the hermes agents.
+    ../../modules/nixos/toolchain-cache-dirs
   ];
 
   # Public IPv4 38.89.142.76, borrowed from sgp through a WireGuard tunnel
@@ -89,6 +92,8 @@ in
   # 2026-11-05). Podman stays, daemonless.
   virtualisation.docker.enable = lib.mkForce false;
   virtualisation.docker.rootless.enable = lib.mkForce false;
+
+  hyper.toolchainCacheDirs.enable = true;
 
   # Boot unlock without a passphrase while vit is up
   # (../../modules/nixos/tang-client.nix), and som serves vit in turn. bam

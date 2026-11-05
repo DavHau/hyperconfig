@@ -118,6 +118,23 @@ in
         '';
       };
 
+      homeEnvironment = mkOption {
+        type = types.attrsOf types.str;
+        default = { };
+        example = {
+          npm_config_cache = "$HOME/.cache/npm";
+        };
+        description = ''
+          Non-secret env vars whose values name paths under `$HOME`, for
+          defaults the host sets in its login sessions (environment.variables
+          or sessionVariables expand `$HOME` per user). The units have no
+          login session and nothing expands them, so each agent gets the
+          literal `$HOME` replaced by its account home. They join the
+          environment entries (managed keys of the agent's .env); an
+          agent's own environment wins.
+        '';
+      };
+
       sshKeyHosts = mkOption {
         type = types.listOf types.str;
         default = [ ];

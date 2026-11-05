@@ -36,12 +36,19 @@ let
 
   # Non-secret .env entries. HERMES_SANDBOX rides here too: hermes loads
   # .env with override=True, so the unit environment alone would not hold.
+  # The gateway exports .env to every tool process, so homeEnvironment
+  # reaches them too, its `$HOME` resolved here rather than left to how
+  # hermes parses .env.
   agentEnvFor =
     user: ucfg:
+    let
+      home = config.users.users.${user}.home;
+    in
     cfg.environment
+    // lib.mapAttrs (_: lib.replaceStrings [ "$HOME" ] [ home ]) cfg.homeEnvironment
     // ucfg.environment
     // {
-      HERMES_SANDBOX = (ac.runtime user config.users.users.${user}.home ucfg).env.HERMES_SANDBOX;
+      HERMES_SANDBOX = (ac.runtime user home ucfg).env.HERMES_SANDBOX;
     };
 
   # Hermes' managed scope (hermes_cli/managed_scope.py) for one agent:

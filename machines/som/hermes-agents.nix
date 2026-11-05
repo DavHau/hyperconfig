@@ -46,6 +46,15 @@ let
       fileset = ./hermes-gpu-skill/SKILL.md;
     };
   };
+  # Where files go (small backed-up ~, large unbacked ~/scratch; see
+  # ../../modules/nixos/entity-storage).
+  storageSkill = inputs.hyperhermes.lib.mkAgentSkill pkgs {
+    name = "storage";
+    src = lib.fileset.toSource {
+      root = ../../modules/nixos/toolchain-cache-dirs/storage-skill;
+      fileset = ../../modules/nixos/toolchain-cache-dirs/storage-skill/SKILL.md;
+    };
+  };
 in
 {
   imports = [
@@ -279,7 +288,12 @@ in
   # Every harness, not only hermes: spaces links it into each user's
   # skill roots (pi, omp, claude-code); hermes agents read it as a root
   # (the agents above).
-  spaces.agentHarnesses.skills = [ gpuSkill ];
+  spaces.agentHarnesses.skills = [
+    gpuSkill
+    storageSkill
+  ];
+  # The storage skill for every agent, bumper included.
+  services.hyperhermes.skillDirs = [ "${storageSkill}/share/skills" ];
 
   # The agents' private /tmp, as in their own sessions
   # (../../modules/nixos/per-user-tmp).
