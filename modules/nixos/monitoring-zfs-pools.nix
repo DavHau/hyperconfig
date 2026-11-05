@@ -7,13 +7,18 @@
 # them and `avail` is what writes actually get (after parity and slop), so
 # a timer writes both to a textfile for Alloy.
 #
+# Quotas: datasets with a quota (incl. children, snapshots) or refquota
+# (own referenced bytes) hit EDQUOT long before the pool fills, so the same
+# timer exports each set limit with the usage it is checked against
+# (quota ↔ used, refquota ↔ referenced) from a single `zfs get`.
+#
 # Health: the zfs collector's node_zfs_zpool_state, read from kstat.
 #
 # The clan-core monitoring client hardcodes its unix exporter collectors; Alloy
 # runs `alloy run /etc/alloy` and merges every *.alloy file there into one
 # config, so a second file can add its own exporter and reuse the upstream
 # `prometheus.remote_write.mimir` component without forking the service.
-# Only the pool series are kept: the zfs collector otherwise emits a few
+# Only the pool and quota series are kept: the zfs collector otherwise emits a few
 # hundred ARC/dataset counters per host that nothing here looks at.
 { config, lib, pkgs, ... }:
 let
@@ -22,7 +27,7 @@ in
 {
   config = lib.mkIf config.boot.zfs.enabled {
     systemd.services.zfs-pool-metrics = {
-      description = "Write ZFS pool capacity for Alloy";
+      description = "Write ZFS pool capacity and dataset quotas for Alloy";
       path = [
         config.boot.zfs.package
         pkgs.gawk
@@ -43,7 +48,29 @@ in
             print "# TYPE zfs_pool_avail_bytes gauge"
             for (p in avail) printf "zfs_pool_avail_bytes{pool=\"%s\"} %s\n", p, avail[p]
           }' > ${dir}/pools.prom.tmp
+        # -p prints an unset quota as 0; "none"/"-" are guarded for safety.
+        # Samples are buffered so each family stays contiguous under its TYPE.
+        zfs get -Hp -t filesystem -o name,property,value quota,refquota,used,referenced | awk -F'\t' '
+          function set(x) { return x != "" && x != "0" && x != "none" && x != "-" }
+          { v[$1, $2] = $3; ds[$1] = 1 }
+          END {
+            for (d in ds) {
+              if (set(v[d, "quota"])) {
+                lim = lim sprintf("zfs_dataset_quota_bytes{dataset=\"%s\",kind=\"quota\"} %s\n", d, v[d, "quota"])
+                use = use sprintf("zfs_dataset_quota_used_bytes{dataset=\"%s\",kind=\"quota\"} %s\n", d, v[d, "used"])
+              }
+              if (set(v[d, "refquota"])) {
+                lim = lim sprintf("zfs_dataset_quota_bytes{dataset=\"%s\",kind=\"refquota\"} %s\n", d, v[d, "refquota"])
+                use = use sprintf("zfs_dataset_quota_used_bytes{dataset=\"%s\",kind=\"refquota\"} %s\n", d, v[d, "referenced"])
+              }
+            }
+            print "# TYPE zfs_dataset_quota_bytes gauge"
+            printf "%s", lim
+            print "# TYPE zfs_dataset_quota_used_bytes gauge"
+            printf "%s", use
+          }' > ${dir}/datasets.prom.tmp
         mv ${dir}/pools.prom.tmp ${dir}/pools.prom
+        mv ${dir}/datasets.prom.tmp ${dir}/datasets.prom
       '';
     };
 
@@ -75,7 +102,7 @@ in
         rule {
           action = "keep"
           source_labels = ["__name__"]
-          regex = "node_zfs_zpool_state|zfs_pool_(used|avail)_bytes"
+          regex = "node_zfs_zpool_state|zfs_pool_(used|avail)_bytes|zfs_dataset_quota_(used_)?bytes"
         }
       }
     '';

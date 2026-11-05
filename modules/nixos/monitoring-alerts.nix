@@ -8,8 +8,10 @@
 #   - always-on host sent no samples for 10 min (critical)
 #   - system service unit failed for 15 min (warning)
 #   - ZFS pool not ONLINE (critical)
+#   - ZFS dataset quota/refquota >= 80 % used (warning) / >= 95 % (critical)
 # ZFS is judged per pool from ./monitoring-zfs-pools.nix (pool health and the
-# root dataset's used/avail); per-dataset filesystem series are skipped.
+# root dataset's used/avail) plus per-dataset quota usage from the same
+# exporter; per-dataset filesystem series are skipped.
 #
 # Every PromQL expression returns only offending series (value > 0), so an
 # empty result is the healthy state: noDataState = OK. A query error (Mimir
@@ -56,6 +58,16 @@ let
   zfsUsage = "(zfs_pool_used_bytes / (zfs_pool_used_bytes + zfs_pool_avail_bytes))";
 
   usage = "((${plainUsage}) or ${zfsUsage})";
+
+  # The query's value as a percentage. Grafana also expands annotations for
+  # states without values (the Normal state an empty result maps to), where
+  # .Values.A is nil and humanizePercentage fails.
+  pct = "{{ with .Values.A }}{{ humanizePercentage .Value }}{{ end }}";
+
+  # Both series carry the same dataset/kind/instance labels, so they divide
+  # one-to-one; kind tells quota (used) from refquota (referenced) apart.
+  quotaUsage = "(zfs_dataset_quota_used_bytes / zfs_dataset_quota_bytes)";
+  quotaSummary = "ZFS dataset {{ .Labels.dataset }} on {{ .Labels.instance }} is at ${pct} of its {{ .Labels.kind }}";
 
   # Fires only for filesystems already past 60 %: a large build writing into
   # an empty disk extrapolates to "full" without being a problem. The 6 h
@@ -179,7 +191,7 @@ in
                 expr = "${usage} >= 0.85 < 0.95";
                 for = "15m";
                 severity = "warning";
-                summary = "${fsLabel} on {{ .Labels.instance }} is {{ humanizePercentage .Values.A.Value }} full";
+                summary = "${fsLabel} on {{ .Labels.instance }} is ${pct} full";
               })
               (rule {
                 uid = "fleet-fs-full";
@@ -187,7 +199,7 @@ in
                 expr = "${usage} >= 0.95";
                 for = "5m";
                 severity = "critical";
-                summary = "${fsLabel} on {{ .Labels.instance }} is {{ humanizePercentage .Values.A.Value }} full";
+                summary = "${fsLabel} on {{ .Labels.instance }} is ${pct} full";
               })
               (rule {
                 uid = "fleet-fs-filling";
@@ -195,7 +207,7 @@ in
                 expr = predictFull;
                 for = "1h";
                 severity = "warning";
-                summary = "${fsLabel} on {{ .Labels.instance }} ({{ humanizePercentage .Values.A.Value }} full) is projected to fill within 24h";
+                summary = "${fsLabel} on {{ .Labels.instance }} (${pct} full) is projected to fill within 24h";
               })
               (rule {
                 uid = "fleet-host-down";
@@ -225,6 +237,22 @@ in
                 for = "5m";
                 severity = "critical";
                 summary = "ZFS pool {{ .Labels.zpool }} on {{ .Labels.instance }} is {{ .Labels.state }}";
+              })
+              (rule {
+                uid = "fleet-zfs-quota-almost-full";
+                title = "ZFS quota almost full";
+                expr = "${quotaUsage} >= 0.8 < 0.95";
+                for = "15m";
+                severity = "warning";
+                summary = quotaSummary;
+              })
+              (rule {
+                uid = "fleet-zfs-quota-full";
+                title = "ZFS quota full";
+                expr = "${quotaUsage} >= 0.95";
+                for = "5m";
+                severity = "critical";
+                summary = quotaSummary;
               })
             ];
           }
