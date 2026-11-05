@@ -193,6 +193,8 @@ in
         sshKeys = adminKeys;
         # Claude through the TeamClaude gateway, not a login of its own.
         teamclaude.enable = true;
+        # The shared OpenRouter key as OPENROUTER_API_KEY (./hermes-inference.nix).
+        openrouter = true;
       };
 
       # joe: dave's former amy microVM agent (hermes-grmpf), its state and
