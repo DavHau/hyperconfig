@@ -150,6 +150,11 @@
 # Enabling this turns the uplink NIC into a port of the bridge; the bridge
 # keeps the NIC's MAC and takes over its DHCP/RA config.
 #
+# Storage: with `storage.enable` and a slot's `storage.enable`, the slot's
+# root is a ZFS dataset (backed up, refquota) and its churn (/scratch,
+# /var/tmp, /var/cache, docker/podman state, root's ~/.cache, more per
+# slot) lives on a second, unsnapshotted one (./container-slots-storage).
+#
 # Rescue (admin only): reseed a slot with its bootstrap system:
 #   rm /nix/var/nix/profiles/per-container/<slot>/system
 #   systemctl restart container@<slot>
@@ -452,6 +457,8 @@ let
   };
 in
 {
+  imports = [ ./container-slots-storage ];
+
   options.services.container-slots = {
     enable = lib.mkEnableOption "container slots (bridges the uplink)";
     uplink = mkOption {

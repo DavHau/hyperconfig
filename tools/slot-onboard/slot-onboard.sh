@@ -38,6 +38,12 @@ if !cs.enable || s == null then { exists = false; } else {
   inherit (cs) ipv6Prefix;
   keys = map comment s.deployKeys;
   shares = builtins.attrNames s.shares;
+  storage = if (cs.storage.enable or false) && s.storage.enable then {
+    inherit (s.storage) rootQuota scratchQuota;
+    paths = cs.storage.defaultScratchPaths
+      ++ builtins.filter (p: !builtins.elem p cs.storage.defaultScratchPaths)
+        (builtins.attrNames s.storage.scratchPaths);
+  } else null;
 }
 EOF
 )
@@ -61,6 +67,7 @@ keys=$(jq -r '.keys | join(", ")' <<<"$facts")
 memory=$(jq -r '.memoryMax // empty' <<<"$facts")
 cpu=$(jq -r '.cpuQuota // empty' <<<"$facts")
 mapfile -t shares < <(jq -r '.shares[]' <<<"$facts")
+storage=$(jq -r 'if .storage == null then "" else "on" end' <<<"$facts")
 
 note "the bootstrap system lets in root with: $keys"
 note "inbound from the internet needs the router allow rules (once per slot):"
@@ -159,4 +166,39 @@ if [ -n "$memory$cpu" ]; then
   echo
   [ -n "$memory" ] && echo "- memory: $memory (your processes, not your nix builds)"
   [ -n "$cpu" ] && echo "- CPU: $cpu"
+fi
+
+if [ -n "$storage" ]; then
+  limit='if . == null then "no limit" else "at most \(.)" end'
+  rootQuota=$(jq -r ".storage.rootQuota | $limit" <<<"$facts")
+  scratchQuota=$(jq -r ".storage.scratchQuota | $limit" <<<"$facts")
+  paths=$(jq -r '.storage.paths | join(", ")' <<<"$facts")
+  cat <<EOF
+
+## Storage
+
+Two kinds of space, both kept across restarts and deploys:
+
+- backed up (snapshotted on $machine): everything in the slot's root,
+  $rootQuota (snapshots do not count; deleting frees space at once).
+- scratch, not backed up ($scratchQuota in all): $paths.
+  /scratch is world-writable (sticky) and yours to organize.
+
+Keep what you could not rebuild in the root (repos, results, databases)
+and everything rebuildable in scratch: caches, build trees, downloaded
+models, datasets you can fetch again, experiment scratch. A full quota
+fails writes in your slot only (EDQUOT/ENOSPC). /tmp is $machine's /tmp:
+emptied at its reboot, files unused for 10 days removed.
+
+Optional, from the hyperhermes flake (inputs.hyperhermes.url =
+"github:DavHau/hyperconfig?dir=hyperhermes"):
+
+    imports = [ inputs.hyperhermes.nixosModules.slot-storage ];
+    slotStorage.cacheUsers = [ "<user>" ];
+
+It points common tools' caches (npm, pnpm, bun, Go modules, gradle,
+maven, conda, ollama) into ~/.cache system-wide, and binds each listed
+user's ~/.cache from /scratch/home/<user>/.cache (root's already is
+scratch).
+EOF
 fi

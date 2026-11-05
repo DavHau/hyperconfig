@@ -73,7 +73,7 @@ flake:
   };
 }
 ```
-@website@
+@website@@storage@
 ## Limits
 
 Memory and CPU of the slot are capped (default 4G, 4 cores), and all slots

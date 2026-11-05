@@ -56,8 +56,9 @@
 #
 # Reset: stop, drop the slot's system profile (every generation), so the
 # next start reseeds the bootstrap system with the agent's key, then restore
-# the previous on/off state. `reset-hard` also wipes the slot's whole root,
-# its /tmp, its gc roots and every profile (/root, /var: everything the
+# the previous on/off state. `reset-hard` also wipes the slot's whole root
+# (the contents of its dataset, if it has one), its scratch dataset, its
+# /tmp, its gc roots and every profile (/root, /var: everything the
 # guest wrote); only the host-side state stays (desired state, the key file
 # and the host key the host provides).
 #
@@ -312,7 +313,19 @@ let
           # every generation: the next start seeds the bootstrap system
           rm -f "$profiles/system" "$profiles"/system-*-link
           if [ "$action" = reset-hard ]; then
-            rm -rf --one-file-system "/var/lib/nixos-containers/$name"
+            root=/var/lib/nixos-containers/$name
+            if mountpoint -q "$root"; then
+              # its own dataset (container-slots storage): the mountpoint
+              # stays, its contents go (snapshots keep them a while)
+              find "$root" -mindepth 1 -maxdepth 1 -exec rm -rf --one-file-system {} +
+            else
+              rm -rf --one-file-system "$root"
+            fi
+            # its scratch dataset; the next start recreates the directories
+            scratch=${slotsCfg.storage.scratchDir}/$name
+            if mountpoint -q "$scratch"; then
+              find "$scratch" -mindepth 1 -xdev -delete
+            fi
             if [ -d "/tmp/.slots/$name" ]; then
               find "/tmp/.slots/$name" -mindepth 1 -xdev -delete
             fi
@@ -391,6 +404,21 @@ let
     sys.exit(0 if rc == 0 else 1)
   '';
 
+  # `slot info`'s storage lines (../container-slots-storage), if the slot
+  # has its datasets.
+  storageInfo =
+    slotName:
+    let
+      s = slotsCfg.slots.${slotName}.storage;
+      limit = q: if q == null then "no limit" else "at most ${q}";
+    in
+    lib.optionalString (slotsCfg.storage.enable && s.enable) ''
+      storage:   root backed up, ${limit s.rootQuota}; scratch not backed up,
+                 ${limit s.scratchQuota}: ${
+                   toString (lib.unique (slotsCfg.storage.defaultScratchPaths ++ lib.attrNames s.scratchPaths))
+                 }
+    '';
+
   # One case arm of `slot`, its lines two spaces in.
   infoArm =
     name: a:
@@ -402,7 +430,8 @@ let
     ''
     + lib.optionalString exposed "  host=${hostOf name}\n"
     + lib.optionalString public "  ports=${portRange a}\n"
-    # The extra names' `slot info` lines, whole (empty without any).
+    # The extra names' and storage's `slot info` lines, whole (empty
+    # without any).
     + "  extra=${
         lib.escapeShellArg (
           lib.optionalString (public && a.slot.extraHostnames != [ ]) ''
@@ -410,6 +439,7 @@ let
                        reach the slot like ${hostOf name} on ${publicIPv4} 80/443;
                        their DNS is not kept here (A ${publicIPv4}, AAAA ${ipv6Of a})
           ''
+          + storageInfo a.slot.name
         )
       }\n"
     + "  ;;\n";
@@ -515,7 +545,7 @@ let
   you = "slot.<you>.${exposure.domain}";
   skillText =
     lib.replaceStrings
-      [ "@summary@" "@egress@" "@v6reach@" "@reach@" "@website@" ]
+      [ "@summary@" "@egress@" "@v6reach@" "@reach@" "@website@" "@storage@" ]
       [
         (
           if public then
@@ -604,6 +634,22 @@ let
             ''
           )
         )
+        (lib.optionalString slotsCfg.storage.enable ''
+
+          ## Storage
+
+          If `slot info` shows a `storage:` line, your slot has two kinds of space,
+          both kept across restarts and deploys: everything in its root is backed up
+          (snapshotted on this host) within the root limit, and the scratch paths it
+          lists (/scratch, /var/tmp, /var/cache, ...) are not backed up, with a larger
+          limit of their own. Keep repos, results and databases in the root; caches,
+          build trees, downloads and experiment scratch in scratch. A full limit fails
+          writes in your slot only. In your NixOS config,
+          `imports = [ inputs.hyperhermes.nixosModules.slot-storage ];` (hyperhermes:
+          `github:DavHau/hyperconfig?dir=hyperhermes`) points common tools' caches
+          into ~/.cache, and `slotStorage.cacheUsers = [ "<user>" ];` puts that user's
+          ~/.cache on scratch (root's already is).
+        '')
       ]
       (builtins.readFile ./SKILL.md);
   skill = import ../../lib/agent-skill.nix pkgs {
