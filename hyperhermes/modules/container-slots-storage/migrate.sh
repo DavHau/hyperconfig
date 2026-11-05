@@ -160,10 +160,20 @@ fi
 
 mapfile -t units < <(get '.units[]')
 was=$(systemctl is-active "container@$slot.service" || true)
-say "stopping ${units[*]}"
+
+# Nothing may start the slot while its root is copied: an agent's
+# `slot start`, a share unit or an operator would run it on the old root,
+# and whatever it wrote after the copy would be lost at the swap. A
+# runtime drop-in makes every start a no-op until this tool lifts it
+# right before its own start; on failure it stays, the slot stopped.
+lock=/run/systemd/system/container@$slot.service.d/50-storage-migrate.conf
+install -d -m 0755 "$(dirname "$lock")"
+printf '[Unit]\n# slot-storage-migrate %s is running; remove this file to allow starts.\nConditionPathExists=/run/slot-storage-migrate-done-%s\n' "$slot" "$slot" >"$lock"
+systemctl daemon-reload
+say "stopping ${units[*]} (starts blocked by $lock)"
 systemctl stop "${units[@]}"
 
-trap 'say "failed; state: old root $root (or $old), $rootDs at $(zfs get -H -o value mountpoint "$rootDs" 2>/dev/null || echo -), scratch contents moved so far in $scratch. The slot is stopped."' ERR
+trap 'say "failed; state: old root $root (or $old), $rootDs at $(zfs get -H -o value mountpoint "$rootDs" 2>/dev/null || echo -), scratch contents moved so far in $scratch. The slot is stopped and cannot start until $lock is removed (then systemctl daemon-reload)."' ERR
 
 for parent in "$(jq -r .rootParent "$conf")" "$(jq -r .scratchParent "$conf")"; do
   exists "$parent" || zfs create -o canmount=off -o mountpoint=none "$parent"
@@ -219,6 +229,9 @@ rmdir "$tmp" 2>/dev/null || true
 trap - ERR
 
 [ "$(mounted_on "$root")" = "$rootDs" ] || die "$root is not $rootDs after the switch"
+rm -f "$lock"
+rmdir "$(dirname "$lock")" 2>/dev/null || true
+systemctl daemon-reload
 if [ "$was" = active ]; then
   say "starting container@$slot"
   systemctl reset-failed "container@$slot.service" 2>/dev/null || true
