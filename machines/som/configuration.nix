@@ -102,7 +102,26 @@ in
   # `entity-storage-migrate <user>` (../../modules/nixos/entity-storage).
   hyper.entityStorage = {
     enable = true;
-    users = { };
+    users = {
+      # adam: not yet; his ssh client reconnects every few seconds, so
+      # entity-storage-migrate cannot get his home quiet (2026-11-05).
+      b3x = { };
+      bumper = { };
+      chris = { };
+      dave = { };
+      domi = { };
+      egg = { };
+      hsjobeki = { };
+      j = { };
+      # 22.8G when moved over (hermes/workspace): room until joe sorts it.
+      joe.homeQuota = "30G";
+      momentum = { };
+      nixremote = { };
+      pinpox = { };
+      rti = { };
+      thaigersprint = { };
+      willi = { };
+    };
   };
 
   # Boot unlock without a passphrase while vit is up
@@ -325,6 +344,30 @@ in
       printf 'sk-ant-oat01-%s' "$(openssl rand -hex 32)" > "$out/key"
     '';
     files.key.secret = true;
+  };
+
+  # Slots move onto their datasets one at a time: opt in, deploy, then
+  # `slot-storage-migrate <slot>` (hyperhermes container-slots-storage).
+  services.container-slots.slots = {
+    thaiger.storage.enable = true;
+    mm.storage.enable = true;
+    # ~38G stays backed up (workspaces, notes-cache, nmm, ...); the
+    # agent's ~/.cache (sccache, rust targets, ~22G) goes to scratch.
+    asof-agents.storage = {
+      enable = true;
+      rootQuota = "60G";
+      scratchPaths."/home/agent/.cache" = {
+        uid = 1000;
+        gid = 993;
+        mode = "0755";
+      };
+    };
+    # The slot's data stays backed up; only caches go to scratch.
+    asof.storage = {
+      enable = true;
+      rootQuota = "150G";
+      scratchQuota = "100G";
+    };
   };
 
   # One isolated slot per hermes agent (hyperhermes' slots module), off
