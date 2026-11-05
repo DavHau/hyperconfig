@@ -100,6 +100,17 @@
           };
           postCreateHook = "zfs snapshot zroot/root/nobackup/tmp@blank";
         };
+        # Emergency headroom: never mounted, holds 30G back from the pool.
+        # When the pool is full: `zfs set refreservation=none zroot/reserved`.
+        # Created by hand on the live pool (2026-11-05).
+        "reserved" = {
+          type = "zfs_fs";
+          options = {
+            mountpoint = "none";
+            canmount = "off";
+            refreservation = "30G";
+          };
+        };
       };
     };
   };

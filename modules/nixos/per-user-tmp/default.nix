@@ -99,9 +99,16 @@ in
     );
 
     # Instances look exactly like pam_namespace makes them (the polydir's
-    # mode and owner), so a pre-created one is taken as is.
+    # mode and owner), so a pre-created one is taken as is. Each carries
+    # systemd's own age for its parent (tmp.conf: /tmp 10d, /var/tmp 30d):
+    # tmpfiles skips paths that have their own line when it ages the
+    # parent, so with "-" an instance is never cleaned.
     systemd.tmpfiles.rules = lib.concatMap (
-      d: [ "d ${d}/.inst 0000 root root -" ] ++ map (u: "d ${d}/.inst/${u} 1777 root root -") normalUsers
+      d:
+      let
+        age = { "/tmp" = "10d"; "/var/tmp" = "30d"; }.${d};
+      in
+      [ "d ${d}/.inst 0000 root root -" ] ++ map (u: "d ${d}/.inst/${u} 1777 root root ${age}") normalUsers
     ) dirs;
 
     systemd.services.per-user-tmp-sweep = {
