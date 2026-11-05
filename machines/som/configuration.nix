@@ -283,6 +283,15 @@ in
       interface = "wg-mullvad";
       table = 51830;
     };
+    # Their DNS through the same tunnel, to Mullvad's in-tunnel resolver
+    # (as ../../modules/nixos/mullvad-egress/dns.nix's unbound asks): never
+    # plaintext past som, never som's resolver and its cache shared by
+    # every agent. Tunnel down, no DNS either (kill switch). The lan slots
+    # ask som's resolved instead (../../modules/nixos/encrypted-dns.nix).
+    dns.nameservers = [
+      "10.64.0.1"
+      "fc00:bbbb:bbbb:bb01::1"
+    ];
     # The routers' WAN side, which "never the LAN" does not cover by itself
     # (seen from som, 2026-10-17): the Beryl relays v6 (its addresses are in
     # the LAN /64, its ULA fdea:fc9f:d6a5::1, WAN v4 192.168.1.x), the AIS

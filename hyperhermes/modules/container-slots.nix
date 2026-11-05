@@ -30,8 +30,29 @@
 #     the LAN's DHCP (NixOS's default dhcpcd does that) and their v6 default
 #     route from the router's RAs; their MAC is fixed (02:43:51:07:00:<id>)
 #     so the DHCP lease is stable.
-#   - DNS: a public-resolver resolv.conf is copied in at every start (the
-#     host's own points at resolved's stub, unreachable from the slot).
+#   - DNS: a resolv.conf is copied in at every start, from `dns`. The
+#     host's own resolv.conf points at resolved's loopback stub, which no
+#     slot can reach. By default every slot gets public resolvers (Quad9).
+#     Isolated and lan slots are configured apart because they reach
+#     different things:
+#       isolated  `dns.nameservers`, reached the way the slot's own traffic
+#                 leaves. isolated-out lets port 53 through to exactly these
+#                 addresses even inside the always-dropped private ranges,
+#                 so a VPN's in-tunnel resolver behind `isolatedEgress`
+#                 works (e.g. Mullvad's 10.64.0.1). Never a resolver on this
+#                 host: isolated slots must not reach the host, and one
+#                 shared caching resolver would let one slot learn what
+#                 another looked up.
+#       lan       `dns.nameservers` too, or with `dns.lanHostResolver` this
+#                 host's resolver at `dns.hostResolverAddress`
+#                 (<ipv6Prefix>::5107:0; slot ids start at 1). The address
+#                 is put on the bridge, deprecated so the host never sends
+#                 from it, and its port 53 is opened to the lan slots' MACs
+#                 only. The address is in the slots' on-link /64, so it needs
+#                 no route. Not a link-local address: resolved's
+#                 DNSStubListenerExtra= drops the scope, and the kernel
+#                 refuses to bind an unscoped link-local address. The
+#                 deployment runs the resolver there.
 #   - first boot: a bootstrap system (sshd) seeds the slot's profile if it
 #     has none yet. After that the profile belongs to the deployer. Its sshd
 #     lets in root with the slot's `deployKeys` (default: the host-wide
@@ -143,6 +164,8 @@
 #             so this host's own connections to the /128 come from its
 #             uplink address, not from the gateway.
 #   lan       veth on the LAN bridge: a LAN peer like any other, unfiltered.
+#             With `dns.lanHostResolver` it also reaches port 53 on this
+#             host's resolver address.
 # Either way inbound from the internet may additionally need an allow rule
 # for the slot's v6 address on the routers in front of the LAN (the
 # deployment's business).
@@ -177,6 +200,12 @@ let
   hostIPv6Of = slot: "fd43:5107::${hex slot.id}:1";
 
   isolated = lib.filterAttrs (_: s: s.mode == "isolated") cfg.slots;
+  lanSlots = lib.filterAttrs (_: s: s.mode == "lan") cfg.slots;
+  lanMacOf = slot: "02:43:51:07:00:${hex2 slot.id}";
+  # The host's resolver address for the lan slots (see DNS above): <id> 0,
+  # which no slot can have.
+  hostResolverAddress = "${cfg.ipv6Prefix}::5107:0";
+  useHostResolver = cfg.dns.lanHostResolver && lanSlots != { };
   # nspawn names the host side of the veth ve-<name> (routed) or vb-<name>
   # (bridged); the rules below match those names.
   vethOf = name: "ve-${name}";
@@ -220,11 +249,16 @@ let
   # must already exist here.
   nixStateStub = "/var/lib/container-slots/nix-var";
 
-  resolvConf = pkgs.writeText "container-slot-resolv.conf" ''
-    nameserver 9.9.9.9
-    nameserver 2620:fe::fe
-    nameserver 149.112.112.112
-  '';
+  resolvConfOf =
+    nameservers:
+    pkgs.writeText "container-slot-resolv.conf" (
+      lib.concatMapStrings (ns: "nameserver ${ns}\n") nameservers
+    );
+  resolvConf = resolvConfOf cfg.dns.nameservers;
+  lanResolvConf = if cfg.dns.lanHostResolver then resolvConfOf [ hostResolverAddress ] else resolvConf;
+  # isolated-out exceptions for the resolvers (see DNS above)
+  isolatedNs4 = lib.filter (a: !lib.hasInfix ":" a) cfg.dns.nameservers;
+  isolatedNs6 = lib.filter (lib.hasInfix ":") cfg.dns.nameservers;
 
   # The one bootstrap system every slot is seeded with. Nothing slot-specific
   # goes in here (see "Evaluation cost" above): hostName "" keeps the one
@@ -549,6 +583,42 @@ in
       default = { };
       description = "Slots by name (<= 11 chars: nspawn's host veth names are ve-/vb-<name>, capped at 15).";
     };
+    dns = {
+      nameservers = mkOption {
+        type = types.nonEmptyListOf types.str;
+        default = [
+          "9.9.9.9"
+          "2620:fe::fe"
+          "149.112.112.112"
+        ];
+        example = [ "10.64.0.1" ];
+        description = ''
+          Resolvers in the isolated slots' resolv.conf, and in the lan slots'
+          unless `lanHostResolver` is set. Isolated slots may reach exactly
+          these addresses on port 53 (UDP, TCP) through their way out,
+          even inside the private ranges they are otherwise denied (e.g. a
+          VPN's in-tunnel resolver behind `isolatedEgress`).
+        '';
+      };
+      lanHostResolver = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          lan slots ask this host's resolver at `hostResolverAddress`
+          instead of `nameservers`. The address is added to the bridge
+          (deprecated, so the host never sends from it), and its port 53
+          is opened to the lan slots' MACs. The deployment must run a
+          resolver listening there.
+        '';
+      };
+      hostResolverAddress = mkOption {
+        type = types.str;
+        readOnly = true;
+        default = hostResolverAddress;
+        defaultText = lib.literalExpression ''"''${ipv6Prefix}::5107:0"'';
+        description = "Where the lan slots expect this host's resolver with `lanHostResolver` (in the LAN /64, on the bridge).";
+      };
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -637,6 +707,13 @@ in
           IPv6AcceptRA = true;
           IPv6ProxyNDP = isolated != { };
           IPv6ProxyNDPAddress = lib.mapAttrsToList (_: ipv6Of) isolated;
+        };
+        # The lan slots' resolver address (see DNS above): deprecated
+        # (PreferredLifetime=0), so no connection of this host picks it as
+        # source; a /128 adds no second route for the /64.
+        addresses = lib.optional useHostResolver {
+          Address = "${hostResolverAddress}/128";
+          PreferredLifetime = "0";
         };
         # While a slot is stopped its host routes are gone; without these
         # its v4 would follow the default route and its v6 the LAN /64 (to
@@ -755,7 +832,7 @@ in
           {
             hostBridge = cfg.bridge;
             localAddress6 = "${ipv6Of slot}/64";
-            localMacAddress = "02:43:51:07:00:${hex2 slot.id}";
+            localMacAddress = lanMacOf slot;
           }
       )
     ) cfg.slots;
@@ -771,8 +848,10 @@ in
               (seed name)
             ];
             # The start script copies the host's /etc/resolv.conf into the
-            # slot; in this unit's mount namespace that is the public one.
-            BindReadOnlyPaths = [ "${resolvConf}:/etc/resolv.conf" ];
+            # slot; in this unit's mount namespace that is the slot's one.
+            BindReadOnlyPaths = [
+              "${if slot.mode == "lan" then lanResolvConf else resolvConf}:/etc/resolv.conf"
+            ];
           }
           // lib.optionalAttrs (slot.memoryMax != null) { MemoryMax = slot.memoryMax; }
           // lib.optionalAttrs (slot.memoryLow != null) { MemoryLow = slot.memoryLow; }
@@ -848,6 +927,16 @@ in
       lib.attrValues cfg.slots
     )) true;
 
+    # --- lan slots -> this host's resolver ---------------------------------
+    # nixos-fw's input chain is the one that drops; an accept in a table of
+    # our own would not override it. The lan slots' fixed MACs only: the
+    # address is reachable from the whole LAN.
+    networking.firewall.extraInputRules = lib.mkIf useHostResolver ''
+      iifname "${cfg.bridge}" ip6 daddr ${hostResolverAddress} ether saddr { ${
+        lib.concatMapStringsSep ", " lanMacOf (lib.attrValues lanSlots)
+      } } meta l4proto { tcp, udp } th dport 53 accept
+    '';
+
     # --- isolated-mode policy --------------------------------------------
     networking.nftables.tables.container-slots = lib.mkIf (isolated != { }) {
       family = "inet";
@@ -900,6 +989,14 @@ in
           ''}
           ct state established,related accept
           oifname != "${outIf}" drop
+          # the slots' resolvers (dns.nameservers), even inside the ranges
+          # dropped next: e.g. a VPN's in-tunnel resolver on the egress link
+          ${lib.optionalString (isolatedNs4 != [ ]) ''
+            ip daddr { ${lib.concatStringsSep ", " isolatedNs4} } meta l4proto { tcp, udp } th dport 53 accept
+          ''}
+          ${lib.optionalString (isolatedNs6 != [ ]) ''
+            ip6 daddr { ${lib.concatStringsSep ", " isolatedNs6} } meta l4proto { tcp, udp } th dport 53 accept
+          ''}
           ip daddr { ${cfg.lanIPv4}, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16${blocked4} } drop
           ip6 daddr { ${cfg.ipv6Prefix}::/64, fc00::/7, fe80::/10${blocked6} } drop
           accept

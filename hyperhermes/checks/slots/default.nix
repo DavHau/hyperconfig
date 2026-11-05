@@ -12,8 +12,10 @@
 # does (TCP and UDP, from the uplink address, never the proxy hop or the
 # veth's host side), and its ssh pins the slot's host key; the slots reach
 # the internet only through the egress link (kill switch), never the host,
-# each other or the blocked destinations, while inbound v6 and forwarded
-# v4 answer the way they came; a slot cannot steer the host's start script
+# each other or the blocked destinations (their resolver, the relay's
+# in-tunnel address in dns.nameservers, is in their resolv.conf and reached
+# on port 53 only), while inbound v6 and forwarded v4 answer the way they
+# came; a slot cannot steer the host's start script
 # through symlinks in its root; stopped slots' addresses are unreachable;
 # the desired state survives a reboot; a reset brings back a slot whose
 # deploy dropped sshd, a hard reset also drops its gc roots; the slots run
@@ -155,6 +157,16 @@ pkgs.testers.runNixOSTest {
       wantedBy = [ "multi-user.target" ];
       serviceConfig.ExecStart = "${pkgs.socat}/bin/socat TCP6-LISTEN:8081,ipv6only=1,fork,reuseaddr EXEC:'${responder} client'";
     };
+    # the in-tunnel resolver's port (the slots' dns.nameservers): a responder
+    # is enough to tell what reaches it, and from where
+    systemd.services.peer53 = {
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig.ExecStart = "${pkgs.socat}/bin/socat TCP4-LISTEN:53,fork,reuseaddr EXEC:'${responder} client'";
+    };
+    systemd.services.peer53v6 = {
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig.ExecStart = "${pkgs.socat}/bin/socat TCP6-LISTEN:53,ipv6only=1,fork,reuseaddr EXEC:'${responder} client'";
+    };
     environment.systemPackages = [ pkgs.curl ];
   };
 
@@ -239,6 +251,11 @@ pkgs.testers.runNixOSTest {
         isolatedBlockedDestinations = [
           routerWanIPv4
           routerWanIPv6
+        ];
+        # Mullvad-style: the resolver inside the tunnel, a private address
+        dns.nameservers = [
+          relayIPv4
+          relayIPv6
         ];
       };
 
@@ -546,6 +563,18 @@ pkgs.testers.runNixOSTest {
         assert "peer=${tunnelIPv4}" in out, out
         out = server.succeed(curl + "'http://[${clientIPv6}]:8081/'")
         assert peer(out) == "${tunnelIPv6}", out
+        # the resolvers: in the slot's resolv.conf, reached on port 53 down
+        # the tunnel, while the relay's other ports stay private ranges
+        # (the guest's own resolvconf rewrites the copy, keeping its servers)
+        resolv = server.succeed(in_slot("alice") + "cat /etc/resolv.conf")
+        servers = [l.split()[1] for l in resolv.splitlines() if l.startswith("nameserver ")]
+        assert servers == ["${relayIPv4}", "${relayIPv6}"], resolv
+        client.wait_for_open_port(53)
+        out = server.succeed(curl + "http://${relayIPv4}:53/")
+        assert "peer=${tunnelIPv4}" in out, out
+        out = server.succeed(curl + "'http://[${relayIPv6}]:53/'")
+        assert peer(out) == "${tunnelIPv6}", out
+        server.fail(curl + "-f http://${relayIPv4}:8081/")
         out = server.succeed("ip route get ${clientIPv4} from 10.43.4.2 iif ve-alice mark 0x2000000")
         assert "dev eth2" in out, out
         # Inbound keeps answering the way it came: v6 straight back over

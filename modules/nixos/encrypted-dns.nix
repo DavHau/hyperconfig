@@ -20,18 +20,51 @@
 #   - nftables output: DNS (53) and DoT/DoQ (853) leave only to loopback,
 #     to private ranges on the overlay links, or from sockets of the
 #     captive-dns group. dnscrypt-proxy itself talks HTTPS on 443.
+#   - nftables forward (routed, e.g. containers behind NAT) and bridge
+#     forward (bridged, e.g. lan container slots, which never reach the
+#     inet hooks): forwarded DNS (53, 853) only to private destinations
+#     (overlays, LAN, a VPN's in-tunnel resolver), anything else is
+#     refused and counted.
+#   - container slots (hyperhermes container-slots), where enabled: lan
+#     slots ask resolved on the bridge (an extra stub on the slots'
+#     dns.hostResolverAddress). Isolated slots keep their own
+#     dns.nameservers, reached through their egress (som: Mullvad's
+#     in-tunnel resolver, set there), never this host's shared cache.
 #
-# Not covered: forwarded traffic (containers or VMs with their own resolver
-# set) and the multicast LLMNR/mDNS lookups resolved does on the local link.
+# Not covered: the multicast LLMNR/mDNS lookups resolved does on the local
+# link, and VLAN-tagged bridged frames (not parsed by the bridge chain).
 {
   config,
+  options,
   lib,
   pkgs,
   ...
 }:
 let
   cfg = config.hyper.encryptedDns;
+  # Declared only where hyperhermes' container-slots module is imported.
+  hasSlots = options ? services.container-slots;
+  slots = config.services.container-slots;
+  slotsOn = hasSlots && slots.enable;
 
+  # Destinations plaintext DNS may still go to: never routed to the
+  # internet. ULA (zerotier, hyprspace, wireguard, tailscale, Mullvad),
+  # link-local, yggdrasil, retiolum.
+  private4 = "10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10";
+  private6 = "fc00::/7, fe80::/10, 200::/7, 42::/16";
+  privateSets = ''
+    set private4 {
+      type ipv4_addr
+      flags interval
+      elements = { ${private4} }
+    }
+
+    set private6 {
+      type ipv6_addr
+      flags interval
+      elements = { ${private6} }
+    }
+  '';
   # dnscrypt-proxy's listener. Clear of resolved's stubs (127.0.0.53/54),
   # the hostname's 127.0.0.2, mullvad-egress's 127.0.0.153 and WARP's DNS
   # proxy on 127.0.2.2/127.0.2.3.
@@ -174,19 +207,7 @@ in
             ];
           in
           ''
-            set overlay4 {
-              type ipv4_addr
-              flags interval
-              elements = { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10 }
-            }
-
-            set overlay6 {
-              type ipv6_addr
-              flags interval
-              # ULA (zerotier, hyprspace, wireguard, tailscale, Mullvad),
-              # link-local, yggdrasil, retiolum.
-              elements = { fc00::/7, fe80::/10, 200::/7, 42::/16 }
-            }
+            ${privateSets}
 
             chain output {
               type filter hook output priority filter; policy accept;
@@ -201,13 +222,62 @@ in
               # captive-browser's proxy, setgid ${captiveGroup}.
               meta skgid ${toString captiveGid} accept
               ${lib.concatMapStringsSep "\n  " (
-                i: ''oifname "${i}" ip daddr @overlay4 accept'' + "\n  " + ''oifname "${i}" ip6 daddr @overlay6 accept''
+                i: ''oifname "${i}" ip daddr @private4 accept'' + "\n  " + ''oifname "${i}" ip6 daddr @private6 accept''
               ) overlayInterfaces}
+              counter reject with icmpx admin-prohibited
+            }
+
+            # Routed traffic of containers and VMs with a resolver of their
+            # own. Private destinations stay allowed (a VPN's in-tunnel
+            # resolver, e.g. the isolated container slots' Mullvad
+            # 10.64.0.1, the LAN, the overlays). A base chain of its own:
+            # its reject is final whatever nixos-fw's forward chain says.
+            chain forward {
+              type filter hook forward priority filter; policy accept;
+              meta l4proto { tcp, udp } th dport { 53, 853 } jump forward-dns
+            }
+
+            chain forward-dns {
+              ip daddr @private4 accept
+              ip6 daddr @private6 accept
               counter reject with icmpx admin-prohibited
             }
           '';
       };
+
+      # Bridged frames (e.g. lan container slots on the uplink bridge) pass
+      # no inet hook. Drop, not reject: the bridge family rejects only in
+      # prerouting and input.
+      networking.nftables.tables.encrypted-dns-bridge = {
+        family = "bridge";
+        content = ''
+          ${privateSets}
+
+          chain forward {
+            type filter hook forward priority filter; policy accept;
+            meta l4proto { tcp, udp } th dport { 53, 853 } jump dns
+          }
+
+          chain dns {
+            ip daddr @private4 accept
+            ip6 daddr @private6 accept
+            ${lib.optionalString slotsOn "ip6 daddr ${slots.ipv6Prefix}::/64 accept # the slots' LAN /64: global, but the LAN's own"}
+            counter drop
+          }
+        '';
+      };
     }
+
+    # lan container slots ask resolved over the bridge (their resolv.conf
+    # names dns.hostResolverAddress; container-slots puts that address on
+    # the bridge and opens port 53 on it to the lan slots). resolved binds
+    # extra stubs with IP_FREEBIND, so the address need not exist yet.
+    (lib.optionalAttrs hasSlots {
+      services.container-slots.dns.lanHostResolver = true;
+    })
+    (lib.mkIf slotsOn {
+      services.resolved.settings.Resolve.DNSStubListenerExtra = [ slots.dns.hostResolverAddress ];
+    })
 
     (lib.mkIf (cfg.captiveInterface != null) {
       programs.captive-browser = {
