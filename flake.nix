@@ -252,6 +252,10 @@
           import ./modules/nixos/per-user-tmp/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
+        entity-storage =
+          import ./modules/nixos/entity-storage/test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          };
         user-manager-restart =
           import ./modules/nixos/user-manager-restart/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
