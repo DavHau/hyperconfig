@@ -84,6 +84,12 @@ in
   hyper.zfsEphemeralTmp.dataset = "zroot/root/nobackup/tmp";
   hyper.perUserTmp.enable = true;
 
+  # No docker here: a rootless daemon per user (and an idle rootful one)
+  # for what was one user's leftover Terminal-Bench images (115G, wiped
+  # 2026-11-05). Podman stays, daemonless.
+  virtualisation.docker.enable = lib.mkForce false;
+  virtualisation.docker.rootless.enable = lib.mkForce false;
+
   # Boot unlock without a passphrase while vit is up
   # (../../modules/nixos/tang-client.nix), and som serves vit in turn. bam
   # stays out: its root is not encrypted, so its Tang keys would leave with
