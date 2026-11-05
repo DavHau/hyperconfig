@@ -59,6 +59,9 @@ in
     # Tool caches and package stores into ~/.cache (scratch), for the
     # sessions and the hermes agents.
     ../../modules/nixos/toolchain-cache-dirs
+    # Per-user backed-up home and scratch datasets
+    # (docs/superpowers/specs/2026-11-05-som-entity-storage-design.md).
+    ../../modules/nixos/entity-storage
   ];
 
   # Public IPv4 38.89.142.76, borrowed from sgp through a WireGuard tunnel
@@ -94,6 +97,13 @@ in
   virtualisation.docker.rootless.enable = lib.mkForce false;
 
   hyper.toolchainCacheDirs.enable = true;
+
+  # Users move over one at a time: list one, deploy, then
+  # `entity-storage-migrate <user>` (../../modules/nixos/entity-storage).
+  hyper.entityStorage = {
+    enable = true;
+    users = { };
+  };
 
   # Boot unlock without a passphrase while vit is up
   # (../../modules/nixos/tang-client.nix), and som serves vit in turn. bam
@@ -222,6 +232,9 @@ in
   # (tools/) prints the handoff for a slot's deployer.
   services.container-slots = {
     enable = true;
+    # Root and scratch datasets per slot, for the slots that opt in
+    # (slots.<name>.storage.enable; then `slot-storage-migrate <slot>`).
+    storage.enable = true;
     uplink = "enp6s0";
     uplinkMac = "a4:0c:66:1b:29:f1";
     lanIPv4 = "192.168.8.0/24";
