@@ -7,6 +7,8 @@
 #     `~.`, no FallbackDNS. Overlays that register their own per-link DNS
 #     with resolved (hyprspace, tailscale MagicDNS, the Mullvad app) keep
 #     their routing domains.
+#   - `lan` names and 192.168.8.0/24 reverse lookups go to the home
+#     router's dnsmasq over zerotier (see homeRouter).
 #   - NetworkManager hands no DHCP/RA/VPN DNS to resolved at all (dns=none,
 #     systemd-resolved=false): its resolved plugin ignores [global-dns]
 #     (nm-dns-systemd-resolved.c update() never reads global_config) and
@@ -43,6 +45,17 @@ let
   captiveGid = 1213;
   captiveWrapper = "captive-browser-proxy";
 
+  # The home router (GL.iNet Beryl, cm-beryl) on the zerotier network
+  # zt44xbwxfb: its dnsmasq knows the LAN's DHCP names under `lan` and
+  # answers on this address too. Asking it over zerotier keeps the query
+  # inside the encrypted overlay (the nftables rule below lets zt* to
+  # private addresses through) and works away from home as well.
+  homeRouter = "192.168.194.4";
+  forwardingRules = pkgs.writeText "dnscrypt-forwarding-rules.txt" ''
+    lan ${homeRouter}
+    8.168.192.in-addr.arpa ${homeRouter}
+  '';
+
   dnscryptConfig = (pkgs.formats.toml { }).generate "dnscrypt-proxy.toml" {
     listen_addresses = [ "${listenAddress}:53" ];
     server_names = [ "quad9-doh-ip4-port443-filter-pri" ];
@@ -77,6 +90,7 @@ let
     # The probe only connect()s a UDP socket, which sends no packet.
     netprobe_address = "9.9.9.9:443";
     netprobe_timeout = 60;
+    forwarding_rules = "${forwardingRules}";
   };
 in
 {
@@ -110,7 +124,12 @@ in
       services.resolved = {
         enable = true;
         settings.Resolve = {
-          Domains = [ "~." ];
+          # `lan` as search domain: bare LAN hostnames (`vit`) resolve as
+          # `vit.lan` via forwardingRules.
+          Domains = [
+            "~."
+            "lan"
+          ];
           # Empty: resolved's compiled-in fallback servers are plaintext.
           FallbackDNS = [ ];
           # The hop to dnscrypt-proxy is loopback.
