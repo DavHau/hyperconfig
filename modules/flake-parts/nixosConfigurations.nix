@@ -392,13 +392,19 @@ in {
             # clan-core monitoring: Alloy on every machine pushes metrics
             # (Mimir) and journal logs (Loki) to edi over zt-eu (edi.d);
             # Grafana at http://edi.d/grafana/. The service sets no retention,
-            # so the server role adds it plus a loopback ring fix.
+            # so the server role adds it plus a loopback ring fix. Alerts
+            # (Grafana unified alerting, Telegram) live in monitoring-alerts.nix;
+            # clients add ZFS pool health and capacity for its pool rules.
             monitoring = {
               module.name = "monitoring";
               module.input = "clan-core";
               roles.client.tags.all = {};
+              roles.client.extraModules = [ ../../modules/nixos/monitoring-zfs-pools.nix ];
               roles.server.machines.edi.settings.grafana.enable = true;
-              roles.server.extraModules = [ ../../modules/nixos/monitoring-server.nix ];
+              roles.server.extraModules = [
+                ../../modules/nixos/monitoring-server.nix
+                ../../modules/nixos/monitoring-alerts.nix
+              ];
             };
           };
         };

@@ -23,4 +23,8 @@
     "bruch-bu.de/AAAA/casa"
     "bruch-bu.de/AAAA/playa"
   ];
+
+  # Fleet alerts to Telegram (../../modules/nixos/monitoring-alerts.nix);
+  # needs the grafana-telegram vars.
+  hyper.monitoringAlerts.telegram.enable = true;
 }
