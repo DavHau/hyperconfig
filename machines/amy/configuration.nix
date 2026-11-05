@@ -91,6 +91,10 @@
   # on; its state vault under /var/lib/hermes-microvm stays on disk.
   services.hermes-microvm.enable = false;
 
+  # No podman here (dave.nix's virtualisation.nix turns it on for som and
+  # vit); rootless docker is the only container runtime.
+  virtualisation.podman.enable = lib.mkForce false;
+
   # dave (clan users role) has no declared uid and on-disk got 1001 (grmpf
   # took 1000 first). Pin both so any tool that rebuilds the user DB from the
   # declarative config (userborn, fresh install) can never hand dave 1000

@@ -20,7 +20,6 @@
 #   - nftables output: DNS (53) and DoT/DoQ (853) leave only to loopback,
 #     to private ranges on the overlay links, or from sockets of the
 #     captive-dns group. dnscrypt-proxy itself talks HTTPS on 443.
-#   - Rootful docker containers ask resolved's stub on the docker0 address.
 #
 # Not covered: forwarded traffic (containers or VMs with their own resolver
 # set) and the multicast LLMNR/mDNS lookups resolved does on the local link.
@@ -37,9 +36,6 @@ let
   # the hostname's 127.0.0.2, mullvad-egress's 127.0.0.153 and WARP's DNS
   # proxy on 127.0.2.2/127.0.2.3.
   listenAddress = "127.0.5.3";
-
-  # Rootful docker's bridge, pinned so the resolver address below holds.
-  dockerBridge = "172.17.0.1";
 
   captiveGroup = "captive-dns";
   captiveGid = 1213;
@@ -237,23 +233,6 @@ in
         setuid = false;
         setgid = true;
       };
-    })
-
-    (lib.mkIf config.virtualisation.docker.enable {
-      # Without this, containers on the default bridge get 8.8.8.8: dockerd
-      # drops the loopback stub from the host's resolv.conf. Containers on
-      # user networks forward through docker's embedded DNS to the same
-      # address. resolved binds extra stubs with IP_FREEBIND, so docker0
-      # need not exist yet.
-      virtualisation.docker.daemon.settings = {
-        bip = "${dockerBridge}/16";
-        dns = [ dockerBridge ];
-      };
-      services.resolved.settings.Resolve.DNSStubListenerExtra = [ dockerBridge ];
-      networking.firewall.extraInputRules = ''
-        iifname "docker0" ip daddr ${dockerBridge} meta l4proto { tcp, udp } th dport 53 accept
-        iifname "br-*" ip daddr ${dockerBridge} meta l4proto { tcp, udp } th dport 53 accept
-      '';
     })
   ];
 }

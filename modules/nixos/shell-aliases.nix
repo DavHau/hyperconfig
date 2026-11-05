@@ -1,8 +1,7 @@
 { ... }:
 {
   environment.shellAliases = {
-    dco = "sudo docker-compose";
-    # docker = "sudo docker";
+    dco = "docker-compose";
     arion = "sudo arion";
     ssh = "env TERM=xterm-color ssh";
     nix-buildr = ''nix-build --builders "ssh://root@168.119.226.152 x86_64-linux,aarch64-linux - 100 1 big-parallel,benchmark"'';

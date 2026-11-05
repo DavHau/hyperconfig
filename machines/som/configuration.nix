@@ -90,10 +90,9 @@ in
   hyper.zfsEphemeralTmp.dataset = "zroot/root/nobackup/tmp";
   hyper.perUserTmp.enable = true;
 
-  # No docker here: a rootless daemon per user (and an idle rootful one)
-  # for what was one user's leftover Terminal-Bench images (115G, wiped
-  # 2026-11-05). Podman stays, daemonless.
-  virtualisation.docker.enable = lib.mkForce false;
+  # No docker here: a rootless daemon per user for what was one user's
+  # leftover Terminal-Bench images (115G, wiped 2026-11-05). Podman stays,
+  # daemonless.
   virtualisation.docker.rootless.enable = lib.mkForce false;
 
   hyper.toolchainCacheDirs.enable = true;

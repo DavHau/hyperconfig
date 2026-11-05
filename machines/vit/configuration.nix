@@ -132,13 +132,12 @@
   systemd.targets.hibernate.enable = false;
   systemd.targets.hybrid-sleep.enable = false;
 
-  # The spaces desktop profile defaults hermes-microvm, llama-swap, ollama
-  # and docker on. vit runs none of them: it is the GPU box the som agents
+  # The spaces desktop profile defaults hermes-microvm, llama-swap and
+  # ollama on. vit runs none of them: it is the GPU box the som agents
   # ssh into, and dave has no declared uid (hermes-microvm asserts one).
   services.hermes-microvm.enable = false;
   services.llama-swap.enable = false;
   services.ollama.enable = lib.mkForce false;
-  virtualisation.docker.enable = lib.mkForce false;
 
   # Belt-and-braces on top of the disabled sleep targets above: logind's
   # default HandleLidSwitch=suspend still fires a (failing) suspend attempt
