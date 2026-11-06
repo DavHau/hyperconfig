@@ -188,7 +188,7 @@ Keep what you could not rebuild in the root (repos, results, databases)
 and everything rebuildable in scratch: caches, build trees, downloaded
 models, datasets you can fetch again, experiment scratch. A full quota
 fails writes in your slot only (EDQUOT/ENOSPC). /tmp is $machine's /tmp:
-emptied at its reboot, files unused for 10 days removed.
+emptied at its reboot, files unused for a day removed.
 
 Optional, from the hyperhermes flake (inputs.hyperhermes.url =
 "github:DavHau/hyperconfig?dir=hyperhermes"):

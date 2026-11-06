@@ -775,14 +775,14 @@ in
     boot.kernel.sysctl."net.ipv4.conf.all.forwarding" = lib.mkDefault 1;
 
     # --- the slots ------------------------------------------------------
-    # The age matches systemd's own /tmp aging (10d): tmpfiles skips paths
-    # that have their own line when it ages /tmp, so without one here a
-    # slot's tmp is never cleaned.
+    # Aged after a day, like the users' /tmp (per-user-tmp): tmpfiles skips
+    # paths that have their own line when it ages /tmp, so without an age
+    # here a slot's tmp is never cleaned.
     systemd.tmpfiles.rules = [
       "d /tmp/.slots 0700 root root -"
     ]
     ++ lib.mapAttrsToList (
-      name: slot: "d ${slotTmp name} 1777 ${toString (uidBase slot)} ${toString (uidBase slot)} 10d"
+      name: slot: "d ${slotTmp name} 1777 ${toString (uidBase slot)} ${toString (uidBase slot)} 1d"
     ) cfg.slots;
 
     containers = lib.mapAttrs (

@@ -26,7 +26,7 @@ switch-over needs it absent or empty).
 - `~/scratch` (not backed up): datasets, downloads, model weights,
   build outputs, checkpoints, logs and large experiment output, clones
   of big third-party repos, anything you can fetch or regenerate.
-- `/tmp`: emptied at every reboot, files older than 10 days are deleted
+- `/tmp`: emptied at every reboot, files unused for a day are deleted
   (`/var/tmp`: 30 days). Not for anything you want tomorrow.
 
 Inside a repo in `~`, write large outputs to `~/scratch/<project>/` and

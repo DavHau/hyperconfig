@@ -150,13 +150,13 @@ pkgs.testers.runNixOSTest {
 
     # Each instance has its own tmpfiles line, which shields it from the
     # parent's aging unless the line carries an age itself.
-    with subtest("instances age like /tmp (10d) and /var/tmp (30d)"):
+    with subtest("instances age: /tmp after a day, /var/tmp after 30"):
         machine.succeed(ssh("alice", "touch /tmp/stale /var/tmp/stale"))
-        machine.succeed("date -s @$(( $(date +%s) + 11 * 86400 ))")
+        machine.succeed("date -s @$(( $(date +%s) + 2 * 86400 ))")
         machine.succeed("systemd-tmpfiles --clean")
         machine.fail("test -e /tmp/.inst/alice/stale")
         machine.succeed("test -e /var/tmp/.inst/alice/stale")
-        machine.succeed("date -s @$(( $(date +%s) + 20 * 86400 ))")
+        machine.succeed("date -s @$(( $(date +%s) + 29 * 86400 ))")
         machine.succeed("systemd-tmpfiles --clean")
         machine.fail("test -e /var/tmp/.inst/alice/stale")
   '';
