@@ -53,6 +53,7 @@ let
     pkgs.gnused
     pkgs.jq
     pkgs.procps
+    pkgs.shadow
     pkgs.util-linux
   ];
 

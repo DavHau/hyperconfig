@@ -177,11 +177,14 @@ pkgs.testers.runNixOSTest {
         machine.succeed("systemctl is-active agent-alice.service alice-echo.socket")
         machine.succeed("test -e /var/lib/systemd/linger/alice")
         machine.wait_for_unit("user@1000.service")
+        # Logins were refused meanwhile (account expired); the expiry is back.
+        machine.succeed("chage -l alice | grep -E 'Account expires\\s*: never'")
 
     with subtest("migration"):
         out = machine.succeed("entity-storage-migrate alice --to-scratch big --to-scratch work/data 2>&1")
         print(out)
         assert "alice-echo.socket" in out and "user@1000.service" in out, out
+        machine.succeed("chage -l alice | grep -E 'Account expires\\s*: never'")
 
     with subtest("layout, snapshot property, ownership"):
         assert source("/home/alice") == "tpool/root/home/alice"

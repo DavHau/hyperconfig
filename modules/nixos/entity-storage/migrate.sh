@@ -5,7 +5,8 @@
 # home dataset, the scratch dataset (old ~/scratch plus --to-scratch
 # paths, which stay reachable through relative symlinks) and the cache,
 # containers and sbox-state datasets. The user's services, user manager
-# and sessions are stopped meanwhile and restored afterwards. The old tree
+# and sessions are stopped meanwhile, and new logins refused (account
+# expired), then restored afterwards. The old tree
 # is kept as /home/.premigrate-USER until --finalize; any failure before
 # the new home is verified puts everything back as it was.
 
@@ -314,6 +315,7 @@ for t in "${triggers[@]}"; do
   ! systemctl is-active --quiet -- "$t" || active_triggers+=("$t")
 done
 lingers=0
+locked=0
 [ ! -e "/var/lib/systemd/linger/$user" ] || lingers=1
 manager=0
 ! systemctl is-active --quiet "user@$uid.service" || manager=1
@@ -340,6 +342,9 @@ swapped=0
 
 restore() {
   local u
+  # First: user@ goes through PAM (systemd-user), which refuses an
+  # expired account.
+  [ "$locked" = 0 ] || chage -E "${expire:--1}" "$user" || echo "WARNING: could not restore the account expiry of $user (chage -E ${expire:--1} $user)"
   [ "$lingers" = 0 ] || loginctl enable-linger "$user" || echo "WARNING: loginctl enable-linger $user failed"
   [ "$manager" = 0 ] || systemctl start "user@$uid.service" || echo "WARNING: could not start user@$uid.service"
   for u in "${active_services[@]}" "${active_triggers[@]}"; do
@@ -402,6 +407,13 @@ mkdir -p "$state_dir"
   [ "$lingers" = 0 ] || echo "linger"
 } >"$stopped_file"
 echo "Stopping; the list is in $stopped_file until it is restored."
+# No new logins until restore: terminate-user alone loses to a client
+# that reconnects every few seconds. An expired account is refused by
+# sshd and by every PAM account check; the previous expiry comes back.
+expire=$(getent shadow "$user" | cut -d: -f8)
+chage -E 0 "$user"
+locked=1
+echo "expire ${expire:--1}" >>"$stopped_file"
 for u in "${active_triggers[@]}"; do systemctl stop -- "$u"; done
 for u in "${active_services[@]}"; do systemctl stop -- "$u"; done
 [ "$lingers" = 0 ] || loginctl disable-linger "$user"
