@@ -25,6 +25,12 @@ let
   pubFile = pkgs.writeText "agent-id_ed25519.pub" (pubKey + "\n");
 in
 {
+  options.hyper.agentUser.enable = lib.mkOption {
+    type = lib.types.bool;
+    default = true;
+    description = "The fleet `agent` account on this machine.";
+  };
+
   # p0 inference over omp/afk, same as the hermes agents
   # (machines/som/hermes-inference.nix): a root
   # oneshot installs a 0400 copy of the shared token at
@@ -34,7 +40,7 @@ in
   # (amy, vit, som); this file is fleet-wide, so the option is set only
   # where it exists — `lib.mkIf` would still declare the path and fail
   # evaluation on the other hosts.
-  config = lib.optionalAttrs (options ? hyper && options.hyper ? inferenceApiKey) {
+  config = lib.mkIf config.hyper.agentUser.enable (lib.optionalAttrs (options ? hyper && options.hyper ? inferenceApiKey) {
     hyper.inferenceApiKey.users = [ "agent" ];
   } // {
   users.groups.agent = { };
@@ -90,5 +96,5 @@ in
     "L+ /home/agent/.ssh/id_ed25519 - - - - ${privKey.path}"
     "L+ /home/agent/.ssh/id_ed25519.pub - - - - ${pubFile}"
   ];
-  };
+  });
 }

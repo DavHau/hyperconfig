@@ -97,13 +97,17 @@ in
 
   hyper.toolchainCacheDirs.enable = true;
 
+  # No fleet `agent` account here: unused on som (no logins), its 109G
+  # deleted 2026-11-06.
+  hyper.agentUser.enable = false;
+
   # Users move over one at a time: list one, deploy, then
   # `entity-storage-migrate <user>` (../../modules/nixos/entity-storage).
   hyper.entityStorage = {
     enable = true;
     users = {
-      # adam: not yet; his ssh client reconnects every few seconds, so
-      # entity-storage-migrate cannot get his home quiet (2026-11-05).
+      # Logins are refused while entity-storage-migrate copies a home.
+      adam.homeQuota = "30G";
       b3x = { };
       bumper = { };
       chris = { };
@@ -119,6 +123,7 @@ in
       pinpox = { };
       rti = { };
       thaigersprint = { };
+      stefan = { };
       willi = { };
     };
   };
@@ -361,6 +366,20 @@ in
   # Slots move onto their datasets one at a time: opt in, deploy, then
   # `slot-storage-migrate <slot>` (hyperhermes container-slots-storage).
   services.container-slots.slots = {
+    # The agent slots; dave-hermes' follows its owner's home last.
+    adam.storage.enable = true;
+    b3x.storage.enable = true;
+    bumper.storage.enable = true;
+    chris.storage.enable = true;
+    domi.storage.enable = true;
+    egg.storage.enable = true;
+    j.storage.enable = true;
+    joe.storage.enable = true;
+    momentum.storage.enable = true;
+    pinpox.storage.enable = true;
+    rti.storage.enable = true;
+    stefan.storage.enable = true;
+    willi.storage.enable = true;
     thaiger.storage.enable = true;
     mm.storage.enable = true;
     # ~38G stays backed up (workspaces, notes-cache, nmm, ...); the
