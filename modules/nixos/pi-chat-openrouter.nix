@@ -1,23 +1,16 @@
-# Enable the shared OpenRouter key (spaces.openrouter — consumed by
-# pi-chat's provider staging and the hermes microvms).
+# The shared OpenRouter key (spaces.openrouter; spaces' hermes microvms
+# ride it in as a systemd credential, som's native agents with
+# `openrouter` as OPENROUTER_API_KEY, ../../machines/som/hermes-inference.nix).
 #
 # The API key is stored as a clan var (`openrouter/apikey`), prompted on
-# `clan vars generate` and persisted in the clan secret store. The host
-# file is loaded into pi as the `openrouter-api-key` systemd credential
-# so it never lands in the nix store.
+# `clan vars generate` and persisted in the clan secret store. Enter the
+# bare `sk-or-…` key, nothing around it.
 { config, ... }:
 {
   clan.core.vars.generators.openrouter = {
     share = true;
     prompts.apikey.type = "hidden";
     prompts.apikey.persist = true;
-    # Re-stage /run/spaces-secrets/openrouter-api-key when the deployed key
-    # changes. Without this a key rotation leaves the boot-time copy in
-    # place and pi's openrouter provider 401s silently (incident
-    # 2026-07-08: staged copy was 2 days older than the rotated var).
-    # Running chat sessions still hold the old credential copy —
-    # Mod+Shift+A (reload pi-chat) picks up the new one.
-    files.apikey.restartUnits = [ "spaces-secrets-load.service" ];
   };
 
   spaces.openrouter = {
