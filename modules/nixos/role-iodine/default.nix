@@ -1,10 +1,11 @@
 {pkgs, config, ...}: {
+  imports = [../iodine-password.nix];
   services.iodine.server = {
     enable = true;
     ip = "192.168.123.1/24";
     domain = "ns.bruch-bu.de";
     extraConfig = "-c";
-    passwordFile = config.sops.secrets.iodine-password.path;
+    passwordFile = config.clan.core.vars.generators.iodine-password.files.password.path;
   };
   boot.kernel.sysctl = {
     "net.ipv4.ip_forward" = 1;

@@ -8,35 +8,6 @@ in
   ];
 
   security.pam.services.sshd.unixAuth = lib.mkForce true;
-  # this is needed for any of the custom sudo rules to take effect at all
-  security.sudo.execWheelOnly = lib.mkForce false;
-  security.sudo.extraRules = [
-    {
-      users = [ "stefen" ];
-      commands = [
-        {
-          command = "${pkgs.systemd}/bin/systemctl stop voicinator";
-          options = [ "NOPASSWD"];
-        }
-        {
-          command = "${pkgs.systemd}/bin/systemctl start voicinator";
-          options = [ "NOPASSWD"];
-        }
-        {
-          command = "${pkgs.systemd}/bin/systemctl restart voicinator";
-          options = [ "SETENV" "NOPASSWD"];
-        }
-        {
-          command = "${pkgs.systemd}/bin/systemctl status voicinator";
-          options = [ "NOPASSWD"];
-        }
-        {
-          command = "${pkgs.systemd}/bin/journalctl -fu voicinator";
-          options = [ "NOPASSWD"];
-        }
-      ];
-    }
-  ];
   services.openssh.extraConfig = ''
     Match User roman
     PasswordAuthentication yes
