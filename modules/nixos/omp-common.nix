@@ -179,6 +179,11 @@ in rec {
     instead: a plain Nix data file both machines import, a shared module
     option, or clan vars / inventory.
 
+    ## Deploys
+
+    - Each deploy logs to its own file (`clan machines update <m> > /tmp/deploy-<m>.log 2>&1`) in its own named kernel; report each machine's result as it finishes.
+    - Deploy independent machines in parallel (`clan machines update a b c`), not one after another.
+
     ## Parallel work with subagents
 
     The main session is an orchestrator: delegate all significant implementation to subagents and only make few-line fixes, merge edits, or very small changes yourself.
