@@ -38,16 +38,19 @@ symlink the output dir there (below).
 Set for you, nothing to do (`env | grep -i cache` shows them):
 
 - `~/.cache` by default: pip, uv, Hugging Face (`HF_HOME`), torch,
-  playwright, puppeteer, ccache, nix, yarn v1, deno, go build cache,
-  sccache, cargo build intermediates.
-- Moved there: Go modules (`GOMODCACHE`), npm (`npm_config_cache`), pnpm
-  store (`pnpm_config_store_dir`), bun (`BUN_INSTALL_CACHE_DIR`), Gradle
-  (`GRADLE_USER_HOME`, so `gradle.properties` lives in `~/.cache/gradle`),
-  Maven repository (`MAVEN_OPTS`), ollama models (`OLLAMA_MODELS`), conda
-  packages (`CONDA_PKGS_DIRS`).
-- Still in `~`: `./target`, `.venv`, `node_modules` in your repos, and
-  `~/.cargo/registry` (safe to delete; cargo downloads it again). Delete
-  them from projects you are done with.
+  playwright, puppeteer, ccache, nix, yarn v1, deno, go build cache.
+- Moved there: cargo's build intermediates (`CARGO_BUILD_BUILD_DIR`:
+  deps, incremental, build scripts go to `~/.cache/cargo-build/...`,
+  deleted once their workspace is gone or after 14 unused days; `./target`
+  keeps only the final binaries), Go modules (`GOMODCACHE`), npm
+  (`npm_config_cache`), pnpm store (`pnpm_config_store_dir`), bun
+  (`BUN_INSTALL_CACHE_DIR`), Gradle (`GRADLE_USER_HOME`, so
+  `gradle.properties` lives in `~/.cache/gradle`), Maven repository
+  (`MAVEN_OPTS`), ollama models (`OLLAMA_MODELS`), conda packages
+  (`CONDA_PKGS_DIRS`).
+- Still in `~`: `.venv` and `node_modules` in your repos, final binaries
+  in `./target`, and `~/.cargo/registry` (safe to delete; cargo downloads
+  it again). Delete them from projects you are done with.
 
 Do not override these variables to point back into `~`.
 

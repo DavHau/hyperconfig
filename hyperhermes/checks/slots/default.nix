@@ -675,7 +675,13 @@ pkgs.testers.runNixOSTest {
         server.fail(ssh_as("bob", bob4))
         # A power cut, not a clean shutdown: the state written by the
         # control units must already be on disk (and this VM's read-only
-        # store image keeps a clean poweroff from ever finishing).
+        # store image keeps a clean poweroff from ever finishing). alice's
+        # guest wrote its user database (/var/lib/nixos) at its boot after
+        # the hard reset, seconds ago and maybe not yet written back; a cut
+        # then leaves it zero-filled and the guest's users broken. fsync
+        # just those files, not the filesystem, so the control state still
+        # has to be on disk by itself.
+        server.succeed(in_slot("alice") + "${pkgs.bash}/bin/sh -c '${pkgs.coreutils}/bin/sync /var/lib/nixos /var/lib/nixos/*'")
         server.crash()
         server.start()
         server.wait_for_unit("agent-slots-restore.service")

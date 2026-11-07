@@ -792,6 +792,13 @@ in
         privateUsers = uidBase slot;
         privateNetwork = true;
         extraFlags = [
+          # Started once the guest's init runs, not once it has booted:
+          # nixpkgs' post-start brings the host side of the veth up only
+          # after start, so a guest whose boot waits for the network
+          # (network-online.target, dhcpcd) would wait for a link the host
+          # never raises and time out after a minute. Later than nixpkgs'
+          # --notify-ready=yes on the command line, so it wins.
+          "--notify-ready=no"
           "--bind-ro=${nixStateStub}:/nix/var/nix"
           # implied by "pick", not by a numeric base: without it the root
           # tree stays host-root-owned, i.e. nobody's inside the slot

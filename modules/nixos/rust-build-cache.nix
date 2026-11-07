@@ -22,7 +22,7 @@
   directory instead of TCP 127.0.0.1:4226, which `--network host` sandboxes
   (sharing the host loopback) could otherwise reach across sandboxes.
 */
-{ pkgs, ... }:
+{ lib, options, pkgs, ... }:
 let
   common = {
     RUSTC_WRAPPER = "${pkgs.sccache}/bin/sccache";
@@ -31,6 +31,13 @@ let
   };
 in
 {
+  # Hermes agents (no PAM session, so no /etc/set-environment) get the
+  # build dir only, through their .env: a shared sccache would need a
+  # per-agent server socket, and the default TCP one would be one cache
+  # for all of them. The option exists only with hyperhermes imported.
+  config = lib.optionalAttrs (options ? services.hyperhermes.homeEnvironment) {
+    services.hyperhermes.homeEnvironment.CARGO_BUILD_BUILD_DIR = "$HOME/.cache/cargo-build{workspace-root}";
+  } // {
   environment.systemPackages = [ pkgs.sccache ];
 
   # /etc/set-environment exports these in double quotes: $HOME and
@@ -58,5 +65,6 @@ in
       CARGO_BUILD_BUILD_DIR = "{cargo-cache-home}/build-dir{workspace-root}";
       SCCACHE_SERVER_UDS = "/tmp/sccache.sock";
     };
+  };
   };
 }

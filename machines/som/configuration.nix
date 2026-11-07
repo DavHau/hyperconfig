@@ -62,6 +62,10 @@ in
     # Per-user backed-up home and scratch datasets
     # (docs/superpowers/specs/2026-11-05-som-entity-storage-design.md).
     ../../modules/nixos/entity-storage
+    # Cargo intermediates into ~/.cache (scratch) instead of ./target in
+    # the backed-up home, and their hourly GC (disk-hygiene).
+    ../../modules/nixos/rust-build-cache.nix
+    ../../modules/nixos/disk-hygiene
   ];
 
   # Public IPv4 38.89.142.76, borrowed from sgp through a WireGuard tunnel
@@ -96,6 +100,10 @@ in
   virtualisation.docker.rootless.enable = lib.mkForce false;
 
   hyper.toolchainCacheDirs.enable = true;
+  # Headless: disk-hygiene's desktop notification has no display to go to
+  # (and would fail in every lingering user's manager); the Grafana pool
+  # and quota alerts cover som.
+  systemd.user.services.zpool-capacity-alert.enable = false;
 
   # No fleet `agent` account here: unused on som (no logins), its 109G
   # deleted 2026-11-06.
