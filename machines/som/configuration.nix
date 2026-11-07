@@ -120,9 +120,9 @@ in
       bumper = { };
       chris = { };
       dave = { };
-      # Temporary: re/omd2 (~300G) still lives in the home until the agent
-      # moves it to ~/scratch; then down to 40G.
-      dave-hermes.homeQuota = "400G";
+      # hermes/workspace (~25G) stays backed up; omd2's rebuildable data
+      # moved to ~/scratch (2026-11-07).
+      dave-hermes.homeQuota = "40G";
       domi = { };
       egg = { };
       hsjobeki = { };
