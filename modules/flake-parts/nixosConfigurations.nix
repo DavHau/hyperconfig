@@ -27,7 +27,17 @@
     inherit (somDashboards) domain accounts frontDoor;
     publish = true;
   };
-  dashboardGroups = hermesSso.accountGroups somDashboards.accounts;
+  # The infra-space agent's dashboard on som (modules/nixos/infra-space/
+  # dashboard.nix): one more client and group of the same convention, for
+  # the account in its data file. Not in hermes-dashboards.nix: that agent
+  # runs in som's container, not on som, and has no serve ports.
+  infraSpaceDashboard = import ../nixos/infra-space/dashboard-account.nix;
+  infraSpaceAccounts = { ${infraSpaceDashboard.name} = infraSpaceDashboard.account; };
+  infraSpaceClients = hermesSso.oidcClients {
+    inherit (somDashboards) domain;
+    accounts = infraSpaceAccounts;
+  };
+  dashboardGroups = hermesSso.accountGroups (somDashboards.accounts // infraSpaceAccounts);
   withDashboardGroups = users:
     let
       unknown = lib.filter (a: !(users ? ${a})) (lib.attrValues somDashboards.accounts);
@@ -261,8 +271,8 @@ in {
               # mail owner page shares (hyperhermes' mail module, its own
               # oauth2-proxy, its own callback), the private serve
               # ports' oauth2-proxy (hermes-serve), plus one client per agent
-              # dashboard.
-              roles.client.machines.som.settings.clients = somHermesClients // {
+              # dashboard, and infra-space's (from its own data file).
+              roles.client.machines.som.settings.clients = somHermesClients // infraSpaceClients // {
                 hermes = somHermesClients.hermes // {
                   callbackURLs = somHermesClients.hermes.callbackURLs ++ [
                     "https://mailgate.${somDashboards.frontDoor}/oauth2/callback"

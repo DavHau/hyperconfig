@@ -121,6 +121,30 @@ in
   hyper.agentUser.enable = false;
 
   hyper.infraSpace.enable = true;
+  # The infra-space agent's dashboard at https://infra-space.davhau.fyi/,
+  # Dave only: its pocket-id client from the inventory
+  # (../../modules/nixos/infra-space/dashboard-account.nix), TLS and the
+  # cross-origin gate from the agents' exposure, like their dashboards.
+  hyper.infraSpace.dashboard =
+    let
+      account = import ../../modules/nixos/infra-space/dashboard-account.nix;
+      exposure = config.services.hyperhermes.exposure;
+      dashboard = config.hyper.infraSpace.dashboard;
+    in
+    {
+      enable = true;
+      host = "${account.name}.${exposure.domain}";
+      url = exposure.urlOf dashboard.host;
+      inherit (config.hyper.oidc) issuer;
+      inherit (config.services.hyperhermes.sso) authorizationEndpoint;
+      clientSecretFile = toString config.hyper.oidc.clients.${dashboard.clientId}.secretFile;
+      virtualHost = exposure.virtualHost exposure.certName;
+    };
+  services.hyperhermes.exposure.fetchMetadataGate.virtualHosts = [ "infra-space-dashboard" ];
+  # Explicit, as the dashboards module gives its names: the wildcard would
+  # stop answering once a name below it exists.
+  services.hyperhermes.exposure.records.${config.hyper.infraSpace.dashboard.host} =
+    config.services.hyperhermes.exposure.hostRecords;
 
   # Users move over one at a time: list one, deploy, then
   # `entity-storage-migrate <user>` (../../modules/nixos/entity-storage).

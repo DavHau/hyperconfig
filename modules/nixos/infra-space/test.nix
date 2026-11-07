@@ -17,6 +17,17 @@
 # `teamclaude-api-key` print the credentials, and web_search, fetch and
 # browser stay off even against infra's own config.yml.
 #
+# hermes (./hermes.nix) in both containers, with a stub model instead of
+# p0: the gateway runs as infra; .env, config.yaml and plugins/ are not
+# writable by infra; every platform's toolsets, as hermes' own config
+# resolution in its venv computes them in the gateway's environment, are
+# exactly the allowlist, and the cli agent's tools come from those only;
+# `hermes chat` answers through the stub with the p0 credential. memberA
+# also plays som with the dashboard (./dashboard.nix): its nginx vhost
+# answers from the host, gated by hermes' OIDC login (lazy discovery, so
+# no issuer is needed for that), the guest's dashboard port is refused to
+# a LAN peer, and memberB (amy) has none.
+#
 # ./test-keys is test-only material: infra-space(.pub) the shared
 # identity, hostkey-member{A,B}(.pub) the guests' host keys, managed-host
 # with managed-host-cert.pub signed by ca.pub (the stand-in for the clan
@@ -32,6 +43,13 @@ let
   sshPort = 2223;
   # the host-only guest service below
   probePort = 8000;
+  # the stub model in the guests, for p0 (./hermes.nix)
+  llmPort = 9999;
+  llmRecord = "/var/lib/fake-llm/auth";
+  # the guest's dashboard port for the host's nginx (./dashboard.nix)
+  dashboardPort = 9119;
+  dashboardHost = "infra-space.test";
+  lockedHome = inputs.hyperhermes.lib.lockedHermesHome "infra";
   # the guest's veth addresses (./default.nix)
   guestV4 = "10.235.0.2";
   guestV6 = "fd23:5ace::2";
@@ -88,7 +106,8 @@ let
         clanStub
         ./default.nix
       ];
-      virtualisation.memorySize = 2048;
+      # the container runs hermes' gateway and dashboard
+      virtualisation.memorySize = 3072;
       virtualisation.cores = 2;
       # the test build's builder, in the store the daemon serves (no
       # substituters in the sandbox)
@@ -96,7 +115,10 @@ let
       # as on som and amy (../encrypted-dns.nix; clan's networkd)
       networking.nftables.enable = true;
       networking.useNetworkd = true;
-      environment.systemPackages = [ pkgs.netcat-openbsd ];
+      environment.systemPackages = [
+        pkgs.netcat-openbsd
+        pkgs.curl
+      ];
 
       hyper.infraSpace = {
         enable = true;
@@ -125,12 +147,43 @@ let
               networking.firewall.allowedTCPPorts = [ probePort ];
             }
           )
+          # No internet here: p0 is the stub model (the p0 credential still
+          # goes along), and the check of the toolsets.
+          (
+            { config, pkgs, ... }:
+            {
+              services.hyperhermes.settings.providers.p0.base_url = lib.mkForce "http://127.0.0.1:${toString llmPort}/v1";
+              services.hyperhermes.initialModel.base_url = lib.mkForce "http://127.0.0.1:${toString llmPort}/v1";
+              systemd.services.fake-llm = {
+                wantedBy = [ "multi-user.target" ];
+                before = [ "hermes-agent-infra.service" ];
+                serviceConfig = {
+                  StateDirectory = "fake-llm";
+                  ExecStart = "${pkgs.python3}/bin/python3 ${inputs.hyperhermes}/checks/locked-config/fake-llm.py ${toString llmPort} ${llmRecord}";
+                };
+              };
+              environment.systemPackages = [
+                (pkgs.writeShellScriptBin "infra-space-toolsets" ''
+                  exec ${config.services.hyperhermes.package.hermesVenv}/bin/python3 ${./test-toolsets.py}
+                '')
+              ];
+            }
+          )
         ];
       };
-      # what ../inference-api-key.nix and ../teamclaude-api-key.nix declare
-      # on som and amy (./afk.nix passes both files in)
+      # what ../inference-api-key.nix and ../teamclaude-api-key.nix declare on som and amy
       clan.core.vars.generators.inference-api-key.files.token = { };
       clan.core.vars.generators.teamclaude-api-key.files.key = { };
+
+      # memberA is som: the dashboard behind its nginx (plain HTTP here).
+      hyper.infraSpace.dashboard = lib.mkIf (me == "memberA") {
+        enable = true;
+        host = dashboardHost;
+        url = "http://${dashboardHost}";
+        # never contacted: hermes discovers its issuer at the first sign-in
+        issuer = "https://id.test";
+        clientSecretFile = "/etc/test-vars/oidc/secret";
+      };
 
       environment.etc = {
         "test-vars/infra-space-ssh/id_ed25519" = secret (keys + "/infra-space");
@@ -139,6 +192,7 @@ let
         "test-vars/infra-space-hostkey/ssh_host_ed25519_key" = secret (keys + "/hostkey-${me}");
         "test-vars/inference-api-key/token" = secret (pkgs.writeText "p0-token" "test-p0-token\n");
         "test-vars/teamclaude-api-key/key" = secret (pkgs.writeText "teamclaude-key" "sk-ant-oat01-test\n");
+        "test-vars/oidc/secret" = secret (pkgs.writeText "oidc" "test-client-secret\n");
       };
     };
 in
@@ -306,5 +360,71 @@ pkgs.testers.runNixOSTest {
               # no personal skills: nothing links ~/.agents/skills
               guest(m, "test ! -e ~/.agents/skills")
               guest(m, "tmux -V")
+      allowlist = ["file", "skills", "terminal", "todo"]
+      # what the four toolsets hold, and hermes' tool search over them
+      allowed_tools = {"patch", "process_manage", "read_file", "search_files", "skill_manage", "skill_view",
+                       "skills_list", "terminal", "todo_list", "write_file", "tool_call", "tool_describe", "tool_search"}
+
+      with subtest("hermes runs as infra, its configuration out of infra's reach"):
+          for m in members.values():
+              m.wait_until_succeeds(
+                  "nixos-container run infra-space -- systemctl is-active hermes-locked-infra.service "
+                  "hermes-agent-infra.service hermes-dashboard-infra.service", timeout=300)
+              pid = guest_root(m, "systemctl show -p MainPID --value hermes-agent-infra.service").strip()
+              assert guest_root(m, f"stat -c %U /proc/{pid}").strip() == "infra", pid
+              # hardened (core's hardening.nix), in the container too
+              status = guest_root(m, f"cat /proc/{pid}/status")
+              assert "NoNewPrivs:\t1" in status and "Seccomp:\t2" in status, status
+              # the keys, from the host's credentials into root's .env
+              env = guest_root(m, "cat ${lockedHome}/.env")
+              assert "P0_API_KEY=test-p0-token" in env, env
+              assert "ANTHROPIC_TOKEN=sk-ant-oat01-test" in env, env
+              assert "ANTHROPIC_BASE_URL=https://teamclaude.davhau.com" in env, env
+              assert ("HERMES_DASHBOARD_OIDC_CLIENT_SECRET=test-client-secret" in env) == (m is memberA), env
+              for name in [".env", "config.yaml"]:
+                  guest(m, f"test ! -w ${lockedHome}/{name}")
+                  guest(m, f"! (echo X=1 >> ${lockedHome}/{name}) 2>/dev/null")
+                  guest(m, f"! rm -f ${lockedHome}/{name} 2>/dev/null")
+              guest(m, "test ! -w ${lockedHome}/plugins")
+              guest(m, "! touch ${lockedHome}/plugins/planted 2>/dev/null")
+              guest(m, "! mv ${lockedHome}/plugins ${lockedHome}/plugins.old 2>/dev/null")
+              guest_root(m, "test -d ${lockedHome}/plugins -a ! -e ${lockedHome}/plugins/planted")
+
+      with subtest("hermes' own resolution gives exactly the allowlist, on every platform"):
+          import json
+          check = (
+              "pid=$(systemctl show -p MainPID --value hermes-agent-infra.service); "
+              "mapfile -d ''' < /proc/$pid/environ envs; "
+              'exec runuser -u infra -- env -i "''${envs[@]}" /run/current-system/sw/bin/infra-space-toolsets'
+          )
+          for m in members.values():
+              got = json.loads(guest_root(m, "bash -c " + shlex.quote(check)).strip().splitlines()[-1])
+              print(json.dumps(got))
+              for platform, toolsets in got["platforms"].items():
+                  assert toolsets == allowlist, (platform, toolsets)
+              assert set(got["tools"]) <= allowed_tools, got["tools"]
+              assert "terminal" in got["tools"], got["tools"]
+              assert got["checkpoints"] is False, got
+
+      with subtest("hermes answers through p0's credential"):
+          for m in members.values():
+              out = guest(m, "hermes chat -Q -q ping")
+              assert "locked-pong" in out, out
+              assert "Bearer test-p0-token" in guest_root(m, "cat ${llmRecord}")
+
+      with subtest("the dashboard: som's nginx from the host, refused to a LAN peer, none on amy"):
+          origin = "--resolve ${dashboardHost}:80:127.0.0.1 http://${dashboardHost}"
+          memberA.wait_until_succeeds(f"curl -sf {origin}/api/status", timeout=180)
+          providers = json.loads(memberA.succeed(f"curl -sf {origin}/api/auth/providers"))
+          assert [p["name"] for p in providers["providers"]] == ["self-hosted"], providers
+          # gated: no session, no config
+          code = memberA.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {origin}/api/config").strip()
+          assert code == "401", code
+          memberA.succeed("nc -z -w 5 ${guestV4} ${toString dashboardPort}")
+          managed.succeed("ip route add ${guestV4}/32 via ${nodes.memberA.networking.primaryIPAddress}")
+          managed.fail("nc -z -w 5 ${guestV4} ${toString dashboardPort}")
+          managed.succeed("ip route del ${guestV4}/32")
+          memberB.fail("nixos-container run infra-space -- systemctl cat infra-space-dashboard.socket")
+          memberB.fail("nc -z -w 5 ${guestV4} ${toString dashboardPort}")
     '';
 }

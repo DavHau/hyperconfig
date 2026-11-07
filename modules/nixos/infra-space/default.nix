@@ -42,6 +42,9 @@
       interactive user and the tools it runs (./guest.nix). The guest's
       ssh host key goes in as credential `ssh-host-key`, for its sshd
       only.
+    - The guest runs the always-on hermes agent (./hermes.nix, with the
+      p0 and TeamClaude keys as credentials); on som its dashboard is
+      published by this host's nginx (./dashboard.nix).
 
   Identities (clan vars; two manual steps once, noted per var):
     infra-space-ssh      shared: root on every clan machine
@@ -99,8 +102,12 @@ let
   '';
 in
 {
-  # afk for Dave's sessions in the guest (credentials + a guest module).
-  imports = [ ./afk.nix ];
+  # afk for Dave's sessions in the guest (credentials + a guest module);
+  # the hermes dashboard (som only).
+  imports = [
+    ./afk.nix
+    ./dashboard.nix
+  ];
 
   options.hyper.infraSpace = {
     enable = lib.mkEnableOption "the infra-space container";
@@ -242,7 +249,14 @@ in
       ssh = vars.infra-space-ssh.files.id_ed25519.path;
       github = vars.infra-space-github.files.id_ed25519.path;
       sops-age = vars.infra-space-age.files."key.txt".path;
+      # Inference for the guest's hermes (./hermes.nix): p0's token
+      # (../inference-api-key.nix) and the TeamClaude client key
+      # (../teamclaude-api-key.nix), both shared vars of every member.
+      p0-api-key = vars.inference-api-key.files.token.path;
+      teamclaude-api-key = vars.teamclaude-api-key.files.key.path;
     };
+    # The always-on agent; its dashboard on som: ./dashboard.nix.
+    hyper.infraSpace.guestModules = [ ./hermes.nix ];
 
     systemd.tmpfiles.rules = [
       "d ${stateDir} 0755 root root -"
