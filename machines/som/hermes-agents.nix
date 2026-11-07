@@ -116,6 +116,7 @@ in
           "sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAIGzA1cg3xTlrzYrEY9CNBiWqu6axpaMBaJfHqZQvB4RHAAAABHNzaDo= pinpox"
           "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBCTwBH0KIRE+9SC4n7hRAGAA7Lf/+PuCHFZzZDajy9lmYrcQdvD5SgP6Q5OikUxycniI0Zse5Xeitq9qkJNg6Lw= pinpox"
         ];
+        openrouter = true;
       };
 
       adam = {
@@ -149,6 +150,7 @@ in
       domi = {
         description = "domi - hermes agent";
         sshKeys = adminKeys;
+        openrouter = true;
       };
 
       rti = {
