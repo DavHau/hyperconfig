@@ -25,13 +25,14 @@
 { config, lib, ... }:
 let
   agent = "roman";
-  # casa joins once its SSH add-on admits the admin keys and
-  # home-assistant-apply has minted its token: until then its prompted var
-  # would block every deploy of som.
   instances = {
     playa = {
       urlHost = "192.168.194.30";
       env = "HA_PLAYA_TOKEN";
+    };
+    casa = {
+      urlHost = "[fcc0:044a:8669:8c81:6d54::1]";
+      env = "HA_CASA_TOKEN";
     };
   };
   generatorOf = name: "ha-${name}-token";
