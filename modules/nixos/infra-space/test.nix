@@ -13,7 +13,9 @@
 # and amy do: it keeps off the veth, also across a restart. managed also
 # plays a LAN peer routing to a member's guest net: refused on sshd and on
 # a host-only guest service the guest's firewall opened, which the host
-# itself reaches.
+# itself reaches. afk (./afk.nix) runs as infra, `p0-api-key` and
+# `teamclaude-api-key` print the credentials, and web_search, fetch and
+# browser stay off even against infra's own config.yml.
 #
 # ./test-keys is test-only material: infra-space(.pub) the shared
 # identity, hostkey-member{A,B}(.pub) the guests' host keys, managed-host
@@ -125,12 +127,18 @@ let
           )
         ];
       };
+      # what ../inference-api-key.nix and ../teamclaude-api-key.nix declare
+      # on som and amy (./afk.nix passes both files in)
+      clan.core.vars.generators.inference-api-key.files.token = { };
+      clan.core.vars.generators.teamclaude-api-key.files.key = { };
 
       environment.etc = {
         "test-vars/infra-space-ssh/id_ed25519" = secret (keys + "/infra-space");
         "test-vars/infra-space-github/id_ed25519" = secret (pkgs.writeText "github" "not a key\n");
         "test-vars/infra-space-age/key.txt" = secret (pkgs.writeText "age" "not a key\n");
         "test-vars/infra-space-hostkey/ssh_host_ed25519_key" = secret (keys + "/hostkey-${me}");
+        "test-vars/inference-api-key/token" = secret (pkgs.writeText "p0-token" "test-p0-token\n");
+        "test-vars/teamclaude-api-key/key" = secret (pkgs.writeText "teamclaude-key" "sk-ant-oat01-test\n");
       };
     };
 in
@@ -268,5 +276,35 @@ pkgs.testers.runNixOSTest {
           for m in members.values():
               guest_root(m, "test ! -e /home/infra/hyperconfig")
               guest_root(m, "journalctl -u infra-space-clone.service | grep -q 'trying again at next boot'")
+
+      with subtest("afk as infra: runs, finds its keys, no web tools"):
+          import json
+
+          # From $HOME, as after an ssh login: omp reads project settings
+          # from the cwd, and runuser keeps root's.
+          def afk_setting(m, key):
+              out = guest(m, f"cd ~ && afk config get {key} --json")
+              return json.loads(out[out.index("{"):])["value"]
+
+          pinned = ["web_search.enabled", "fetch.enabled", "browser.enabled"]
+          for m in members.values():
+              guest(m, "cd ~ && afk --version")
+              # models.yml routes anthropic through TeamClaude, keys by command
+              models = guest(m, "cat ~/.omp/profiles/afk/agent/models.yml")
+              assert '"!teamclaude-api-key"' in models and '"!p0-api-key"' in models, models
+              assert guest(m, "p0-api-key").strip() == "test-p0-token"
+              assert guest(m, "teamclaude-api-key").strip() == "sk-ant-oat01-test"
+              for key in pinned:
+                  assert afk_setting(m, key) is False, key
+              # an unpinned distro default still comes through
+              assert afk_setting(m, "startup.quiet") is True
+              # the user's (or the agent's) config.yml cannot switch them back on
+              guest(m, "printf 'web_search:\\n  enabled: true\\nfetch:\\n  enabled: true\\nbrowser:\\n  enabled: true\\n' > ~/.omp/profiles/afk/agent/config.yml")
+              for key in pinned:
+                  assert afk_setting(m, key) is False, key
+              guest(m, "rm ~/.omp/profiles/afk/agent/config.yml")
+              # no personal skills: nothing links ~/.agents/skills
+              guest(m, "test ! -e ~/.agents/skills")
+              guest(m, "tmux -V")
     '';
 }

@@ -85,14 +85,11 @@ let
   # never copied out for `infra`.
   hostKeyCredential = "ssh-host-key";
 
-  publicValue =
-    machine: generator: file:
-    lib.trim (
-      inputs.clan-core.clanLib.getPublicValue {
-        flake = config.clan.core.settings.directory;
-        inherit machine generator file;
-      }
-    );
+  publicMembers = import ./public-members.nix {
+    inherit lib;
+    inherit (inputs.clan-core) clanLib;
+    flake = config.clan.core.settings.directory;
+  };
 
   self = cfg.members.${cfg.member};
   bracket = address: if lib.hasInfix ":" address then "[${address}]" else address;
@@ -102,6 +99,9 @@ let
   '';
 in
 {
+  # afk for Dave's sessions in the guest (credentials + a guest module).
+  imports = [ ./afk.nix ];
+
   options.hyper.infraSpace = {
     enable = lib.mkEnableOption "the infra-space container";
 
@@ -149,11 +149,7 @@ in
           };
         }
       );
-      default = lib.mapAttrs (machine: m: {
-        inherit (m) sshPort;
-        address = publicValue machine "yggdrasil" "address";
-        hostKey = publicValue machine "infra-space-hostkey" "ssh_host_ed25519_key.pub";
-      }) (import ./members.nix);
+      default = publicMembers;
       defaultText = lib.literalMD "./members.nix, with each member's yggdrasil address and `infra-space-hostkey` public value";
       description = "Every infra-space member.";
     };

@@ -25,17 +25,36 @@
 # writable so runtime settings persist; defaults arrive via $OMP_DISTRO_CONFIG
 # below it) and afk's own extensions/rules (its preHook runs after ours, so
 # deploying them here would be an overwrite race).
+#
+# `hyper.afk.pinnedSettings` (the infra-space container turns tools off
+# with it) cannot go into afk's distro layer: afk's wrapper exports
+# OMP_DISTRO_CONFIG unconditionally after our preHook and offers no hook
+# to extend it. It goes in as an omp config overlay (PI_CONFIG_FILES, the
+# file form of `--config`), which afk's wrapper leaves alone and omp merges
+# ABOVE the user's config.yml: the user (or an agent editing its own
+# config.yml) cannot switch these back on.
 let
   common = import ./omp-common.nix { inherit pkgs inputs lib config; };
+  cfg = config.hyper.afk;
   skill =
     dir:
     lib.fileset.toSource {
       root = dir;
       fileset = dir + "/SKILL.md";
     };
+  pinnedSettingsFile = (pkgs.formats.yaml { }).generate "afk-pinned-settings.yml" cfg.pinnedSettings;
 in
 {
-  environment.systemPackages = [
+  options.hyper.afk.pinnedSettings = lib.mkOption {
+    type = (pkgs.formats.yaml { }).type;
+    default = { };
+    example = {
+      web_search.enabled = false;
+    };
+    description = "omp settings for afk that override the user's config.yml (an omp config overlay).";
+  };
+
+  config.environment.systemPackages = [
     (inputs.wrappers.lib.wrapPackage {
       inherit pkgs;
       package = inputs.afk.packages.${pkgs.stdenv.hostPlatform.system}.afk;
@@ -61,6 +80,10 @@ in
         # HERDR_SOCKET_PATH, HERDR_PANE_ID). Vendored verbatim from what
         # `herdr integration install omp` writes; see herdr-omp-agent-state/.
         ln -sf ${common.herdrOmpExtension} "$config_dir/extensions/herdr-omp-agent-state.ts"
+      ''
+      # After any PI_CONFIG_FILES the caller set: later overlays win.
+      + lib.optionalString (cfg.pinnedSettings != { }) ''
+        export PI_CONFIG_FILES="''${PI_CONFIG_FILES:+$PI_CONFIG_FILES:}${pinnedSettingsFile}"
       ''
       # TeamClaude or not, per start: omp reads models.yml once and reloads
       # it only when its mtime changes. Both files are store paths (mtime 1),

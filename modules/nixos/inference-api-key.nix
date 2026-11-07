@@ -20,13 +20,17 @@
 # restartUnits).
 #
 # `p0-api-key` prints the token for the calling user (its copy first,
-# then the var file). models.yml names it as `apiKey: "!p0-api-key"`, so
-# every harness (afk, bare omp, pi) resolves the key by running it and no
-# wrapper has to export anything. Exit 1 when neither file is readable.
-{ config, lib, pkgs, ... }:
+# then `tokenFile`, the var file by default). models.yml names it as
+# `apiKey: "!p0-api-key"`, so every harness (afk, bare omp, pi) resolves
+# the key by running it and no wrapper has to export anything. Exit 1 when
+# neither file is readable.
+#
+# Also imported where clan is not (the infra-space container,
+# ./infra-space/afk.nix): there `tokenFile` points at a credential and the
+# var declaration is left out.
+{ config, lib, pkgs, options, ... }:
 let
   cfg = config.hyper.inferenceApiKey;
-  token = config.clan.core.vars.generators.inference-api-key.files.token;
   unit = user: "inference-api-key-${user}";
 in
 {
@@ -42,60 +46,69 @@ in
       default = user: "/run/inference-api-key/${user}/token";
       description = "Where a user's copy lands; omp-common.nix reads it with the runtime user name.";
     };
-  };
-
-  config = {
-    environment.systemPackages = [
-      (pkgs.writeShellApplication {
-        runtimeInputs = [ pkgs.coreutils ];
-        name = "p0-api-key";
-        text = ''
-          for f in ${cfg.userTokenPath "$(id -un)"} ${token.path}; do
-            [ -r "$f" ] && exec cat "$f"
-          done
-          echo "p0-api-key: no readable inference-api-key token for $(id -un)" >&2
-          exit 1
-        '';
-      })
-    ];
-
-    systemd.services = lib.listToAttrs (
-      map (
-        user:
-        lib.nameValuePair (unit user) {
-          description = "inference endpoint token copy for ${user}";
-          wantedBy = [ "multi-user.target" ];
-          # sops-install-secrets writes the var during activation, before
-          # any unit starts; the token file is there once the target runs.
-          serviceConfig = {
-            Type = "oneshot";
-            RemainAfterExit = true;
-            RuntimeDirectory = "inference-api-key/${user}";
-            RuntimeDirectoryPreserve = true;
-            RuntimeDirectoryMode = "0755";
-            ExecStart = "${pkgs.coreutils}/bin/install -m 0400 -o ${user} -g root ${token.path} ${cfg.userTokenPath user}";
-          };
-        }
-      ) cfg.users
-    );
-
-    clan.core.vars.generators.inference-api-key = {
-      share = true;
-      # A persisted prompt IS the file — no generator script, so the var holds
-      # exactly the token and nothing else.
-      prompts.token = {
-        description = "Bearer token for https://inference.p0.contact (same value as project-zero)";
-        type = "hidden";
-        persist = true;
-      };
-      # Readable by the desktop user: the omp wrappers run unprivileged and read
-      # this at launch. An owner the machine doesn't declare makes
-      # sops-install-secrets abort every secret on the host (sops-nix#972).
-      files.token = {
-        owner = if config.users.users ? grmpf then "grmpf" else "dave";
-        mode = "0400";
-        restartUnits = map (u: "${unit u}.service") cfg.users;
-      };
+    tokenFile = lib.mkOption {
+      type = lib.types.str;
+      default = config.clan.core.vars.generators.inference-api-key.files.token.path;
+      defaultText = lib.literalExpression "config.clan.core.vars.generators.inference-api-key.files.token.path";
+      description = "The token file `p0-api-key` falls back to and the per-user copies are made from.";
     };
   };
+
+  config = lib.mkMerge [
+    {
+      environment.systemPackages = [
+        (pkgs.writeShellApplication {
+          runtimeInputs = [ pkgs.coreutils ];
+          name = "p0-api-key";
+          text = ''
+            for f in ${cfg.userTokenPath "$(id -un)"} ${cfg.tokenFile}; do
+              [ -r "$f" ] && exec cat "$f"
+            done
+            echo "p0-api-key: no readable inference-api-key token for $(id -un)" >&2
+            exit 1
+          '';
+        })
+      ];
+
+      systemd.services = lib.listToAttrs (
+        map (
+          user:
+          lib.nameValuePair (unit user) {
+            description = "inference endpoint token copy for ${user}";
+            wantedBy = [ "multi-user.target" ];
+            # sops-install-secrets writes the var during activation, before
+            # any unit starts; the token file is there once the target runs.
+            serviceConfig = {
+              Type = "oneshot";
+              RemainAfterExit = true;
+              RuntimeDirectory = "inference-api-key/${user}";
+              RuntimeDirectoryPreserve = true;
+              RuntimeDirectoryMode = "0755";
+              ExecStart = "${pkgs.coreutils}/bin/install -m 0400 -o ${user} -g root ${cfg.tokenFile} ${cfg.userTokenPath user}";
+            };
+          }
+        ) cfg.users
+      );
+    }
+    (lib.optionalAttrs (options ? clan) {
+      clan.core.vars.generators.inference-api-key = {
+        share = true;
+        # A persisted prompt IS the file — no generator script, so the var holds
+        # exactly the token and nothing else.
+        prompts.token = {
+          description = "Bearer token for https://inference.p0.contact (same value as project-zero)";
+          type = "hidden";
+          persist = true;
+        };
+        # Readable by the desktop user: the omp wrappers run unprivileged and read
+        # this at launch. An owner the machine doesn't declare makes
+        # sops-install-secrets abort every secret on the host (sops-nix#972).
+        files.token = {
+          owner = if config.users.users ? grmpf then "grmpf" else "dave";
+          mode = "0400";
+          restartUnits = map (u: "${unit u}.service") cfg.users;
+        };
+      };
+    })
+  ];
 }

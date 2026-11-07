@@ -16,45 +16,61 @@
 #   clan vars generate som --generator teamclaude-api-key --regenerate
 #
 # and deploy som plus every machine importing this module.
-{ config, lib, pkgs, ... }:
+#
+# Also imported where clan is not (the infra-space container,
+# ./infra-space/afk.nix): there `keyFile` points at a credential and the
+# var, its group and owner are left out.
+{ config, lib, pkgs, options, ... }:
 let
-  key = config.clan.core.vars.generators.teamclaude-api-key.files.key;
+  cfg = config.hyper.teamclaudeApiKey;
   owner = if config.users.users ? grmpf then "grmpf" else "dave";
 in
 {
-  environment.systemPackages = [
-    (pkgs.writeShellApplication {
-      runtimeInputs = [ pkgs.coreutils ];
-      name = "teamclaude-api-key";
-      text = ''
-        [ -r ${key.path} ] && exec cat ${key.path}
-        echo "teamclaude-api-key: ${key.path} is not readable for $(id -un)" >&2
-        exit 1
-      '';
+  options.hyper.teamclaudeApiKey.keyFile = lib.mkOption {
+    type = lib.types.str;
+    default = config.clan.core.vars.generators.teamclaude-api-key.files.key.path;
+    defaultText = lib.literalExpression "config.clan.core.vars.generators.teamclaude-api-key.files.key.path";
+    description = "The key file `teamclaude-api-key` prints.";
+  };
+
+  config = lib.mkMerge [
+    {
+      environment.systemPackages = [
+        (pkgs.writeShellApplication {
+          runtimeInputs = [ pkgs.coreutils ];
+          name = "teamclaude-api-key";
+          text = ''
+            [ -r ${cfg.keyFile} ] && exec cat ${cfg.keyFile}
+            echo "teamclaude-api-key: ${cfg.keyFile} is not readable for $(id -un)" >&2
+            exit 1
+          '';
+        })
+      ];
+    }
+    (lib.optionalAttrs (options ? clan) {
+      # Every account that runs a harness reads the key through this group: the
+      # desktop user and, where it exists, the fleet `agent` account
+      # (./agent-user.nix), which gets afk's models.yml too.
+      users.groups.teamclaude-api-key.members = [ owner ] ++ lib.optional (config.users.users ? agent) "agent";
+
+      clan.core.vars.generators.teamclaude-api-key = {
+        share = true;
+        runtimeInputs = [ pkgs.openssl ];
+        # `sk-ant-oat01-` is load-bearing, as for the gateway's operator key:
+        # omp presents as Claude Code (the only shape Anthropic accepts
+        # subscription OAuth in) only when its key looks like a subscription
+        # token, and sends it as `Authorization: Bearer`.
+        script = ''
+          printf 'sk-ant-oat01-%s' "$(openssl rand -hex 32)" > "$out/key"
+        '';
+        # An owner or group the machine doesn't declare makes sops-install-secrets
+        # abort every secret on the host (sops-nix#972).
+        files.key = {
+          inherit owner;
+          group = "teamclaude-api-key";
+          mode = "0440";
+        };
+      };
     })
   ];
-
-  # Every account that runs a harness reads the key through this group: the
-  # desktop user and, where it exists, the fleet `agent` account
-  # (./agent-user.nix), which gets afk's models.yml too.
-  users.groups.teamclaude-api-key.members = [ owner ] ++ lib.optional (config.users.users ? agent) "agent";
-
-  clan.core.vars.generators.teamclaude-api-key = {
-    share = true;
-    runtimeInputs = [ pkgs.openssl ];
-    # `sk-ant-oat01-` is load-bearing, as for the gateway's operator key:
-    # omp presents as Claude Code (the only shape Anthropic accepts
-    # subscription OAuth in) only when its key looks like a subscription
-    # token, and sends it as `Authorization: Bearer`.
-    script = ''
-      printf 'sk-ant-oat01-%s' "$(openssl rand -hex 32)" > "$out/key"
-    '';
-    # An owner or group the machine doesn't declare makes sops-install-secrets
-    # abort every secret on the host (sops-nix#972).
-    files.key = {
-      inherit owner;
-      group = "teamclaude-api-key";
-      mode = "0440";
-    };
-  };
 }

@@ -18,6 +18,8 @@ in
     # sets them up.
     inputs.hyperhermes.nixosModules.desktop
     ./hermes-desktop.nix
+    # "infra-space (<member>)" shells into the infra-space containers.
+    ./infra-space/launchers.nix
     ./ssh-tpm-agent.nix
     ./etc-hosts.nix
     ./nix-development.nix

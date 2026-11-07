@@ -88,9 +88,11 @@
   #   the gateway's nginx hands a bearer over as x-api-key, so no `headers`
   #   override is needed.
   #
-  # Only where the key module is imported (dave.nix): elsewhere the command
-  # would not exist and the provider would 401 on the first turn.
-  teamclaude-enabled = config.clan.core.vars.generators ? teamclaude-api-key;
+  # Only where the key module is imported (dave.nix, the infra-space
+  # container): elsewhere the command would not exist and the provider
+  # would 401 on the first turn. Detected by its option, which exists with
+  # or without clan.
+  teamclaude-enabled = config ? hyper && config.hyper ? teamclaudeApiKey;
   teamclaudeProvider = lib.concatStringsSep "\n" [
     "  anthropic:"
     "    baseUrl: https://teamclaude.davhau.com"
