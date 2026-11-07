@@ -267,7 +267,11 @@ in
                   prefix), read at runtime. Each entry rides a systemd
                   credential into hermes-agent-<name> and is rewritten into
                   the owner's $HERMES_HOME/.env before the agent starts. It
-                  never enters the store; restart the unit after a rotation.
+                  never enters the store; restart hermes-agent-<name> after a
+                  rotation. With lockedConfig the credentials go to
+                  hermes-locked-<name> instead, which writes them into root's
+                  .env: restart hermes-locked-<name> after a rotation (that
+                  restarts the gateway and the dashboard too).
                 '';
               };
               dashboardDropEnv = mkOption {
@@ -280,6 +284,33 @@ in
                   expressions matched against the whole key. The agent can
                   write its .env, so a key that must never reach the dashboard
                   goes here; HERMES_MANAGED and HERMES_MANAGED_DIR always go.
+                  With lockedConfig nothing is removed (the dashboard reads
+                  the pinned .env the agent cannot write); instead evaluation
+                  fails if environment or secretEnv sets a key these patterns
+                  (as POSIX extended regular expressions, builtins.match) or
+                  HERMES_MANAGED(_DIR) name.
+                '';
+              };
+              lockedConfig = mkOption {
+                type = types.bool;
+                default = false;
+                description = ''
+                  Whether everything hermes reads as its configuration is
+                  root's, immutable and Nix-generated: config.yaml (with
+                  initialModel as its model), .env (the Nix environment plus
+                  secretEnv), .op.env, active_profile, gateway.json and the
+                  plugins, hooks, profiles, lib and patches directories.
+                  Nothing running as the agent's uid (gateway, dashboard,
+                  their tools, the account's own `hermes` sessions) can
+                  change them; see core's locked-config.nix. $HERMES_HOME is
+                  /var/lib/hermes/<name>/home then, not the state
+                  directory's .hermes. Runtime configuration from the
+                  dashboard or the CLI (`/model`, the settings and keys
+                  pages, `hermes config set`, plugin installs, profiles)
+                  fails or does not persist: change the Nix options instead.
+                  Needs a state filesystem with the immutable flag. Not with
+                  the browser feature, which writes the agent's .env and
+                  plugins at runtime.
                 '';
               };
               sshKeyFile = mkOption {

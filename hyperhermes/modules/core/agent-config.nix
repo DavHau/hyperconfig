@@ -36,6 +36,34 @@ rec {
       // lib.optionalAttrs (plugins != [ ]) { plugins.enabled = plugins; }
     );
 
+  # One agent's config.yaml settings: settingsFor plus the workspace as the
+  # terminal's cwd. settingsFile is the same as a store file.
+  agentSettings =
+    user: acfg:
+    lib.recursiveUpdate {
+      terminal.cwd = hlib.workspace user;
+    } (settingsFor acfg);
+  settingsFile =
+    user: acfg:
+    pkgs.writeText "hermes-settings-${user}.json" (builtins.toJSON (agentSettings user acfg));
+
+  # Non-secret .env entries. HERMES_SANDBOX rides here too: hermes loads
+  # .env with override=True, so the unit environment alone would not hold.
+  # The gateway exports .env to every tool process, so homeEnvironment
+  # reaches them too, its `$HOME` resolved here rather than left to how
+  # hermes parses .env.
+  agentEnv =
+    user: home: acfg:
+    cfg.environment
+    // lib.mapAttrs (_: lib.replaceStrings [ "$HOME" ] [ home ]) cfg.homeEnvironment
+    // acfg.environment
+    // {
+      HERMES_SANDBOX = (runtime user home acfg).env.HERMES_SANDBOX;
+    };
+  envBlock =
+    user: home: acfg:
+    lib.concatStringsSep "\n" (lib.mapAttrsToList (k: v: "${k}=${v}") (agentEnv user home acfg));
+
   basePackages = with pkgs; [
     git
     curl
@@ -80,7 +108,8 @@ rec {
         # session token under the SSH login home, and `hermes serve`
         # accepts it only under Path.home().
         HOME = home;
-        HERMES_HOME = "${stateDir}/.hermes";
+        # A lockedConfig agent's is elsewhere (./locked-config.nix).
+        HERMES_HOME = if acfg.lockedConfig then hlib.lockedHermesHome user else "${stateDir}/.hermes";
         # No HERMES_MANAGED: it locks every setting (hermes_cli/config.py,
         # is_managed). ./agents.nix locks only the Nix keys, through
         # HERMES_MANAGED_DIR.
@@ -94,6 +123,21 @@ rec {
         # with hermes' own sealed interpreter, which lacks the venv's
         # libraries (tools/code_execution_env.py, _resolve_child_python).
         VIRTUAL_ENV = "${stateDir}/.venv";
+      }
+      # A .container-mode file in $HERMES_HOME sends every `hermes` run
+      # into a container, whatever it names (hermes_cli/config.py,
+      # get_container_exec_info); a locked agent can still create one, so
+      # hermes is told to ignore it. HERMES_DEV does nothing else there.
+      // lib.optionalAttrs acfg.lockedConfig {
+        HERMES_DEV = "1";
+        # claude-auth's bootstrap (../claude-auth) otherwise puts the
+        # first of $HERMES_HOME/patches and ~/.hermes/patches (the
+        # agent's) that holds anthropic_billing_bypass.py first on
+        # sys.path, in every hermes process. An explicit dir wins
+        # outright; this one is root's, immutable and empty
+        # (./locked-config.nix), and the patch itself loads from
+        # claude-auth's PYTHONPATH.
+        HERMES_PATCHES_DIR = "${hlib.lockedHermesHome user}/patches";
       };
       # venv root first, so python and pip resolve to the writable
       # interpreter. systemd appends /bin to every `path` entry, so this
@@ -109,6 +153,12 @@ rec {
       ++ cfg.extraPackages
       ++ acfg.extraPackages;
     };
+
+  # config.yaml's `model` from cfg.initialModel.
+  initialModelSettings = lib.filterAttrs (_: v: v != null) {
+    inherit (cfg.initialModel) provider base_url;
+    default = cfg.initialModel.default;
+  };
 
   # Seed-once model. This writes to config.yaml only when no model is
   # configured. Then it writes a sentinel. So it never clobbers the user's
@@ -128,14 +178,7 @@ rec {
           with open(path) as f:
               data = yaml.safe_load(f) or {}
       if not data.get("model"):
-          data["model"] = ${
-            builtins.toJSON (
-              lib.filterAttrs (_: v: v != null) {
-                inherit (cfg.initialModel) provider base_url;
-                default = cfg.initialModel.default;
-              }
-            )
-          }
+          data["model"] = ${builtins.toJSON initialModelSettings}
           with open(path, "w") as f:
               yaml.dump(data, f, default_flow_style=False)
       SEED

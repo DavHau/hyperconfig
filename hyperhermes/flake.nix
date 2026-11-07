@@ -143,6 +143,10 @@
           inherit pkgs self hermesPackage;
         };
 
+        locked-config = import ./checks/locked-config {
+          inherit pkgs self hermesPackage;
+        };
+
         public = import ./checks/public {
           inherit pkgs self hermesPackage;
         };

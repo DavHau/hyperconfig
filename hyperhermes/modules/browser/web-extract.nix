@@ -63,6 +63,13 @@ in
   };
 
   config = lib.mkIf cfg.browser.enable {
+    # This link and Camofox's key in .env are written into $HERMES_HOME at
+    # every start, which core's lockedConfig makes root's.
+    assertions = lib.mapAttrsToList (user: a: {
+      assertion = !(a.lockedConfig or false);
+      message = "services.hyperhermes.agents.${user}: lockedConfig does not go with the browser feature; set browser.enable = false.";
+    }) browserAgents;
+
     # Hermes discovers user plugins only under $HERMES_HOME/plugins. The
     # link is renewed before every start, after core's preStart created
     # the directory.

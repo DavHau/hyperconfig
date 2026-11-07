@@ -14,7 +14,9 @@
 #     connection to the owner's backends by an owner-uid-checking forward
 #     (forwards.nix),
 #   - owner-only iptables gates on those ports and their backends
-#     (firewall.nix).
+#     (firewall.nix),
+#   - lockedConfig: what hermes reads as its configuration root's and
+#     Nix-generated, out of the agent's reach (locked-config.nix).
 #
 # `hermes-agent` is this flake's input: the package source and its
 # config merge script.
@@ -36,5 +38,6 @@ in
     (importApply ./agents.nix { inherit hermes-agent; })
     ./forwards.nix
     ./firewall.nix
+    ./locked-config.nix
   ];
 }

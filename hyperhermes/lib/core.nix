@@ -14,6 +14,11 @@ rec {
   stateRoot = "/var/lib/hermes";
   baseDir = user: "${stateRoot}/${user}";
   stateDir = user: "${baseDir user}/state";
+  # A lockedConfig agent's HERMES_HOME, the owner's 0700 directory
+  # directly in the root one: hermes wants its home to be the owner's,
+  # and here the owner cannot rename it away and put another in its place
+  # (core's locked-config.nix).
+  lockedHermesHome = user: "${baseDir user}/home";
 
   # The agent's directory in the owner's home, and its working directory.
   hermesDir = user: "/home/${user}/hermes";

@@ -13,7 +13,7 @@ store path.
 
 | module | what it does |
 |---|---|
-| `core` | agent registry (`agents.<name>`: uid, keys, `secretEnv`, settings), the patched hermes package, gateway and dashboard units, owner-checked forwards, firewall; opt-in `hardening.enable` (no namespaces, setuid, io_uring or syscalls outside `@system-service` for the agent units, the agent account's user manager and their tools; rootless podman/docker, bwrap and sudo stop working there, slots and nix builds do not) |
+| `core` | agent registry (`agents.<name>`: uid, keys, `secretEnv`, settings, `lockedConfig` for a root-owned, Nix-only configuration), the patched hermes package, gateway and dashboard units, owner-checked forwards, firewall; opt-in `hardening.enable` (no namespaces, setuid, io_uring or syscalls outside `@system-service` for the agent units, the agent account's user manager and their tools; rootless podman/docker, bwrap and sudo stop working there, slots and nix builds do not) |
 | `exposure` | nginx routing by host name below `domain`; `mode = "local"` (HTTP on `127.0.0.1:8473`, `hermes.localhost`) or `"public"` (HTTPS, ACME DNS-01, `dnsRecords`) |
 | `sso` | OIDC sign-in: the issuer, client secrets, which account owns which agent; local mode runs dex with password users |
 | `dashboards` | each agent's hermes dashboard at `<agent>.<domain>`, group-checked, plus an optional front door |

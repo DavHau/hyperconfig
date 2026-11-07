@@ -90,7 +90,9 @@
 # files between the drop and hermes reading them, and config.yaml edits can
 # still plant and enable a dashboard_auth plugin or configure a secret
 # source (secrets.command) that emits the keys; those are config the user
-# legitimately changes, so they stay unpinned.
+# legitimately changes, so they stay unpinned. An agent with core's
+# lockedConfig has neither residual: its .env, .op.env, config.yaml and
+# plugin directories are root's (core's locked-config.nix).
 #
 # The settings are pinned through hermes' managed scope (core,
 # managedDirFor), so neither the dashboard nor the CLI can change them:

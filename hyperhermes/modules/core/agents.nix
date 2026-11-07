@@ -28,33 +28,6 @@ let
   # dashboard survive.
   configMergeScript = pkgs.callPackage "${hermes-agent}/nix/configMergeScript.nix" { };
 
-  settingsFor =
-    user: ucfg:
-    pkgs.writeText "hermes-settings-${user}.json" (
-      builtins.toJSON (
-        lib.recursiveUpdate {
-          terminal.cwd = hlib.workspace user;
-        } (ac.settingsFor ucfg)
-      )
-    );
-
-  # Non-secret .env entries. HERMES_SANDBOX rides here too: hermes loads
-  # .env with override=True, so the unit environment alone would not hold.
-  # The gateway exports .env to every tool process, so homeEnvironment
-  # reaches them too, its `$HOME` resolved here rather than left to how
-  # hermes parses .env.
-  agentEnvFor =
-    user: ucfg:
-    let
-      home = config.users.users.${user}.home;
-    in
-    cfg.environment
-    // lib.mapAttrs (_: lib.replaceStrings [ "$HOME" ] [ home ]) cfg.homeEnvironment
-    // ucfg.environment
-    // {
-      HERMES_SANDBOX = (ac.runtime user home ucfg).env.HERMES_SANDBOX;
-    };
-
   # Hermes' managed scope (hermes_cli/managed_scope.py) for one agent:
   # config.yaml and .env in a directory the owner cannot write. Hermes
   # overlays both on the user's files and refuses a dashboard or CLI
@@ -70,18 +43,15 @@ let
     user: ucfg:
     pkgs.runCommand "hermes-managed-${user}"
       {
-        envText = envBlockFor user ucfg + "\n";
+        envText = ac.envBlock user config.users.users.${user}.home ucfg + "\n";
         passAsFile = [ "envText" ];
       }
       ''
         mkdir $out
         # JSON is YAML, so the settings file is the managed config.yaml.
-        cp ${settingsFor user ucfg} $out/config.yaml
+        cp ${ac.settingsFile user ucfg} $out/config.yaml
         cp "$envTextPath" $out/.env
       '';
-  envBlockFor =
-    user: ucfg:
-    lib.concatStringsSep "\n" (lib.mapAttrsToList (k: v: "${k}=${v}") (agentEnvFor user ucfg));
 
   # The session bus and XDG runtime dir of the owner. A system unit gets
   # neither from systemd, and the uid is runtime-allocated, so the wrapper
@@ -160,8 +130,9 @@ let
       home = config.users.users.${user}.home;
       rt = ac.runtime user home ucfg;
       inherit (rt) stateDir;
-      hermesHome = "${stateDir}/.hermes";
+      hermesHome = rt.env.HERMES_HOME;
       workspace = hlib.workspace user;
+      locked = ucfg.lockedConfig;
       venv = pythonVenv.mkUnit {
         suffix = "-${user}";
         inherit user stateDir;
@@ -183,7 +154,8 @@ let
       mounts = [
         stateDir
         home
-      ];
+      ]
+      ++ lib.optional locked hermesHome;
       # The user's private /tmp, as in their own sessions (perUserTmp).
       # No "-": with per-user tmp on, a missing instance must stop the unit,
       # not quietly put it on the shared /tmp.
@@ -199,7 +171,7 @@ let
           ${hermesHome}/memories ${hermesHome}/plugins ${workspace}
         # The managed scope pins these keys and wins over this file. The
         # merge keeps them in the file the dashboard's raw editor shows.
-        ${configMergeScript} ${settingsFor user ucfg} ${hermesHome}/config.yaml
+        ${configMergeScript} ${ac.settingsFile user ucfg} ${hermesHome}/config.yaml
         # Named profiles (profiles/<name>/config.yaml) get the same merge:
         # hermes overlays the managed scope on a profile's config too, but
         # its skills loader reads the profile's file alone
@@ -208,7 +180,7 @@ let
         # not written a config.yaml for yet is left alone.
         for profile_config in ${hermesHome}/profiles/*/config.yaml; do
           [ -f "$profile_config" ] || continue
-          ${configMergeScript} ${settingsFor user ucfg} "$profile_config"
+          ${configMergeScript} ${ac.settingsFile user ucfg} "$profile_config"
         done
         # The same keys as the managed .env. Hermes loads that file after
         # this one, so the managed values win; this copy lets the
@@ -223,7 +195,7 @@ let
         {
           echo "# BEGIN hermes-native environment"
           cat <<'HERMES_NIX_ENV_EOF'
-        ${envBlockFor user ucfg}
+        ${ac.envBlock user home ucfg}
         HERMES_NIX_ENV_EOF
           echo "# END hermes-native environment"
         } >> "$env_file"
@@ -231,6 +203,75 @@ let
         ${ac.modelSeedScript stateDir}
         ${pruneMovedBundledSkills} ${ac.hermesPackage}/share/hermes-agent/skills ${hermesHome}/skills
       '';
+      # lockedConfig (./locked-config.nix): root's immutable config.yaml,
+      # .env and the rest of what hermes reads are in place, and the unit
+      # has no credentials; the owner only makes its own state directories.
+      lockedPreStart = ''
+        umask 0077
+        mkdir -p ${hermesHome}/cron ${hermesHome}/sessions ${hermesHome}/logs \
+          ${hermesHome}/memories ${workspace}
+        ${pruneMovedBundledSkills} ${ac.hermesPackage}/share/hermes-agent/skills ${hermesHome}/skills
+      '';
+      openShimCaseArm =
+        let
+          env = lib.filterAttrs (n: _: n != "LD_LIBRARY_PATH") unitEnv;
+        in
+        ''
+          ${user})
+            ${lib.concatStringsSep "\n    " (
+              lib.mapAttrsToList (n: v: "export ${n}=${lib.escapeShellArg v}") env
+            )}
+            export PATH=${lib.escapeShellArg (lib.makeBinPath rt.path)}:"$PATH"
+            export LD_LIBRARY_PATH=${lib.escapeShellArg rt.env.LD_LIBRARY_PATH}"''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            cd ${lib.escapeShellArg workspace}
+            ;;
+        '';
+      # lockedConfig (./locked-config.nix): the gateway unit's environment
+      # and nothing of the caller's but terminal and locale variables. An
+      # inherited HERMES_*, PYTHONPATH or PATH (from the agent's own shell
+      # startup files, say) would otherwise move HERMES_HOME, the managed
+      # scope, the plugin dirs or the interpreter's imports, or override
+      # the gate keys, in a session Dave starts. Its PYTHONPATH is the
+      # unit's too (claude-auth's), not the caller's.
+      lockedShimCaseArm =
+        let
+          unit = config.systemd.services."hermes-agent-${user}".environment;
+          env =
+            lib.filterAttrs (
+              n: v:
+              v != null
+              && !lib.elem n [
+                "PATH"
+                "LD_LIBRARY_PATH"
+              ]
+            ) unit
+            // {
+              USER = user;
+              LOGNAME = user;
+              PATH = "${lib.makeBinPath rt.path}:/run/wrappers/bin:/run/current-system/sw/bin";
+              LD_LIBRARY_PATH = rt.env.LD_LIBRARY_PATH;
+            };
+        in
+        ''
+          ${user})
+            keep=()
+            for v in TERM COLORTERM TERM_PROGRAM TERM_PROGRAM_VERSION LANG LANGUAGE TZ \
+              NO_COLOR COLUMNS LINES DISPLAY WAYLAND_DISPLAY SHELL \
+              SSH_AUTH_SOCK SSH_CONNECTION SSH_CLIENT SSH_TTY ''${!LC_@}; do
+              [ -n "''${!v+x}" ] && keep+=("$v=''${!v}")
+            done
+            uid=$(${pkgs.coreutils}/bin/id -u)
+            cd ${lib.escapeShellArg workspace}
+            ${pkgs.systemd}/bin/systemctl is-active --quiet hermes-agent-${user}.service || {
+              echo "hermes: hermes-agent-${user} is not running (systemctl status hermes-agent-${user})" >&2
+              exit 1
+            }
+            exec ${pkgs.coreutils}/bin/env -i "''${keep[@]}" \
+              XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+              ${lib.concatStringsSep " " (lib.mapAttrsToList (n: v: lib.escapeShellArg "${n}=${toString v}") env)} \
+              ${ac.hermesPackage}/bin/hermes "$@"
+            ;;
+        '';
     in
     {
       # The parent is root's, 0711, so the owner's units can traverse it
@@ -261,20 +302,7 @@ let
       # CLIs, HOME and per-setting locks. HOME is the account home, so the
       # shim enters the workspace by path. LD_LIBRARY_PATH prepends rather
       # than replaces the caller's.
-      shimCaseArm =
-        let
-          env = lib.filterAttrs (n: _: n != "LD_LIBRARY_PATH") unitEnv;
-        in
-        ''
-          ${user})
-            ${lib.concatStringsSep "\n    " (
-              lib.mapAttrsToList (n: v: "export ${n}=${lib.escapeShellArg v}") env
-            )}
-            export PATH=${lib.escapeShellArg (lib.makeBinPath rt.path)}:"$PATH"
-            export LD_LIBRARY_PATH=${lib.escapeShellArg rt.env.LD_LIBRARY_PATH}"''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-            cd ${lib.escapeShellArg workspace}
-            ;;
-        '';
+      shimCaseArm = if locked then lockedShimCaseArm else openShimCaseArm;
 
       services = venv.services // {
         "hermes-agent-${user}" = {
@@ -292,12 +320,14 @@ let
           unitConfig.RequiresMountsFor = mounts;
           environment = unitEnv;
           path = rt.path;
-          preStart = agentPreStart;
+          preStart = if locked then lockedPreStart else agentPreStart;
           serviceConfig = {
             User = user;
             Group = "users";
             WorkingDirectory = workspace;
-            LoadCredential = lib.mapAttrsToList (name: path: "${name}:${path}") ucfg.secretEnv;
+            LoadCredential = lib.optionals (!locked) (
+              lib.mapAttrsToList (name: path: "${name}:${path}") ucfg.secretEnv
+            );
             ExecStart = "${withSession} ${ac.hermesPackage}/bin/hermes gateway";
             # `hermes gateway restart` SIGUSR1s this main process
             # (patches/hermes-gateway-restart-foreign-unit.patch). The
@@ -341,7 +371,9 @@ let
           # hermes reads keys from (hermes_cli/env_loader.py): .env, and
           # .op.env, the 1Password bootstrap it loads after .env without
           # override, so a key missing from .env would come from there.
-          preStart =
+          # A locked agent's are root's (./locked-config.nix): nothing to
+          # drop.
+          preStart = lib.optionalString (!locked) (
             lib.concatMapStrings
               (file: ''
                 ${dropEnvKeys} ${hermesHome}/${file} ${
@@ -353,7 +385,8 @@ let
               [
                 ".env"
                 ".op.env"
-              ];
+              ]
+          );
           script = ''
             exec ${withSession} ${ac.hermesPackage}/bin/hermes dashboard \
               --no-open --host 127.0.0.1 \
