@@ -35,6 +35,8 @@ in
     ./bumper.nix
     # roman's ssh and MCP into Roman's two Home Assistant instances.
     ./roman-home-assistant.nix
+    # roman's ESPHome builds and OTA uploads for those instances' devices.
+    ./roman-esphome.nix
     # Claude subscription OAuth for every agent (enabled in ./hermes-agents.nix).
     inputs.hyperhermes.nixosModules.claude-auth
     ../../modules/nixos/public-ipv6-token.nix
