@@ -271,7 +271,11 @@ in
                   rotation. With lockedConfig the credentials go to
                   hermes-locked-<name> instead, which writes them into root's
                   .env: restart hermes-locked-<name> after a rotation (that
-                  restarts the gateway and the dashboard too).
+                  restarts the gateway and the dashboard too). "Host" is
+                  the machine running the agent: where that is a container
+                  whose paths are themselves copies made at its start (e.g.
+                  nspawn credentials), a rotation on the outer host needs
+                  the container restarted instead.
                 '';
               };
               dashboardDropEnv = mkOption {

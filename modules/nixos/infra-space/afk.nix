@@ -10,10 +10,11 @@
       (hyper.afk.pinnedSettings, ../afk.nix has why that is an overlay and
       not afk's distro layer), so nothing the agent reads comes straight
       off the web.
-    - The p0 and TeamClaude keys come in as credentials (from the same
-      clan vars the desktops use, both shared and deployed on som and amy
-      through ../dave.nix); `p0-api-key` and `teamclaude-api-key`, which
-      models.yml runs, read them from /run/infra-space/secrets.
+    - The p0 and TeamClaude keys are the credentials `p0-api-key` and
+      `teamclaude-api-key` (passed in by ./default.nix, from the same clan
+      vars the desktops use, both shared and deployed on som and amy
+      through ../dave.nix); the same-named commands models.yml runs read
+      them from /run/infra-space/secrets.
 
   jobs-hub and the herdr bridge come along with ../afk.nix: both are TUI
   extensions, the latter inert outside a herdr pane.
@@ -24,16 +25,10 @@
 { config, lib, ... }:
 let
   cfg = config.hyper.infraSpace;
-  vars = config.clan.core.vars.generators;
   secretsDir = "/run/infra-space/secrets";
 in
 {
   config = lib.mkIf cfg.enable {
-    hyper.infraSpace.credentials = {
-      p0-api-key = vars.inference-api-key.files.token.path;
-      teamclaude-api-key = vars.teamclaude-api-key.files.key.path;
-    };
-
     hyper.infraSpace.guestModules = [
       {
         imports = [

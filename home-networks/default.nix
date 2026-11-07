@@ -1,6 +1,7 @@
 # What ./sites.nix implies for zt-eu: its network id, the routers' zt
 # addresses, the controller's routes, and each router's state for
 # ./apply.py. Consumed by ../modules/nixos/zt-eu-sites.nix (edi),
+# ../modules/nixos/zt-eu-lan-guard (som),
 # ../modules/flake-parts/nixosConfigurations.nix (allowedIds) and
 # ../modules/flake-parts/apps.site-routers-apply.nix.
 { lib }:
@@ -84,6 +85,12 @@ in
       target = s.lan.ipv6;
       via = s.router.ztIpv6;
     }
+  ) routedSites;
+
+  # The routed sites' LAN prefixes: every zt-eu member has a route to them
+  # (../modules/nixos/zt-eu-lan-guard decides who on a host may use it).
+  routedLanPrefixes = lib.concatMap (
+    s: [ s.lan.ipv4 ] ++ lib.optional (s.lan.ipv6 != null) s.lan.ipv6
   ) routedSites;
 
   # One router's state as ./apply.py converges it (rendered to JSON).

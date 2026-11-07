@@ -50,10 +50,19 @@
       /run/infra-space/secrets/<name> (owner infra, 0400) for the
       interactive user and the tools it runs (./guest.nix). The guest's
       ssh host key goes in as credential `ssh-host-key`, for its sshd
-      only.
+      only. nspawn copies them in at container start only: each var below
+      (and the p0, TeamClaude and dashboard OIDC ones) restarts
+      container@infra-space on a rotation.
     - The guest runs the always-on hermes agent (./hermes.nix, with the
       p0 and TeamClaude keys as credentials); on som its dashboard is
       published by this host's nginx (./dashboard.nix).
+
+  Teardown (disabling infra-space, or `nixos-container destroy
+  infra-space`): hermes' locked config pins entries of the agent's home
+  immutable (hyperhermes' modules/core/locked-config.nix), so deleting the
+  container's root fails until root here clears the flag first:
+    chattr -i /var/lib/nixos-containers/infra-space/var/lib/hermes/infra/home/{.env,.op.env,config.yaml,active_profile,gateway.json,plugins,hooks,profiles,lib,patches}
+  /var/lib/infra-space (the guest's /home/infra) is separate and stays.
 
   Identities (clan vars; two manual steps once, noted per var):
     infra-space-ssh      shared: root on every clan machine
@@ -83,6 +92,7 @@ let
   name = "infra-space";
   # nspawn's host-side veth: ve-<name>, at most 15 characters.
   veth = "ve-${name}";
+  containerUnit = "container@${name}.service";
   hostAddress = "10.235.0.1";
   localAddress = "10.235.0.2";
   hostAddress6 = "fd23:5ace::1";
@@ -115,8 +125,8 @@ let
   '';
 in
 {
-  # afk for Dave's sessions in the guest (credentials + a guest module);
-  # the hermes dashboard (som only).
+  # afk for Dave's sessions in the guest (a guest module); the hermes
+  # dashboard (som only).
   imports = [
     ./afk.nix
     ./dashboard.nix
@@ -223,24 +233,28 @@ in
       }
     ];
 
+    # nspawn reads --load-credential only when the container starts: every
+    # var the guest consumes restarts it when it changes (a rotation).
     clan.core.vars.generators = {
+      inference-api-key.files.token.restartUnits = [ containerUnit ];
+      teamclaude-api-key.files.key.restartUnits = [ containerUnit ];
       infra-space-ssh = {
         share = true;
-        files.id_ed25519 = { };
+        files.id_ed25519.restartUnits = [ containerUnit ];
         files."id_ed25519.pub".secret = false;
         runtimeInputs = [ pkgs.openssh ];
         script = sshKeygen "infra-space";
       };
       infra-space-github = {
         share = true;
-        files.id_ed25519 = { };
+        files.id_ed25519.restartUnits = [ containerUnit ];
         files."id_ed25519.pub".secret = false;
         runtimeInputs = [ pkgs.openssh ];
         script = sshKeygen "infra-space@DavHau/hyperconfig";
       };
       infra-space-age = {
         share = true;
-        files."key.txt" = { };
+        files."key.txt".restartUnits = [ containerUnit ];
         files.pub.secret = false;
         runtimeInputs = [ pkgs.age ];
         script = ''
@@ -249,7 +263,7 @@ in
         '';
       };
       infra-space-hostkey = {
-        files.ssh_host_ed25519_key = { };
+        files.ssh_host_ed25519_key.restartUnits = [ containerUnit ];
         files."ssh_host_ed25519_key.pub".secret = false;
         runtimeInputs = [ pkgs.openssh ];
         script = ''
@@ -262,8 +276,8 @@ in
       ssh = vars.infra-space-ssh.files.id_ed25519.path;
       github = vars.infra-space-github.files.id_ed25519.path;
       sops-age = vars.infra-space-age.files."key.txt".path;
-      # Inference for the guest's hermes (./hermes.nix): p0's token
-      # (../inference-api-key.nix) and the TeamClaude client key
+      # Inference for the guest's hermes (./hermes.nix) and afk (./afk.nix):
+      # p0's token (../inference-api-key.nix) and the TeamClaude client key
       # (../teamclaude-api-key.nix), both shared vars of every member.
       p0-api-key = vars.inference-api-key.files.token.path;
       teamclaude-api-key = vars.teamclaude-api-key.files.key.path;

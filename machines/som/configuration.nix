@@ -50,6 +50,8 @@ in
     # Container slots (generic) and every agent's own slot.
     inputs.hyperhermes.nixosModules.slots
     ../../modules/nixos/mullvad-egress
+    # Only roman of the agents reaches Roman's site LANs (below).
+    ../../modules/nixos/zt-eu-lan-guard
     ../../modules/nixos/web-bench-mullvad.nix
     ../../modules/nixos/zfs-ephemeral-tmp.nix
     ../../modules/nixos/zfs-arc-max.nix
@@ -144,6 +146,10 @@ in
       clientSecretFile = toString config.hyper.oidc.clients.${dashboard.clientId}.secretFile;
       virtualHost = exposure.virtualHost exposure.certName;
     };
+  # The secret reaches the guest as a credential, read at container start
+  # (../../modules/nixos/infra-space/default.nix).
+  clan.core.vars.generators."oidc-client-${config.hyper.infraSpace.dashboard.clientId}".files.secret.restartUnits =
+    [ "container@infra-space.service" ];
   services.hyperhermes.exposure.fetchMetadataGate.virtualHosts = [ "infra-space-dashboard" ];
   # Explicit, as the dashboards module gives its names: the wildcard would
   # stop answering once a name below it exists.
@@ -563,6 +569,24 @@ in
   };
   # searx's uid as allocated on som, pinned so the uid rules can name it.
   users.users.searx.uid = lib.mkIf (mullvadStage >= 2) 986;
+
+  # zt-eu routes Roman's site LANs to every member, som included
+  # (../../home-networks). Of the agents only Roman's and Dave's own (by
+  # their dashboard account, ./hermes-dashboards.nix) may reach them; the
+  # human logins, root and system services keep them too. bumper, though
+  # Dave's, stays off them: its own table (./bumper.nix) refuses every
+  # private destination.
+  hyper.ztEuLanGuard.refusedUsers =
+    let
+      inherit (import ./hermes-dashboards.nix) accounts;
+    in
+    lib.filter (
+      a:
+      !lib.elem (accounts.${a} or null) [
+        "roman"
+        "dave"
+      ]
+    ) agents;
 
   system.stateVersion = "25.11";
 }

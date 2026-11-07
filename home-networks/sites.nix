@@ -18,8 +18,8 @@
     instance = "zt-eu";
     # zt-eu's IPv4: needed only to reach the IPv4-only LAN devices (ESPHome).
     # Collides with nothing in the fleet (10.42/10.43/10.64/10.77/10.99/
-    # 10.147/10.233/10.241 are taken). Routers are pinned below .100, every
-    # other member draws from the pool.
+    # 10.147/10.233/10.241 and infra-space's 10.235.0.0/30 are taken).
+    # Routers are pinned below .100, every other member draws from the pool.
     ipv4 = {
       subnet = "10.194.0.0/24";
       poolStart = "10.194.0.100";

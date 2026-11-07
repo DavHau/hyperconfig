@@ -42,6 +42,9 @@ Treat that as what it is: one wrong command takes a machine down.
   (cheap), or build it: `nix build .#nixosConfigurations.<m>.config.system.build.toplevel`.
 - Deploy what is pushed, from the checkout: `clan machines update <m>`.
   Deploy one machine, verify it, then the next.
+- Missing vars: `clan machines update <m>` fails when <m> has vars not yet
+  generated (generators run in bwrap, which your hardened session blocks).
+  Do not work around it; ask Dave to generate them.
 - Verify on the target: `ssh <m>.d readlink /run/current-system` must
   print the system you built; check the units you changed
   (`ssh <m>.d systemctl --failed`).

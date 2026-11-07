@@ -6,18 +6,10 @@
 # Reached over the zerotier "home" net (../machines/som/roman-home-assistant.nix
 # says which addresses and why): ssh lands in the SSH add-on, whose shell
 # holds the Supervisor token for the Supervisor and Core APIs.
-{ self, lib }:
+{ lib }:
 let
-  # Root keys of every clan machine: the sshd instance's authorizedKeys
-  # (../modules/flake-parts/nixosConfigurations.nix), read through the
-  # option it sets so the module wrapping of inventory settings stays opaque.
-  adminKeys = lib.attrValues
-    (lib.evalModules {
-      modules = [
-        { options.authorizedKeys = lib.mkOption { type = lib.types.attrsOf lib.types.str; }; }
-        self.clan.inventory.instances.sshd.roles.server.settings
-      ];
-    }).config.authorizedKeys;
+  # Dave's keys, root on every clan machine (../modules/admin-ssh-keys.nix).
+  adminKeys = lib.attrValues (import ../modules/admin-ssh-keys.nix);
 
   instance = name: {
     # Core as seen from inside the add-on (login flow, the user's own

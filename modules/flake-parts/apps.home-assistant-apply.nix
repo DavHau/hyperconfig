@@ -1,9 +1,9 @@
 # `nix run .#home-assistant-apply -- [--dry-run] [--skip-token] [playa|casa ...]`:
 # converges Roman's Home Assistant instances to ../../home-assistant/hosts.nix.
 # Run from the repo root: minted tokens go into som's clan vars there.
-{ self, lib, ... }:
+{ lib, ... }:
 let
-  hosts = import ../../home-assistant/hosts.nix { inherit self lib; };
+  hosts = import ../../home-assistant/hosts.nix { inherit lib; };
 in
 {
   perSystem = { pkgs, inputs', ... }:

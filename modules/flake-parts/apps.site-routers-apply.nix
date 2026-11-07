@@ -3,18 +3,11 @@
 # (../../home-networks/sites.nix, ../../home-networks/apply.py). Deploy edi
 # first: it authorizes the routers and pins their zt-eu IPv4. Run from the
 # repo root (a router without key login reads its password via clan vars).
-{ self, lib, ... }:
+{ lib, ... }:
 let
   homeNetworks = import ../../home-networks { inherit lib; };
-  # Dave's keys as root on every clan machine: the sshd instance's
-  # authorizedKeys, read through its option like ../../home-assistant/hosts.nix.
-  adminKeys = lib.attrValues
-    (lib.evalModules {
-      modules = [
-        { options.authorizedKeys = lib.mkOption { type = lib.types.attrsOf lib.types.str; }; }
-        self.clan.inventory.instances.sshd.roles.server.settings
-      ];
-    }).config.authorizedKeys;
+  # Dave's keys, root on every clan machine (../admin-ssh-keys.nix).
+  adminKeys = lib.attrValues (import ../admin-ssh-keys.nix);
   states = lib.mapAttrs (_: homeNetworks.routerState adminKeys) homeNetworks.sites;
 in
 {
