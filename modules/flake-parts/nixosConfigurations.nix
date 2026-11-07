@@ -35,6 +35,7 @@
       assert lib.assertMsg (unknown == [ ])
         "machines/som/hermes-dashboards.nix names accounts the oidc instance does not declare: ${toString unknown}";
       lib.mapAttrs (name: u: u // { groups = (u.groups or [ ]) ++ dashboardGroups.${name} or [ ]; }) users;
+  homeNetworks = import ../../home-networks { inherit lib; };
 in {
   flake =
     let
@@ -102,16 +103,20 @@ in {
             #     "7c29125877"
             #   ];
             # };
+            # The clan-managed zerotier network. Its controller (edi) also
+            # bridges the home LANs (../../home-networks): it authorizes the
+            # site routers and routes their LANs (../nixos/zt-eu-sites.nix).
             zt-eu = {
               module.name = "zerotier";
               roles.peer.tags.all = {};
               roles.controller.machines.edi = {};
-              roles.controller.settings.allowedIps = [
-                "7c29125877"
-              ];
+              roles.controller.extraModules = [ ../nixos/zt-eu-sites.nix ];
               roles.controller.settings.allowedIds = [
                 "2f4e835d67" # stefan's laptop (external)
-              ];
+                # Was listed under allowedIps, where clan reads it as a
+                # zt IPv6 address (and fails): it is a node id.
+                "7c29125877"
+              ] ++ map (r: r.ztNodeId) homeNetworks.routers;
             };
             importer.roles.default.extraModules = [
               ../../modules/nixos/common.nix
