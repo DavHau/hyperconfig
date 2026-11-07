@@ -14,13 +14,12 @@
     # var and the host-key pin), so it is the only line needed here.
     ../../modules/nixos/storagebox-sync.nix
     ../../modules/nixos/vault-nfs-server.nix
-    # RAM LEDs (mode set below).
+    # RAM LEDs off (dramMode defaults to off).
     ../../modules/nixos/rgb-off.nix
   ];
 
   nixpkgs.hostPlatform = "x86_64-linux";
 
-  hyper.rgbOff.dramMode = "rainbow";
   boot.binfmt.emulatedSystems = ["aarch64-linux"];
 
   # Must not change: the vault pool's labels carry this hostId, and a mismatch
