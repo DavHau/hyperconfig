@@ -16,10 +16,17 @@
   header for the reasons): Host passed through (hermes accepts only its
   public URL's), X-Forwarded-* set by nginx and the client's list replaced,
   only hermes' own cookies forwarded (its cookies.js), framing refused,
-  websockets with long timeouts, sign-in rate-limited, and the native-app
-  sign-in made to ask the issuer for a fresh login (prompt=login). The
+  websockets with long timeouts, sign-in rate-limited per IPv4 address or
+  IPv6 /64 (its ratelimit.js), the same request limits per client network
+  and per host, and the native-app sign-in made to ask the issuer for a
+  fresh login (prompt=login). The limits' pool is the guest's socket proxy
+  here, not core's bridges: its 256 connections (systemd-socket-proxyd's
+  default) stay above the host-wide in-flight cap of 192. The
   deployment's TLS part comes from `virtualHost` (som: hyperhermes'
   exposure, the *.davhau.fyi wildcard certificate).
+
+  This host's nginx (and root) is all that may dial the guest's dashboard
+  port: ./default.nix's output gate.
 
   The pocket-id client (`clientId`, callback <url>/auth/callback, admitting
   `allowedGroup` only, which Dave's account joins) is declared in the clan
@@ -39,7 +46,7 @@ let
   account = import ./dashboard-account.nix;
   # the guest's veth address (./default.nix)
   guestAddress = config.containers.infra-space.localAddress;
-  port = 9119;
+  inherit (cfg) port;
   vhost = "infra-space-dashboard";
   location = {
     proxyPass = "http://${guestAddress}:${toString port}";
@@ -107,6 +114,11 @@ in
       type = lib.types.str;
       description = "Runtime path of the client's secret on this host; reaches the guest as a credential.";
     };
+    port = lib.mkOption {
+      type = lib.types.port;
+      default = 9119;
+      description = "The guest's dashboard port on its veth address.";
+    };
     virtualHost = lib.mkOption {
       type = lib.types.attrsOf lib.types.anything;
       default = { };
@@ -139,7 +151,12 @@ in
       appendHttpConfig = ''
         js_import infra_space_dashboard_cookies from ${inputs.hyperhermes}/modules/dashboards/cookies.js;
         js_set $infra_space_dashboard_cookie infra_space_dashboard_cookies.hermesCookies;
-        limit_req_zone $binary_remote_addr zone=infra_space_dashboard_login:1m rate=6r/m;
+        js_import infra_space_dashboard_ratelimit from ${inputs.hyperhermes}/modules/dashboards/ratelimit.js;
+        js_set $infra_space_dashboard_client_net infra_space_dashboard_ratelimit.clientNet;
+        limit_req_zone $infra_space_dashboard_client_net zone=infra_space_dashboard_login:1m rate=6r/m;
+        limit_req_zone $infra_space_dashboard_client_net zone=infra_space_dashboard_requests:10m rate=50r/s;
+        limit_conn_zone $infra_space_dashboard_client_net zone=infra_space_dashboard_conns:10m;
+        limit_conn_zone $host zone=infra_space_dashboard_host_conns:1m;
         map $upstream_http_x_frame_options $infra_space_dashboard_frame_options {
           "" SAMEORIGIN;
           default "";
@@ -147,9 +164,16 @@ in
       '';
       virtualHosts.${vhost} = cfg.virtualHost // {
         serverName = cfg.host;
+        # the sign-in locations' own limit_req replaces the request limit
+        # there (nginx inherits limit_req only into a level without one)
         extraConfig = ''
           add_header Content-Security-Policy "frame-ancestors 'self'" always;
           add_header X-Frame-Options $infra_space_dashboard_frame_options always;
+          limit_req zone=infra_space_dashboard_requests burst=500 nodelay;
+          limit_conn infra_space_dashboard_conns 128;
+          limit_conn infra_space_dashboard_host_conns 192;
+          limit_req_status 429;
+          limit_conn_status 429;
         '';
         locations."/" = location;
         locations."= /auth/login" = signIn;

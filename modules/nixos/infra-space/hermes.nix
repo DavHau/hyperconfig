@@ -140,7 +140,9 @@ let
   # social, browsing, media, shopping, office, notes and design skills,
   # skills that drive other harnesses or delegate, the GitHub CLI (no gh
   # token here; pushes go over ssh), and hermes' own config and authoring
-  # skills (its config is Nix's). core adds `maps`.
+  # skills (its config is Nix's). Set host-wide, where it concatenates with
+  # core's `maps` (web fetching); an agent's own list would replace that
+  # (lib.recursiveUpdate, core's agent-config.nix).
   disabledSkills = [
     "apple-notes"
     "apple-reminders"
@@ -264,6 +266,7 @@ in
           model = "qwen";
         };
         settings.sessions.auto_prune = false;
+        settings.skills.disabled = disabledSkills;
         initialModel = {
           provider = "custom:p0";
           base_url = "https://inference.p0.contact/v1";
@@ -287,7 +290,6 @@ in
             platform_toolsets = lib.genAttrs platforms (_: allowedToolsets);
             agent.disabled_toolsets = disabledToolsets;
             checkpoints.enabled = false;
-            skills.disabled = disabledSkills;
           };
         };
       };

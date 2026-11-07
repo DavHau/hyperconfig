@@ -22,11 +22,14 @@
 # writable by infra; every platform's toolsets, as hermes' own config
 # resolution in its venv computes them in the gateway's environment, are
 # exactly the allowlist, and the cli agent's tools come from those only;
-# `hermes chat` answers through the stub with the p0 credential. memberA
+# `hermes chat` answers through the stub with the p0 credential; the
+# bundled `maps` (core's) stays disabled next to the module's list. memberA
 # also plays som with the dashboard (./dashboard.nix): its nginx vhost
 # answers from the host, gated by hermes' OIDC login (lazy discovery, so
 # no issuer is needed for that), the guest's dashboard port is refused to
-# a LAN peer, and memberB (amy) has none.
+# a LAN peer, and memberB (amy) has none. A user on a member (`tenant`)
+# reaches no port of its guest, nginx only the dashboard's; root and the
+# sshd forward still do.
 #
 # ./test-keys is test-only material: infra-space(.pub) the shared
 # identity, hostkey-member{A,B}(.pub) the guests' host keys, managed-host
@@ -118,7 +121,11 @@ let
       environment.systemPackages = [
         pkgs.netcat-openbsd
         pkgs.curl
+        # for the guest (the store is shared): a query to this host's resolved
+        pkgs.dnsutils
       ];
+      # a user of the host, as som's agents and tenants
+      users.users.tenant.isNormalUser = true;
 
       hyper.infraSpace = {
         enable = true;
@@ -405,6 +412,9 @@ pkgs.testers.runNixOSTest {
               assert set(got["tools"]) <= allowed_tools, got["tools"]
               assert "terminal" in got["tools"], got["tools"]
               assert got["checkpoints"] is False, got
+              # core's `maps` (web fetching) next to the module's list
+              assert {"maps", "apple-notes", "xurl"} <= set(got["skills_disabled"]), got["skills_disabled"]
+              assert "systematic-debugging" not in got["skills_disabled"], got["skills_disabled"]
 
       with subtest("hermes answers through p0's credential"):
           for m in members.values():
@@ -426,5 +436,24 @@ pkgs.testers.runNixOSTest {
           managed.succeed("ip route del ${guestV4}/32")
           memberB.fail("nixos-container run infra-space -- systemctl cat infra-space-dashboard.socket")
           memberB.fail("nc -z -w 5 ${guestV4} ${toString dashboardPort}")
+
+      with subtest("on the host only root and the forwarders reach the guest"):
+          for m in members.values():
+              for addr in ["${guestV4}", "${guestV6}"]:
+                  for port in [22, ${toString probePort}, ${toString dashboardPort}]:
+                      m.fail(f"runuser -u tenant -- nc -z -w 5 {addr} {port}")
+                  m.succeed(f"nc -z -w 5 {addr} 22", f"nc -z -w 5 {addr} ${toString probePort}")
+          # nginx: the dashboard port only (on v4, where the guest serves it)
+          memberA.succeed("runuser -u nginx -- nc -z -w 5 ${guestV4} ${toString dashboardPort}")
+          for addr in ["${guestV4}", "${guestV6}"]:
+              for port in [22, ${toString probePort}]:
+                  memberA.fail(f"runuser -u nginx -- nc -z -w 5 {addr} {port}")
+          memberA.succeed(f"curl -sf {origin}/api/status")
+          # the sshd forward (its own uid), and the replies of this host's
+          # resolved to the guest
+          reach_each_other()
+          for m in members.values():
+              out = guest_root(m, "${pkgs.dnsutils}/bin/dig +short +time=5 +tries=1 @10.235.0.1 managed").strip()
+              assert out, out
     '';
 }

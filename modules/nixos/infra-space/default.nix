@@ -28,6 +28,15 @@
       of the veth, and the guest's firewall admits this host's veth
       addresses only (./guest.nix), on any port. Guest services for this
       host only (a dashboard behind this host's nginx) need no opening.
+    - And on this host only root and the forwarders: whatever this host
+      sends into the veth comes from its veth addresses, which the guest
+      admits, so the same table's output chain refuses every other uid
+      (users, agents, services) on every port and address of the guest,
+      link-local included. Passing: root, the sshd socket proxy (its own
+      uid, below) to port 22, nginx to the dashboard port (som,
+      ./dashboard.nix); packets of the guest's own connections (replies
+      of this host's resolved) and socketless ones (the kernel's: ND,
+      resets).
     - /home/infra in the guest is /var/lib/infra-space/home here,
       read-write, so the checkout and the agents' state survive container
       rebuilds. A plain directory, on som too: som's entity storage
@@ -83,6 +92,10 @@ let
   uid = 1203;
   stateDir = "/var/lib/infra-space";
   homeDir = "${stateDir}/home";
+  # The guest's sshd forwarder's uid here, the one the output gate admits
+  # to port 22 (id ladder in ../vault-ids.nix).
+  sshProxyUser = "infra-space-ssh";
+  sshProxyUid = 1204;
 
   # Credential carrying the guest's ssh host key; not in `credentials`, so
   # never copied out for `infra`.
@@ -332,8 +345,9 @@ in
       ip -6 route replace ${localAddress6} dev ${veth} src ${hostAddress6}
     '';
 
-    # Only this host opens connections into the guest; the guest's own
-    # connections and their replies pass (see the header).
+    # Only this host opens connections into the guest, and on this host
+    # only root and the forwarders; the guest's own connections and their
+    # replies pass (see the header).
     networking.nftables.enable = true;
     networking.nftables.tables.infra-space = {
       family = "inet";
@@ -341,6 +355,23 @@ in
         chain forward {
           type filter hook forward priority filter; policy accept;
           oifname "${veth}" ct state new drop
+        }
+        # Every packet a local socket sends in the original direction, not
+        # only a flow's first (two UDP sockets with SO_REUSEADDR share a
+        # port whatever their uid). Socketless packets never match skuid.
+        chain output {
+          type filter hook output priority filter; policy accept;
+          oifname "${veth}" ct direction original jump to-guest
+        }
+        chain to-guest {
+          meta skuid 0 return
+          meta skuid ${toString sshProxyUid} tcp dport 22 return
+          ${lib.optionalString cfg.dashboard.enable "meta skuid ${toString config.users.users.${config.services.nginx.user}.uid} tcp dport ${toString cfg.dashboard.port} return"}
+          meta skuid != 0 jump refuse
+        }
+        chain refuse {
+          meta l4proto tcp reject with tcp reset
+          reject with icmpx admin-prohibited
         }
       '';
     };
@@ -365,10 +396,19 @@ in
       after = [ "container@${name}.service" ];
       serviceConfig = {
         ExecStart = "${config.systemd.package}/lib/systemd/systemd-socket-proxyd ${localAddress}:22";
+        # the static user below, still with DynamicUser's sandbox
         DynamicUser = true;
+        User = sshProxyUser;
+        Group = sshProxyUser;
         PrivateTmp = true;
       };
     };
+    users.users.${sshProxyUser} = {
+      isSystemUser = true;
+      uid = sshProxyUid;
+      group = sshProxyUser;
+    };
+    users.groups.${sshProxyUser}.gid = sshProxyUid;
     networking.firewall.interfaces.${cfg.meshInterface}.allowedTCPPorts = [ self.sshPort ];
   };
 }

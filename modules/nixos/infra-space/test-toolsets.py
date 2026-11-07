@@ -1,7 +1,7 @@
 """What the infra-space agent may use, as hermes itself resolves it (./test.nix):
 run with hermes' venv python in the gateway's environment, as infra. Prints
-the toolsets of every platform hermes knows (and acp) and the tool names
-the cli platform's agent gets."""
+the toolsets of every platform hermes knows (and acp), the tool names the
+cli platform's agent gets and the bundled skills disabled for cli."""
 
 import json
 
@@ -10,6 +10,7 @@ from hermes_cli import plugins
 plugins.discover_plugins()
 
 import model_tools  # noqa: E402
+from agent.skill_utils import get_disabled_skill_names  # noqa: E402
 from hermes_cli.config import load_config  # noqa: E402
 from hermes_cli.platforms import PLATFORMS  # noqa: E402
 from hermes_cli.tools_config import _get_platform_tools  # noqa: E402
@@ -24,4 +25,5 @@ print(json.dumps({
     "platforms": platforms,
     "tools": sorted(d["function"]["name"] for d in defs),
     "checkpoints": (cfg.get("checkpoints") or {}).get("enabled"),
+    "skills_disabled": sorted(get_disabled_skill_names("cli")),
 }))
