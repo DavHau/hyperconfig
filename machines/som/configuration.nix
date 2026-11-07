@@ -179,6 +179,9 @@ in
   # The router's DHCP/RA DNS stays unused: lookups go through
   # ../../modules/nixos/encrypted-dns.nix.
   hyper.encryptedDns.networkdUplinks = [ "40-br0" ];
+  # lego's DNS-01 orders (dnsResolver 1.1.1.1:53, see exposure below) walk
+  # SOA records in plaintext; without this every renewal fails.
+  hyper.encryptedDns.plainDnsUsers = [ "acme" ];
 
   # No wifi on this desktop: it sits on the LAN cable. The AX210 stays
   # unbound (no wlan0, no supplicant, no initrd PSK); nixos-facter's
