@@ -18,18 +18,17 @@
     (mapModules "flake-parts")
   );
 
+  kinds = lib.mapAttrs (kind: _: mapModules kind) moduleKinds;
+
 in {
 
   imports = flakePartsModules;
 
-  options.flake.modules = lib.mkOption {
-    type = lib.types.anything;
-  };
-
-  # generates future flake outputs: `modules.<kind>.<module-name>`
-  config.flake.modules = lib.mapAttrs (kind: _: mapModules kind) moduleKinds;
+  # generates future flake outputs: `modules.<kind>.<module-name>` (the
+  # option is flake-parts' flakeModules.modules, imported by ./nixvim)
+  config.flake.modules = kinds;
 
   # comapt to current schema: `nixosModules` / `darwinModules`
-  config.flake.nixosModules = config.flake.modules.nixos or {};
-  config.flake.darwinModules = config.flake.modules.darwin or {};
+  config.flake.nixosModules = kinds.nixos or {};
+  config.flake.darwinModules = kinds.darwin or {};
 }

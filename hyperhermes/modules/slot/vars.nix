@@ -1,17 +1,22 @@
 # Tool-default overrides that move rebuildable downloads into ~/.cache
-# (a non-snapshotted scratch dataset on hosts with entity storage). Plain
-# data, `$HOME` left for the consumer to expand: /etc/set-environment
-# expands it per user, hyperhermes substitutes each agent's home.
+# (a non-snapshotted scratch dataset on hosts with entity storage, and in
+# container slots with storage). Plain data, `$HOME` left for the consumer
+# to expand: /etc/set-environment expands it per user, hyperhermes
+# substitutes each agent's home, ./default.nix falls back to /scratch.
+# The one copy: nixosModules.slot (./default.nix) uses it, and so does
+# hyperconfig's modules/nixos/toolchain-cache-dirs.
 #
 # Only tools whose default is outside ~/.cache are listed. Already under
 # ~/.cache by default: go build cache (GOCACHE), pip, uv, yarn v1, deno,
 # Hugging Face, torch, playwright, puppeteer, ccache, nix, pnpm's metadata
-# cache, sccache and cargo's build-dir (../rust-build-cache.nix).
+# cache, sccache and cargo's build-dir (hyperconfig's
+# modules/nixos/rust-build-cache.nix).
 #
 # Deliberately not moved:
 # - CARGO_HOME (~/.cargo): also holds bin/ and config.toml, and sbox
 #   persists ~/.cargo/{registry,git,build-dir} per project and names the
-#   build dir via {cargo-cache-home} (../rust-build-cache.nix).
+#   build dir via {cargo-cache-home} (hyperconfig's
+#   modules/nixos/rust-build-cache.nix).
 # - GOPATH (~/go): GOMODCACHE moves the bulky part (pkg/mod) alone, so
 #   `go install` binaries stay in ~/go/bin where existing PATHs expect them.
 # - RUSTUP_HOME, STACK_ROOT, JULIA_DEPOT_PATH: installed toolchains that a

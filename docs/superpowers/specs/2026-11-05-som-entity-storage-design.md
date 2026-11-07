@@ -65,7 +65,7 @@ Subdirectories of the scratch dataset are bound into the guest at
 declared in this repo (e.g. asof-agents' `/home/agent/.cache`). The
 guest's `/tmp` already lives on the host's non-snapshotted `/tmp`.
 
-An optional guest module (`slot-storage`) sets the same tool defaults
+The slot guest module (`slot`) sets the same tool defaults
 inside the guest and binds `~/.cache` of named guest users onto
 `/scratch`; the host-side binds work without it.
 

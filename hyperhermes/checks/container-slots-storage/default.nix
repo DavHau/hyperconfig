@@ -7,9 +7,9 @@
 # and can write there as that user, the root quota stops writes in the
 # root only. --finalize drops the old tree; `slot reset --hard` empties
 # both datasets and the slot comes back with its binds. A fresh slot gets
-# its datasets at first start. The guest module (nixosModules.slot-storage)
-# on a plain VM: tool defaults, a cache user's ~/.cache bound from
-# /scratch, a non-empty one left alone.
+# its datasets at first start. The guest module (nixosModules.slot) on a
+# plain VM: tool defaults, a cache user's ~/.cache bound from /scratch, a
+# non-empty one left alone.
 { pkgs, self }:
 let
   inherit (pkgs) lib;
@@ -17,7 +17,7 @@ let
   rootQuota = "256M";
 in
 pkgs.testers.runNixOSTest {
-  name = "hyperhermes-slot-storage";
+  name = "hyperhermes-container-slots-storage";
   globalTimeout = 1200;
 
   nodes.host =
@@ -92,7 +92,10 @@ pkgs.testers.runNixOSTest {
     };
 
   nodes.guest = {
-    imports = [ self.nixosModules.slot-storage ];
+    imports = [ self.nixosModules.slot ];
+    # a VM stands in for the slot here (the agent slots above run the
+    # bootstrap, which is this module too)
+    boot.isNspawnContainer = lib.mkForce false;
     # stands in for the host's bind of the slot's scratch dataset
     virtualisation.fileSystems."/scratch" = {
       fsType = "tmpfs";
@@ -111,7 +114,7 @@ pkgs.testers.runNixOSTest {
       "d /home/other/.cache 0700 other users -"
       "f /home/other/.cache/keep 0600 other users - kept"
     ];
-    slotStorage.cacheUsers = [
+    containerSlot.cacheUsers = [
       "agent"
       "other"
     ];
@@ -220,7 +223,7 @@ pkgs.testers.runNixOSTest {
 
     with subtest("guest module: tool defaults and a cache user's ~/.cache on /scratch"):
         guest.wait_for_unit("multi-user.target")
-        guest.wait_for_unit("slot-storage-cache-agent.service")
+        guest.wait_for_unit("container-slot-cache-agent.service")
         assert guest.succeed("runuser -l agent -c 'echo $npm_config_cache'").strip() == "/home/agent/.cache/npm"
         assert guest.succeed("env -i sh -c '. /etc/profile; echo $GOMODCACHE'").strip() == "/scratch/.cache/go-mod"
         assert guest.succeed("findmnt -rn -o SOURCE --mountpoint /home/agent/.cache").strip().endswith("[/home/agent/.cache]")
@@ -229,9 +232,15 @@ pkgs.testers.runNixOSTest {
         guest.succeed("test -e /scratch/home/agent/.cache/x")
 
     with subtest("guest module: a non-empty ~/.cache is not hidden"):
-        guest.wait_for_unit("slot-storage-cache-other.service")
+        guest.wait_for_unit("container-slot-cache-other.service")
         guest.fail("findmnt --mountpoint /home/other/.cache")
         guest.succeed("test -e /home/other/.cache/keep")
-        guest.succeed("journalctl -u slot-storage-cache-other | grep -q 'holds data'")
+        guest.succeed("journalctl -u container-slot-cache-other | grep -q 'holds data'")
+
+    with subtest("guest module: sshd with the host's keys file and host key"):
+        guest.wait_for_unit("sshd.service")
+        sshd = guest.succeed("sshd -T -f /etc/ssh/sshd_config")
+        assert "/var/lib/container-slot/authorized_keys" in sshd, sshd
+        assert "HostKey /var/lib/container-slot/ssh_host_ed25519_key" in sshd, sshd
   '';
 }

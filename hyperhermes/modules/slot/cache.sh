@@ -1,4 +1,4 @@
-# slot-storage-cache <user> <group> <home>: bind <home>/.cache from
+# container-slot-cache <user> <group> <home>: bind <home>/.cache from
 # /scratch/home/<user>/.cache. Root runs this in a /scratch every slot
 # user can write (1777), so every step refuses a symlink in the way.
 
@@ -8,7 +8,7 @@ home=$3
 src=/scratch/home/$user/.cache
 dst=$home/.cache
 
-log() { echo "slot-storage-cache: $*" >&2; }
+log() { echo "container-slot-cache: $*" >&2; }
 
 if findmnt -rn --mountpoint "$dst" >/dev/null; then
   exit 0 # already a mount (the host's scratchPaths, or an earlier run)
@@ -44,7 +44,7 @@ if [ -L "$dst" ]; then
   exit 1
 fi
 if [ -d "$dst" ] && [ -n "$(ls -A "$dst")" ]; then
-  log "$dst holds data; not hiding it. Move it into $src (or delete it), then: systemctl restart slot-storage-cache-$user"
+  log "$dst holds data; not hiding it. Move it into $src (or delete it), then: systemctl restart container-slot-cache-$user"
   exit 0
 fi
 mkdir_owned "$dst" 0700 "$user" "$group"

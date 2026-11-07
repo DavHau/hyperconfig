@@ -56,9 +56,10 @@
         # slots imports it.
         container-slots = ./modules/container-slots.nix;
         slots = ./modules/slots;
-        # For the system inside a container slot (not the host): the
+        # For the system inside a container slot (not the host): what
+        # every slot guest needs (nspawn, sshd with the host's keys), the
         # storage convention's tool defaults and scratch ~/.cache.
-        slot-storage = ./modules/slot-storage;
+        slot = ./modules/slot;
         default = {
           imports = [
             self.nixosModules.core
@@ -152,7 +153,7 @@
         mail = import ./checks/mail { inherit pkgs self; };
         slots = import ./checks/slots { inherit pkgs self; };
         slots-local = import ./checks/slots/local.nix { inherit pkgs self; };
-        slot-storage = import ./checks/slot-storage { inherit pkgs self; };
+        container-slots-storage = import ./checks/container-slots-storage { inherit pkgs self; };
         # Evaluation only: teamclaude, claude-auth, desktop and rea on a
         # system without clan, secrets as runtime paths.
         client-features = import ./checks/client-features { inherit pkgs self; };

@@ -15,7 +15,7 @@
 # (by default /scratch, /var/tmp, /var/cache, /var/lib/docker,
 # /var/lib/containers, /root/.cache) is bound over that path in the slot,
 # so what the slot churns there leaves its snapshots. The guest needs no
-# cooperation; nixosModules.slot-storage adds the tool defaults and binds
+# cooperation; nixosModules.slot (../slot) adds the tool defaults and binds
 # named guest users' ~/.cache onto /scratch. Owners are guest ids, and
 # stored as such: the binds are idmapped (nspawn's `:idmap`), like the
 # slot's root under --private-users-ownership=auto on ZFS, so data moves

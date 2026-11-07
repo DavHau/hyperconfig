@@ -124,18 +124,20 @@ pushed. Keep the brackets: a bare IPv6 address breaks nix-copy-closure.
 
 ## What your config needs
 
-- boot.isNspawnContainer = true;
-- services.openssh.enable = true; plus your key in
-  users.users.root.openssh.authorizedKeys.keys, or keep the bootstrap's
-  services.openssh.authorizedKeysFiles =
-  [ "/var/lib/container-slot/authorized_keys" ]; ($machine provides the
-  keys above there at every start). Without either, your access is gone
-  after your first deploy, and $machine does not repair a slot that
-  locked its deployer out.
-- To keep the slot's ssh host key (generated and kept by $machine, so it
-  survives resets and redeploys and $machine can pin it):
-  services.openssh.hostKeys = [ { type = "ed25519";
-  path = "/var/lib/container-slot/ssh_host_ed25519_key"; } ];
+Import the slot module from hyperconfig (flake input
+inputs.hyperconfig.url = "github:DavHau/hyperconfig"):
+
+    imports = [ inputs.hyperconfig.nixosModules.slot ];
+
+It sets what the slot needs: boot.isNspawnContainer = true; sshd,
+letting root in with the keys $machine provides at every start in
+/var/lib/container-slot/authorized_keys (the keys above; your own
+users.users.root.openssh.authorizedKeys.keys work as well); and the
+slot's ssh host key, which $machine generates and keeps (so it survives
+resets and redeploys and $machine can pin it). It also sets the storage
+tool defaults (see Storage, if your slot has it). Keep sshd and a key:
+without them your access is gone after your first deploy, and $machine
+does not repair a slot that locked its deployer out.
 
 What it need not (and should not) do:
 
@@ -190,15 +192,13 @@ models, datasets you can fetch again, experiment scratch. A full quota
 fails writes in your slot only (EDQUOT/ENOSPC). /tmp is $machine's /tmp:
 emptied at its reboot, files unused for a day removed.
 
-Optional, from the hyperhermes flake (inputs.hyperhermes.url =
-"github:DavHau/hyperconfig?dir=hyperhermes"):
+The slot module (above) points common tools' caches (npm, pnpm, bun, Go
+modules, gradle, maven, conda, ollama) into ~/.cache system-wide.
+Optionally,
 
-    imports = [ inputs.hyperhermes.nixosModules.slot-storage ];
-    slotStorage.cacheUsers = [ "<user>" ];
+    containerSlot.cacheUsers = [ "<user>" ];
 
-It points common tools' caches (npm, pnpm, bun, Go modules, gradle,
-maven, conda, ollama) into ~/.cache system-wide, and binds each listed
-user's ~/.cache from /scratch/home/<user>/.cache (root's already is
-scratch).
+binds each listed user's ~/.cache from /scratch/home/<user>/.cache
+(root's already is scratch).
 EOF
 fi

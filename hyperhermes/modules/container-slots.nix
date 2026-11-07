@@ -16,12 +16,12 @@
 # ssh. A bare IPv6 literal fails in nix-copy-closure ("invalid URL
 # authority").
 #
-# The guest config needs exactly one line beyond its own content:
-# `boot.isNspawnContainer = true;` (what nixos-generate-config emits inside
-# nspawn). It must also keep its own way in (sshd + a key for root): this
-# host does not repair a slot that locked its deployer out. The simplest way
-# is the bootstrap's own: `services.openssh.authorizedKeysFiles =
-# [ "/var/lib/container-slot/authorized_keys" ];` (see first boot below).
+# The guest config imports nixosModules.slot (./slot; hyperconfig's flake
+# exports it as well): `boot.isNspawnContainer = true;` (what
+# nixos-generate-config emits inside nspawn), sshd with the host-provided
+# authorized_keys (see first boot below) and host key. The guest must keep
+# its own way in (sshd + a key for root): this host does not repair a slot
+# that locked its deployer out.
 #
 # What the host provides, so the guest config does not have to:
 #   - addresses: the slot's public v6 /128 (<ipv6Prefix>::5107:<id hex>) is
@@ -72,9 +72,8 @@
 #     way, so it survives resets, hard resets and redeploys, and this host
 #     can pin it: known_hosts next to it lists the slot's addresses
 #     (`hostKeysDir`). The bootstrap's sshd uses it; a deployed guest
-#     keeps it with `services.openssh.hostKeys = [ { type = "ed25519";
-#     path = "/var/lib/container-slot/ssh_host_ed25519_key"; } ];`, or
-#     clients that pin it refuse the slot.
+#     keeps it through nixosModules.slot (`services.openssh.hostKeys`,
+#     mkDefault), or clients that pin it refuse the slot.
 #   - start: `autoStart` (default on) starts the slot at boot; off, the
 #     unit container@<slot> exists and something else starts it
 #     (./slots).
@@ -260,24 +259,17 @@ let
   isolatedNs4 = lib.filter (a: !lib.hasInfix ":" a) cfg.dns.nameservers;
   isolatedNs6 = lib.filter (lib.hasInfix ":") cfg.dns.nameservers;
 
-  # The one bootstrap system every slot is seeded with. Nothing slot-specific
-  # goes in here (see "Evaluation cost" above): hostName "" keeps the one
+  # The one bootstrap system every slot is seeded with: nixosModules.slot
+  # (./slot, the module deployed guests import too) and nothing
+  # slot-specific (see "Evaluation cost" above): hostName "" keeps the one
   # nspawn sets, root's keys and the host key come from files the host binds
-  # in.
+  # in at these paths (the ones ./slot names).
   slotKeysPath = "/var/lib/container-slot/authorized_keys";
   slotHostKeyPath = "/var/lib/container-slot/ssh_host_ed25519_key";
   bootstrap =
     (pkgs.nixos {
-      boot.isNspawnContainer = true;
+      imports = [ ./slot ];
       networking.hostName = "";
-      services.openssh.enable = true;
-      services.openssh.authorizedKeysFiles = [ slotKeysPath ];
-      services.openssh.hostKeys = [
-        {
-          type = "ed25519";
-          path = slotHostKeyPath;
-        }
-      ];
       system.stateVersion = config.system.stateVersion;
     }).toplevel;
 

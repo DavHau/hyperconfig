@@ -644,11 +644,9 @@ let
           lists (/scratch, /var/tmp, /var/cache, ...) are not backed up, with a larger
           limit of their own. Keep repos, results and databases in the root; caches,
           build trees, downloads and experiment scratch in scratch. A full limit fails
-          writes in your slot only. In your NixOS config,
-          `imports = [ inputs.hyperhermes.nixosModules.slot-storage ];` (hyperhermes:
-          `github:DavHau/hyperconfig?dir=hyperhermes`) points common tools' caches
-          into ~/.cache, and `slotStorage.cacheUsers = [ "<user>" ];` puts that user's
-          ~/.cache on scratch (root's already is).
+          writes in your slot only. The slot module (see Deploy) points common tools'
+          caches into ~/.cache, and `containerSlot.cacheUsers = [ "<user>" ];` puts
+          that user's ~/.cache on scratch (root's already is).
         '')
       ]
       (builtins.readFile ./SKILL.md);

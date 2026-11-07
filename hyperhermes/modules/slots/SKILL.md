@@ -42,29 +42,25 @@ From a flake on this host:
     nixos-rebuild switch --flake .#slot \
       --target-host root@<v4> --build-host root@<v4>
 
-Builds run on this host's nix daemon. The guest config must contain
-`boot.isNspawnContainer = true;` and keep sshd with your key and the host
-key this host provides, or you lock yourself out (then `slot reset`): your
-ssh checks that key and refuses a slot that presents another. Addresses,
-routes and DNS come from the host: do not configure networking. Minimal
-flake:
+Builds run on this host's nix daemon. The guest config must import
+`nixosModules.slot` from hyperconfig (`github:DavHau/hyperconfig`): it
+sets `boot.isNspawnContainer = true;`, sshd with your key (the host
+provides it at /var/lib/container-slot/authorized_keys) and the host key
+this host provides, plus tool cache defaults. Keep sshd and that key, or
+you lock yourself out (then `slot reset`): your ssh checks the host key
+and refuses a slot that presents another. Addresses, routes and DNS come
+from the host: do not configure networking. Minimal flake:
 
 ```nix
 {
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { nixpkgs, ... }: {
+  inputs.hyperconfig.url = "github:DavHau/hyperconfig";
+  outputs = { nixpkgs, hyperconfig, ... }: {
     nixosConfigurations.slot = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
       modules = [
+        hyperconfig.nixosModules.slot
         {
-          boot.isNspawnContainer = true;
-          services.openssh.enable = true;
-          # The host provides your key here; keep this line.
-          services.openssh.authorizedKeysFiles = [ "/var/lib/container-slot/authorized_keys" ];
-          # The host key this host pins; keep it too.
-          services.openssh.hostKeys = [
-            { type = "ed25519"; path = "/var/lib/container-slot/ssh_host_ed25519_key"; }
-          ];
           networking.firewall.allowedTCPPorts = [ 80 443 ];
           system.stateVersion = "25.11";
         }

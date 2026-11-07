@@ -2,8 +2,8 @@
   Tool defaults that keep rebuildable downloads (module caches, package
   stores, model files) in ~/.cache, for hosts where ~/.cache is a
   non-snapshotted scratch dataset and ~ a small, backed-up one (entity
-  storage). The variables are ./vars.nix, shared with the hermes agents
-  and slot guests.
+  storage). The variables are hyperhermes' modules/slot/vars.nix, shared
+  with the hermes agents and slot guests (nixosModules.slot).
 
   - Login sessions: environment.sessionVariables, i.e. /etc/set-environment
     (shells, which expand $HOME) and pam_env (every PAM session, systemd
@@ -28,7 +28,7 @@ in
     enable = lib.mkEnableOption "tool cache and download dirs under ~/.cache";
     variables = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
-      default = import ./vars.nix;
+      default = import ../../../hyperhermes/modules/slot/vars.nix;
       description = "Variables to set, values with a literal `$HOME`.";
     };
   };
