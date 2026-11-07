@@ -112,6 +112,9 @@ in
       bumper = { };
       chris = { };
       dave = { };
+      # Temporary: re/omd2 (~300G) still lives in the home until the agent
+      # moves it to ~/scratch; then down to 40G.
+      dave-hermes.homeQuota = "400G";
       domi = { };
       egg = { };
       hsjobeki = { };
@@ -366,7 +369,8 @@ in
   # Slots move onto their datasets one at a time: opt in, deploy, then
   # `slot-storage-migrate <slot>` (hyperhermes container-slots-storage).
   services.container-slots.slots = {
-    # The agent slots; dave-hermes' follows its owner's home last.
+    # The agent slots.
+    dave-hermes.storage.enable = true;
     adam.storage.enable = true;
     b3x.storage.enable = true;
     bumper.storage.enable = true;
