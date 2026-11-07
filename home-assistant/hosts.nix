@@ -59,15 +59,16 @@ let
     };
 
     # Roman's hermes agent on som (../machines/som/roman-home-assistant.nix):
-    # MCP only, as this non-admin user. It has no password: apply mints its
-    # long-lived token through a throwaway one and removes that again.
+    # MCP and the admin REST/WebSocket API, so this user is an admin. It has
+    # no password: apply mints its long-lived token through a throwaway one
+    # and removes that again.
     # local_only does NOT confine this token: edi proxies playa.bruch-bu.de
     # to 192.168.194.30:8123 (and casa.bruch-bu.de to casa) without
     # X-Forwarded-For (../machines/edi/reverse-proxy.nix), so HA sees edi's
     # private address and counts every request, internet ones included, as
     # local.
     users.hermes-roman = {
-      group_ids = [ "system-users" ];
+      group_ids = [ "system-admin" ];
       local_only = true;
       is_active = true;
       token = {
@@ -79,7 +80,7 @@ let
     };
 
     # "Model Context Protocol Server" (mcp_server, single entry): the Assist
-    # API only, open to non-admins so hermes-roman can use it.
+    # API only.
     configEntries.mcp_server.options = {
       all_llm_apis = false;
       llm_hass_api = [ "assist" ];
@@ -90,11 +91,11 @@ let
 in
 {
   playa = instance "playa" // {
-    address = "192.168.194.30";
+    address = "192.168.10.3";
     sshPort = 22;
   };
   casa = instance "casa" // {
-    address = "fcc0:044a:8669:8c81:6d54::1";
+    address = "192.168.20.3";
     sshPort = 22;
   };
 }

@@ -1,15 +1,12 @@
 # roman's (./hermes-agents.nix) way into Roman's two Home Assistant
-# instances, which are not clan machines: MCP only, no ssh.
-#   playa.bruch-bu.de  HA at 192.168.194.30, on the zerotier "home" net
-#                      (af415e486f4514ce, which every machine joins,
-#                      ../../modules/nixos/common.nix),
-#   casa.bruch-bu.de   HA at fcc0:044a:8669:8c81:6d54::1, that net's 6plane.
-# The public names resolve to edi, which proxies only :8123
-# (../edi/reverse-proxy.nix), so the API goes to the overlay addresses.
-# roman's uid leaves through Mullvad, whose kill switch passes
-# 192.168.0.0/16 and fc00::/7 directly, and its uid rule still uses every
-# non-default route of the main table, the zerotier ones included
+# instances, which are not clan machines: MCP plus the admin REST/WebSocket
+# API with the same token, no ssh. Addressed on their LANs, which som
+# reaches over zt-eu (../../home-networks): som is not a member of the old
+# zerotier "home" net, and for roman's uid any destination without a
+# main-table route goes into Mullvad
 # (../../modules/nixos/mullvad-egress/egress.nix).
+#   playa.bruch-bu.de  HA at 192.168.10.3
+#   casa.bruch-bu.de   HA at 192.168.20.3
 #
 # Per instance, HA's "Model Context Protocol Server" integration as an MCP
 # server (streamable HTTP at /api/mcp, hermes' default transport for a
@@ -27,11 +24,11 @@ let
   agent = "roman";
   instances = {
     playa = {
-      urlHost = "192.168.194.30";
+      urlHost = "192.168.10.3";
       env = "HA_PLAYA_TOKEN";
     };
     casa = {
-      urlHost = "[fcc0:044a:8669:8c81:6d54::1]";
+      urlHost = "192.168.20.3";
       env = "HA_CASA_TOKEN";
     };
   };
