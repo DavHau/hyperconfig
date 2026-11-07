@@ -51,13 +51,29 @@ let
           init_commands = [ ];
         };
       };
-      # The official SSH add-on: replaced by the one above.
-      core_ssh.present = false;
+      # The official SSH add-on: replaced by the one above. Where it still
+      # holds the session and port 22 (casa), apply moves in two runs
+      # (./remote.py): run 1 installs and starts a0d7b954_ssh
+      # on 2222/tcp with the keys above and stops; rerun with
+      # `--ssh-port 2222 <host>`: that session (in a0d7b954_ssh) uninstalls
+      # core_ssh and moves a0d7b954_ssh to 22 (detached restart).
+      core_ssh = {
+        present = false;
+        replacedBy = {
+          slug = "a0d7b954_ssh";
+          network."22/tcp" = 2222;
+        };
+      };
     };
 
     # Roman's hermes agent on som (../machines/som/roman-home-assistant.nix):
     # MCP only, as this non-admin user. It has no password: apply mints its
     # long-lived token through a throwaway one and removes that again.
+    # local_only does NOT confine this token: edi proxies playa.bruch-bu.de
+    # to 192.168.194.30:8123 (and casa.bruch-bu.de to casa) without
+    # X-Forwarded-For (../machines/edi/reverse-proxy.nix), so HA sees edi's
+    # private address and counts every request, internet ones included, as
+    # local.
     users.hermes-roman = {
       group_ids = [ "system-users" ];
       local_only = true;

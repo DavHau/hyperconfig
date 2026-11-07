@@ -6,12 +6,11 @@ let
   hosts = import ../../home-assistant/hosts.nix { inherit self lib; };
 in
 {
-  perSystem = { pkgs, ... }:
+  perSystem = { pkgs, inputs', ... }:
     let
       program = pkgs.writeShellApplication {
         name = "home-assistant-apply";
-        # clan comes from the devshell (it is not a nixpkgs package).
-        runtimeInputs = [ pkgs.python3 pkgs.openssh ];
+        runtimeInputs = [ pkgs.python3 pkgs.openssh inputs'.clan-core.packages.clan-cli ];
         text = ''
           exec python3 ${../../home-assistant/apply.py} \
             --state ${pkgs.writeText "home-assistant-hosts.json" (builtins.toJSON hosts)} \

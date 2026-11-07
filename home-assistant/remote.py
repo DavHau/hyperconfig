@@ -6,13 +6,23 @@ Supervisor token. Reads one JSON object on stdin:
     {"state": <one host of hosts.nix>, "dryRun": bool, "mint": [user names]}
 
 Reports each change on stderr ("would" in a dry run) and prints one JSON
-object on stdout for apply.py: {"changes": [...], "tokens": {user: token}}.
-Tokens are never written anywhere else.
+object on stdout for apply.py: {"changes": [...], "tokens": {user: token},
+"rerunSshPort": port or null}. Tokens are never written anywhere else.
 
 Official APIs only: Supervisor REST (add-ons, backups), Core REST via the
 Supervisor proxy (config entries), Core websocket via the Supervisor proxy
 (users, credentials), and Core's own login flow plus the user's websocket
 to mint the long-lived token.
+
+Moving off a declared-absent SSH add-on that holds the session (the
+official core_ssh, as on casa) takes two runs, since that add-on cannot be
+uninstalled from its own session and holds the port its replacement wants:
+its `replacedBy` (hosts.nix) names the replacement and a temporary network.
+Run 1 (session in core_ssh) only installs, configures and starts the
+replacement on the temporary port, then stops and asks for a rerun through
+that port. Run 2 (session in the replacement, /addons/self/info) is an
+ordinary run: it uninstalls core_ssh and, last, moves its own add-on to the
+declared port with the detached restart.
 """
 
 import base64
@@ -32,12 +42,33 @@ import urllib.request
 SUPERVISOR = "http://supervisor"
 TOKEN = os.environ["SUPERVISOR_TOKEN"]
 
+# Detached restart of the session's own add-on (Run.self_addon): argv is the
+# URL and the log file; the token comes from the inherited environment.
+RESTART_LOG = "/data/hyperconfig-apply-restart.log"
+RESTART = """
+import json, os, sys, time, urllib.request
+url, log = sys.argv[1:3]
+time.sleep(2)
+req = urllib.request.Request(
+    url, method="POST", headers={"Authorization": "Bearer " + os.environ["SUPERVISOR_TOKEN"]}
+)
+try:
+    with urllib.request.urlopen(req, timeout=600) as resp:
+        reply = json.loads(resp.read() or b"{}")
+    error = None if reply.get("result") == "ok" else repr(reply)[:500]
+except Exception as e:
+    error = repr(e)[:500]
+if error:
+    with open(log, "w") as f:
+        f.write(time.strftime("%Y-%m-%dT%H:%M:%SZ ", time.gmtime()) + "POST " + url + ": " + error + "\\n")
+"""
+
 
 class ApplyError(Exception):
     pass
 
 
-def http(method, url, body=None, token=TOKEN, form=False, timeout=600):
+def fetch(method, url, body=None, token=TOKEN, form=False, timeout=600):
     headers = {}
     data = None
     if token:
@@ -59,14 +90,14 @@ def http(method, url, body=None, token=TOKEN, form=False, timeout=600):
 
 
 def supervisor(method, path, body=None):
-    reply = http(method, SUPERVISOR + path, body)
+    reply = fetch(method, SUPERVISOR + path, body)
     if reply.get("result") != "ok":
         raise ApplyError(f"{method} {path}: {reply}")
     return reply.get("data")
 
 
 def core(method, path, body=None):
-    return http(method, f"{SUPERVISOR}/core/api{path}", body)
+    return fetch(method, f"{SUPERVISOR}/core/api{path}", body)
 
 
 class WebSocket:
@@ -209,67 +240,96 @@ class Run:
     # Supervisor: add-ons -------------------------------------------------
 
     def addons(self):
+        """Converge add-ons; return the session's own pending change.
+
+        Returns ("migrate", port) when the session runs in a declared-absent
+        add-on with a replacement (run 1 of the move, see the module doc),
+        else ("self", (slug, body)) or None.
+        """
         self_slug = supervisor("GET", "/addons/self/info")["slug"]
         installed = {a["slug"] for a in supervisor("GET", "/addons")["addons"]}
+        wants = self.state["addons"]
+        self_want = wants.get(self_slug, {"present": True})
+        if not self_want["present"]:
+            move = self_want.get("replacedBy")
+            if move is None:
+                raise ApplyError(f"{self_slug}: refusing to uninstall the add-on of this session")
+            new = move["slug"]
+            print(
+                f"{self_slug}: this session runs in it; moving to {new} on {move['network']} first",
+                file=sys.stderr,
+            )
+            self.addon(new, dict(wants[new], network=move["network"]), installed)
+            return ("migrate", next(iter(move["network"].values())))
         deferred = None
-        for slug, want in self.state["addons"].items():
+        for slug, want in wants.items():
             if not want["present"]:
-                if slug in installed:
-                    if slug == self_slug:
-                        raise ApplyError(f"{slug}: refusing to uninstall the add-on of this session")
-                    if self.change(f"uninstall add-on {slug}"):
-                        supervisor("POST", f"/addons/{slug}/uninstall")
+                if slug in installed and self.change(f"uninstall add-on {slug}"):
+                    supervisor("POST", f"/addons/{slug}/uninstall")
                 continue
-            if slug not in installed:
-                repos = {r["source"] for r in supervisor("GET", "/store/repositories")}
-                if want["repository"] not in repos and self.change(
-                    f"add add-on repository {want['repository']}"
-                ):
-                    supervisor("POST", "/store/repositories", {"repository": want["repository"]})
-                if not self.change(f"install add-on {slug}"):
-                    self.change(f"configure and start add-on {slug}")
-                    continue
-                supervisor("POST", f"/store/addons/{slug}/install")
-            info = supervisor("GET", f"/addons/{slug}/info")
-            body = {}
-            for key in ("boot", "network", "options"):
-                if info.get(key) != want[key]:
-                    body[key] = want[key]
-            if slug == self_slug:
-                deferred = (slug, body)
-                continue
-            if body and self.change(f"set add-on {slug} {', '.join(sorted(body))}"):
-                supervisor("POST", f"/addons/{slug}/options", body)
-                if info["state"] == "started" and self.change(f"restart add-on {slug}"):
-                    supervisor("POST", f"/addons/{slug}/restart")
-                    info["state"] = "started"
-            if want["started"] and info["state"] != "started" and self.change(f"start add-on {slug}"):
-                supervisor("POST", f"/addons/{slug}/start")
+            pending = self.addon(slug, want, installed, own=slug == self_slug)
+            if pending:
+                deferred = ("self", pending)
         return deferred
+
+    def addon(self, slug, want, installed, own=False):
+        """Converge one present add-on; for the session's own, return its pending (slug, body)."""
+        if slug not in installed:
+            repos = {r["source"] for r in supervisor("GET", "/store/repositories")}
+            if want["repository"] not in repos and self.change(
+                f"add add-on repository {want['repository']}"
+            ):
+                supervisor("POST", "/store/repositories", {"repository": want["repository"]})
+            if not self.change(f"install add-on {slug}"):
+                self.change(f"configure and start add-on {slug}")
+                return None
+            supervisor("POST", f"/store/addons/{slug}/install")
+        info = supervisor("GET", f"/addons/{slug}/info")
+        body = {}
+        for key in ("boot", "network", "options"):
+            if info.get(key) != want[key]:
+                body[key] = want[key]
+        if own:
+            return (slug, body) if body else None
+        if body and self.change(f"set add-on {slug} {', '.join(sorted(body))}"):
+            supervisor("POST", f"/addons/{slug}/options", body)
+            if info["state"] == "started" and self.change(f"restart add-on {slug}"):
+                supervisor("POST", f"/addons/{slug}/restart")
+        if want["started"] and info["state"] != "started" and self.change(f"start add-on {slug}"):
+            supervisor("POST", f"/addons/{slug}/start")
+        return None
 
     def self_addon(self, slug, body):
         """Change the session's own add-on, then restart it detached."""
-        if not body or not self.change(
-            f"set add-on {slug} {', '.join(sorted(body))} and restart it (drops this session)"
-        ):
+        if not self.change(f"set add-on {slug} {', '.join(sorted(body))} and restart it (drops this session)"):
             return
         supervisor("POST", f"/addons/{slug}/options", body)
         # The restart kills this container, this script and its ssh session:
         # leave it to a detached process, after the result has been printed.
+        # The token stays in its environment, out of argv; a failed request
+        # lands in RESTART_LOG (the add-on's persistent /data), which the next
+        # run reports, since the saved options would otherwise look converged.
         subprocess.Popen(
-            [
-                "sh",
-                "-c",
-                (
-                    'sleep 2; curl -s -X POST -H "Authorization: Bearer $SUPERVISOR_TOKEN" '
-                    f"{SUPERVISOR}/addons/{slug}/restart"
-                ),
-            ],
+            [sys.executable, "-c", RESTART, f"{SUPERVISOR}/addons/{slug}/restart", RESTART_LOG],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
+
+    def report_failed_restart(self):
+        try:
+            with open(RESTART_LOG) as f:
+                log = f.read().strip()
+        except FileNotFoundError:
+            return
+        print(
+            f"warning: the previous run's detached add-on restart failed ({log}); its saved options"
+            " may not be active: restart that add-on by hand",
+            file=sys.stderr,
+        )
+        if not self.dry_run:
+            os.remove(RESTART_LOG)
 
     # Core: users -----------------------------------------------------------
 
@@ -335,13 +395,13 @@ class Run:
             password=password,
         )
         try:
-            flow = http(
+            flow = fetch(
                 "POST",
                 core_url + "/auth/login_flow",
                 {"client_id": client_id, "handler": ["homeassistant", None], "redirect_uri": client_id},
                 token=None,
             )
-            result = http(
+            result = fetch(
                 "POST",
                 f"{core_url}/auth/login_flow/{flow['flow_id']}",
                 {"client_id": client_id, "username": username, "password": password},
@@ -349,7 +409,7 @@ class Run:
             )
             if result.get("type") != "create_entry":
                 raise ApplyError(f"login of {name}: {result.get('type')} {result.get('errors')}")
-            grant = http(
+            grant = fetch(
                 "POST",
                 core_url + "/auth/token",
                 {"grant_type": "authorization_code", "code": result["result"], "client_id": client_id},
@@ -420,25 +480,32 @@ def main():
     state = request["state"]
     run = Run(state, request["dryRun"])
     tokens = {}
+    rerun_port = None
+    run.report_failed_restart()
     try:
-        deferred = run.addons()
-        user_ids = run.users()
-        run.config_entries()
-        for name in request["mint"]:
-            token = run.mint(name, user_ids[name])
-            if token is not None:
-                tokens[name] = token
-        if deferred:
-            run.self_addon(*deferred)
+        pending = run.addons()
+        if pending and pending[0] == "migrate":
+            # Run 1 of moving off the session's add-on: nothing else until
+            # the session runs in the replacement.
+            rerun_port = pending[1]
+        else:
+            user_ids = run.users()
+            run.config_entries()
+            for name in request["mint"]:
+                token = run.mint(name, user_ids[name])
+                if token is not None:
+                    tokens[name] = token
+            if pending:
+                run.self_addon(*pending[1])
     finally:
         if run._admin_ws is not None:
             run._admin_ws.close()
-    json.dump({"changes": run.changes, "tokens": tokens}, sys.stdout)
+    json.dump({"changes": run.changes, "tokens": tokens, "rerunSshPort": rerun_port}, sys.stdout)
 
 
 if __name__ == "__main__":
     try:
         main()
-    except (ApplyError, OSError, http.client.HTTPException) as e:
+    except (ApplyError, OSError, ValueError, http.client.HTTPException) as e:
         print(f"error: {e}", file=sys.stderr)
         sys.exit(1)
