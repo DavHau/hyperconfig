@@ -2,8 +2,9 @@
 # flake): one login account per agent, the gateway and dashboard natively
 # as that account, state under /var/lib/hermes/<agent>/state. Entries here
 # carry what differs per agent; the uids are in ./hermes-agents-data.nix,
-# which vit's GPU host reads too. Who signs in to which agent's dashboard,
-# and the front door: ./hermes-dashboards.nix. The brain:
+# which vit's GPU host reads too (roman's, kept out of it, in its entry).
+# Who signs in to which agent's dashboard, and the front door:
+# ./hermes-dashboards.nix. The brain:
 # ./hermes-inference.nix. bumper, the nixpkgs-bump agent, is apart
 # (./bumper.nix): of the site shape below it has only the dashboard.
 #
@@ -213,6 +214,19 @@ in
       thaigersprint = {
         description = "thaigersprint - hermes agent, no vault access";
         sshKeys = adminKeys;
+      };
+
+      # roman: Roman's agent for his two Home Assistant instances (ssh and
+      # MCP: ./roman-home-assistant.nix). Not in ./hermes-agents-data.nix:
+      # no vault-ro, wallet, REA or account on vit, so its uid is pinned
+      # here (../../modules/nixos/vault-ids.nix, which also keeps it off
+      # bam's /vault). No keys of Roman's known yet, so no ssh login; he
+      # signs in to its dashboard.
+      roman = {
+        uid = 1116;
+        description = "roman - hermes agent, Home Assistant";
+        sshKeys = [ ];
+        mail.enable = false;
       };
 
       # momentum: OpenRouter brain, and a Telegram bot in ONE group chat where

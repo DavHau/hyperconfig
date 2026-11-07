@@ -33,6 +33,8 @@ in
     ./hermes-agents.nix
     # The nixpkgs bump: its pipeline and bumper, its agent.
     ./bumper.nix
+    # roman's ssh and MCP into Roman's two Home Assistant instances.
+    ./roman-home-assistant.nix
     # Claude subscription OAuth for every agent (enabled in ./hermes-agents.nix).
     inputs.hyperhermes.nixosModules.claude-auth
     ../../modules/nixos/public-ipv6-token.nix
@@ -133,6 +135,7 @@ in
       nixremote = { };
       pinpox = { };
       rti = { };
+      roman = { };
       thaigersprint = { };
       stefan = { };
       willi = { };
@@ -441,6 +444,8 @@ in
         joe = 16;
         thaigersprint = 17;
         # 18: bumper (./bumper.nix), not in hermes-agents-data.nix.
+        # roman is not in it either (./hermes-agents.nix), added below.
+        roman = 19;
       };
       # Container names are capped at 11 chars (nspawn veth names,
       # hyperhermes container-slots); longer agent names get a short one
@@ -467,7 +472,7 @@ in
         extraHostnames = slotHostnames.${name} or [ ];
       }
       // lib.optionalAttrs (slotNames ? ${name}) { name = slotNames.${name}; };
-    }) (import ./hermes-agents-data.nix);
+    }) (import ./hermes-agents-data.nix // { roman = { }; });
   services.hyperhermes.slots = {
     legacyDomain = "slots.davhau.com";
     egress = "Mullvad (its outbound address is a Mullvad one, not its own IPv6 or the public IPv4)";
