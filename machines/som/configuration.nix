@@ -33,10 +33,12 @@ in
     ./hermes-agents.nix
     # The nixpkgs bump: its pipeline and bumper, its agent.
     ./bumper.nix
-    # roman's ssh and MCP into Roman's two Home Assistant instances.
+    # roman's MCP into Roman's two Home Assistant instances.
     ./roman-home-assistant.nix
     # roman's ESPHome builds and OTA uploads for those instances' devices.
     ./roman-esphome.nix
+    # Pointers to Roman's home LANs for roman and dave-hermes.
+    ./home-networks-agents.nix
     # Claude subscription OAuth for every agent (enabled in ./hermes-agents.nix).
     inputs.hyperhermes.nixosModules.claude-auth
     ../../modules/nixos/public-ipv6-token.nix
