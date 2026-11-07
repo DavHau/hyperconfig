@@ -216,8 +216,8 @@ in
         sshKeys = adminKeys;
       };
 
-      # roman: Roman's agent for his two Home Assistant instances (ssh and
-      # MCP: ./roman-home-assistant.nix). Not in ./hermes-agents-data.nix:
+      # roman: Roman's agent for his two Home Assistant instances (MCP:
+      # ./roman-home-assistant.nix). Not in ./hermes-agents-data.nix:
       # no vault-ro, wallet, REA or account on vit, so its uid is pinned
       # here (../../modules/nixos/vault-ids.nix, which also keeps it off
       # bam's /vault). No keys of Roman's known yet, so no ssh login; he
@@ -227,6 +227,10 @@ in
         description = "roman - hermes agent, Home Assistant";
         sshKeys = [ ];
         mail.enable = false;
+        # Claude through the TeamClaude gateway, as client `roman`.
+        teamclaude.enable = true;
+        # The shared OpenRouter key as OPENROUTER_API_KEY (./hermes-inference.nix).
+        openrouter = true;
       };
 
       # momentum: OpenRouter brain, and a Telegram bot in ONE group chat where
