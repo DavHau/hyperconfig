@@ -54,7 +54,10 @@
 # 1114 thaigersprint (no vault access, denied above), 1115 bumper (som's
 # nixpkgs-bump agent, no vault access, denied above), 1116 roman (som's
 # Home Assistant agent, no vault access, denied above), 1200 agent,
-# 1201 slot-asof, 1202 slot-mm. gid 1100 stays unallocated.
+# 1201 slot-asof, 1202 slot-mm, 1203 infra (uid and gid; the infra-space
+# container's user, no host account: infra-space/default.nix; not a vault
+# principal, only kept clear of host users because it owns the container's
+# home on the host). gid 1100 stays unallocated.
 {
   users.groups.vault.gid = 1101;
   users.groups.vault-ro.gid = 1103;

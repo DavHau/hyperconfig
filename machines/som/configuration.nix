@@ -68,6 +68,8 @@ in
     # the backed-up home, and their hourly GC (disk-hygiene).
     ../../modules/nixos/rust-build-cache.nix
     ../../modules/nixos/disk-hygiene
+    # The fleet-managing container (also on amy).
+    ../../modules/nixos/infra-space
   ];
 
   # Public IPv4 38.89.142.76, borrowed from sgp through a WireGuard tunnel
@@ -117,6 +119,8 @@ in
   # No fleet `agent` account here: unused on som (no logins), its 109G
   # deleted 2026-11-06.
   hyper.agentUser.enable = false;
+
+  hyper.infraSpace.enable = true;
 
   # Users move over one at a time: list one, deploy, then
   # `entity-storage-migrate <user>` (../../modules/nixos/entity-storage).

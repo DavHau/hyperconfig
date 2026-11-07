@@ -274,6 +274,12 @@
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
             inherit (inputs) hyperhermes;
           };
+        # infra-space's containers on two members, root on a third machine.
+        infra-space =
+          import ./modules/nixos/infra-space/test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+            inherit inputs;
+          };
       };
     };
 }

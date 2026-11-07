@@ -173,14 +173,15 @@ in {
               module.input = "clan-core";
               roles.server.tags.all = {};
               # Fleet-wide `agent` account (sbox ssh identity); reaches all
-              # machines through this all-tags instance.
-              roles.server.extraModules = [ ../../modules/nixos/agent-user.nix ];
+              # machines through this all-tags instance. infra-space's
+              # fleet root key rides along the same way, in a key file of
+              # its own (fleet-access.nix says why).
+              roles.server.extraModules = [
+                ../../modules/nixos/agent-user.nix
+                ../../modules/nixos/infra-space/fleet-access.nix
+              ];
               # Root on every machine.
-              roles.server.settings.authorizedKeys = {
-                "dave-tpm" = "ecdsa-sha2-nistp384 AAAAE2VjZHNhLXNoYTItbmlzdHAzODQAAAAIbmlzdHAzODQAAABhBMAWEy2KMRae6D0kreSie2gA7s3g8x3QVNtdotxY4MDVO2dim6kc1OlGovByt06XGa/H1kMwIlc+RhfuJ/eRioGhrJ13SrDeJegC0T1iyIIZY67WMNSj5vZ0bJOmIQvm1A== grmpf@amy";
-                "dave" = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDuhpzDHBPvn8nv8RH1MRomDOaXyP4GziQm7r3MZ1Syk";
-                "phone" = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJwzL0rt4J+kzggV4pFXf9yh9zBF6n4hdXXVbCB7p1x6";
-              };
+              roles.server.settings.authorizedKeys = import ../admin-ssh-keys.nix;
               roles.client.tags.all = {};
             };
             remote-building = {

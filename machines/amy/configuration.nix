@@ -37,6 +37,8 @@
     # nix-housing needs Landlock ABI 9 (Linux >= 7.1); 6.18 LTS only has ABI 7.
     ../../modules/nixos/kernel-latest-zfs.nix
     ../../modules/nixos/oomd.nix
+    # The fleet-managing container (also on som).
+    ../../modules/nixos/infra-space
     ./disko.nix
   ];
 
@@ -52,6 +54,8 @@
   # captive-browser (../../modules/nixos/encrypted-dns.nix) asks the
   # hotspot's DHCP DNS through the wifi card.
   hyper.encryptedDns.captiveInterface = "wlp192s0";
+
+  hyper.infraSpace.enable = true;
 
   networking.extraHosts = "10.0.0.1 127.0.0.0";
 
