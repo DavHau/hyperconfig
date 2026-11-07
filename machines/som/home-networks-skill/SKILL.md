@@ -14,5 +14,3 @@ som routes directly into both home LANs:
   them; otherwise you have no HA credentials.
 - ESPHome devices: see the `esphome` skill if you have it. Never build
   firmware on the Home Assistant hosts.
-- These are someone's home: no scans or bulk changes; ask before
-  anything that switches, reboots or reflashes devices.
