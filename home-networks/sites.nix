@@ -18,8 +18,8 @@
     instance = "zt-eu";
     # zt-eu's IPv4: needed only to reach the IPv4-only LAN devices (ESPHome).
     # Collides with nothing in the fleet (10.42/10.43/10.64/10.77/10.99/
-    # 10.147/10.233 are taken). Routers are pinned below .100, every other
-    # member draws from the pool.
+    # 10.147/10.233/10.241 are taken). Routers are pinned below .100, every
+    # other member draws from the pool.
     ipv4 = {
       subnet = "10.194.0.0/24";
       poolStart = "10.194.0.100";
@@ -39,9 +39,10 @@
         address = "192.168.194.4";
         ztNodeId = "224b430dcf";
         ztIpv4 = "10.194.0.4";
-        firewall = "fw3"; # GL.iNet 4.11 (OpenWrt 21.02)
+        # GL.iNet 4.11 (OpenWrt 21.02, fw3)
         zerotierSection = "gl";
-        # No admin key until the first apply; password from this var.
+        # Dave's admin keys are installed; the password from this var is
+        # only the fallback should key login ever be refused.
         passwordVar = "router-cm-beryl/password";
       };
       lan.ipv4 = "192.168.8.0/24";
@@ -60,9 +61,8 @@
         address = "192.168.194.10";
         ztNodeId = "571742a187";
         ztIpv4 = "10.194.0.10";
-        firewall = "fw4"; # OpenWrt 23.05
+        # OpenWrt 23.05 (fw4); keys only (no passwordVar)
         zerotierSection = "sample_config";
-        passwordVar = "router-tossa/password";
       };
       lan.ipv4 = "192.168.10.0/24";
       lan.ipv6 = "fd2a:8abf:35da::/48";
@@ -80,9 +80,8 @@
         address = "192.168.194.20";
         ztNodeId = "34d0757647";
         ztIpv4 = "10.194.0.20";
-        firewall = "fw3"; # GL.iNet 4.9 (OpenWrt 21.02)
+        # GL.iNet 4.9 (OpenWrt 21.02, fw3); keys only (no passwordVar)
         zerotierSection = "gl";
-        passwordVar = "router-waldkirch/password";
       };
       lan.ipv4 = "192.168.20.0/24";
       lan.ipv6 = "fd99:a769:4eae::/48";

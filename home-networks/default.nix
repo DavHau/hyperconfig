@@ -96,13 +96,12 @@ in
       inherit (r)
         name
         address
-        ztNodeId
         ztIpv4
         ztIpv6
-        firewall
         zerotierSection
-        passwordVar
         ;
+      # Absent: keys only (./apply.py fails when key login is refused).
+      passwordVar = r.passwordVar or null;
       inherit networkId adminKeys;
       inherit (site) masqueradeFromLan;
       # Sources to masquerade into the LAN, or none.

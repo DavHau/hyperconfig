@@ -24,12 +24,16 @@ Per router, in this order:
      ssh connection made after the reload has disarmed it. Finally checks
      that the zt-eu addresses are on the device.
 
+A revert still pending from an interrupted run fails the router before
+anything else (it would undo this run's result, and arming again would
+overwrite its snapshot); the error says how to keep or restore.
+
 ssh is root@<address> (the old zerotier net) with your keys; a router
 without them is reached with its password from `clan vars get amy
 <passwordVar>` (run from the repo root) through sshpass, once: step 1 then
-installs the keys. Host keys are pinned in
-$XDG_STATE_HOME/site-routers/known_hosts. A failing router does not stop
-the others; the exit status is 1 if any failed.
+installs the keys. A router without a passwordVar is keys only. Host keys
+are pinned in $XDG_STATE_HOME/site-routers/known_hosts. A failing router
+does not stop the others; the exit status is 1 if any failed.
 """
 
 import argparse
@@ -104,7 +108,9 @@ class Router:
             return
         if "Permission denied" not in r.stderr:
             raise Failed(f"ssh {self.name}: {r.stderr.strip()}")
-        var = self.state["passwordVar"]
+        var = self.state.get("passwordVar")
+        if var is None:
+            raise Failed(f"{self.name}: key login refused (no passwordVar): {r.stderr.strip()}")
         got = subprocess.run(["clan", "vars", "get", "amy", var], capture_output=True, text=True)
         if got.returncode != 0 or not got.stdout.strip():
             raise Failed(f"{self.name}: key login refused and no password: clan vars get amy {var}: {got.stderr.strip()}")
@@ -272,6 +278,37 @@ def wait_network(router):
         time.sleep(5)
 
 
+def check_pending(router):
+    """Fail if an interrupted run left a revert armed.
+
+    Its timer would restore that run's snapshot whatever this run finds
+    converged, and arming again would overwrite the snapshot. Run right
+    after connect(), before anything is changed or snapshotted.
+    """
+    r = router.run(
+        f"if [ -e {ARMED} ]; then "
+        f"if kill -0 $(cat {PIDFILE} 2>/dev/null) 2>/dev/null; then echo live; else echo stale; fi; "
+        f"else echo clear; fi",
+        timeout=60,
+    )
+    status = r.stdout.strip()
+    if status == "clear":
+        return
+    ssh = f"ssh root@{router.state['address']}"
+    keep = f"{ssh} 'rm -f {ARMED}; kill $(cat {PIDFILE}) 2>/dev/null; rm -f {PIDFILE}'"
+    restore = f"{ssh} 'cp -a {BACKUP}/. /etc/config/ && /etc/init.d/firewall reload'"
+    if status == "live":
+        what = (f"a revert from an interrupted run is pending: when its timer fires it "
+                f"restores /etc/config from {BACKUP} and reloads the firewall")
+    else:
+        what = (f"{ARMED} is set but no revert process runs (pid file {PIDFILE}): "
+                f"an interrupted run's state is unknown")
+    raise Failed(
+        f"{router.name}: {what}. Nothing done. Check the router's config, then either keep it: "
+        f"{keep}; or restore the snapshot: {keep} && {restore}; and rerun."
+    )
+
+
 def arm(router, seconds):
     script = f"""#!/bin/sh
 sleep {seconds}
@@ -281,7 +318,10 @@ cp -a {BACKUP}/. /etc/config/
 /etc/init.d/firewall reload
 logger -t site-routers-apply "no fresh ssh after the change: restored /etc/config from {BACKUP}"
 """
+    # Never overwrite the snapshot of a revert still pending (check_pending
+    # has already refused one; this guards the race).
     router.run(
+        f"if [ -e {ARMED} ]; then echo 'a revert is already pending' >&2; exit 1; fi && "
         f"rm -rf {BACKUP} && mkdir -p {BACKUP} && cp -a /etc/config/. {BACKUP}/ && "
         f"printf %s {shlex.quote(script)} > {REVERT} && chmod 700 {REVERT} && touch {ARMED} && "
         f"start-stop-daemon -S -b -m -p {PIDFILE} -x /bin/sh -- {REVERT}"
@@ -346,6 +386,7 @@ def check_addresses(router, device):
 def apply(state, dry_run, revert_after, log):
     router = Router(state, log)
     router.connect()
+    check_pending(router)
     changes = ensure_keys(router, dry_run)
     changes += ensure_join(router, dry_run)
     if dry_run and state["networkId"] not in networks(router):

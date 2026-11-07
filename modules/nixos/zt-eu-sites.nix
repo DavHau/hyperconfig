@@ -28,25 +28,26 @@ in
   # A member whose ipAssignments already hold an address inside an on-link
   # route gets nothing from the pool, so a pinned router keeps exactly its
   # address. The member records persist in controller.d; the unit reruns
-  # whenever the pins change.
+  # whenever the pins change. No ordering against zerotier-autoaccept (a
+  # Type=simple unit, so After= would only wait for its start): a POST
+  # merges into the member record, and autoaccept sets `authorized` only.
   systemd.services."zerotier-pin-${net.instance}" = {
     description = "Pin the site routers' IPv4 on zerotier network ${net.instance}";
     wantedBy = [ "multi-user.target" ];
-    after = [
-      "zerotierone.service"
-      "zerotier-autoaccept-${net.instance}.service"
-    ];
+    after = [ "zerotierone.service" ];
     requires = [ "zerotierone.service" ];
     path = [ pkgs.curl ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
     };
+    # The auth token reaches curl through a header file (bash process
+    # substitution, printf a builtin), never through any argv.
     script = ''
-      token=$(cat /var/lib/zerotier-one/authtoken.secret)
+      token=$(< /var/lib/zerotier-one/authtoken.secret)
       ${lib.concatMapStrings (r: ''
         curl -fsS -o /dev/null --retry 30 --retry-delay 2 --retry-all-errors \
-          -H "X-ZT1-AUTH: $token" -X POST \
+          -H @<(printf 'X-ZT1-AUTH: %s\n' "$token") -X POST \
           -d ${lib.escapeShellArg (builtins.toJSON { ipAssignments = [ r.ztIpv4 ]; })} \
           http://localhost:9993/controller/network/${net.networkId}/member/${r.ztNodeId}
         echo "${r.name} (${r.ztNodeId}): ${r.ztIpv4}"
