@@ -352,6 +352,18 @@ in
         # `off` before any prompt, LLM check or queue; the hardline floor
         # (rm -rf /, mkfs, reboot, ...) still refuses.
         approvals.mode = lib.mkDefault "off";
+
+        # Speech-to-text auto-detects the language. hermes defaults
+        # stt.language to "en" (hermes_cli/config_defaults.py), which every
+        # provider without its own stt.<provider>.language gets, so the
+        # dashboard's voice button transcribed German as English. "" is
+        # hermes' auto-detect value: _resolve_stt_language
+        # (tools/transcription_tools.py) skips empty strings and returns
+        # None, and faster-whisper (the `local` provider) then detects the
+        # language itself. Managed, so a dashboard pick of a fixed
+        # language does not persist; set stt.language (or
+        # stt.<provider>.language) in Nix to pin one.
+        stt.language = lib.mkDefault "";
       };
 
       forwards.dashboard = {
