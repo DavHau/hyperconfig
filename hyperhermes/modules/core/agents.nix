@@ -1,10 +1,14 @@
 # The agent units and the `hermes` shim. Per agent, the gateway and the
-# web dashboard run on the host as the owner, with no systemd sandboxing.
+# web dashboard run on the host as the owner. No systemd sandboxing
+# beyond the opt-in syscall/namespace hardening (options.nix,
+# hardening.enable), which also covers the owner's user manager: the
+# agent keeps the whole home, bus and host tools.
 { hermes-agent }:
 {
   config,
   lib,
   pkgs,
+  utils,
   ...
 }:
 let
@@ -174,6 +178,8 @@ let
       unitEnv = rt.env // {
         HERMES_MANAGED_DIR = "${managedDirFor user ucfg}";
       };
+      # Opt-in hardening of both units (options.nix, hardening).
+      hardening = lib.optionalAttrs cfg.hardening.enable cfg.hardening.serviceConfig;
       mounts = [
         stateDir
         home
@@ -301,7 +307,8 @@ let
             RestartSec = 5;
             UMask = "0007";
             BindPaths = userTmpBinds;
-          };
+          }
+          // hardening;
         };
 
         # Web dashboard, a separate process upstream; it shares state
@@ -360,9 +367,26 @@ let
             RestartSec = 5;
             UMask = "0007";
             BindPaths = userTmpBinds;
-          };
+          }
+          // hardening;
         };
       };
+
+      # The units hand their tools the owner's session bus and runtime dir
+      # (withSession), so a tool can start a process under the owner's
+      # lingering user manager (`systemd-run --user`), which is no child
+      # of theirs. The manager gets the same set, and with it everything
+      # it starts. A drop-in file of its own on the upstream template's
+      # instance: a services entry would also set the manager's PATH, and
+      # a systemd.units one would be the instance's only overrides.conf,
+      # which other modules write too (mullvad-egress). A switch never
+      # restarts user@ units, so a running manager picks it up on its next
+      # start.
+      userManagerDropin =
+        pkgs.writeTextDir "etc/systemd/system/user@${toString ucfg.uid}.service.d/hyperhermes-hardening.conf"
+          ''
+            [Service]
+            ${utils.systemdUtils.lib.attrsToSection cfg.hardening.serviceConfig}'';
     };
   users = lib.mapAttrs perUser cfg.agents;
   # Static top-level option keys only. A config-dependent mkMerge list at
@@ -394,6 +418,9 @@ in
       "d ${hlib.stateRoot} 0755 root root - -"
     ]
     ++ lib.concatMap (u: u.tmpfiles) (lib.attrValues users);
+    systemd.packages = lib.optionals cfg.hardening.enable (
+      map (u: u.userManagerDropin) (lib.attrValues users)
+    );
     environment.systemPackages = [ hermesShim ];
     environment.extraInit = lib.concatMapStrings (u: u.loginInit) (lib.attrValues users);
     # The venv's manylinux wheels dlopen host libraries; nix-ld serves the

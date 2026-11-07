@@ -317,6 +317,11 @@ in
   # (../../modules/nixos/per-user-tmp).
   services.hyperhermes.perUserTmp = config.hyper.perUserTmp.enable;
 
+  # som holds keys that are root on the whole fleet, and the agents are
+  # untrusted (prompt-injectable): no namespaces, setuid or io_uring for
+  # them and their tools (the option's description lists what that costs).
+  services.hyperhermes.hardening.enable = true;
+
   services.hyperhermes.browser = {
     enable = true;
     # browser_solve_captcha's model: CaptchaKraken on vit

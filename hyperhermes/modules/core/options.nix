@@ -118,6 +118,47 @@ in
         '';
       };
 
+      hardening = {
+        enable = mkOption {
+          type = types.bool;
+          default = false;
+          description = ''
+            Shrink the kernel attack surface of every agent's gateway and
+            dashboard units (hermes-agent-<name>, hermes-dashboard-<name>)
+            with hardening.serviceConfig, against local privilege escalation
+            by a prompt-injected agent. The agent's tools (terminal, code
+            execution) are children of these units and inherit it. The
+            agent account's user manager (user@<uid>) gets the same set, as
+            the units hand their tools its session bus: whatever a tool
+            starts there (`systemd-run --user`, a D-Bus activated service)
+            is hardened too.
+
+            Cost, inside agent tools and the account's user units: no user
+            or other namespaces, so rootless podman/docker, bwrap and
+            unshare fail; no privilege gain on exec, so sudo, su and every
+            other setuid or file-cap wrapper fails; no ptrace (strace, gdb),
+            mount, clock, kernel module or other syscalls outside systemd's
+            @system-service, and no io_uring (they fail with EPERM). Not
+            affected: the agent's slot (root nspawn, started over the slot
+            control socket) and nix builds (the nix-daemon builds), nor the
+            owner's own ssh login shells (though user units they start are).
+          '';
+        };
+
+        serviceConfig = mkOption {
+          type = types.attrsOf types.anything;
+          readOnly = true;
+          internal = true;
+          default = import ./hardening.nix;
+          defaultText = literalExpression "import modules/core/hardening.nix";
+          description = ''
+            The unit settings hardening.enable adds to the agent units
+            (./hardening.nix, plain data so a check without core can run a
+            transient unit with exactly this set).
+          '';
+        };
+      };
+
       homeEnvironment = mkOption {
         type = types.attrsOf types.str;
         default = { };

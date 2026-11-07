@@ -101,6 +101,13 @@ in
   # daemonless.
   virtualisation.docker.rootless.enable = lib.mkForce false;
 
+  # No io_uring for anyone: a frequent source of kernel privilege
+  # escalations, and som holds keys that are root on the whole fleet
+  # while untrusted agents run on it. Its users here (node's libuv,
+  # stalwart) fall back to plain syscalls; the hyperhermes hardening and
+  # mail checks run with this set.
+  boot.kernel.sysctl."kernel.io_uring_disabled" = 2;
+
   hyper.toolchainCacheDirs.enable = true;
   # Headless: disk-hygiene's desktop notification has no display to go to
   # (and would fail in every lingering user's manager); the Grafana pool

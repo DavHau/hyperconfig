@@ -577,6 +577,9 @@ pkgs.testers.runNixOSTest {
       ];
       virtualisation.memorySize = 3072;
       virtualisation.cores = 2;
+      # As on som: no io_uring for anyone. Stalwart uses it where the
+      # kernel offers it and must work without it.
+      boot.kernel.sysctl."kernel.io_uring_disabled" = 2;
       networking.nameservers = [ "192.168.1.1" ];
       networking.hosts."127.0.0.1" = [
         dashHost
@@ -721,6 +724,7 @@ pkgs.testers.runNixOSTest {
     client.wait_for_open_port(25)
     server.wait_for_unit("mailgate-firewall.service")
     server.wait_for_unit("stalwart.service")
+    server.succeed("test \"$(sysctl -n kernel.io_uring_disabled)\" = 2")
     server.wait_for_unit("mailgate.service")
     server.wait_for_unit("mailgate-imap-passwords.service")
     server.wait_for_open_port(25)

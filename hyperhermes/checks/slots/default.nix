@@ -35,6 +35,12 @@
 let
   inherit (pkgs) lib;
   common = import ./common.nix { inherit pkgs; };
+  # bob starts his slot from a unit with the agent units' hardening, as a
+  # hardened agent's tools would (../hardening).
+  hardenedBob = import ../hardening/run.nix { inherit lib; } {
+    serviceConfig = import ../../modules/core/hardening.nix;
+    user = "bob";
+  };
   inherit (common)
     sshKeys
     adminKey
@@ -386,7 +392,8 @@ pkgs.testers.runNixOSTest {
             out = server.succeed(f"echo '{line}' | runuser -u {user} -- {sock}")
             assert out.startswith("refused"), (user, line, out)
         server.fail("systemctl is-active container@bob.service")
-        server.succeed("runuser -u bob -- slot start")
+        server.succeed("${hardenedBob} --pipe --wait --quiet --collect -- slot start")
+        server.succeed("systemctl is-active container@bob.service")
 
     with subtest("slot info names the ports, addresses and hostname"):
         info = server.succeed("runuser -u alice -- slot info")

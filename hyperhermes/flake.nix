@@ -136,6 +136,8 @@
 
       checks.${system} = {
         core = import ./checks/core { inherit pkgs self; };
+        # services.hyperhermes.hardening, with io_uring off host-wide.
+        hardening = import ./checks/hardening { inherit pkgs self; };
 
         local-sso = import ./checks/local-sso {
           inherit pkgs self hermesPackage;
