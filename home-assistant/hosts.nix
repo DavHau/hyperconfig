@@ -87,6 +87,17 @@ let
       require_admin = false;
       read_only = false;
     };
+
+    # Built-in integrations replaced by a patched copy of the running HA
+    # version's own (apply.py builds it, remote.py installs it as a custom
+    # component where a config entry of the domain exists and restarts
+    # Core). Drop an entry once upstream carries its patch; apply removes
+    # the override by itself when the running HA already does.
+    patchedIntegrations = {
+      # Follow a camera that rebooted onto a new DHCP address (the flow
+      # trusted the last poll, and probed before the camera's API was up).
+      reolink.patch = ./patches/reolink-dhcp-follow-ip.patch;
+    };
   };
 in
 {

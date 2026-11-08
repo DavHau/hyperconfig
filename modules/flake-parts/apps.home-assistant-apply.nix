@@ -10,7 +10,8 @@ in
     let
       program = pkgs.writeShellApplication {
         name = "home-assistant-apply";
-        runtimeInputs = [ pkgs.python3 pkgs.openssh inputs'.clan-core.packages.clan-cli ];
+        # git: `git apply` for patchedIntegrations (../../home-assistant/apply.py).
+        runtimeInputs = [ pkgs.python3 pkgs.openssh pkgs.git inputs'.clan-core.packages.clan-cli ];
         text = ''
           exec python3 ${../../home-assistant/apply.py} \
             --state ${pkgs.writeText "home-assistant-hosts.json" (builtins.toJSON hosts)} \

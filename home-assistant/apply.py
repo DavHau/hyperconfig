@@ -11,16 +11,34 @@ or still needs a rerun.
 Moving an instance off the official core_ssh add-on (see remote.py) takes
 two runs: the first one starts the replacement on a temporary port and
 says which; rerun that host with --ssh-port set to it.
+
+patchedIntegrations (hosts.nix) are built here, for the HA version the
+instance runs: that version's built-in integration, taken from its
+homeassistant wheel on PyPI (sha256-checked against PyPI, cached; it, unlike
+the git tag, carries the generated translations a custom component needs),
+plus the patch and a manifest "version". remote.py installs the result as a
+custom component where a config entry of that domain exists. A patch that
+neither applies nor reverse-applies fails the host (the override is removed,
+not installed); one that reverse-applies means the running HA carries the
+fix, so the override is removed.
 """
 
 import argparse
+import base64
+import hashlib
 import json
+import os
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
+import zipfile
 
 REMOTE_PATH = "/tmp/hyperconfig-home-assistant-apply.py"
+WHEEL_CACHE = os.path.join(
+    os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "hyperconfig", "home-assistant-wheels"
+)
 
 
 class Failed(Exception):
@@ -79,6 +97,121 @@ def ssh(state, command, **kwargs):
     )
 
 
+def remote_run(state, request, keep=False):
+    """Run the shipped remote.py with `request`; remove it unless `keep`."""
+    rm = "" if keep else f"; rm -f {REMOTE_PATH}"
+    ran = ssh(
+        state,
+        f"python3 {REMOTE_PATH}; rc=$?{rm}; exit $rc",
+        input=json.dumps(request),
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    if ran.returncode != 0:
+        raise Failed(f"remote apply failed ({ran.returncode})")
+    return json.loads(ran.stdout)
+
+
+def wheel(version):
+    """Path of the homeassistant wheel of `version`, fetched once, sha256 as PyPI lists it."""
+    path = os.path.join(WHEEL_CACHE, f"homeassistant-{version}-py3-none-any.whl")
+    if os.path.exists(path):
+        return path
+    url = f"https://pypi.org/pypi/homeassistant/{version}/json"
+    try:
+        with urllib.request.urlopen(url, timeout=60) as resp:
+            release = json.load(resp)
+    except urllib.error.HTTPError as e:
+        raise Failed(f"GET {url}: {e.code} {e.reason}") from None
+    wheels = [f for f in release["urls"] if f["filename"] == os.path.basename(path)]
+    if len(wheels) != 1:
+        raise Failed(f"PyPI lists no {os.path.basename(path)}")
+    os.makedirs(WHEEL_CACHE, exist_ok=True)
+    part = path + ".part"
+    digest = hashlib.sha256()
+    print(f"fetching {wheels[0]['url']}", file=sys.stderr)
+    with urllib.request.urlopen(wheels[0]["url"], timeout=600) as resp, open(part, "wb") as out:
+        while chunk := resp.read(1 << 20):
+            digest.update(chunk)
+            out.write(chunk)
+    if digest.hexdigest() != wheels[0]["digests"]["sha256"]:
+        os.remove(part)
+        raise Failed(f"{wheels[0]['url']}: sha256 differs from PyPI's")
+    os.replace(part, path)
+    return path
+
+
+def build(domain, spec, version):
+    """The patched integration for remote.py: {"files": {path: base64}, ...} or {"remove": why}.
+
+    Raises Failed when the patch neither applies nor reverse-applies.
+    """
+    prefix = f"homeassistant/components/{domain}/"
+    name = os.path.basename(spec["patch"])
+    with open(spec["patch"], "rb") as f:
+        patch_sha256 = hashlib.sha256(f.read()).hexdigest()
+    with tempfile.TemporaryDirectory() as tmp:
+        with zipfile.ZipFile(wheel(version)) as whl:
+            members = [m for m in whl.namelist() if m.startswith(prefix) and not m.endswith("/")]
+            if not members:
+                raise Failed(f"homeassistant {version} has no integration {domain}")
+            for m in members:
+                whl.extract(m, tmp)
+
+        def git_apply(*args):
+            # Outside any repository, so the patch's paths resolve against tmp.
+            return subprocess.run(
+                ["git", "apply", *args, spec["patch"]],
+                cwd=tmp,
+                env=dict(os.environ, GIT_CEILING_DIRECTORIES=os.path.dirname(tmp)),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        if git_apply("--check").returncode != 0:
+            if git_apply("--check", "--reverse").returncode == 0:
+                return {"haVersion": version, "remove": f"homeassistant {version} already carries {name}"}
+            raise Failed(f"{name} does not apply to homeassistant {version}: {git_apply('--check').stderr.strip()}")
+        applied = git_apply()
+        if applied.returncode != 0:
+            raise Failed(f"{name}: {applied.stderr.strip()}")
+        files = {}
+        for m in members:
+            with open(os.path.join(tmp, m), "rb") as f:
+                files[m[len(prefix):]] = f.read()
+    # Custom components need a version; the HA one says what it was built from.
+    manifest = json.loads(files["manifest.json"])
+    manifest["version"] = version
+    files["manifest.json"] = (json.dumps(manifest, indent=2) + "\n").encode()
+    return {
+        "haVersion": version,
+        "patch": f"{name} {patch_sha256}",
+        "files": {path: base64.b64encode(data).decode() for path, data in files.items()},
+    }
+
+
+def patched_integrations(host, state):
+    """Build the declared patched integrations; return (request part, errors)."""
+    wanted = state.get("patchedIntegrations") or {}
+    if not wanted:
+        return {}, []
+    found = remote_run(state, {"probe": sorted(wanted)}, keep=True)
+    version = found["haVersion"]
+    integrations, errors = {}, []
+    for domain, spec in wanted.items():
+        if not found["configured"][domain]:
+            integrations[domain] = {"haVersion": version, "remove": f"no {domain} config entry"}
+            continue
+        try:
+            integrations[domain] = build(domain, spec, version)
+        except Failed as e:
+            print(f"{host}: patched {domain}: {e}", file=sys.stderr)
+            integrations[domain] = {"haVersion": version, "remove": f"its patch does not fit HA {version}"}
+            errors.append(f"patched {domain}: {e}")
+    return integrations, errors
+
+
 def apply(host, state, remote, dry_run, skip_token):
     """Converge one host; return False when it needs a rerun."""
     mint = []
@@ -91,17 +224,12 @@ def apply(host, state, remote, dry_run, skip_token):
     with open(remote, "rb") as script:
         if ssh(state, f"cat > {REMOTE_PATH}", stdin=script).returncode != 0:
             raise Failed(f"cannot ssh to root@{state['address']} -p {state['sshPort']}")
-    request = json.dumps({"state": state, "dryRun": dry_run, "mint": mint})
-    ran = ssh(
-        state,
-        f"python3 {REMOTE_PATH}; rc=$?; rm -f {REMOTE_PATH}; exit $rc",
-        input=request,
-        stdout=subprocess.PIPE,
-        text=True,
-    )
-    if ran.returncode != 0:
-        raise Failed(f"remote apply failed ({ran.returncode})")
-    result = json.loads(ran.stdout)
+    try:
+        integrations, errors = patched_integrations(host, state)
+    except BaseException:
+        ssh(state, f"rm -f {REMOTE_PATH}")
+        raise
+    result = remote_run(state, {"state": state, "dryRun": dry_run, "mint": mint, "integrations": integrations})
     for name, token in result["tokens"].items():
         spec = state["users"][name]["token"]
         if not token_valid(state["address"], token):
@@ -111,6 +239,8 @@ def apply(host, state, remote, dry_run, skip_token):
     n = len(result["changes"])
     verb = "would make" if dry_run else "made"
     print(f"{host}: {verb} {n} change(s)" if n else f"{host}: no changes")
+    if errors:
+        raise Failed("; ".join(errors))
     port = result.get("rerunSshPort")
     if port is not None:
         print(

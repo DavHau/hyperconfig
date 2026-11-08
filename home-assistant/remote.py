@@ -3,16 +3,28 @@
 Runs with python3 (stdlib only) inside the SSH add-on, which holds the
 Supervisor token. Reads one JSON object on stdin:
 
-    {"state": <one host of hosts.nix>, "dryRun": bool, "mint": [user names]}
+    {"state": <one host of hosts.nix>, "dryRun": bool, "mint": [user names],
+     "integrations": {domain: <built by apply.py>}}
 
 Reports each change on stderr ("would" in a dry run) and prints one JSON
 object on stdout for apply.py: {"changes": [...], "tokens": {user: token},
 "rerunSshPort": port or null}. Tokens are never written anywhere else.
 
-Official APIs only: Supervisor REST (add-ons, backups), Core REST via the
-Supervisor proxy (config entries), Core websocket via the Supervisor proxy
-(users, credentials), and Core's own login flow plus the user's websocket
-to mint the long-lived token.
+{"probe": [domains]} instead only prints {"haVersion": running Core
+version, "configured": {domain: has a config entry}}, which apply.py needs
+to build the patched integrations: each is either {"haVersion", "patch",
+"files": {path: base64}}, installed as Core's custom_components/<domain>
+(overriding the built-in) with a MARKER naming the HA version and patch it
+was built for, or {"haVersion", "remove": why}, which removes it. Core is
+restarted once after any of that changed. A directory without the MARKER is
+someone else's custom component and is never touched.
+
+Official APIs only: Supervisor REST (add-ons, backups, Core info and
+restart), Core REST via the Supervisor proxy (config entries), Core
+websocket via the Supervisor proxy (users, credentials), and Core's own
+login flow plus the user's websocket to mint the long-lived token. The one
+file system write is the patched integrations' custom_components in /config,
+the documented place for custom integrations.
 
 Moving off a declared-absent SSH add-on that holds the session (the
 official core_ssh, as on casa) takes two runs, since that add-on cannot be
@@ -30,6 +42,7 @@ import http.client
 import json
 import os
 import secrets
+import shutil
 import socket
 import struct
 import subprocess
@@ -41,6 +54,11 @@ import urllib.request
 
 SUPERVISOR = "http://supervisor"
 TOKEN = os.environ["SUPERVISOR_TOKEN"]
+
+# Core's /config, as the add-on mounts it.
+CORE_CONFIG = "/homeassistant"
+CUSTOM_COMPONENTS = CORE_CONFIG + "/custom_components"
+MARKER = ".hyperconfig.json"
 
 # Detached restart of the session's own add-on (Run.self_addon): argv is the
 # URL and the log file; the token comes from the inherited environment.
@@ -474,9 +492,99 @@ class Run:
         if done["type"] != "create_entry":
             raise ApplyError(f"{domain} options: {done.get('errors') or done}")
 
+    # Core: patched integrations --------------------------------------------
+
+    def patched_integrations(self, integrations):
+        """Converge the overrides apply.py built; return whether Core needs a restart.
+
+        It does after a change and also while Core still runs other code than
+        the files hold (a previous run's restart failed): per its manifest,
+        the built-in where none is wanted, else our override's version.
+        """
+        if not integrations:
+            return False
+        version = supervisor("GET", "/core/info")["version"]
+        restart = False
+        for domain, want in integrations.items():
+            if want["haVersion"] != version:
+                raise ApplyError(f"patched {domain}: built for HA {want['haVersion']}, but {version} runs; rerun")
+            path = os.path.join(CUSTOM_COMPONENTS, domain)
+            current = read_tree(path)
+            if current is not None and MARKER not in current:
+                raise ApplyError(f"{path} is not this tool's (no {MARKER}); refusing to touch it")
+            loaded = self.admin_ws.call("manifest/get", integration=domain)
+            if "files" not in want:
+                if not loaded["is_built_in"]:
+                    restart = True
+                if current is not None:
+                    restart = True
+                    if self.core_change(f"remove patched {domain} ({path}): {want['remove']}"):
+                        shutil.rmtree(path)
+                continue
+            if loaded["is_built_in"] or loaded.get("version") != version:
+                restart = True
+            desired = {p: base64.b64decode(data) for p, data in want["files"].items()}
+            marker = {"haVersion": version, "patch": want["patch"]}
+            desired[MARKER] = (json.dumps(marker, indent=2) + "\n").encode()
+            if current == desired:
+                continue
+            restart = True
+            if self.core_change(f"install patched {domain} ({path}) built for HA {version}: {want['patch']}"):
+                write_tree(path, desired)
+        return restart
+
+    def restart_core(self):
+        if not self.change("restart Home Assistant Core"):
+            return
+        if self._admin_ws is not None:
+            self._admin_ws.close()
+            self._admin_ws = None
+        supervisor("POST", "/core/restart")
+
+
+def read_tree(path):
+    """{relative path: bytes} of the files under path (bytecode caches aside), None if absent."""
+    if not os.path.isdir(path):
+        return None
+    files = {}
+    for dirpath, dirnames, filenames in os.walk(path):
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        for name in filenames:
+            full = os.path.join(dirpath, name)
+            with open(full, "rb") as f:
+                files[os.path.relpath(full, path)] = f.read()
+    return files
+
+
+def write_tree(path, files):
+    """Replace the directory path with files, staged next to Core's config."""
+    stage = os.path.join(CORE_CONFIG, f".hyperconfig-{os.path.basename(path)}-new")
+    shutil.rmtree(stage, ignore_errors=True)
+    for rel, data in files.items():
+        full = os.path.join(stage, rel)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "wb") as f:
+            f.write(data)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if os.path.isdir(path):
+        shutil.rmtree(path)
+    os.rename(stage, path)
+
 
 def main():
     request = json.load(sys.stdin)
+    if "probe" in request:
+        json.dump(
+            {
+                "haVersion": supervisor("GET", "/core/info")["version"],
+                "configured": {
+                    domain: bool(core("GET", f"/config/config_entries/entry?domain={domain}"))
+                    for domain in request["probe"]
+                },
+            },
+            sys.stdout,
+        )
+        return
     state = request["state"]
     run = Run(state, request["dryRun"])
     tokens = {}
@@ -491,10 +599,13 @@ def main():
         else:
             user_ids = run.users()
             run.config_entries()
+            restart = run.patched_integrations(request.get("integrations"))
             for name in request["mint"]:
                 token = run.mint(name, user_ids[name])
                 if token is not None:
                     tokens[name] = token
+            if restart:
+                run.restart_core()
             if pending:
                 run.self_addon(*pending[1])
     finally:
