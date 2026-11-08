@@ -61,13 +61,13 @@ let
   '';
 
   # Into a temporary directory first, so a failed clone leaves nothing
-  # that would stop the next boot's attempt.
+  # that would stop the next attempt (the timer below, every 15 min).
   clone = pkgs.writeShellScript "infra-space-clone" ''
     set -eu
     tmp=$(mktemp -d ${home}/.hyperconfig-clone.XXXXXX)
     trap 'rm -rf "$tmp"' EXIT
-    if ! git clone --quiet ${repo} "$tmp/hyperconfig"; then
-      echo "cloning ${repo} failed (deploy key not registered yet?); trying again at next boot" >&2
+    if ! git clone --quiet --branch main ${repo} "$tmp/hyperconfig"; then
+      echo "cloning ${repo} failed (deploy key not registered, or no network?); trying again in 15 min" >&2
       exit 0
     fi
     (cd "$tmp/hyperconfig" && jj git init --colocate)
@@ -266,9 +266,9 @@ in
     environment.variables.JJ_USER = identity.name;
     environment.variables.JJ_EMAIL = identity.email;
 
-    # The checkout each instance works in. Absent until GitHub knows the
-    # deploy key: then the clone fails, says so, and the next boot tries
-    # again.
+    # The checkout each instance works in. Absent until the clone succeeds:
+    # it is retried at boot and every 15 minutes until the checkout exists
+    # (then the condition skips it).
     systemd.services.infra-space-clone = {
       description = "Clone hyperconfig for infra";
       wantedBy = [ "multi-user.target" ];
@@ -296,6 +296,13 @@ in
         Group = "infra";
         WorkingDirectory = home;
         ExecStart = clone;
+      };
+    };
+    systemd.timers.infra-space-clone = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnBootSec = "15min";
+        OnUnitInactiveSec = "15min";
       };
     };
   };

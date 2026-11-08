@@ -339,7 +339,8 @@ pkgs.testers.runNixOSTest {
       with subtest("without GitHub the clone gives up softly"):
           for m in members.values():
               guest_root(m, "test ! -e /home/infra/hyperconfig")
-              guest_root(m, "journalctl -u infra-space-clone.service | grep -q 'trying again at next boot'")
+              guest_root(m, "journalctl -u infra-space-clone.service | grep -q 'trying again in 15 min'")
+              guest_root(m, "systemctl is-active infra-space-clone.timer")
 
       with subtest("afk as infra: runs, finds its keys, no web tools"):
           import json
