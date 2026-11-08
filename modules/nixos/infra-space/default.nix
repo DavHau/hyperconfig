@@ -53,9 +53,10 @@
       only. nspawn copies them in at container start only: each var below
       (and the p0, TeamClaude and dashboard OIDC ones) restarts
       container@infra-space on a rotation.
-    - The guest runs the always-on hermes agent (./hermes.nix, with the
-      p0 and TeamClaude keys as credentials); on som its dashboard is
-      published by this host's nginx (./dashboard.nix).
+    - Where hyper.infraSpace.hermes is set (som), the guest runs the
+      always-on hermes agent (./hermes.nix, with the p0 and TeamClaude
+      keys as credentials), and its dashboard is published by this host's
+      nginx (./dashboard.nix); other members are the plain backup.
 
   Teardown (disabling infra-space, or `nixos-container destroy
   infra-space`): hermes' locked config pins entries of the agent's home
@@ -134,6 +135,12 @@ in
 
   options.hyper.infraSpace = {
     enable = lib.mkEnableOption "the infra-space container";
+
+    hermes = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Run the always-on hermes infra agent in the guest (./hermes.nix). On som only; other members are a plain backup of the same environment (afk, tools, identities).";
+    };
 
     guestModules = lib.mkOption {
       type = lib.types.listOf lib.types.deferredModule;
@@ -282,8 +289,8 @@ in
       p0-api-key = vars.inference-api-key.files.token.path;
       teamclaude-api-key = vars.teamclaude-api-key.files.key.path;
     };
-    # The always-on agent; its dashboard on som: ./dashboard.nix.
-    hyper.infraSpace.guestModules = [ ./hermes.nix ];
+    # The always-on agent, where enabled (som); its dashboard: ./dashboard.nix.
+    hyper.infraSpace.guestModules = lib.optional cfg.hermes ./hermes.nix;
 
     systemd.tmpfiles.rules = [
       "d ${stateDir} 0755 root root -"

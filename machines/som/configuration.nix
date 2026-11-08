@@ -126,6 +126,8 @@ in
   hyper.agentUser.enable = false;
 
   hyper.infraSpace.enable = true;
+  # The always-on infra agent runs here only; amy's member is the backup.
+  hyper.infraSpace.hermes = true;
   # The infra-space agent's dashboard at https://infra-space.davhau.fyi/,
   # Dave only: its pocket-id client from the inventory
   # (../../modules/nixos/infra-space/dashboard-account.nix), TLS and the
