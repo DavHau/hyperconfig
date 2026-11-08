@@ -123,9 +123,6 @@ in {
               roles.controller.extraModules = [ ../nixos/zt-eu-sites.nix ];
               roles.controller.settings.allowedIds = [
                 "2f4e835d67" # stefan's laptop (external)
-                # Was listed under allowedIps, where clan reads it as a
-                # zt IPv6 address (and fails): it is a node id.
-                "7c29125877"
               ] ++ map (r: r.ztNodeId) homeNetworks.routers;
             };
             importer.roles.default.extraModules = [
