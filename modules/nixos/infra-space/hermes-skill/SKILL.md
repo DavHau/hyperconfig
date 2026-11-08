@@ -32,6 +32,17 @@ Treat that as what it is: one wrong command takes a machine down.
 - Never force-push and never rewrite commits that are already on
   `main@origin`.
 
+## Implementation work goes to subagents
+
+- Do a change yourself only when it is a few lines. Anything larger goes
+  to a subagent working in its own jj workspace
+  (`jj workspace add ../hyperconfig-<topic> -r main@origin`), never in the
+  main checkout. Clean up with `jj workspace forget` once it has landed.
+- Larger changes get reviewed by an independent agent (one that did not
+  write the change) before they are pushed.
+- If you have no way to start a subagent, stop and tell Dave. Do not
+  fall back to doing the larger change yourself.
+
 ## Deploying
 
 - Machines: `clan machines list` (every machine in the clan inventory,
