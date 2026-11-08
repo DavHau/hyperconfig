@@ -75,6 +75,9 @@ let
   '';
 in
 {
+  # Dave's shell (fish, aliases, zoxide, direnv, tmux) for the launcher sessions.
+  imports = [ ../shell-profile.nix ];
+
   options.infraSpace = {
     member = lib.mkOption {
       type = lib.types.str;

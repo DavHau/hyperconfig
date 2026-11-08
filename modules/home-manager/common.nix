@@ -15,6 +15,4 @@
   xdg.configFile."fish/config.fish".force = true;
 
 
-  programs.zoxide.enable = true;
-
 }

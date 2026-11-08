@@ -9,7 +9,8 @@ in
     inputs.spaces.nixosModules.spaces
     ./pi-chat-openrouter.nix
     ./common.nix
-    ./common-tools.nix
+    # fish, aliases, zoxide, direnv, tmux, CLI tools; shared with infra-space.
+    ./shell-profile.nix
     ./sbox.nix
     ./sbox-age.nix
     ./sbox-mullvad.nix
@@ -62,7 +63,6 @@ in
     ./proton-vpn.nix
     ./vpn.nix
     ./home-manager.nix
-    ./fish.nix
     # fish-ai is now a home-manager module: ../home-manager/fish-ai.nix
     # ./backup.nix
     # ./retiolum.nix
@@ -103,7 +103,6 @@ in
     ./virtualisation.nix
     ./ssh.nix
     ./locale.nix
-    ./shell-aliases.nix
     ./nix-gc.nix
     ./pueue.nix
     ./wdisplays.nix
