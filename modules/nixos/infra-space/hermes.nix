@@ -32,10 +32,10 @@
     - bundled skills: all but a handful of engineering ones disabled
       (hermes has no allowlist), plus the infra skill (./hermes-skill).
 
-  Inference: p0's Qwen (the providers entry and seed model som's agents
-  use, machines/som/hermes-inference.nix), and Anthropic through
-  TeamClaude with the shared client key (../teamclaude-api-key.nix, booked
-  as `hyperconfig`). Both keys arrive as the host's credentials
+  Inference: Claude Opus 5.5 through TeamClaude (the model) with the
+  shared client key (../teamclaude-api-key.nix, booked as `hyperconfig`),
+  and p0's Qwen as a provider (machines/som/hermes-inference.nix) for
+  titles. Both keys arrive as the host's credentials
   `p0-api-key` and `teamclaude-api-key`, the dashboard's OIDC client secret
   (som only) as `dashboard-oidc-secret`; hermes-locked-infra takes them
   from the guest's system credentials into the root-owned .env.
@@ -267,10 +267,12 @@ in
         };
         settings.sessions.auto_prune = false;
         settings.skills.disabled = disabledSkills;
+        # The model: Claude Opus 5.5 via the anthropic provider (TeamClaude,
+        # below). lockedConfig writes it as config.yaml's model on every
+        # start, so this is the model, not just a seed.
         initialModel = {
-          provider = "custom:p0";
-          base_url = "https://inference.p0.contact/v1";
-          default = "qwen";
+          provider = "anthropic";
+          default = "claude-opus-5-5";
         };
 
         agents.${user} = {
