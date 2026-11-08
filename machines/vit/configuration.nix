@@ -7,7 +7,6 @@
     ../../modules/nixos/user-dave.nix
     ./disko.nix
     ../../modules/nixos/nvidia.nix
-    ../../modules/nixos/storagebox.nix
     ../../modules/nixos/vault-nfs-client.nix
     ../../modules/nixos/hermes-agents-gpu-host.nix
     ../../modules/nixos/captchakraken-server.nix

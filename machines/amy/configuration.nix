@@ -25,7 +25,6 @@
     ../../modules/nixos/amd-powersave-limits.nix
     ../../modules/nixos/powersave-panel-refresh.nix
     ../../modules/nixos/chores-on-ac.nix
-    ../../modules/nixos/storagebox.nix
     ../../modules/nixos/vault-nfs-client.nix
     ../../modules/nixos/router-ais.nix
     ../../modules/nixos/router-cm-beryl.nix

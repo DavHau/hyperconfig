@@ -27,8 +27,8 @@ BUDGET_MB=128
 STREAMS=8
 REMOTE_DIR=depth
 REMOTE_FILE=
-MOUNTPOINT=/mnt/storagebox
-MACHINE=amy
+MOUNTPOINT=/mnt/storagebox # only bam mounts it; elsewhere test 4 skips
+MACHINE=bam                # any host carrying the storagebox clan var
 REPEATS=1
 
 while getopts ':b:s:p:d:f:m:r:h' opt; do
@@ -100,10 +100,15 @@ trap cleanup EXIT
 # Forcing the RSA family then stops Go preferring the ed25519 key we have no
 # pin for ("key mismatch"). rsa-sha2-* are the same RSA key with a modern
 # signature - plain ssh-rsa (SHA-1) is disabled by default in OpenSSH >= 8.8.
+# Only bam deploys the pin since the mount moved there; elsewhere read it
+# from bam's evaluated config in this flake.
 system_known_hosts=/etc/ssh/ssh_known_hosts
 pin=$(awk -v h="$HOST" \
   'index($1, h) > 0 && $2 == "ssh-rsa" { print $2 " " $3; exit }' \
   "$system_known_hosts" 2>/dev/null || true)
+if [ -z "$pin" ] && command -v nix >/dev/null; then
+  pin=$(nix eval --raw "$(dirname "$0")#nixosConfigurations.bam.config.programs.ssh.knownHosts.\"$HOST\".publicKey" 2>/dev/null || true)
+fi
 if [ -n "$pin" ]; then
   printf '%s %s\n[%s]:%s %s\n' "$HOST" "$pin" "$HOST" "$PORT" "$pin" \
     >"$dest/known_hosts"

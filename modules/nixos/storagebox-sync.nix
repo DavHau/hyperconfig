@@ -5,15 +5,17 @@
 # Why rclone and not the sshfs mount this imports: measured on the same link
 # in the same minute, rclone sustains 6-7 MB/s where the mount manages
 # 1-2.5 MB/s. The mount stays for interactive browsing; bulk transfer goes
-# over plain SFTP.
+# over plain SFTP. So this unit does not touch /mnt/storagebox and is not
+# ordered against its automount or mount: a dead box fails rclone, never the
+# mount, and the sync never triggers a mount attempt.
 #
 # Connection budget - the box allows 10 concurrent connections per ACCOUNT
-# (Hetzner docs), and the fleet already holds about five of them: one sshfs
-# per host (amy, bam, som, vit) plus moneymaker's beast, all on the same
-# u632961-sub1 sub-account. Hence the deliberately small transfers/checkers
-# below. Measurements also showed parallelism buys nothing on this route
-# (8 streams was no faster than 1, 8 parallel files was slower), so the only
-# reason for transfers > 1 is to overlap the gap between files.
+# (Hetzner docs). The fleet holds up to two on the same u632961-sub1
+# sub-account: bam's sshfs while it is automounted, plus moneymaker's beast.
+# The small transfers/checkers below stay deliberate anyway: measurements
+# showed parallelism buys nothing on this route (8 streams was no faster
+# than 1, 8 parallel files was slower), so the only reason for
+# transfers > 1 is to overlap the gap between files.
 { config, pkgs, ... }:
 let
   dest = "/vault/parquet/depth";
@@ -42,10 +44,7 @@ in
 
   systemd.services.storagebox-sync = {
     description = "pull storagebox depth archive into ${dest}";
-    after = [
-      "network-online.target"
-      "storagebox-mount.service"
-    ];
+    after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
 
     environment = {

@@ -15,16 +15,18 @@
 # Hence all three, or none of it helps: in-flight bytes = requests x size,
 # and throughput = in-flight bytes / RTT.
 #
-# The mount does not exist yet when ExecStartPost fires (sshfs is still
-# connecting), hence the wait loop rather than a one-shot write.
+# Runs from storagebox-readahead.service once the mount unit is active, so
+# the mount normally exists already; the loop only covers a slow mountinfo.
 mountpoint=$1
 kb=$2
 background=$3
 
-for _ in $(seq 1 60); do
+for _ in $(seq 1 20); do
   # /proc/self/mountinfo field 3 is the "major:minor"; it names both the bdi
-  # and (via the minor) the fuse connection directory.
-  dev=$(awk -v m="$mountpoint" '$5 == m { print $3; exit }' /proc/self/mountinfo)
+  # and (via the minor) the fuse connection directory. The automount leaves
+  # an autofs row on the same path, so match the fuse row by its fstype
+  # (after the " - " separator).
+  dev=$(awk -v m="$mountpoint" '$5 == m && / - fuse\.sshfs / { print $3; exit }' /proc/self/mountinfo)
   if [ -n "$dev" ] && [ -w "/sys/class/bdi/$dev/read_ahead_kb" ]; then
     echo "$kb" >"/sys/class/bdi/$dev/read_ahead_kb"
 
