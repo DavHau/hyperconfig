@@ -260,15 +260,16 @@
         "treefmt-nix": "treefmt-nix_3"
       },
       "locked": {
-        "lastModified": 1792646627,
-        "narHash": "sha256-4rG1EWSeUmfYgWYVjq04zxL1f9AnAgF1iIF+oYH+xxs=",
-        "ref": "refs/heads/main",
-        "rev": "b94705194f766cd5b62f88c4d2100b782fc1a783",
-        "revCount": 15399,
+        "lastModified": 1794150597,
+        "narHash": "sha256-0WAMmsBBhFC0VdKGYjvYzPSQGz0kcG/bULVKdYXq+Wc=",
+        "ref": "hotfix/8245-ssh-drop-switch",
+        "rev": "d1a2142ed84658af47a7ca570afc78284b8e18aa",
+        "revCount": 15420,
         "type": "git",
         "url": "https://git.clan.lol/clan/clan-core"
       },
       "original": {
+        "ref": "hotfix/8245-ssh-drop-switch",
         "type": "git",
         "url": "https://git.clan.lol/clan/clan-core"
       }
@@ -1199,11 +1200,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1792366139,
-        "narHash": "sha256-jto4pdsl0bgErQ5vaMc3gOyj//PILLRJuqX3I7fUk6s=",
+        "lastModified": 1792737899,
+        "narHash": "sha256-P0/GhewcEQmAbzq3QunNWY2jLJaYH9F6c/5dEM/jQ4M=",
         "owner": "nix-darwin",
         "repo": "nix-darwin",
-        "rev": "f0ec2b3fae4df92ea7788359aef9e07bb88d720f",
+        "rev": "bb0b90dbd54e207100de72b5dcbe3188c98a4b69",
         "type": "github"
       },
       "original": {

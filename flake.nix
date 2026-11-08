@@ -56,7 +56,8 @@
     nix-lazy.url = "github:nixos/nix/lazy-trees-v2";
     retiolum.url = "github:mic92/retiolum";
 
-    clan-core.url = "git+https://git.clan.lol/clan/clan-core";
+    # Hotfix for #8245 (switch survives an SSH drop); back to main once merged.
+    clan-core.url = "git+https://git.clan.lol/clan/clan-core?ref=hotfix/8245-ssh-drop-switch";
     clan-core.inputs.nixpkgs.follows = "nixpkgs";
     clan-core.inputs.disko.follows = "disko";
     clan-core.inputs.flake-parts.follows = "flake-parts";
