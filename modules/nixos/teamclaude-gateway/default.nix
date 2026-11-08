@@ -425,9 +425,6 @@ in
         PORKBUN_API_KEY_FILE = config.clan.core.vars.generators.porkbun.files.apikey.path;
         PORKBUN_SECRET_API_KEY_FILE = config.clan.core.vars.generators.porkbun.files.secretkey.path;
       };
-      # som's upstream answers REFUSED for names that do not exist yet, which
-      # ends lego's SOA walk (as for som's exposure.acme).
-      dnsResolver = "1.1.1.1:53";
     };
 
     # A: sgp's IPv4, forwarded here like the hermes dashboards'; AAAA: som's

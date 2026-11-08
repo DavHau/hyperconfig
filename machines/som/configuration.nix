@@ -40,6 +40,9 @@ in
     ./home-networks-agents.nix
     # Claude subscription OAuth for every agent (enabled in ./hermes-agents.nix).
     inputs.hyperhermes.nixosModules.claude-auth
+    # lego through the local encrypted resolver: the home router intercepts
+    # plaintext DNS.
+    ../../modules/nixos/acme-local-resolver.nix
     ../../modules/nixos/public-ipv6-token.nix
     ../../modules/nixos/linger-normal-users.nix
     ../../modules/nixos/user-manager-restart
@@ -214,10 +217,6 @@ in
   # The router's DHCP/RA DNS stays unused: lookups go through
   # ../../modules/nixos/encrypted-dns.nix.
   hyper.encryptedDns.networkdUplinks = [ "40-br0" ];
-  # lego's DNS-01 orders (dnsResolver 1.1.1.1:53, see exposure below) walk
-  # SOA records in plaintext; without this every renewal fails.
-  hyper.encryptedDns.plainDnsUsers = [ "acme" ];
-
   # No wifi on this desktop: it sits on the LAN cable. The AX210 stays
   # unbound (no wlan0, no supplicant, no initrd PSK); nixos-facter's
   # wlan0 network unit just never matches.
@@ -259,9 +258,6 @@ in
         PORKBUN_SECRET_API_KEY_FILE = config.clan.core.vars.generators.porkbun.files.secretkey.path;
       };
       email = "info@davhau.com";
-      # som's upstream answers REFUSED for names that do not exist yet,
-      # which ends lego's SOA walk (the mail module's MX certificate uses it too).
-      dnsResolver = "1.1.1.1:53";
       # Let's Encrypt only, by DNS-01 only. Without issuewild the issue
       # property governs wildcards as well.
       caa = ''0 issue "letsencrypt.org; validationmethods=dns-01"'';

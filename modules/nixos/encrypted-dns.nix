@@ -137,18 +137,6 @@ in
       example = [ "40-br0" ];
       description = "systemd.network.networks entries of uplinks whose DHCP/RA DNS servers and domains are ignored.";
     };
-
-    plainDnsUsers = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [ ];
-      example = [ "acme" ];
-      description = ''
-        Users whose plaintext DNS may still reach the internet. For lego's
-        DNS-01 orders with security.acme.certs.<name>.dnsResolver set: lego
-        walks SOA records against that resolver itself, so without this
-        every such order and renewal fails with EPERM.
-      '';
-    };
   };
 
   config = lib.mkMerge [
@@ -200,12 +188,6 @@ in
       users.groups.${captiveGroup}.gid = captiveGid;
 
       networking.nftables.enable = true;
-      # The build-time ruleset check runs where plainDnsUsers' (dynamic)
-      # users do not exist; nft resolves skuid names at load time on the
-      # host, so check against a user that exists everywhere instead.
-      networking.nftables.preCheckRuleset = lib.concatMapStrings (
-        u: "sed -i 's/meta skuid \"${u}\"/meta skuid \"nobody\"/' ruleset.conf\n"
-      ) cfg.plainDnsUsers;
       networking.nftables.tables.encrypted-dns = {
         family = "inet";
         content =
@@ -239,7 +221,6 @@ in
               oifname "lo" accept
               # captive-browser's proxy, setgid ${captiveGroup}.
               meta skgid ${toString captiveGid} accept
-              ${lib.concatMapStringsSep "\n  " (u: ''meta skuid "${u}" accept'') cfg.plainDnsUsers}
               ${lib.concatMapStringsSep "\n  " (
                 i: ''oifname "${i}" ip daddr @private4 accept'' + "\n  " + ''oifname "${i}" ip6 daddr @private6 accept''
               ) overlayInterfaces}
