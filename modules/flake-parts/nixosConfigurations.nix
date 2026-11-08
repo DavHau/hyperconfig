@@ -127,6 +127,7 @@ in {
             };
             importer.roles.default.extraModules = [
               ../../modules/nixos/common.nix
+              ../../modules/nixos/networkmanager-restart-late.nix
             ];
             dave-user = { #
               module.name = "users";
