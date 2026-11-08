@@ -214,6 +214,10 @@ in
       thaigersprint = {
         description = "thaigersprint - hermes agent, no vault access";
         sshKeys = adminKeys;
+        # Claude through the TeamClaude gateway, as client `thaigersprint`
+        # (not a Claude subscription login of its own: those hit the
+        # account's rate limit).
+        teamclaude.enable = true;
       };
 
       # roman: Roman's agent for his two Home Assistant instances (MCP:
