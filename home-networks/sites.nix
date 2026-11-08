@@ -4,7 +4,9 @@
 #     router's pinned IPv4 (../modules/nixos/zt-eu-sites.nix);
 #   - the routers' authorization (`allowedIds` of the zt-eu instance in
 #     ../modules/flake-parts/nixosConfigurations.nix);
-#   - the routers' own config: `nix run .#site-routers-apply` (./apply.py).
+#   - the routers' own config: `nix run .#site-routers-apply` (./apply.py);
+#   - playa's ISP router's DHCP: `nix run .#playa-isp-apply`
+#     (../modules/flake-parts/apps.playa-isp-apply.nix).
 #
 # Routing: every zt-eu member installs a site's LAN prefixes via that site's
 # router (ZeroTier's allowManaged, on by default); a router skips its own
@@ -69,6 +71,40 @@
       routeLan = true;
       masqueradeFromLan = false;
       masqueradeToLan = true;
+      # The LAN's gateway and DHCP server: Orange's Livebox Fibra (Arcadyan
+      # PRV3399B), web UI only. `nix run .#playa-isp-apply` converges its
+      # DHCP to this (../tools/router-playa-isp); undeclared reservations
+      # are deleted. The pool is declared as found (the UI restarts the
+      # router and drops reservations when it changes). Reservation names
+      # are the labels the router stores, [A-Za-z0-9._-].
+      ispRouter = {
+        address = "192.168.10.1";
+        user = "admin";
+        passwordVar = "router-playa-isp/password";
+        dhcp = {
+          poolStart = "192.168.10.100";
+          poolEnd = "192.168.10.250";
+          leaseTime = 86400;
+          reservations = {
+            GL-MT6000 = {
+              mac = "94:83:c4:a4:38:09";
+              ip = "192.168.10.2";
+            };
+            homeassistant = {
+              mac = "d8:3a:dd:ed:e0:a9";
+              ip = "192.168.10.3";
+            };
+            tossa-pi = {
+              mac = "b8:27:eb:8c:e2:b5";
+              ip = "192.168.10.21";
+            };
+            e1-camera = {
+              mac = "2c:1b:3a:75:04:a6";
+              ip = "192.168.10.182";
+            };
+          };
+        };
+      };
     };
 
     # Roman's casa: router-waldkirch is the LAN's IPv4 gateway and its IPv6

@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "router-playa-isp"
+version = "0.1.0"
+description = "Converge the DHCP pool and reservations of playa's ISP router (Orange Livebox Fibra, Arcadyan PRV3399B) over its web UI"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+router-playa-isp = "router_playa_isp.cli:main"
+
+[tool.setuptools]
+packages = ["router_playa_isp"]
