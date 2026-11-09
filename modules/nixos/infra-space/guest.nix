@@ -21,19 +21,21 @@
   It decrypts the clan vars (their recipients: ./age-recipients.nix).
 
   Clan vars store: clan's external age store, the git checkout
-  ~/clan-secrets of DavHau/hyperconfig-secrets (CLAN_AGE_STORE_DIR),
-  into which clan commits every var it writes. Both instances and Dave
-  write to it, so it is kept in sync with GitHub's main by
-  clan-secrets-sync: `pull` rebases local commits onto it, `push` pushes
-  them, never forced. Run by the `clan` on PATH (a wrapper: pull before,
-  push after the real clan, holding the sync's lock throughout) and by
+  ~/clan-secrets of DavHau/hyperconfig-secrets, into which clan commits
+  every var it writes. Only the `clan` on PATH (a wrapper, below) points
+  clan at it (CLAN_AGE_STORE_DIR, set nowhere else): any other clan (the
+  devshell's, first on PATH where direnv loads hyperconfig's .envrc)
+  fails for want of it instead of running on a store out of sync. Both
+  instances and Dave write to it, so it is kept in sync with GitHub's
+  main by clan-secrets-sync: `pull` rebases local commits onto it, `push`
+  pushes them, never forced. Run by the wrapper (pull before, push after
+  the real clan, holding the sync's lock throughout) and by
   infra-space-secrets-push on every commit and every 5 minutes, so
   commits made otherwise go up too; a run fired while the wrapper holds
   the lock (clan's own commits) does nothing: the wrapper's push takes
-  them up. A
-  conflict (one var written on both sides) is never resolved here: the
-  rebase is aborted, the run fails and the push unit stays failed, which
-  makes the wrapper refuse until infra resolves it by hand
+  them up. A conflict (one var written on both sides) is never resolved
+  here: the rebase is aborted, the run fails and the push unit stays
+  failed, which makes the wrapper refuse until infra resolves it by hand
   (./hermes-skill/SKILL.md, "Secrets store conflict").
 
   Inbound: the firewall admits the host's veth addresses (hostAddress,
@@ -89,7 +91,7 @@ let
       pkgs.util-linux
     ];
     text = ''
-      store=''${CLAN_AGE_STORE_DIR:?CLAN_AGE_STORE_DIR is not set}
+      store=${secretsStore}
       if ! cd "$store" 2>/dev/null; then
         echo "clan-secrets-sync: no secrets store checkout at $store (infra-space-clone-secrets.service makes it)" >&2
         exit 1
@@ -176,7 +178,8 @@ let
             ;;
         esac
       ''}
-      store=''${CLAN_AGE_STORE_DIR:?CLAN_AGE_STORE_DIR is not set}
+      export CLAN_AGE_STORE_DIR=${secretsStore}
+      store=$CLAN_AGE_STORE_DIR
       # The sync's lock for the whole run (pull, clan, push), waited for:
       # the push unit, fired by clan's commits, skips instead of running
       # under clan (secretsPush below). No checkout: the pull below says so.
@@ -220,7 +223,7 @@ let
       pkgs.util-linux
     ];
     text = ''
-      cd "''${CLAN_AGE_STORE_DIR:?CLAN_AGE_STORE_DIR is not set}"
+      cd ${secretsStore}
       exec 9>"$(git rev-parse --git-dir)/clan-secrets-sync.lock"
       if ! flock -n 9; then
         echo "a clan run holds the secrets store; its own push takes these commits up"
@@ -512,10 +515,6 @@ in
       "flakes"
     ];
 
-    # clan's external age store (the header), in logins and units.
-    environment.variables.CLAN_AGE_STORE_DIR = secretsStore;
-    systemd.globalEnvironment.CLAN_AGE_STORE_DIR = secretsStore;
-
     programs.git = {
       enable = true;
       config.user = identity;
@@ -542,7 +541,14 @@ in
         "network-online.target"
         "infra-space-secrets.service"
       ];
-      unitConfig.ConditionPathExists = "${secretsStore}/.git";
+      unitConfig = {
+        ConditionPathExists = "${secretsStore}/.git";
+        # A start per commit, and clan commits in bursts (one per
+        # re-encrypted file in `clan vars fix`): systemd's default limit
+        # (5 in 10 s) would fail it, blocking the wrapper, and the path
+        # unit with it, which would stop watching.
+        StartLimitIntervalSec = 0;
+      };
       serviceConfig = {
         Type = "oneshot";
         User = "infra";
@@ -553,9 +559,14 @@ in
       };
     };
     # HEAD's reflog: appended to by every commit, rebase and reset on it.
+    # No trigger limit (200 in 2 s by default, then failed and no longer
+    # watching): a rebase of many local commits writes it that fast.
     systemd.paths.infra-space-secrets-push = {
       wantedBy = [ "paths.target" ];
-      pathConfig.PathChanged = "${secretsStore}/.git/logs/HEAD";
+      pathConfig = {
+        PathChanged = "${secretsStore}/.git/logs/HEAD";
+        TriggerLimitIntervalSec = 0;
+      };
     };
     systemd.timers.infra-space-secrets-push = {
       wantedBy = [ "timers.target" ];

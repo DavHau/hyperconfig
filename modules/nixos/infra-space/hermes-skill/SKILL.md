@@ -37,14 +37,20 @@ Treat that as what it is: one wrong command takes a machine down.
 ## The secrets store
 
 - clan's vars are encrypted with clan's age backend into an external
-  store: the git checkout `~/clan-secrets` (`CLAN_AGE_STORE_DIR`) of the
-  private repository `DavHau/hyperconfig-secrets`, branch `main`. It is
-  not part of the hyperconfig checkout and never goes into it.
-- clan commits there itself whenever it writes a var. You do not push it:
-  the `clan` command here is a wrapper that rebases the store onto GitHub's
-  `main` before running clan and pushes its new commits after;
-  `infra-space-secrets-push.service` does the same on every commit and
-  every 5 minutes. Never force-push it and never commit to it by hand.
+  store: the git checkout `~/clan-secrets` of the private repository
+  `DavHau/hyperconfig-secrets`, branch `main`. It is not part of the
+  hyperconfig checkout and never goes into it.
+- Always run the system's `clan` (`/run/current-system/sw/bin/clan`), a
+  wrapper: it points clan at the store (`CLAN_AGE_STORE_DIR`, set nowhere
+  else), rebases the store onto GitHub's `main` before running clan and
+  pushes its new commits after. A `clan` from hyperconfig's devshell
+  (direnv in `~/hyperconfig` and in workspaces puts it first on PATH)
+  fails on purpose, for want of `CLAN_AGE_STORE_DIR`: call the wrapper by
+  its full path there, never set the variable yourself.
+- clan commits to the store itself whenever it writes a var. You do not
+  push it: the wrapper does, and `infra-space-secrets-push.service` does
+  the same on every commit and every 5 minutes. Never force-push it and
+  never commit to it by hand.
 - The wrapper fails loudly instead of running on a store out of sync: when
   the pull hits a conflict, when the push fails (clan's own exit status
   is then replaced by a failure), and while

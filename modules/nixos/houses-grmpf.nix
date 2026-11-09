@@ -1,6 +1,8 @@
 /*
   grmpf's nix-housing houses (see houses.nix): `house-slop` for coding agents,
-  `house-secure` for key-touching ops (deploys, clan vars).
+  `house-secure` for ops through grmpf's ssh agents (root ssh on the fleet,
+  git on hyperconfig). It holds no age identity and has no clan vars store,
+  so clan vars and deploys, which decrypt them, run in infra-space.
 
   Each house has its own HOME (~/houses/<name>) and XDG_RUNTIME_DIR, so the
   real files and sockets a house needs are symlinked into it at launch and

@@ -11,31 +11,34 @@
 # build` works as infra; the guest sshd answers on the mesh address only;
 # both clones (hyperconfig, the secrets repo) fail softly without GitHub.
 # The clan vars store, with a bare repo in memberB's guest as GitHub and a
-# stub as the real clan-cli (no-op, or committing slowly; the wrapper
-# itself is the production one): the `clan` wrapper pushes a local
-# commit; an upstream commit to the same file makes it fail with the
-# conflicting file and the runbook, no rebase left in progress and the
-# local commit intact, and the runbook (./hermes-skill/SKILL.md) resolves
-# it; a failed infra-space-secrets-push makes it refuse, pointing at the
-# unit's journal, until infra starts the unit again; the path unit pushes
-# a commit on its own, and, fired by clan's commits mid-run, leaves the
-# store to the run (whose push takes them up) instead of failing on clan's
-# half-written store or timing out waiting for it. On memberA (som,
-# buildOnHost) the wrapper hands `clan machines update` to the stub with
-# `--build-host localhost` unless the caller named a build host, and
-# leaves other subcommands, and memberB's, as they are.
-# Each member has a software TPM: infra makes its age identity on it in
-# the guest and decrypts with it; `tenant` on the host can neither read
-# that identity nor, with a copy, use it (no access to the TPM); with the
-# ACL stripped, a restart of the container without any udev event gives
-# infra its TPM back, as a switch on a booted host must. The
-# members run networkd as som and amy do: it keeps off the veth, also
+# stub as the real clan-cli (no-op, or committing slowly or in a burst;
+# the wrapper itself is the production one): only the `clan` wrapper sets
+# CLAN_AGE_STORE_DIR (not a login shell, not the push unit) and hands it
+# to clan; it pushes a local commit; an upstream commit to the same file
+# makes it fail with the conflicting file and the runbook, no rebase left
+# in progress and the local commit intact, and the runbook
+# (./hermes-skill/SKILL.md) resolves it; a failed infra-space-secrets-push
+# makes it refuse, pointing at the unit's journal, until infra starts the
+# unit again; the path unit pushes a commit on its own, and, fired by
+# clan's commits mid-run, leaves the store to the run (whose push takes
+# them up) instead of failing on clan's half-written store or timing out
+# waiting for it; a burst of clan's commits (more starts than systemd's
+# default limit) fails neither the push unit nor the path unit, which
+# keeps watching. On memberA (som, buildOnHost) the wrapper hands `clan
+# machines update` to the stub with `--build-host localhost` unless the
+# caller named a build host, and leaves other subcommands, and memberB's,
+# as they are. Each member has a software TPM: infra makes its age
+# identity on it in the guest and decrypts with it; `tenant` on the host
+# can neither read that identity nor, with a copy, use it (no access to
+# the TPM); with the ACL stripped, a restart of the container without any
+# udev event gives infra its TPM back, as a switch on a booted host must.
+# The members run networkd as som and amy do: it keeps off the veth, also
 # across a restart. managed also plays a LAN peer routing to a member's
-# guest net: refused on sshd and on
-# a host-only guest service the guest's firewall opened, which the host
-# itself reaches. afk (./afk.nix) runs as infra, `p0-api-key` and
-# `teamclaude-api-key` print the credentials, and web_search, fetch and
-# browser stay off even against infra's own config.yml.
+# guest net: refused on sshd and on a host-only guest service the guest's
+# firewall opened, which the host itself reaches. afk (./afk.nix) runs as
+# infra, `p0-api-key` and `teamclaude-api-key` print the credentials, and
+# web_search, fetch and browser stay off even against infra's own
+# config.yml.
 #
 # hermes (./hermes.nix) in memberA's container only (som), with a stub
 # model instead of p0: the gateway runs as infra; .env, config.yaml and
@@ -49,12 +52,12 @@
 # hermes-agent, kept off the raw list as well), in hermes' own
 # resolution; skills_list offers none of the others, and skill_view
 # serves every skill it offers. memberB (amy) is the plain backup: no
-# hermes unit in its guest. memberA also plays som with the dashboard (./dashboard.nix):
-# its nginx vhost answers from the host, gated by hermes' OIDC login (lazy
-# discovery, so no issuer is needed for that), the guest's dashboard port
-# is refused to a LAN peer, and memberB (amy) has none. A user on a member
-# (`tenant`) reaches no port of its guest, nginx only the dashboard's; root
-# and the sshd forward still do.
+# hermes unit in its guest. memberA also plays som with the dashboard
+# (./dashboard.nix): its nginx vhost answers from the host, gated by
+# hermes' OIDC login (lazy discovery, so no issuer is needed for that),
+# the guest's dashboard port is refused to a LAN peer, and memberB (amy)
+# has none. A user on a member (`tenant`) reaches no port of its guest,
+# nginx only the dashboard's; root and the sshd forward still do.
 #
 # ./test-keys is test-only material: infra-space(.pub) the shared
 # identity, hostkey-member{A,B}(.pub) the guests' host keys, managed-host
@@ -187,11 +190,14 @@ let
           )
           # the real clan-cli needs the fleet's flake; the wrapper around it
           # is what is tested. The stub records its argv in ~/clan-argv
-          # (one line each). `clan slow-commit` writes and commits vars
-          # slowly, as `clan vars generate` does, so the push unit fires
-          # mid-run, and holds the wrapper's lock (~10 s) longer than the
-          # push unit's start timeout, cut to 5 s here (5 min in
-          # production, where a `clan machines update` outlasts that).
+          # (one line each) and its CLAN_AGE_STORE_DIR in ~/clan-store-dir.
+          # `clan slow-commit` writes and commits vars slowly, as `clan vars
+          # generate` does, so the push unit fires mid-run, and holds the
+          # wrapper's lock (~10 s) longer than the push unit's start
+          # timeout, cut to 5 s here (5 min in production, where a `clan
+          # machines update` outlasts that). `clan burst` commits 10 times
+          # in ~5 s, as `clan vars fix` does (a commit per re-encrypted
+          # file).
           (
             { pkgs, lib, ... }:
             {
@@ -199,17 +205,28 @@ let
               infraSpace.clanPackage = pkgs.writeShellScriptBin "clan" ''
                 set -eu
                 printf '%s\n' "$@" > "$HOME/clan-argv"
-                [ "''${1:-}" = slow-commit ] || exit 0
-                cd "$CLAN_AGE_STORE_DIR"
+                printf '%s\n' "''${CLAN_AGE_STORE_DIR-unset}" > "$HOME/clan-store-dir"
                 export PATH=${pkgs.git}/bin:$PATH
-                # a commit, then at once the next var's files, uncommitted
-                echo one > slow && git add slow && git commit --quiet -m slow1
-                echo two > slow
-                sleep 5
-                git commit --quiet -am slow2
-                echo three > slow
-                sleep 5
-                git commit --quiet -am slow3
+                case "''${1:-}" in
+                  slow-commit)
+                    cd "$CLAN_AGE_STORE_DIR"
+                    # a commit, then at once the next var's files, uncommitted
+                    echo one > slow && git add slow && git commit --quiet -m slow1
+                    echo two > slow
+                    sleep 5
+                    git commit --quiet -am slow2
+                    echo three > slow
+                    sleep 5
+                    git commit --quiet -am slow3
+                    ;;
+                  burst)
+                    cd "$CLAN_AGE_STORE_DIR"
+                    for i in $(seq 10); do
+                      echo "$i" > burst && git add burst && git commit --quiet -m "burst$i"
+                      sleep 0.5
+                    done
+                    ;;
+                esac
               '';
             }
           )
@@ -341,8 +358,10 @@ pkgs.testers.runNixOSTest {
               guest_root(m, "test ! -e /run/infra-space/secrets/ssh-host-key")
               out = guest_root(m, "stat -c '%a %U' /run/infra-space/ssh_host_ed25519_key").strip()
               assert out == "600 root", out
-              assert guest(m, "echo $CLAN_AGE_STORE_DIR").strip() == "/home/infra/clan-secrets"
-              assert "CLAN_AGE_STORE_DIR=/home/infra/clan-secrets" in guest_root(m, "systemctl show -p Environment infra-space-secrets-push.service")
+              # only the `clan` wrapper sets the store: a clan run
+              # otherwise (the devshell's) fails instead of using it unsynced
+              assert guest(m, "echo \"''${CLAN_AGE_STORE_DIR-unset}\"").strip() == "unset"
+              guest_root(m, "sh -c '! systemctl show -p Environment infra-space-secrets-push.service | grep -q CLAN_AGE_STORE_DIR'")
 
       with subtest("the members reach each other's container"):
           reach_each_other()
@@ -450,6 +469,8 @@ pkgs.testers.runNixOSTest {
           guest(m, f"cd {store} && echo local1 > var && git commit --quiet -am local1")
           guest(m, "clan")
           assert tip(remote) == tip(store)
+          # the wrapper hands the real clan its store
+          assert guest(m, "cat ~/clan-store-dir").strip() == store
 
           # the same var written upstream and here
           guest(m, f"cd {upstream} && git pull --quiet --ff-only origin main && echo upstream > var && git commit --quiet -am upstream && git push --quiet origin main")
@@ -494,6 +515,26 @@ pkgs.testers.runNixOSTest {
           guest_root(m, "sh -c '! systemctl is-failed --quiet infra-space-secrets-push.service'")
           out = guest_root(m, f"journalctl -o cat -u infra-space-secrets-push.service --since @{since}")
           assert "Starting" in out and "Failed" not in out and "timeout" not in out.lower(), out
+
+          # a burst of clan's commits (more than systemd's default 5 starts
+          # in 10 s) leaves neither the push unit nor the path unit failed,
+          # and the path unit watching
+          since = guest_root(m, "date +%s").strip()
+          guest(m, "clan burst")
+          assert tip(remote) == tip(store)
+          m.wait_until_succeeds("nixos-container run infra-space -- sh -c "
+                                + shlex.quote("case $(systemctl show -p ActiveState --value infra-space-secrets-push.service) in inactive|failed) ;; *) exit 1;; esac"), timeout=60)
+          units = "infra-space-secrets-push.service infra-space-secrets-push.path"
+          rc, out = m.execute(f"nixos-container run infra-space -- systemctl status --no-pager {units} 2>&1")
+          print(out)
+          guest_root(m, f"sh -c '! systemctl is-failed --quiet {units}'")
+          guest_root(m, "systemctl is-active infra-space-secrets-push.path")
+          out = guest_root(m, f"journalctl -o cat -u infra-space-secrets-push.service --since @{since}")
+          assert out.count("a clan run holds the secrets store") > 5, out
+          # still watching: a commit afterwards goes up on its own
+          guest(m, f"cd {store} && echo local4 > var && git commit --quiet -am local4")
+          m.wait_until_succeeds("nixos-container run infra-space -- runuser -u infra -- bash -lc "
+                                + shlex.quote(f"test $(git -C {remote} rev-parse main) = $(git -C {store} rev-parse main)"), timeout=60)
 
       with subtest("som's clan builds every deploy on its host; amy's leaves clan's default"):
           # memberA's store, as infra-space-clone-secrets makes it from a
