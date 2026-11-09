@@ -20,7 +20,10 @@
 # unit's journal, until infra starts the unit again; the path unit pushes
 # a commit on its own, and, fired by clan's commits mid-run, leaves the
 # store to the run (whose push takes them up) instead of failing on clan's
-# half-written store or timing out waiting for it.
+# half-written store or timing out waiting for it. On memberA (som,
+# buildOnHost) the wrapper hands `clan machines update` to the stub with
+# `--build-host localhost` unless the caller named a build host, and
+# leaves other subcommands, and memberB's, as they are.
 # Each member has a software TPM: infra makes its age identity on it in
 # the guest and decrypts with it; `tenant` on the host can neither read
 # that identity nor, with a copy, use it (no access to the TPM); with the
@@ -155,6 +158,8 @@ let
         enable = true;
         # som (memberA) runs the agent; amy (memberB) is the plain backup.
         hermes = me == "memberA";
+        # som (memberA) builds every deploy itself; amy (memberB) does not.
+        buildOnHost = me == "memberA";
         member = me;
         meshInterface = "eth1";
         members = lib.genAttrs memberNames (m: {
@@ -181,7 +186,8 @@ let
             }
           )
           # the real clan-cli needs the fleet's flake; the wrapper around it
-          # is what is tested. `clan slow-commit` writes and commits vars
+          # is what is tested. The stub records its argv in ~/clan-argv
+          # (one line each). `clan slow-commit` writes and commits vars
           # slowly, as `clan vars generate` does, so the push unit fires
           # mid-run, and holds the wrapper's lock (~10 s) longer than the
           # push unit's start timeout, cut to 5 s here (5 min in
@@ -192,6 +198,7 @@ let
               systemd.services.infra-space-secrets-push.serviceConfig.TimeoutStartSec = lib.mkForce "5s";
               infraSpace.clanPackage = pkgs.writeShellScriptBin "clan" ''
                 set -eu
+                printf '%s\n' "$@" > "$HOME/clan-argv"
                 [ "''${1:-}" = slow-commit ] || exit 0
                 cd "$CLAN_AGE_STORE_DIR"
                 export PATH=${pkgs.git}/bin:$PATH
@@ -487,6 +494,31 @@ pkgs.testers.runNixOSTest {
           guest_root(m, "sh -c '! systemctl is-failed --quiet infra-space-secrets-push.service'")
           out = guest_root(m, f"journalctl -o cat -u infra-space-secrets-push.service --since @{since}")
           assert "Starting" in out and "Failed" not in out and "timeout" not in out.lower(), out
+
+      with subtest("som's clan builds every deploy on its host; amy's leaves clan's default"):
+          # memberA's store, as infra-space-clone-secrets makes it from a
+          # repo without commits (memberB's is the one above)
+          remote = "/home/infra/secrets-remote.git"
+          store = "/home/infra/clan-secrets"
+          guest(memberA, f"git init --quiet --bare --initial-branch=main {remote} && git clone --quiet {remote} {store} 2>/dev/null && git -C {store} symbolic-ref HEAD refs/heads/main")
+
+          # what the real clan-cli gets from the wrapper
+          def argv(m, args):
+              guest(m, f"rm -f ~/clan-argv && clan {args}")
+              return guest(m, "cat ~/clan-argv").splitlines()
+
+          on_host = ["--build-host", "localhost"]
+          assert argv(memberA, "machines update foo") == ["machines", "update", *on_host, "foo"]
+          assert argv(memberA, "m u foo bar") == ["m", "u", *on_host, "foo", "bar"]
+          assert argv(memberA, "machines update -- foo") == ["machines", "update", *on_host, "--", "foo"]
+          # a build host the caller names stays the only one
+          assert argv(memberA, "machines update --build-host x foo") == ["machines", "update", "--build-host", "x", "foo"]
+          assert argv(memberA, "machines update foo --build-host=x") == ["machines", "update", "foo", "--build-host=x"]
+          # other subcommands as they are
+          assert argv(memberA, "vars list foo") == ["vars", "list", "foo"]
+          assert argv(memberA, "machines build foo") == ["machines", "build", "foo"]
+          # amy (option off): nothing added
+          assert argv(memberB, "machines update foo") == ["machines", "update", "foo"]
 
       with subtest("afk as infra: runs, finds its keys, no web tools"):
           import json

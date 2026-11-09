@@ -65,6 +65,14 @@
       always-on hermes agent (./hermes.nix, with the p0 and TeamClaude
       keys as credentials), and its dashboard is published by this host's
       nginx (./dashboard.nix); other members are the plain backup.
+    - Where hyper.infraSpace.buildOnHost is set (som), every `clan
+      machines update` in the guest builds here: its `clan` wrapper
+      (./guest.nix) adds `--build-host localhost` unless the caller names a
+      build host, and the guest's builds are this host's nix-daemon's, so
+      the closures are built on this host and uploaded to the targets
+      (not built on each target, clan's default). This host must not
+      offload them in turn (som: no nix.buildMachines; it is the fleet's
+      remote builder itself).
 
   Teardown (disabling infra-space, or `nixos-container destroy
   infra-space`): hermes' locked config pins entries of the agent's home
@@ -166,6 +174,12 @@ in
       type = lib.types.bool;
       default = false;
       description = "Run the always-on hermes infra agent in the guest (./hermes.nix). On som only; other members are a plain backup of the same environment (afk, tools, identities).";
+    };
+
+    buildOnHost = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Make every `clan machines update` in the guest build on this host (`--build-host localhost` through the guest's nix-daemon socket, i.e. this host's daemon) and upload the closures to the targets, unless the caller passes `--build-host`. On som only, the fleet's builder.";
     };
 
     guestModules = lib.mkOption {
@@ -356,6 +370,7 @@ in
             member
             sshPublicKey
             fleetCertAuthority
+            buildOnHost
             ;
           members = lib.mapAttrs (_: m: { inherit (m) address sshPort hostKey; }) cfg.members;
           credentials = lib.attrNames cfg.credentials;

@@ -101,6 +101,13 @@ yours:
   (cheap), or build it: `nix build .#nixosConfigurations.<m>.config.system.build.toplevel`.
 - Deploy what is pushed, from the checkout: `clan machines update <m>`.
   Deploy one machine, verify it, then the next.
+- Where deploys build: on som's container, every `clan machines update`
+  builds on som (the `clan` wrapper adds `--build-host localhost`, and
+  your nix builds are som's nix-daemon's) and uploads the closures to the
+  targets; the targets build nothing. Do not pass `--build-host`
+  yourself: a build host you name replaces som. On the other members
+  clan's default applies (each target builds its own system, unless the
+  inventory sets `deploy.buildHost`).
 - Missing vars: `clan machines update <m>` fails when <m> has vars not yet
   generated (generators run in bwrap, which your hardened session blocks).
   Do not work around it; ask Dave to generate them.

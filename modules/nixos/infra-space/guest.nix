@@ -154,9 +154,28 @@ let
   # The `clan` on PATH: the real one between a pull and a push of the
   # store, so every clan run starts from GitHub's vars and leaves its own
   # there. Fails loudly instead of running on a store out of sync.
+  # With buildOnHost (som), `clan machines update` builds here, which is
+  # the host's nix-daemon, and uploads the closures to the targets: the
+  # wrapper adds `--build-host localhost` unless the caller names one.
   clanWrapper = pkgs.writeShellApplication {
     name = "clan";
     text = ''
+      ${lib.optionalString cfg.buildOnHost ''
+        # clan's top-level parser takes no options: the subcommand is
+        # always $1 $2 (with their aliases m, u).
+        case "''${1:-} ''${2:-}" in
+          "machines update" | "machines u" | "m update" | "m u")
+            named=0
+            for arg in "''${@:3}"; do
+              case "$arg" in
+                --build-host | --build-host=*) named=1 ;;
+              esac
+            done
+            # right after the subcommand, so a `--` later stays last
+            [ "$named" = 1 ] || set -- "$1" "$2" --build-host localhost "''${@:3}"
+            ;;
+        esac
+      ''}
       store=''${CLAN_AGE_STORE_DIR:?CLAN_AGE_STORE_DIR is not set}
       # The sync's lock for the whole run (pull, clan, push), waited for:
       # the push unit, fired by clan's commits, skips instead of running
@@ -341,6 +360,11 @@ in
     extraHosts = lib.mkOption {
       type = lib.types.lines;
       description = "The host's /etc/hosts additions (`<machine>.d` from clan yggdrasil).";
+    };
+    buildOnHost = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Make the `clan` wrapper pass `--build-host localhost` to every `clan machines update` that names no build host (the host's hyper.infraSpace.buildOnHost).";
     };
     clanPackage = lib.mkOption {
       type = lib.types.package;
