@@ -29,12 +29,15 @@
       four share: the cap works per tool (_prune_toolsets_stripped_by_
       disabled), so a composite like `debugging` would take terminal and
       file with it. Checkpoints off.
-    - skills: the infra skill (./hermes-skill), and of the bundled ones
-      only systematic-debugging and codebase-inspection: the rest of what
-      the package ships is disabled, read from its source at eval time
-      (hermes has no allowlist), but for hermes' essential hermes-agent,
+    - skills: the infra skill (./hermes-skill) and the nightly bump's
+      (./nixpkgs-bump), and of the bundled ones only systematic-debugging
+      and codebase-inspection: the rest of what the package ships is
+      disabled, read from its source at eval time (hermes has no
+      allowlist), but for hermes' essential hermes-agent,
       which stays on (under OAuth the prompt calls it claude-code; the
       bundled claude-code skill is another one, disabled).
+    - the nightly nixpkgs bump (./nixpkgs-bump.nix): a timer that starts
+      the agent with ./nixpkgs-bump/SKILL.md; here only, so on som only.
 
   Inference: Claude Opus 5.5 through TeamClaude (the model) with the
   shared client key (../teamclaude-api-key.nix, booked as `hyperconfig`),
@@ -141,12 +144,11 @@ let
     "hermes-webhook"
     "a2a"
   ];
-  # The skills that stay on: the infra skill (./hermes-skill, no bundled
-  # one) and two bundled ones. hermes has no allowlist, so every other
+  # The skills that stay on: ours (nixSkills, no bundled one has their
+  # names) and two bundled ones. hermes has no allowlist, so every other
   # skill the package ships is disabled, a hermes update's new ones
   # included.
-  allowedSkills = [
-    "infra-space"
+  allowedSkills = map (s: s.passthru.skillName) nixSkills ++ [
     "systematic-debugging"
     "codebase-inspection"
   ];
@@ -213,11 +215,29 @@ let
     );
   };
 
+  bumpSkill = hlib.mkAgentSkill pkgs {
+    name = "nixpkgs-bump";
+    src = pkgs.writeTextDir "SKILL.md" (
+      lib.replaceStrings [ "@MEMBER@" ] [ config.infraSpace.member ] (
+        builtins.readFile ./nixpkgs-bump/SKILL.md
+      )
+    );
+  };
+
+  # The skill roots built here: the agent's skills.external_dirs.
+  nixSkills = [
+    skill
+    bumpSkill
+  ];
+
   dashboardPort = hlib.dashboardPortFor user;
   proxyUser = "infra-space-dashboard";
 in
 {
-  imports = [ inputs.hyperhermes.nixosModules.core ];
+  imports = [
+    inputs.hyperhermes.nixosModules.core
+    ./nixpkgs-bump.nix
+  ];
 
   # For ./test.nix, which checks hermes' own view against them.
   options.infraSpace.hermes.skills = lib.mkOption {
@@ -228,6 +248,7 @@ in
       allowed = allowedSkills;
       essential = essentialSkills;
       bundled = bundledSkills;
+      nix = map (s: s.passthru.skillName) nixSkills;
     };
   };
 
@@ -308,7 +329,7 @@ in
             P0_API_KEY = credential "p0-api-key";
             ANTHROPIC_TOKEN = credential "teamclaude-api-key";
           };
-          skillDirs = [ "${skill}/share/skills" ];
+          skillDirs = map (s: "${s}/share/skills") nixSkills;
           settings = {
             terminal.timeout = 3600;
             platform_toolsets = lib.genAttrs platforms (_: allowedToolsets);

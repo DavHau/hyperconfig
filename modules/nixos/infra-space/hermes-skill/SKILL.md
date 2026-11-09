@@ -88,12 +88,31 @@ yours:
 
 ## Implementation work goes to subagents
 
+You orchestrate; subagents (`delegate_task`) investigate and implement,
+so you stay free for Dave's next request.
+
+- Hand off immediately: brief with what you already know, let the
+  subagent dig. Do not wait for a "go" on what Dave already asked for;
+  several requests, several subagents in parallel.
 - Do a change yourself only when it is a few lines. Anything larger goes
-  to a subagent working in its own jj workspace
-  (`jj workspace add ../hyperconfig-<topic> -r main@origin`), never in the
-  main checkout. Clean up with `jj workspace forget` once it has landed.
-- Larger changes get reviewed by an independent agent (one that did not
-  write the change) before they are pushed.
+  to a subagent in its own jj workspace, created by you before dispatch:
+  `jj git fetch && jj workspace add ../hyperconfig-<topic> -r main@origin`.
+  Never the main checkout, not even for a quick look.
+- Every brief starts with the workspace rule: `cd` into the workspace
+  first, never touch `/home/infra/hyperconfig` or other workspaces (a
+  subagent's terminal starts in the main checkout). The subagent
+  implements, runs the checks and `jj describe`; it never runs
+  `jj bookmark set`, `jj git push` or `clan`.
+- Larger changes get reviewed by an independent, read-only subagent (one
+  that did not write the change) in the same workspace: verdict approve
+  or request changes, findings with file:line. Push only on approve;
+  send requested changes back to an implementer.
+- Land it yourself, from the workspace: rebase on `main@origin` if it
+  moved and check again, `jj bookmark set main -r @`,
+  `jj git push --bookmark main`, deploy and verify (below), then
+  `jj workspace forget <name>` and remove the directory. Never for the
+  nightly bump: it merges but never deploys (below), and neither do you
+  on its behalf unless Dave asks.
 - If you have no way to start a subagent, stop and tell Dave. Do not
   fall back to doing the larger change yourself.
 
@@ -135,6 +154,19 @@ mid-command. Expect either. After it comes
 back, verify with `ssh @MEMBER@.d readlink /run/current-system` and check
 the container's own services. If you cannot afford to lose the session
 (a long chain of steps), deploy @MEMBER@ from the other instance instead.
+
+The restart kills the `clan machines update @MEMBER@` client (exit 143)
+while the switch goes on. Before deploying, note the current
+`readlink /run/current-system` and send the client's output to a file in
+the scratch directory; afterwards judge from that log and from
+`ssh @MEMBER@.d readlink /run/current-system`, never from the exit code.
+
+## The nightly nixpkgs bump
+
+A timer starts you on @MEMBER@ every night with the `nixpkgs-bump` skill
+(Nix's, in `modules/nixos/infra-space/nixpkgs-bump.nix`): bump, build
+every machine, reviews, merge to main, no deploy. Its reports are in
+`~/nixpkgs-bump/`. When Dave asks for a bump, follow that skill.
 
 ## The other instance
 

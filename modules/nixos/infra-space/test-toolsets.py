@@ -2,7 +2,8 @@
 run with hermes' venv python in the gateway's environment, as infra. Prints
 the toolsets of every platform hermes knows (and acp), the tool names the
 cli platform's agent gets, the skills disabled for cli, the skills the
-agent's skills_list offers and the ones hermes never disables."""
+agent's skills_list offers, the ones hermes never disables and the skills
+of the Nix skill roots (skills.external_dirs)."""
 
 import json
 
@@ -11,7 +12,7 @@ from hermes_cli import plugins
 plugins.discover_plugins()
 
 import model_tools  # noqa: E402
-from agent.skill_utils import ESSENTIAL_SKILLS, get_disabled_skill_names  # noqa: E402
+from agent.skill_utils import ESSENTIAL_SKILLS, get_disabled_skill_names, get_external_skills_dirs  # noqa: E402
 from hermes_cli.config import load_config  # noqa: E402
 from hermes_cli.platforms import PLATFORMS  # noqa: E402
 from hermes_cli.tools_config import _get_platform_tools  # noqa: E402
@@ -36,4 +37,5 @@ print(json.dumps({
     "skills_viewable": viewable,
     "skills_all": sorted(s["name"] for s in find_all_skills(skip_disabled=True)),
     "skills_essential": sorted(ESSENTIAL_SKILLS),
+    "skills_external": sorted(p.parent.name for d in get_external_skills_dirs() for p in d.glob("*/SKILL.md")),
 }))

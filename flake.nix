@@ -297,6 +297,11 @@
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
             inherit inputs;
           };
+        # The nightly bump's pre-push guard in a scratch repo, with stubs
+        # for GitHub and the prefetch (no network).
+        nixpkgs-bump-guard = import ./modules/nixos/infra-space/nixpkgs-bump/guard-test.nix {
+          pkgs = nixpkgs.legacyPackages.x86_64-linux;
+        };
       };
     };
 }

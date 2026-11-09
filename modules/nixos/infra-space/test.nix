@@ -649,7 +649,7 @@ pkgs.testers.runNixOSTest {
           # core's `maps` (web fetching) next to the module's list
           assert {"maps", "apple-notes", "xurl"} <= set(got["skills_disabled"]), got["skills_disabled"]
           assert "systematic-debugging" not in got["skills_disabled"], got["skills_disabled"]
-          # of the package's bundled skills and the infra skill, the allowlist
+          # of the package's bundled skills and ours (Nix's), the allowlist
           # stays enabled, and hermes' essential ones (hermes-agent), which
           # must stay off the raw list too: skill_view checks that one
           skills = json.loads('${builtins.toJSON nodes.memberA.containers.infra-space.config.infraSpace.hermes.skills}')
@@ -657,11 +657,16 @@ pkgs.testers.runNixOSTest {
           essential = set(skills["essential"])
           assert set(got["skills_essential"]) == essential, got["skills_essential"]
           assert not (essential & set(got["skills_disabled_raw"])), got["skills_disabled_raw"]
-          enabled = (set(skills["bundled"]) | {"infra-space"}) - set(got["skills_disabled"])
+          # ours, the Nix skill roots (./hermes.nix nixSkills), are exactly
+          # what hermes finds in its external dirs
+          ours = set(skills["nix"])
+          assert set(got["skills_external"]) == ours, got["skills_external"]
+          assert "nixpkgs-bump" in ours, sorted(ours)
+          enabled = (set(skills["bundled"]) | ours) - set(got["skills_disabled"])
           assert enabled == allowed | essential, sorted(enabled)
           # hermes' own catalog, so skills the package ships beyond its
           # source's show up too
-          rest = set(got["skills_all"]) - set(got["skills_disabled"]) - {"infra-space"}
+          rest = set(got["skills_all"]) - set(got["skills_disabled"]) - ours
           assert rest <= allowed | essential, sorted(rest)
           # skills_list offers the allowlist, none of the others, and
           # skill_view serves every one it offers
@@ -673,6 +678,73 @@ pkgs.testers.runNixOSTest {
           out = guest(memberA, "hermes chat -Q -q ping")
           assert "locked-pong" in out, out
           assert "Bearer test-p0-token" in guest_root(memberA, "cat ${llmRecord}")
+
+      with subtest("the nightly bump: memberA's timer only; a run without a verdict fails"):
+          memberB.fail("nixos-container run infra-space -- systemctl cat nixpkgs-bump.timer")
+          memberB.fail("nixos-container run infra-space -- systemctl cat nixpkgs-bump.service")
+          guest_root(memberA, "systemctl is-active nixpkgs-bump.timer")
+          # 01:30 at Dave's: the zone is part of the calendar, and the
+          # guest's tzdata resolves it (01:30 +07 is 18:30 UTC)
+          timer = guest_root(memberA, "systemctl show -p TimersCalendar --value nixpkgs-bump.timer")
+          assert "01:30:00 Asia/Bangkok" in timer, timer
+          cal = guest_root(memberA, "systemd-analyze calendar '*-*-* 01:30:00 Asia/Bangkok'")
+          assert "18:30:00 UTC" in cal, cal
+          # it follows the gateway without being restarted with it, and a
+          # switch does not start it
+          deps = guest_root(memberA, "systemctl show -p Wants -p Requires -p After nixpkgs-bump.service")
+          assert "Wants=hermes-agent-infra.service" in deps, deps
+          assert "Requires=hermes-agent-infra.service" not in deps, deps
+          assert "hermes-agent-infra.service" in deps.split("After=")[1], deps
+          unit = guest_root(memberA, "systemctl cat nixpkgs-bump.service")
+          assert "X-RestartIfChanged=false" in unit, unit
+          # the pre-push guard is on infra's PATH (the agent's terminal),
+          # and refuses outside a bump workspace (its offline test is the
+          # nixpkgs-bump-guard check)
+          assert guest(memberA, "command -v nixpkgs-bump-guard").strip() == "/run/current-system/sw/bin/nixpkgs-bump-guard"
+          code, out = guest(memberA, "cd /home/infra && nixpkgs-bump-guard 2>&1", check=False)
+          assert code != 0 and "not in a bump workspace" in out, (code, out)
+          # the verdict is the log's last non-empty line, exactly (hermes
+          # -Q's trailing `session_id:` line aside)
+          for text, ok in [("x\\nNIXPKGS-BUMP: merged\\n\\nsession_id: 20261110_013000_abc\\n", True),
+                           ("NIXPKGS-BUMP: unchanged\\n", True),
+                           ("NIXPKGS-BUMP: failed\\nsession_id: x\\n", False),
+                           ("NIXPKGS-BUMP: merged\\nmore\\nsession_id: x\\n", False),
+                           ("NIXPKGS-BUMP: merged\\nsession_id: x y\\n", False),
+                           ("session_id: x\\n", False),
+                           ("", False)]:
+              code, out = guest(memberA, f"printf '{text}' > /tmp/v && nixpkgs-bump-verdict /tmp/v", check=False)
+              assert (code == 0) == ok, (text, code, out)
+          guest(memberA, "rm /tmp/v")
+          # no checkout (no GitHub here): the condition skips the run
+          guest_root(memberA, "systemctl start nixpkgs-bump.service")
+          guest_root(memberA, "test ! -d /home/infra/nixpkgs-bump")
+          guest(memberA, "mkdir /home/infra/hyperconfig")
+          # a second client while one holds the lock starts nothing
+          guest(memberA, "mkdir -m 700 /home/infra/nixpkgs-bump && touch /home/infra/nixpkgs-bump/.lock")
+          before = int(guest_root(memberA, "cat ${llmRecord} | wc -l").strip())
+          code, _ = memberA.execute(
+              "nixos-container run infra-space -- "
+              "flock /home/infra/nixpkgs-bump/.lock systemctl start nixpkgs-bump.service"
+          )
+          assert code != 0, code
+          journal = guest_root(memberA, "journalctl -u nixpkgs-bump.service")
+          assert "another run holds" in journal, journal
+          assert int(guest_root(memberA, "cat ${llmRecord} | wc -l").strip()) == before
+          guest_root(memberA, "systemctl reset-failed nixpkgs-bump.service")
+          # the stub's answer has no verdict as its last line: failed
+          code, _ = memberA.execute("nixos-container run infra-space -- systemctl start nixpkgs-bump.service")
+          assert code != 0, code
+          report = guest(memberA, "cat /home/infra/nixpkgs-bump/*.log")
+          assert "locked-pong" in report, report
+          assert int(guest_root(memberA, "cat ${llmRecord} | wc -l").strip()) > before
+          journal = guest_root(memberA, "journalctl -u nixpkgs-bump.service")
+          assert "last line: " in journal, journal
+          # hermes' own trailing session_id line is never taken for the verdict
+          assert "last line: session_id" not in journal, journal
+          # umask 077: the report is infra's alone
+          assert guest(memberA, "stat -c %a /home/infra/nixpkgs-bump/*.log").split() == ["600"]
+          guest(memberA, "rm -r /home/infra/hyperconfig /home/infra/nixpkgs-bump")
+          guest_root(memberA, "systemctl reset-failed nixpkgs-bump.service")
 
       with subtest("the dashboard: som's nginx from the host, refused to a LAN peer, none on amy"):
           origin = "--resolve ${dashboardHost}:80:127.0.0.1 http://${dashboardHost}"
