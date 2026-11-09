@@ -342,22 +342,6 @@
         "type": "github"
       }
     },
-    "easytier": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1753752647,
-        "narHash": "sha256-RhPoogOGTaItlinEhMGZtFJsaC947TtuGk25iV5LMZo=",
-        "owner": "EasyTier",
-        "repo": "EasyTier",
-        "rev": "2ec88da82329db26344679573783106bb210d60d",
-        "type": "github"
-      },
-      "original": {
-        "owner": "EasyTier",
-        "repo": "EasyTier",
-        "type": "github"
-      }
-    },
     "envfs": {
       "inputs": {
         "flake-parts": [
@@ -1783,7 +1767,6 @@
         "clan-community": "clan-community",
         "clan-core": "clan-core",
         "disko": "disko",
-        "easytier": "easytier",
         "envfs": "envfs",
         "fast-nix-gc": "fast-nix-gc",
         "flake-compat": "flake-compat",

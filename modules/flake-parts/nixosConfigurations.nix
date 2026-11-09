@@ -70,7 +70,6 @@ in {
 
         modules = {
           nix-cache = ../../modules/clan/nix-cache;
-          # easytier = ../../modules/clan/easytier;
           wireguard = ../../modules/clan/wireguard;
           ncps = inputs.ncps + "/clanServices/ncps";
           cctl = ../../modules/clan/cctl;
@@ -377,18 +376,6 @@ in {
               };
               roles.peer.machines = lib.genAttrs [ "amy" "vit" "som" ] (_: { });
             };
-            # easytier
-            # dave = {
-            #   module.name = "easytier";
-            #   module.input = "self";
-            #   # roles.peer.settings.domain = "dave";
-            #   roles.peer.settings.foreignHostNames = [
-            #     "ashburn1"
-            #     "nuremberg1"
-            #   ];
-            #   roles.peer.tags.all = {};
-            # };
-
             # ncps = {
             #   module.name = "ncps";
             #   module.input = "self";

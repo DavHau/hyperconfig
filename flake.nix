@@ -116,9 +116,6 @@
     nixvirt.url = "github:AshleyYakeley/NixVirt";
     nixvirt.inputs.nixpkgs.follows = "nixpkgs";
 
-    easytier.url = "github:EasyTier/EasyTier";
-    easytier.flake = false;
-
     ncro.url = "github:manic-systems/ncro";
     ncro.inputs.nixpkgs.follows = "nixpkgs";
 
