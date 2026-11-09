@@ -9,7 +9,9 @@ You run in the infra-space container on @MEMBER@. infra-space exists on
 more than one member machine; each instance is an independent agent with
 its own checkout, sessions and memory. You have the same rights on every
 instance: root over ssh on every clan machine, write access to the
-hyperconfig repository, and the age key that decrypts every clan secret.
+hyperconfig repository, and an age key that decrypts every clan secret.
+That key is bound to this container's TPM (`~/.config/age/identities` is
+only a handle to it): it works here only and can never be copied out.
 Treat that as what it is: one wrong command takes a machine down.
 
 ## The checkout
@@ -31,6 +33,52 @@ Treat that as what it is: one wrong command takes a machine down.
      commit.
 - Never force-push and never rewrite commits that are already on
   `main@origin`.
+
+## The secrets store
+
+- clan's vars are encrypted with clan's age backend into an external
+  store: the git checkout `~/clan-secrets` (`CLAN_AGE_STORE_DIR`) of the
+  private repository `DavHau/hyperconfig-secrets`, branch `main`. It is
+  not part of the hyperconfig checkout and never goes into it.
+- clan commits there itself whenever it writes a var. You do not push it:
+  the `clan` command here is a wrapper that rebases the store onto GitHub's
+  `main` before running clan and pushes its new commits after;
+  `infra-space-secrets-push.service` does the same on every commit and
+  every 5 minutes. Never force-push it and never commit to it by hand.
+- The wrapper fails loudly instead of running on a store out of sync: when
+  the pull hits a conflict, when the push fails (clan's own exit status
+  is then replaced by a failure), and while
+  `infra-space-secrets-push.service` is failed. Do not work around it
+  (no calling the real clan-cli directly, no editing the store); find out
+  why (`journalctl -u infra-space-secrets-push`) and fix that. A conflict
+  is handled as below.
+
+## Secrets store conflict
+
+The wrapper or `infra-space-secrets-push` reported files of
+`~/clan-secrets` that conflict with GitHub's `main`. That is one var
+encrypted twice: written here and, meanwhile, by the other instance or
+Dave. The rebase was aborted, so `main` is back at your local commits and
+nothing is lost. Keep upstream's version (the one on GitHub) and drop
+yours:
+
+1. `cd ~/clan-secrets && git rebase origin/main`; it stops at the conflict.
+2. For each conflicting file: `git checkout --ours -- <file>`, then
+   `git add <file>`. During a rebase `--ours` is the side being rebased
+   onto, i.e. upstream (`origin/main`); `--theirs` is your local commit.
+   Do not mix them up: `--theirs` would keep your version.
+3. `GIT_EDITOR=true git rebase --continue`; if it stops at another
+   conflict, repeat 2. A local commit that only held the discarded value
+   is dropped.
+4. `systemctl start infra-space-secrets-push`: it pushes what is left and
+   clears its failed state, which the wrapper refuses to run under. If it
+   fails again, read its journal before anything else.
+5. `clan vars check` and then `clan vars fix`, so the store is consistent
+   again.
+6. Redeploy every machine that received the discarded value
+   (`clan machines update <m>`, one at a time, as in Deploying): for a
+   per-machine var its machine, for a shared var all machines. Until
+   then they run with a value the store no longer has.
 
 ## Implementation work goes to subagents
 

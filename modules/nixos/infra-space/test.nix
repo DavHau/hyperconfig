@@ -10,6 +10,14 @@
 # /run/infra-space/secrets, 0400 infra, on the guest's own /run; `nix
 # build` works as infra; the guest sshd answers on the mesh address only;
 # both clones (hyperconfig, the secrets repo) fail softly without GitHub.
+# The clan vars store, with a bare repo in memberB's guest as GitHub and a
+# no-op stub as the real clan-cli (the wrapper itself is the production
+# one): the `clan` wrapper pushes a local commit; an upstream commit to the
+# same file makes it fail with the conflicting file and the runbook, no
+# rebase left in progress and the local commit intact, and the runbook
+# (./hermes-skill/SKILL.md) resolves it; a failed infra-space-secrets-push
+# makes it refuse until infra starts the unit again; the path unit pushes
+# a commit on its own.
 # Each member has a software TPM: infra makes its age identity on it in
 # the guest and decrypts with it; `tenant` on the host can neither read
 # that identity nor, with a copy, use it (no access to the TPM); with the
@@ -169,6 +177,9 @@ let
               networking.firewall.allowedTCPPorts = [ probePort ];
             }
           )
+          # the real clan-cli needs the fleet's flake; the wrapper around it
+          # is what is tested
+          { infraSpace.clanPackage = pkgs.writeShellScriptBin "clan" "exit 0"; }
         ]
         # No internet here: p0 is the stub model (the p0 credential still
         # goes along), and the check of the toolsets; where hermes runs.
@@ -216,7 +227,6 @@ let
         "test-vars/infra-space-ssh/id_ed25519" = secret (keys + "/infra-space");
         "test-vars/infra-space-github/id_ed25519" = secret (pkgs.writeText "github" "not a key\n");
         "test-vars/infra-space-secrets-github/id_ed25519" = secret (pkgs.writeText "secrets-github" "not a key\n");
-        "test-vars/infra-space-age/key.txt" = secret (pkgs.writeText "age" "not a key\n");
         "test-vars/infra-space-hostkey/ssh_host_ed25519_key" = secret (keys + "/hostkey-${me}");
         "test-vars/inference-api-key/token" = secret (pkgs.writeText "p0-token" "test-p0-token\n");
         "test-vars/teamclaude-api-key/key" = secret (pkgs.writeText "teamclaude-key" "sk-ant-oat01-test\n");
@@ -286,7 +296,7 @@ pkgs.testers.runNixOSTest {
 
       with subtest("credentials: 0400 infra on the guest's own /run"):
           for m in members.values():
-              for name in ["ssh", "github", "secrets-github", "sops-age"]:
+              for name in ["ssh", "github", "secrets-github"]:
                   out = guest_root(m, f"stat -c '%a %U %G' /run/infra-space/secrets/{name}").strip()
                   assert out == "400 infra infra", (name, out)
               out = guest_root(m, "findmnt -n -o TARGET,FSTYPE -T /run/infra-space/secrets/ssh").split()
@@ -298,7 +308,8 @@ pkgs.testers.runNixOSTest {
               guest_root(m, "test ! -e /run/infra-space/secrets/ssh-host-key")
               out = guest_root(m, "stat -c '%a %U' /run/infra-space/ssh_host_ed25519_key").strip()
               assert out == "600 root", out
-              assert guest(m, "echo $SOPS_AGE_KEY_FILE").strip() == "/run/infra-space/secrets/sops-age"
+              assert guest(m, "echo $CLAN_AGE_STORE_DIR").strip() == "/home/infra/clan-secrets"
+              assert "CLAN_AGE_STORE_DIR=/home/infra/clan-secrets" in guest_root(m, "systemctl show -p Environment infra-space-secrets-push.service")
 
       with subtest("the members reach each other's container"):
           reach_each_other()
@@ -357,7 +368,7 @@ pkgs.testers.runNixOSTest {
 
       with subtest("without GitHub the clones give up softly"):
           for m in members.values():
-              for unit, checkout in [("infra-space-clone", "hyperconfig"), ("infra-space-clone-secrets", "hyperconfig-secrets")]:
+              for unit, checkout in [("infra-space-clone", "hyperconfig"), ("infra-space-clone-secrets", "clan-secrets")]:
                   guest_root(m, f"test ! -e /home/infra/{checkout}")
                   guest_root(m, f"journalctl -u {unit}.service | grep -q 'trying again in 15 min'")
                   guest_root(m, f"systemctl is-active {unit}.timer")
@@ -379,6 +390,64 @@ pkgs.testers.runNixOSTest {
               m.fail(f"runuser -u tenant -- env {host_age} age -d -i /tmp/identities /tmp/secret.age")
               assert m.succeed(f"{host_age} age -d -i /tmp/identities /tmp/secret.age").strip() == "tpm-secret"
               m.succeed("rm /tmp/identities /tmp/secret.age")
+
+      with subtest("the clan wrapper keeps the secrets store in sync, failing loudly"):
+          m = memberB
+          store = "/home/infra/clan-secrets"
+          remote = "/home/infra/secrets-remote.git"
+          upstream = "/home/infra/upstream"
+
+          def tip(repo):
+              return guest(m, f"git -C {repo} rev-parse main").strip()
+
+          def clan_fails():
+              rc, out = guest(m, "clan 2>&1", check=False)
+              assert rc != 0, out
+              return out
+
+          # the timer and the path unit stay out of the wrapper's part
+          guest_root(m, "systemctl stop infra-space-secrets-push.path infra-space-secrets-push.timer")
+          # GitHub's repo, a second writer's clone of it, and the checkout
+          # as infra-space-clone-secrets makes it
+          guest(m, f"git init --quiet --bare --initial-branch=main {remote}")
+          guest(m, f"git clone --quiet {remote} {upstream} 2>/dev/null; cd {upstream} && echo first > var && git add var && git commit --quiet -m first && git push --quiet origin main")
+          guest(m, f"git clone --quiet --branch main {remote} {store} && cd {store} && jj git init --colocate")
+
+          # clan's commit goes up with the run
+          guest(m, f"cd {store} && echo local1 > var && git commit --quiet -am local1")
+          guest(m, "clan")
+          assert tip(remote) == tip(store)
+
+          # the same var written upstream and here
+          guest(m, f"cd {upstream} && git pull --quiet --ff-only origin main && echo upstream > var && git commit --quiet -am upstream && git push --quiet origin main")
+          guest(m, f"cd {store} && echo local2 > var && git commit --quiet -am local2")
+          local = tip(store)
+          out = clan_fails()
+          assert "  var\n" in out and "Secrets store conflict" in out, out
+          guest(m, f"cd {store} && test ! -e .git/rebase-merge && test ! -e .git/rebase-apply && test -z \"$(git status --porcelain)\"")
+          assert tip(store) == local
+          assert guest(m, f"cat {store}/var").strip() == "local2"
+          # the runbook: keep upstream's version, `--ours` in a rebase
+          guest(m, f"cd {store} && ! git rebase origin/main && git checkout --ours -- var && git add var && GIT_EDITOR=true git rebase --continue")
+          assert guest(m, f"cat {store}/var").strip() == "upstream"
+          guest(m, "clan")
+          assert tip(remote) == tip(store)
+
+          # a failed push unit blocks the wrapper until it succeeds again
+          guest(m, f"git -C {store} remote set-url origin /nonexistent")
+          m.fail("nixos-container run infra-space -- systemctl start infra-space-secrets-push.service")
+          guest_root(m, "systemctl is-failed infra-space-secrets-push.service")
+          guest(m, f"git -C {store} remote set-url origin {remote}")
+          out = clan_fails()
+          assert "infra-space-secrets-push.service failed" in out and "Secrets store conflict" in out, out
+          guest(m, "systemctl start infra-space-secrets-push.service")
+          guest(m, "clan")
+
+          # a commit made without the wrapper goes up through the path unit
+          guest_root(m, "systemctl start infra-space-secrets-push.path infra-space-secrets-push.timer")
+          guest(m, f"cd {store} && echo local3 > var && git commit --quiet -am local3")
+          m.wait_until_succeeds("nixos-container run infra-space -- runuser -u infra -- bash -lc "
+                                + shlex.quote(f"test $(git -C {remote} rev-parse main) = $(git -C {store} rev-parse main)"), timeout=60)
 
       with subtest("afk as infra: runs, finds its keys, no web tools"):
           import json

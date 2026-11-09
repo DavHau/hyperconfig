@@ -69,6 +69,17 @@ in {
         meta.name = "DavClan";
         meta.domain = "d";
 
+        # Vars are encrypted with clan's age backend, decryptable only by
+        # the TPM age identities of the infra-space containers on som and
+        # amy (../nixos/infra-space/age-recipients.nix). The encrypted store
+        # is not in this repo: it is DavHau/hyperconfig-secrets, checked out
+        # in each container at CLAN_AGE_STORE_DIR and kept in sync by its
+        # `clan` wrapper (../nixos/infra-space/guest.nix).
+        vars.settings.secretStore = "age";
+        vars.settings.age.externalStore = true;
+        vars.settings.recipients.default = lib.attrValues (import ../nixos/infra-space/age-recipients.nix);
+        secrets.age.plugins = [ "age-plugin-tpm" ];
+
         modules = {
           nix-cache = ../../modules/clan/nix-cache;
           wireguard = ../../modules/clan/wireguard;

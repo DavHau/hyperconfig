@@ -84,25 +84,26 @@
     infra-space-secrets-github
                          shared: GitHub deploy key of
                          DavHau/hyperconfig-secrets, the clan vars' encrypted
-                         store (deploy keys are per repository, so not the
-                         one above); credential `secrets-github`. Manual: add
+                         store (the guest's ~/clan-secrets, ./guest.nix;
+                         deploy keys are per repository, so not the one
+                         above); credential `secrets-github`. Manual: add
                          its public value on that repository as a deploy key
                          with write access.
-    infra-space-age      shared: age key; credential `sops-age`. Manual:
-                         `clan secrets users add infra-space <its pub>`,
-                         add it to group admins, `clan vars fix`.
     infra-space-hostkey  per member: the guest's ssh host key, pinned by
                          the other members and Dave's launcher from its
                          public value
     TPM age identity     per member, not a clan var: made in the guest and
-                         sealed to this host's TPM, it never leaves either.
+                         sealed to this host's TPM, it never leaves either;
+                         the clan vars' only decrypting identities (clan
+                         finds it at ~/.config/age/identities).
                          /home/infra/.config/age/identities in the guest
                          (here under /var/lib/infra-space/home, 0700 infra).
                          Manual, as infra in the container, no PIN:
                            mkdir -p ~/.config/age
                            age-plugin-tpm --generate -o ~/.config/age/identities
                          and add `age-plugin-tpm -y ~/.config/age/identities`
-                         (its recipient) to the clan's age recipients.
+                         (its recipient) to ./age-recipients.nix, then
+                         `clan vars fix`.
 */
 {
   config,
@@ -291,16 +292,6 @@ in
         runtimeInputs = [ pkgs.openssh ];
         script = sshKeygen "infra-space@DavHau/hyperconfig-secrets";
       };
-      infra-space-age = {
-        share = true;
-        files."key.txt".restartUnits = [ containerUnit ];
-        files.pub.secret = false;
-        runtimeInputs = [ pkgs.age ];
-        script = ''
-          age-keygen -o "$out"/key.txt 2>/dev/null
-          age-keygen -y "$out"/key.txt > "$out"/pub
-        '';
-      };
       infra-space-hostkey = {
         files.ssh_host_ed25519_key.restartUnits = [ containerUnit ];
         files."ssh_host_ed25519_key.pub".secret = false;
@@ -315,7 +306,6 @@ in
       ssh = vars.infra-space-ssh.files.id_ed25519.path;
       github = vars.infra-space-github.files.id_ed25519.path;
       secrets-github = vars.infra-space-secrets-github.files.id_ed25519.path;
-      sops-age = vars.infra-space-age.files."key.txt".path;
       # Inference for the guest's hermes (./hermes.nix) and afk (./afk.nix):
       # p0's token (../inference-api-key.nix) and the TeamClaude client key
       # (../teamclaude-api-key.nix), both shared vars of every member.

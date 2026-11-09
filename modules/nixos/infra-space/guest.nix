@@ -12,12 +12,26 @@
   is a system credential here, for guest units to take with
   LoadCredential=<name>; infra-space-secrets.service also installs each at
   /run/infra-space/secrets/<name>, owner infra, 0400, for the interactive
-  user and the tools it runs (ssh, git, clan, sops). /run is the guest's
+  user and the tools it runs (ssh, git, clan). /run is the guest's
   own tmpfs: nothing secret sits on a path bound from the host.
 
   TPM: /dev/tpmrm0 is the host's, which grants `infra` (only) access on
   it (./default.nix). infra's age identity, sealed to it, lives at
   ~/.config/age/identities: made here once per member, never copied out.
+  It decrypts the clan vars (their recipients: ./age-recipients.nix).
+
+  Clan vars store: clan's external age store, the git checkout
+  ~/clan-secrets of DavHau/hyperconfig-secrets (CLAN_AGE_STORE_DIR),
+  into which clan commits every var it writes. Both instances and Dave
+  write to it, so it is kept in sync with GitHub's main by
+  clan-secrets-sync: `pull` rebases local commits onto it, `push` pushes
+  them, never forced. Run by the `clan` on PATH (a wrapper: pull before,
+  push after the real clan) and by infra-space-secrets-push on every
+  commit and every 5 minutes, so commits made otherwise go up too. A
+  conflict (one var written on both sides) is never resolved here: the
+  rebase is aborted, the run fails and the push unit stays failed, which
+  makes the wrapper refuse until infra resolves it by hand
+  (./hermes-skill/SKILL.md, "Secrets store conflict").
 
   Inbound: the firewall admits the host's veth addresses (hostAddress,
   hostAddress6), on every port, and nothing else; sshd opens no port of
@@ -53,8 +67,108 @@ let
     };
     secrets = {
       repo = "${secretsHost}:DavHau/hyperconfig-secrets.git";
-      dir = "hyperconfig-secrets";
+      dir = "clan-secrets";
     };
+  };
+  secretsStore = "${home}/${checkouts.secrets.dir}";
+  pushUnit = "infra-space-secrets-push.service";
+  runbook = ''the infra-space skill (modules/nixos/infra-space/hermes-skill/SKILL.md), section "Secrets store conflict"'';
+
+  # The clan vars store's sync with GitHub (see the header); one run at a
+  # time (the wrapper and the push unit both run it).
+  secretsSync = pkgs.writeShellApplication {
+    name = "clan-secrets-sync";
+    runtimeInputs = [
+      pkgs.git
+      pkgs.openssh
+      pkgs.util-linux
+    ];
+    text = ''
+      store=''${CLAN_AGE_STORE_DIR:?CLAN_AGE_STORE_DIR is not set}
+      if ! cd "$store" 2>/dev/null; then
+        echo "clan-secrets-sync: no secrets store checkout at $store (infra-space-clone-secrets.service makes it)" >&2
+        exit 1
+      fi
+      export GIT_SSH_COMMAND="ssh -o BatchMode=yes"
+      exec 9>"$(git rev-parse --git-dir)/clan-secrets-sync.lock"
+      flock 9
+      # clan commits to HEAD; only main is synced.
+      if [ "$(git symbolic-ref -q HEAD || true)" != refs/heads/main ]; then
+        echo "clan-secrets-sync: $store is not on branch main; switch back to it (git switch main)" >&2
+        exit 1
+      fi
+
+      case "''${1:-}" in
+        pull)
+          # Exit 2: GitHub has no main yet; the first push makes it.
+          rc=0
+          git ls-remote --exit-code origin refs/heads/main >/dev/null || rc=$?
+          if [ "$rc" = 2 ]; then
+            exit 0
+          elif [ "$rc" != 0 ]; then
+            exit "$rc"
+          fi
+          # No `+`: a rewritten upstream main fails here instead of
+          # being followed.
+          git fetch --quiet origin refs/heads/main:refs/remotes/origin/main
+          if ! git rev-parse -q --verify refs/heads/main >/dev/null; then
+            # cloned while GitHub had no main: take it as it is now
+            git merge --quiet --ff-only refs/remotes/origin/main
+          elif ! git rebase --quiet refs/remotes/origin/main; then
+            if [ -e "$(git rev-parse --git-path rebase-merge)" ] || [ -e "$(git rev-parse --git-path rebase-apply)" ]; then
+              mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
+              git rebase --abort
+              {
+                echo "clan-secrets-sync: local commits in $store conflict with GitHub's main in:"
+                printf '  %s\n' "''${conflicts[@]}"
+                echo "The rebase was aborted: main is back at the local commits, nothing is lost."
+                echo ${lib.escapeShellArg "Resolve it by hand: ${runbook}."}
+              } >&2
+            fi
+            exit 1
+          fi
+          ;;
+        push)
+          git rev-parse -q --verify refs/heads/main >/dev/null || exit 0
+          if git rev-parse -q --verify refs/remotes/origin/main >/dev/null \
+            && [ "$(git rev-list --count refs/remotes/origin/main..refs/heads/main)" = 0 ]; then
+            exit 0
+          fi
+          git push --quiet origin refs/heads/main:refs/heads/main
+          ;;
+        *)
+          echo "usage: clan-secrets-sync pull|push" >&2
+          exit 2
+          ;;
+      esac
+    '';
+  };
+
+  # The `clan` on PATH: the real one between a pull and a push of the
+  # store, so every clan run starts from GitHub's vars and leaves its own
+  # there. Fails loudly instead of running on a store out of sync.
+  clanWrapper = pkgs.writeShellApplication {
+    name = "clan";
+    text = ''
+      if ${config.systemd.package}/bin/systemctl is-failed --quiet ${pushUnit}; then
+        {
+          echo "clan: ${pushUnit} failed (journalctl -u ${pushUnit}): the secrets store is out of sync with GitHub."
+          echo ${lib.escapeShellArg "Refusing to run. Fix it first: ${runbook}."}
+        } >&2
+        exit 1
+      fi
+      if ! ${lib.getExe secretsSync} pull; then
+        echo "clan: refusing to run on a secrets store out of sync with GitHub" >&2
+        exit 1
+      fi
+      rc=0
+      ${cfg.clanPackage}/bin/clan "$@" || rc=$?
+      if ! ${lib.getExe secretsSync} push; then
+        echo "clan: pushing the secrets store failed; its new commits are only in $CLAN_AGE_STORE_DIR" >&2
+        [ "$rc" != 0 ] || rc=1
+      fi
+      exit "$rc"
+    '';
   };
 
   aliasOf = member: "infra-space-${member}";
@@ -185,6 +299,12 @@ in
       type = lib.types.lines;
       description = "The host's /etc/hosts additions (`<machine>.d` from clan yggdrasil).";
     };
+    clanPackage = lib.mkOption {
+      type = lib.types.package;
+      default = inputs.clan-core.packages.${pkgs.stdenv.hostPlatform.system}.clan-cli;
+      defaultText = lib.literalExpression "inputs.clan-core.packages.\${system}.clan-cli";
+      description = "The real clan-cli the `clan` wrapper runs (a stub in ./test.nix).";
+    };
   };
 
   config = {
@@ -307,7 +427,8 @@ in
     '';
 
     environment.systemPackages = [
-      inputs.clan-core.packages.${pkgs.stdenv.hostPlatform.system}.clan-cli
+      clanWrapper
+      secretsSync
       pkgs.git
       pkgs.jujutsu
       pkgs.openssh
@@ -324,9 +445,9 @@ in
       "flakes"
     ];
 
-    # clan and sops decrypt with the space's age key, in logins and units.
-    environment.variables.SOPS_AGE_KEY_FILE = "${secretsDir}/sops-age";
-    systemd.globalEnvironment.SOPS_AGE_KEY_FILE = "${secretsDir}/sops-age";
+    # clan's external age store (the header), in logins and units.
+    environment.variables.CLAN_AGE_STORE_DIR = secretsStore;
+    systemd.globalEnvironment.CLAN_AGE_STORE_DIR = secretsStore;
 
     programs.git = {
       enable = true;
@@ -340,5 +461,53 @@ in
     systemd.timers.infra-space-clone = cloneTimer;
     systemd.services.infra-space-clone-secrets = cloneService checkouts.secrets;
     systemd.timers.infra-space-clone-secrets = cloneTimer;
+
+    # The store's safety net (the header): every commit, however made, and
+    # every 5 minutes. A failed run stays failed, and so blocks the `clan`
+    # wrapper, until a later one succeeds; infra may start it itself (the
+    # polkit rule below), as the conflict runbook in ./hermes-skill/SKILL.md
+    # does. Skipped until the checkout exists.
+    systemd.services.infra-space-secrets-push = {
+      description = "Sync infra's clan secrets store with GitHub";
+      wants = [ "network-online.target" ];
+      requires = [ "infra-space-secrets.service" ];
+      after = [
+        "network-online.target"
+        "infra-space-secrets.service"
+      ];
+      unitConfig.ConditionPathExists = "${secretsStore}/.git";
+      serviceConfig = {
+        Type = "oneshot";
+        User = "infra";
+        Group = "infra";
+        # in order, the push only after a successful pull
+        ExecStart = [
+          "${lib.getExe secretsSync} pull"
+          "${lib.getExe secretsSync} push"
+        ];
+        # a hung connection would keep it active and the triggers idle
+        TimeoutStartSec = "5min";
+      };
+    };
+    # HEAD's reflog: appended to by every commit, rebase and reset on it.
+    systemd.paths.infra-space-secrets-push = {
+      wantedBy = [ "paths.target" ];
+      pathConfig.PathChanged = "${secretsStore}/.git/logs/HEAD";
+    };
+    systemd.timers.infra-space-secrets-push = {
+      wantedBy = [ "timers.target" ];
+      timerConfig.OnCalendar = "*:0/5";
+    };
+    security.polkit.enable = true;
+    security.polkit.extraConfig = ''
+      polkit.addRule(function(action, subject) {
+        if (action.id == "org.freedesktop.systemd1.manage-units" &&
+            action.lookup("unit") == "${pushUnit}" &&
+            action.lookup("verb") == "start" &&
+            subject.user == "infra") {
+          return polkit.Result.YES;
+        }
+      });
+    '';
   };
 }
