@@ -47,7 +47,7 @@ in
     type = lib.types.attrsOf lib.types.str;
     default = { };
     example = {
-      vault = "/run/secrets/vars/per-machine/bam/vault-key/key";
+      vault = "/run/secrets/per-machine/bam/vault-key/key";
     };
     description = ''
       Encryption roots (dataset names) mapped to the absolute path of their

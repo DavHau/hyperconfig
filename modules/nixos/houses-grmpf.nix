@@ -1,13 +1,13 @@
 /*
   grmpf's nix-housing houses (see houses.nix): `house-slop` for coding agents,
-  `house-secure` for key-touching ops (deploys, sops, clan vars).
+  `house-secure` for key-touching ops (deploys, clan vars).
 
   Each house has its own HOME (~/houses/<name>) and XDG_RUNTIME_DIR, so the
   real files and sockets a house needs are symlinked into it at launch and
   granted by their real path (Landlock checks the resolved inode). A separate
   HOME also means an empty direnv allow-list: no .envrc auto-loads in a house.
 */
-{ config, lib, pkgs, ... }:
+{ config, lib, ... }:
 let
   home = config.users.users.grmpf.home;
   houseHome = "$NIX_HOUSING_HOUSE_HOME";
@@ -118,8 +118,6 @@ in
       '';
     };
 
-    secure.packages = [ pkgs.sops ];
-
     secure.capabilities = { housingLib, ... }: {
       imports = [ base ];
       landlock = {
@@ -129,7 +127,6 @@ in
         ];
         roDirs = [
           "${home}/.ssh"
-          "${home}/.config/sops/age"
           "${home}/.config/git"
           "${home}/.config/jj"
         ];
@@ -142,14 +139,13 @@ in
         connectTcpPorts = [ 22 443 ];
       };
       symlinks = {
-        "${houseHome}/.config/sops/age" = "${home}/.config/sops/age";
         "${houseHome}/.config/git" = "${home}/.config/git";
         "${houseHome}/.config/jj" = "${home}/.config/jj";
         "${houseRuntime}/ssh-agent" = "${realRuntime}/ssh-agent";
         "${houseRuntime}/ssh-tpm-agent.sock" = "${realRuntime}/ssh-tpm-agent.sock";
       };
       # Never run git hooks: a hook planted by an agent in a repo must not
-      # execute where the deploy and sops keys are reachable.
+      # execute where the deploy keys are reachable.
       execWrappers.noGitHooks = housingLib.dag.entryBetween [ "final" ] [ "profile" ] ''
         export GIT_CONFIG_COUNT=1
         export GIT_CONFIG_KEY_0=core.hooksPath

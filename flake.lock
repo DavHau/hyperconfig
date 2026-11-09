@@ -253,9 +253,7 @@
         "nixpkgs": [
           "nixpkgs"
         ],
-        "sops-nix": [
-          "sops-nix"
-        ],
+        "sops-nix": "sops-nix",
         "systems": "systems_2",
         "treefmt-nix": "treefmt-nix_3"
       },
@@ -1796,7 +1794,6 @@
         "ntop": "ntop",
         "retiolum": "retiolum",
         "sbox": "sbox",
-        "sops-nix": "sops-nix",
         "spaces": "spaces",
         "srvos": "srvos",
         "stylix": "stylix",
@@ -1823,15 +1820,16 @@
     "sops-nix": {
       "inputs": {
         "nixpkgs": [
+          "clan-core",
           "nixpkgs"
         ]
       },
       "locked": {
-        "lastModified": 1789890976,
-        "narHash": "sha256-GKwH3zpy7tartuJMG0Rv/xUsdetG1QLmTVv8UKgJLmA=",
+        "lastModified": 1792809984,
+        "narHash": "sha256-KV+CaZX7QS0hcdKxwGKehDb1jmUgx6lbkTPpaoIW5Nw=",
         "owner": "Mic92",
         "repo": "sops-nix",
-        "rev": "7214124c20c1542c90deb54af50e2f53ae02711f",
+        "rev": "442449fa7b1fe6c692d0103ac9fc8f9e82931cf3",
         "type": "github"
       },
       "original": {

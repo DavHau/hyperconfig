@@ -76,8 +76,9 @@ in
           lib.nameValuePair (unit user) {
             description = "inference endpoint token copy for ${user}";
             wantedBy = [ "multi-user.target" ];
-            # sops-install-secrets writes the var during activation, before
-            # any unit starts; the token file is there once the target runs.
+            # clan-core's age backend (nixosModules/clanCore/vars/secret/age.nix)
+            # decrypts the var in its setupSecrets activation snippet, before
+            # any unit (re)starts; the token file is there once the target runs.
             serviceConfig = {
               Type = "oneshot";
               RemainAfterExit = true;
@@ -101,8 +102,10 @@ in
           persist = true;
         };
         # Readable by the desktop user: the omp wrappers run unprivileged and read
-        # this at launch. An owner the machine doesn't declare makes
-        # sops-install-secrets abort every secret on the host (sops-nix#972).
+        # this at launch. The owner must exist on every importing machine: the
+        # age backend's decrypt script runs under `set -e` and chowns each file,
+        # so an unknown owner aborts it and leaves the host's remaining secrets
+        # undecrypted.
         files.token = {
           owner = if config.users.users ? grmpf then "grmpf" else "dave";
           mode = "0400";

@@ -1,6 +1,5 @@
 # Copied from hyperconfig modules/nixos/common.nix for the standalone guest
-# flake (a flake cannot import files outside its root). Two adaptations:
-# - clan.core.sops.defaultGroups dropped: no clan-core in this flake.
+# flake (a flake cannot import files outside its root). One adaptation:
 # - users.mutableUsers = false dropped: the VM's root console password was
 #   set imperatively; freezing the user DB would silently remove it.
 {

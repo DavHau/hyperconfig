@@ -63,8 +63,10 @@ in
         script = ''
           printf 'sk-ant-oat01-%s' "$(openssl rand -hex 32)" > "$out/key"
         '';
-        # An owner or group the machine doesn't declare makes sops-install-secrets
-        # abort every secret on the host (sops-nix#972).
+        # Owner and group must exist on every importing machine: the age
+        # backend's decrypt script (clan-core nixosModules/clanCore/vars/secret/age.nix)
+        # runs under `set -e` and chowns each file, so an unknown one aborts it
+        # and leaves the host's remaining secrets undecrypted.
         files.key = {
           inherit owner;
           group = "teamclaude-api-key";

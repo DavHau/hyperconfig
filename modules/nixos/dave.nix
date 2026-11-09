@@ -126,9 +126,6 @@ in
 
   clan.core.networking.targetHost = lib.mkForce "root@localhost";
 
-  # set by default via clan
-  # sops.age.keyFile = "/home/grmpf/.config/sops/age/keys.txt";
-
   # NIX settings
   nix.nixPath = [
     "tb=/home/grmpf/synced/projects/github/nix-toolbox"

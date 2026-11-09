@@ -48,5 +48,4 @@
     "cgroups"
     "ca-derivations"
   ];
-  clan.core.sops.defaultGroups = [ "admins" ];
 }

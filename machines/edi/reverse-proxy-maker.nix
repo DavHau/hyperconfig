@@ -1,8 +1,9 @@
 # Secret HTTP endpoint whose hostname never enters the world-readable nix store.
 #
 # The bare subdomain label (e.g. <label>) is prompted at
-# `clan vars generate` time, encrypted via sops, and materialised at runtime to
-# /run/secrets/vars/maker-1/servername as the literal nginx directive
+# `clan vars generate` time, encrypted into the clan vars secret store, and
+# decrypted at runtime to the generator's `files.servername.path` as the
+# literal nginx directive
 #   server_name <fqdn>;
 # nginx `include`s that file at startup, so the name only ever lives in the
 # decrypted runtime secret -- not in nix code, the store, or git.
@@ -79,13 +80,14 @@ in
       listen [::]:443 ssl;
       http2 on;
 
-      # secret server_name, injected at runtime from the sops-decrypted file
+      # secret server_name, injected at runtime from the decrypted var
       include ${servername};
 
       ssl_certificate     ${cert.directory}/fullchain.pem;
       ssl_certificate_key ${cert.directory}/key.pem;
 
-      # reverse proxy to the secret upstream, injected at runtime from sops
+      # reverse proxy to the secret upstream, injected at runtime from the
+      # decrypted var
       location / {
         include ${proxypass};
 

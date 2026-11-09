@@ -63,14 +63,6 @@
     clan-core.inputs.flake-parts.follows = "flake-parts";
     # clan-core.inputs.systems.follows = "systems";
 
-    # Upstream, pinned here so clan-core's sops-nix follows our nixpkgs.
-    # Without https://github.com/Mic92/sops-nix/pull/973 (still open), one
-    # secret whose owner does not resolve to an existing user aborts the whole
-    # activation and leaves the machine with zero secrets (vit, 2026-08-08).
-    sops-nix.url = "github:Mic92/sops-nix";
-    sops-nix.inputs.nixpkgs.follows = "nixpkgs";
-    clan-core.inputs.sops-nix.follows = "sops-nix";
-
     disko.url = "github:nix-community/disko";
     disko.inputs.nixpkgs.follows = "nixpkgs";
 

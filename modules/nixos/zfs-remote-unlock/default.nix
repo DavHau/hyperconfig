@@ -132,7 +132,8 @@ in
         # also reach a server on the LAN gets the passphrase. neededFor =
         # activation: clan uploads it before the switch and it persists, so
         # append-initrd-secrets finds it even on a `boot`-only switch, which
-        # runs no activation (sops would only fill /run/secrets at boot).
+        # runs no activation (clan-core's age backend only decrypts services
+        # secrets into /run/secrets during activation, i.e. at the next boot).
         files."zfs-key.jwe".neededFor = "activation";
         validation.servers = tang.validation;
         runtimeInputs = [ pkgs.clevis ];
