@@ -36,6 +36,10 @@ let
     "-o UserKnownHostsFile=${knownHosts}"
     "-o GlobalKnownHostsFile=/dev/null"
     "-o StrictHostKeyChecking=yes"
+    # ./ssh.nix turns on multiplexing fleet-wide with ControlPath
+    # ~/.ssh/control/%C; root may have no such directory, and then ssh fails
+    # ("unix_listener: cannot bind"). Same choice as ./storagebox.nix.
+    "-o ControlMaster=no"
   ];
 in
 {
