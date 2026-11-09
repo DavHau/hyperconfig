@@ -1,7 +1,8 @@
 """What the infra-space agent may use, as hermes itself resolves it (./test.nix):
 run with hermes' venv python in the gateway's environment, as infra. Prints
 the toolsets of every platform hermes knows (and acp), the tool names the
-cli platform's agent gets and the bundled skills disabled for cli."""
+cli platform's agent gets, the skills disabled for cli, the skills the
+agent's skills_list offers and the ones hermes never disables."""
 
 import json
 
@@ -10,10 +11,11 @@ from hermes_cli import plugins
 plugins.discover_plugins()
 
 import model_tools  # noqa: E402
-from agent.skill_utils import get_disabled_skill_names  # noqa: E402
+from agent.skill_utils import ESSENTIAL_SKILLS, get_disabled_skill_names  # noqa: E402
 from hermes_cli.config import load_config  # noqa: E402
 from hermes_cli.platforms import PLATFORMS  # noqa: E402
 from hermes_cli.tools_config import _get_platform_tools  # noqa: E402
+from tools.skills_tool import find_all_skills, skill_view  # noqa: E402
 
 cfg = load_config()
 platforms = {p: sorted(_get_platform_tools(cfg, p)) for p in list(PLATFORMS) + ["acp"]}
@@ -21,9 +23,17 @@ disabled = (cfg.get("agent") or {}).get("disabled_toolsets") or []
 defs = model_tools.get_tool_definitions(
     enabled_toolsets=platforms["cli"], disabled_toolsets=disabled, quiet_mode=True
 )
+listed = sorted(s["name"] for s in find_all_skills())
+# skill_view returns JSON, {"success": false, "error": ...} when it refuses
+viewable = [n for n in listed if json.loads(skill_view(n, preprocess=False)).get("success")]
 print(json.dumps({
     "platforms": platforms,
     "tools": sorted(d["function"]["name"] for d in defs),
     "checkpoints": (cfg.get("checkpoints") or {}).get("enabled"),
     "skills_disabled": sorted(get_disabled_skill_names("cli")),
+    "skills_disabled_raw": sorted((cfg.get("skills") or {}).get("disabled") or []),
+    "skills_listed": listed,
+    "skills_viewable": viewable,
+    "skills_all": sorted(s["name"] for s in find_all_skills(skip_disabled=True)),
+    "skills_essential": sorted(ESSENTIAL_SKILLS),
 }))

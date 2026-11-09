@@ -24,8 +24,12 @@
 # gateway's environment, are exactly the allowlist, and the cli agent's
 # tools come from those only; `hermes chat` answers through the stub with
 # the p0 credential; the bundled `maps` (core's) stays disabled next to
-# the module's list. memberB (amy) is the plain backup: no hermes unit in
-# its guest. memberA also plays som with the dashboard (./dashboard.nix):
+# the module's list, and of the package's bundled skills and the infra
+# skill only the module's allowlist stays enabled (and hermes' essential
+# hermes-agent, kept off the raw list as well), in hermes' own
+# resolution; skills_list offers none of the others, and skill_view
+# serves every skill it offers. memberB (amy) is the plain backup: no
+# hermes unit in its guest. memberA also plays som with the dashboard (./dashboard.nix):
 # its nginx vhost answers from the host, gated by hermes' OIDC login (lazy
 # discovery, so no issuer is needed for that), the guest's dashboard port
 # is refused to a LAN peer, and memberB (amy) has none. A user on a member
@@ -425,6 +429,25 @@ pkgs.testers.runNixOSTest {
           # core's `maps` (web fetching) next to the module's list
           assert {"maps", "apple-notes", "xurl"} <= set(got["skills_disabled"]), got["skills_disabled"]
           assert "systematic-debugging" not in got["skills_disabled"], got["skills_disabled"]
+          # of the package's bundled skills and the infra skill, the allowlist
+          # stays enabled, and hermes' essential ones (hermes-agent), which
+          # must stay off the raw list too: skill_view checks that one
+          skills = json.loads('${builtins.toJSON nodes.memberA.containers.infra-space.config.infraSpace.hermes.skills}')
+          allowed = set(skills["allowed"])
+          essential = set(skills["essential"])
+          assert set(got["skills_essential"]) == essential, got["skills_essential"]
+          assert not (essential & set(got["skills_disabled_raw"])), got["skills_disabled_raw"]
+          enabled = (set(skills["bundled"]) | {"infra-space"}) - set(got["skills_disabled"])
+          assert enabled == allowed | essential, sorted(enabled)
+          # hermes' own catalog, so skills the package ships beyond its
+          # source's show up too
+          rest = set(got["skills_all"]) - set(got["skills_disabled"]) - {"infra-space"}
+          assert rest <= allowed | essential, sorted(rest)
+          # skills_list offers the allowlist, none of the others, and
+          # skill_view serves every one it offers
+          assert allowed | essential <= set(got["skills_listed"]), got["skills_listed"]
+          assert not (set(got["skills_listed"]) & (set(skills["bundled"]) - allowed - essential)), got["skills_listed"]
+          assert got["skills_viewable"] == got["skills_listed"], (got["skills_listed"], got["skills_viewable"])
 
       with subtest("hermes answers through p0's credential"):
           out = guest(memberA, "hermes chat -Q -q ping")

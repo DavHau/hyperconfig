@@ -29,8 +29,12 @@
       four share: the cap works per tool (_prune_toolsets_stripped_by_
       disabled), so a composite like `debugging` would take terminal and
       file with it. Checkpoints off.
-    - bundled skills: all but a handful of engineering ones disabled
-      (hermes has no allowlist), plus the infra skill (./hermes-skill).
+    - skills: the infra skill (./hermes-skill), and of the bundled ones
+      only systematic-debugging and codebase-inspection: the rest of what
+      the package ships is disabled, read from its source at eval time
+      (hermes has no allowlist), but for hermes' essential hermes-agent,
+      which stays on (under OAuth the prompt calls it claude-code; the
+      bundled claude-code skill is another one, disabled).
 
   Inference: Claude Opus 5.5 through TeamClaude (the model) with the
   shared client key (../teamclaude-api-key.nix, booked as `hyperconfig`),
@@ -137,69 +141,62 @@ let
     "hermes-webhook"
     "a2a"
   ];
-  # hermes v0.22.5's bundled skills (skills/*/*/SKILL.md) but these:
-  # systematic-debugging, test-driven-development, spike,
-  # requesting-code-review, codebase-inspection. Gone: messaging, mail,
-  # social, browsing, media, shopping, office, notes and design skills,
-  # skills that drive other harnesses or delegate, the GitHub CLI (no gh
-  # token here; pushes go over ssh), and hermes' own config and authoring
-  # skills (its config is Nix's). Set host-wide, where it concatenates with
-  # core's `maps` (web fetching); an agent's own list would replace that
-  # (lib.recursiveUpdate, core's agent-config.nix).
-  disabledSkills = [
-    "apple-notes"
-    "apple-reminders"
-    "findmy"
-    "imessage"
-    "claude-code"
-    "codex"
-    "computer-use"
-    "hermes-agent"
-    "opencode"
-    "architecture-diagram"
-    "ascii-video"
-    "baoyu-infographic"
-    "claude-design"
-    "design-md"
-    "humanizer"
-    "manim-video"
-    "p5js"
-    "popular-web-designs"
-    "songwriting-and-ai-music"
-    "sdlc-review"
-    "email-inbox-triage"
-    "himalaya"
-    "gif-search"
-    "songsee"
-    "youtube-content"
-    "obsidian"
-    "airtable"
-    "box"
-    "document-to-action-items"
-    "docx"
-    "google-workspace"
-    "meeting-action-items"
-    "notion"
-    "pdf"
-    "powerpoint"
-    "product-price-monitor"
-    "teams-meeting-pipeline"
-    "weekly-review-planning"
-    "xlsx"
-    "arxiv"
-    "competitor-news-monitor"
-    "grounded-citations"
-    "llm-wiki"
-    "xurl"
-    "dogfood"
-    "github"
-    "hermes-agent-skill-authoring"
-    "inspecting-hermes-desktop-dom"
-    "node-inspect-debugger"
-    "python-debugpy"
-    "simplify-code"
-    "blocked-page-recovery"
+  # The skills that stay on: the infra skill (./hermes-skill, no bundled
+  # one) and two bundled ones. hermes has no allowlist, so every other
+  # skill the package ships is disabled, a hermes update's new ones
+  # included.
+  allowedSkills = [
+    "infra-space"
+    "systematic-debugging"
+    "codebase-inspection"
   ];
+  # The bundled skills of the package in use, by the name hermes disables
+  # them by: the frontmatter `name:`, else the directory's
+  # (tools/skills_tool.py). skills/<category>/<skill>/SKILL.md of its
+  # source, upstream's passthru.agentBuilderSrc.origSrc: a flake input,
+  # so read at eval time without import-from-derivation (the built
+  # package's share/hermes-agent/skills would be IFD).
+  bundledSkills =
+    let
+      root = config.services.hyperhermes.package.passthru.agentBuilderSrc.origSrc + "/skills";
+      dirs = path: lib.attrNames (lib.filterAttrs (_: t: t == "directory") (builtins.readDir path));
+      nameOf =
+        dir:
+        let
+          # the lines between the opening `---` and the next
+          text = lib.replaceStrings [ "\r" ] [ "" ] (builtins.readFile (dir + "/SKILL.md"));
+          frontmatter = lib.optionals (lib.hasPrefix "---\n" text) (
+            lib.splitString "\n" (lib.head (lib.splitString "\n---" (lib.removePrefix "---\n" text)))
+          );
+          names = lib.concatMap (
+            l:
+            let
+              m = builtins.match "name:[[:space:]]*[\"']?([^\"']*[^\"'[:space:]])[\"']?[[:space:]]*" l;
+            in
+            lib.optional (m != null) (lib.head m)
+          ) frontmatter;
+        in
+        if names != [ ] then lib.head names else baseNameOf dir;
+    in
+    lib.concatMap (
+      category:
+      map nameOf (
+        lib.filter (dir: builtins.pathExists (dir + "/SKILL.md")) (
+          map (skill: root + "/${category}/${skill}") (dirs (root + "/${category}"))
+        )
+      )
+    ) (dirs root);
+  # hermes' ESSENTIAL_SKILLS (agent/skill_utils.py): the system prompt
+  # tells the agent to skill_view it (agent/prompt_builder.py), under OAuth
+  # as claude-code (the anthropic adapter's renaming, agent/
+  # anthropic_adapter.py). Listed even when disabled
+  # (get_disabled_skill_names drops it), but skill_view checks the raw
+  # skills.disabled and would refuse it, so it stays off the list.
+  essentialSkills = [ "hermes-agent" ];
+  # Set host-wide, where it concatenates with core's `maps` (web fetching);
+  # an agent's own list would replace that (lib.recursiveUpdate, core's
+  # agent-config.nix).
+  disabledSkills = lib.subtractLists (allowedSkills ++ essentialSkills) bundledSkills;
 
   skill = hlib.mkAgentSkill pkgs {
     name = "infra-space";
@@ -221,6 +218,18 @@ let
 in
 {
   imports = [ inputs.hyperhermes.nixosModules.core ];
+
+  # For ./test.nix, which checks hermes' own view against them.
+  options.infraSpace.hermes.skills = lib.mkOption {
+    type = lib.types.attrsOf (lib.types.listOf lib.types.str);
+    readOnly = true;
+    internal = true;
+    default = {
+      allowed = allowedSkills;
+      essential = essentialSkills;
+      bundled = bundledSkills;
+    };
+  };
 
   options.infraSpace.hermes.dashboard = {
     enable = lib.mkEnableOption "the agent's dashboard for the host's nginx, behind hermes' OIDC login";
