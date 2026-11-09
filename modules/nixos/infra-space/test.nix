@@ -11,13 +11,15 @@
 # build` works as infra; the guest sshd answers on the mesh address only;
 # both clones (hyperconfig, the secrets repo) fail softly without GitHub.
 # The clan vars store, with a bare repo in memberB's guest as GitHub and a
-# no-op stub as the real clan-cli (the wrapper itself is the production
-# one): the `clan` wrapper pushes a local commit; an upstream commit to the
-# same file makes it fail with the conflicting file and the runbook, no
-# rebase left in progress and the local commit intact, and the runbook
-# (./hermes-skill/SKILL.md) resolves it; a failed infra-space-secrets-push
-# makes it refuse until infra starts the unit again; the path unit pushes
-# a commit on its own.
+# stub as the real clan-cli (no-op, or committing slowly; the wrapper
+# itself is the production one): the `clan` wrapper pushes a local
+# commit; an upstream commit to the same file makes it fail with the
+# conflicting file and the runbook, no rebase left in progress and the
+# local commit intact, and the runbook (./hermes-skill/SKILL.md) resolves
+# it; a failed infra-space-secrets-push makes it refuse, pointing at the
+# unit's journal, until infra starts the unit again; the path unit pushes
+# a commit on its own, and, fired by clan's commits mid-run, waits for the
+# wrapper's end instead of failing on clan's half-written store.
 # Each member has a software TPM: infra makes its age identity on it in
 # the guest and decrypts with it; `tenant` on the host can neither read
 # that identity nor, with a copy, use it (no access to the TPM); with the
@@ -178,8 +180,28 @@ let
             }
           )
           # the real clan-cli needs the fleet's flake; the wrapper around it
-          # is what is tested
-          { infraSpace.clanPackage = pkgs.writeShellScriptBin "clan" "exit 0"; }
+          # is what is tested. `clan slow-commit` writes and commits vars
+          # slowly, as `clan vars generate` does, so the push unit fires
+          # mid-run.
+          (
+            { pkgs, ... }:
+            {
+              infraSpace.clanPackage = pkgs.writeShellScriptBin "clan" ''
+                set -eu
+                [ "''${1:-}" = slow-commit ] || exit 0
+                cd "$CLAN_AGE_STORE_DIR"
+                export PATH=${pkgs.git}/bin:$PATH
+                # a commit, then at once the next var's files, uncommitted
+                echo one > slow && git add slow && git commit --quiet -m slow1
+                echo two > slow
+                sleep 5
+                git commit --quiet -am slow2
+                echo three > slow
+                sleep 5
+                git commit --quiet -am slow3
+              '';
+            }
+          )
         ]
         # No internet here: p0 is the stub model (the p0 credential still
         # goes along), and the check of the toolsets; where hermes runs.
@@ -439,7 +461,8 @@ pkgs.testers.runNixOSTest {
           guest_root(m, "systemctl is-failed infra-space-secrets-push.service")
           guest(m, f"git -C {store} remote set-url origin {remote}")
           out = clan_fails()
-          assert "infra-space-secrets-push.service failed" in out and "Secrets store conflict" in out, out
+          assert "infra-space-secrets-push.service failed" in out and "journalctl -u infra-space-secrets-push.service" in out, out
+          assert "If it lists conflicting files" in out and "Secrets store conflict" in out, out
           guest(m, "systemctl start infra-space-secrets-push.service")
           guest(m, "clan")
 
@@ -448,6 +471,17 @@ pkgs.testers.runNixOSTest {
           guest(m, f"cd {store} && echo local3 > var && git commit --quiet -am local3")
           m.wait_until_succeeds("nixos-container run infra-space -- runuser -u infra -- bash -lc "
                                 + shlex.quote(f"test $(git -C {remote} rev-parse main) = $(git -C {store} rev-parse main)"), timeout=60)
+
+          # the path unit fires on clan's commits mid-run, and waits for
+          # the run's end instead of pulling under it
+          since = guest_root(m, "date +%s").strip()
+          guest(m, "clan slow-commit")
+          assert tip(remote) == tip(store)
+          m.wait_until_succeeds("nixos-container run infra-space -- sh -c "
+                                + shlex.quote("case $(systemctl show -p ActiveState --value infra-space-secrets-push.service) in inactive|failed) ;; *) exit 1;; esac"), timeout=60)
+          guest_root(m, "sh -c '! systemctl is-failed --quiet infra-space-secrets-push.service'")
+          out = guest_root(m, f"journalctl -o cat -u infra-space-secrets-push.service --since @{since}")
+          assert "Starting" in out and "Failed" not in out, out
 
       with subtest("afk as infra: runs, finds its keys, no web tools"):
           import json

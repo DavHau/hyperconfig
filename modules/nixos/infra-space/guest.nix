@@ -26,8 +26,10 @@
   write to it, so it is kept in sync with GitHub's main by
   clan-secrets-sync: `pull` rebases local commits onto it, `push` pushes
   them, never forced. Run by the `clan` on PATH (a wrapper: pull before,
-  push after the real clan) and by infra-space-secrets-push on every
-  commit and every 5 minutes, so commits made otherwise go up too. A
+  push after the real clan, holding the sync's lock throughout) and by
+  infra-space-secrets-push on every commit and every 5 minutes, so
+  commits made otherwise go up too; a run fired by clan's own commits
+  waits for the wrapper's end instead of pulling under clan. A
   conflict (one var written on both sides) is never resolved here: the
   rebase is aborted, the run fails and the push unit stays failed, which
   makes the wrapper refuse until infra resolves it by hand
@@ -75,7 +77,9 @@ let
   runbook = ''the infra-space skill (modules/nixos/infra-space/hermes-skill/SKILL.md), section "Secrets store conflict"'';
 
   # The clan vars store's sync with GitHub (see the header); one run at a
-  # time (the wrapper and the push unit both run it).
+  # time (the wrapper and the push unit both run it). The wrapper holds
+  # the lock for its whole run and tells its two runs so
+  # (CLAN_SECRETS_SYNC_LOCKED=1).
   secretsSync = pkgs.writeShellApplication {
     name = "clan-secrets-sync";
     runtimeInputs = [
@@ -90,8 +94,10 @@ let
         exit 1
       fi
       export GIT_SSH_COMMAND="ssh -o BatchMode=yes"
-      exec 9>"$(git rev-parse --git-dir)/clan-secrets-sync.lock"
-      flock 9
+      if [ "''${CLAN_SECRETS_SYNC_LOCKED:-}" != 1 ]; then
+        exec 9>"$(git rev-parse --git-dir)/clan-secrets-sync.lock"
+        flock 9
+      fi
       # clan commits to HEAD; only main is synced.
       if [ "$(git symbolic-ref -q HEAD || true)" != refs/heads/main ]; then
         echo "clan-secrets-sync: $store is not on branch main; switch back to it (git switch main)" >&2
@@ -150,10 +156,20 @@ let
   clanWrapper = pkgs.writeShellApplication {
     name = "clan";
     text = ''
+      store=''${CLAN_AGE_STORE_DIR:?CLAN_AGE_STORE_DIR is not set}
+      # The sync's lock for the whole run (pull, clan, push): the push
+      # unit, fired by clan's commits, runs after it, not under clan. No
+      # checkout: the pull below says so.
+      if git_dir=$(${pkgs.git}/bin/git -C "$store" rev-parse --absolute-git-dir 2>/dev/null); then
+        exec 9>"$git_dir/clan-secrets-sync.lock"
+        ${pkgs.util-linux}/bin/flock 9
+        export CLAN_SECRETS_SYNC_LOCKED=1
+      fi
       if ${config.systemd.package}/bin/systemctl is-failed --quiet ${pushUnit}; then
         {
-          echo "clan: ${pushUnit} failed (journalctl -u ${pushUnit}): the secrets store is out of sync with GitHub."
-          echo ${lib.escapeShellArg "Refusing to run. Fix it first: ${runbook}."}
+          echo "clan: ${pushUnit} failed: the secrets store may be out of sync with GitHub. Refusing to run."
+          echo "See journalctl -u ${pushUnit}; once its cause is fixed, systemctl start ${pushUnit}."
+          echo ${lib.escapeShellArg "If it lists conflicting files, follow ${runbook}."}
         } >&2
         exit 1
       fi
@@ -162,7 +178,8 @@ let
         exit 1
       fi
       rc=0
-      ${cfg.clanPackage}/bin/clan "$@" || rc=$?
+      # neither the lock nor the variable for clan and what it starts
+      ${pkgs.coreutils}/bin/env -u CLAN_SECRETS_SYNC_LOCKED ${cfg.clanPackage}/bin/clan "$@" 9>&- || rc=$?
       if ! ${lib.getExe secretsSync} push; then
         echo "clan: pushing the secrets store failed; its new commits are only in $CLAN_AGE_STORE_DIR" >&2
         [ "$rc" != 0 ] || rc=1
