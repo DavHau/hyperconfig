@@ -12,7 +12,9 @@
 # both clones (hyperconfig, the secrets repo) fail softly without GitHub.
 # Each member has a software TPM: infra makes its age identity on it in
 # the guest and decrypts with it; `tenant` on the host can neither read
-# that identity nor, with a copy, use it (no access to the TPM). The
+# that identity nor, with a copy, use it (no access to the TPM); with the
+# ACL stripped, a restart of the container without any udev event gives
+# infra its TPM back, as a switch on a booted host must. The
 # members run networkd as som and amy do: it keeps off the veth, also
 # across a restart. managed also plays a LAN peer routing to a member's
 # guest net: refused on sshd and on
@@ -514,5 +516,21 @@ pkgs.testers.runNixOSTest {
           for m in members.values():
               out = guest_root(m, "${pkgs.dnsutils}/bin/dig +short +time=5 +tries=1 @10.235.0.1 managed").strip()
               assert out, out
+
+      with subtest("the guest's TPM access survives a container restart without a udev event"):
+          # as on an already booted host after a switch: no device event
+          # sets the ACL again, the container's start must
+          m = memberB
+          uid = "${toString nodes.memberB.containers.infra-space.config.infraSpace.uid}"
+          m.succeed(f"getfacl -n /dev/tpmrm0 | grep -q '^user:{uid}:rw'")
+          m.succeed(f"setfacl -x u:{uid} /dev/tpmrm0")
+          m.fail(f"getfacl -n /dev/tpmrm0 | grep -q '^user:{uid}:'")
+          m.succeed("systemctl restart container@infra-space.service")
+          m.wait_for_unit("container@infra-space.service")
+          m.wait_until_succeeds("nixos-container run infra-space -- systemctl is-active multi-user.target", timeout=120)
+          recipient = guest(m, "age-plugin-tpm -y ~/.config/age/identities").strip()
+          out = guest(m, f"set -o pipefail; echo tpm-secret | age -r {recipient} | age -d -i ~/.config/age/identities").strip()
+          assert out == "tpm-secret", out
+          guest(m, "age-plugin-tpm --generate -o /tmp/identities-after-restart")
     '';
 }

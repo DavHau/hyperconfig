@@ -45,10 +45,11 @@
     - This host's TPM, for the guest's age identity (below): its resource
       manager /dev/tpmrm0 is bound into the guest and allowed in its device
       cgroup. Access is a POSIX ACL for the guest's `infra` uid on the node,
-      set by a udev rule here; the ACL lives on the node itself, so it holds
-      inside the guest too. Not the tss group: its gid is dynamic (970 on
-      amy, 986 on som) and would have to match the guest's. No host user
-      has that uid, so no one here gains the TPM.
+      set by the container unit every time it starts (below); the ACL lives
+      on the node itself, so it holds inside the guest too. Not the tss
+      group: its gid is dynamic (970 on amy, 986 on som) and would have to
+      match the guest's. No host user has that uid, so no one here gains
+      the TPM.
     - The identities below, as clan vars. Their secrets reach the guest
       only as systemd credentials (nspawn --load-credential, read by root
       on this host), never through a bind mount. Inside, every entry of
@@ -394,19 +395,23 @@ in
     # those take this host's veth addresses as their source.
     services.udev.extraRules = ''
       ACTION=="add", SUBSYSTEM=="net", KERNEL=="${veth}", RUN+="${pkgs.iproute2}/bin/ip link set dev $name up"
-      # the guest's infra on the TPM (the header); on change events too, as
-      # udev then applies the node's mode again
-      ACTION!="remove", KERNEL=="tpmrm0", RUN+="${pkgs.acl}/bin/setfacl -m u:${toString uid}:rw /dev/tpmrm0"
     '';
     systemd.network.networks."10-${veth}" = lib.mkIf config.systemd.network.enable {
       matchConfig.Name = veth;
       linkConfig.Unmanaged = true;
     };
     systemd.services."container@${name}" = {
-      # The bind mount needs the TPM node, and the guest its ACL: udev
-      # announces the device to systemd after running the rule above.
+      # The bind mount needs the TPM node, and the guest's infra the ACL on
+      # it, set at each start: a udev rule would set it only on a device
+      # event, and a switch or a restart on a booted host brings none.
+      # udev's change events leave it: they chmod the node only when its
+      # mode differs from the rules' (0660 with tss, else none), and the
+      # entry's rw mask keeps it at 0660.
       requires = [ "dev-tpmrm0.device" ];
       after = [ "dev-tpmrm0.device" ];
+      preStart = lib.mkAfter ''
+        ${pkgs.acl}/bin/setfacl -m u:${toString uid}:rw /dev/tpmrm0
+      '';
       postStart = lib.mkAfter ''
         ip route replace ${localAddress} dev ${veth} src ${hostAddress}
         # a source only once its duplicate address detection is over
