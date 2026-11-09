@@ -15,6 +15,10 @@
   user and the tools it runs (ssh, git, clan, sops). /run is the guest's
   own tmpfs: nothing secret sits on a path bound from the host.
 
+  TPM: /dev/tpmrm0 is the host's, which grants `infra` (only) access on
+  it (./default.nix). infra's age identity, sealed to it, lives at
+  ~/.config/age/identities: made here once per member, never copied out.
+
   Inbound: the firewall admits the host's veth addresses (hostAddress,
   hostAddress6), on every port, and nothing else; sshd opens no port of
   its own. The host's ssh proxy and services the host fronts (som's nginx)
@@ -33,13 +37,25 @@ let
   secretsDir = "/run/infra-space/secrets";
   hostKeyPath = "/run/infra-space/ssh_host_ed25519_key";
   home = "/home/infra";
-  repo = "git@github.com:DavHau/hyperconfig.git";
   # Commits from each instance say which one made them.
   identity = {
     name = "infra-space (${cfg.member})";
     email = "infra-space@${cfg.member}.d";
   };
-  checkout = "${home}/hyperconfig";
+  # The checkouts each instance works in: hyperconfig, and the clan vars'
+  # encrypted store, reached through its own deploy key (the ssh alias
+  # below).
+  secretsHost = "github-secrets";
+  checkouts = {
+    hyperconfig = {
+      repo = "git@github.com:DavHau/hyperconfig.git";
+      dir = "hyperconfig";
+    };
+    secrets = {
+      repo = "${secretsHost}:DavHau/hyperconfig-secrets.git";
+      dir = "hyperconfig-secrets";
+    };
+  };
 
   aliasOf = member: "infra-space-${member}";
 
@@ -57,17 +73,64 @@ let
 
   # Into a temporary directory first, so a failed clone leaves nothing
   # that would stop the next attempt (the timer below, every 15 min).
-  clone = pkgs.writeShellScript "infra-space-clone" ''
-    set -eu
-    tmp=$(mktemp -d ${home}/.hyperconfig-clone.XXXXXX)
-    trap 'rm -rf "$tmp"' EXIT
-    if ! git clone --quiet --branch main ${repo} "$tmp/hyperconfig"; then
-      echo "cloning ${repo} failed (deploy key not registered, or no network?); trying again in 15 min" >&2
-      exit 0
-    fi
-    (cd "$tmp/hyperconfig" && jj git init --colocate)
-    mv "$tmp/hyperconfig" ${checkout}
-  '';
+  clone =
+    { repo, dir }:
+    pkgs.writeShellScript "infra-space-clone-${dir}" ''
+      set -eu
+      tmp=$(mktemp -d ${home}/.${dir}-clone.XXXXXX)
+      trap 'rm -rf "$tmp"' EXIT
+      # An empty remote (no commits yet: the secrets repo before its first
+      # push) has no main to check out; it is cloned as it is, on an unborn
+      # main the first push creates.
+      if ! git clone --quiet --branch main ${repo} "$tmp/${dir}"; then
+        if [ -n "$(git ls-remote --heads ${repo})" ] || ! git clone --quiet ${repo} "$tmp/${dir}"; then
+          echo "cloning ${repo} failed (deploy key not registered, or no network?); trying again in 15 min" >&2
+          exit 0
+        fi
+        git -C "$tmp/${dir}" symbolic-ref HEAD refs/heads/main
+      fi
+      (cd "$tmp/${dir}" && jj git init --colocate)
+      mv "$tmp/${dir}" ${home}/${dir}
+    '';
+
+  # Absent until the clone succeeds: it is retried at boot and every 15
+  # minutes until the checkout exists (then the condition skips it).
+  cloneService = checkout: {
+    description = "Clone ${checkout.dir} for infra";
+    wantedBy = [ "multi-user.target" ];
+    wants = [ "network-online.target" ];
+    requires = [ "infra-space-secrets.service" ];
+    after = [
+      "network-online.target"
+      "infra-space-secrets.service"
+    ];
+    unitConfig.ConditionPathExists = "!${home}/${checkout.dir}";
+    path = [
+      pkgs.git
+      pkgs.jujutsu
+      pkgs.openssh
+      pkgs.coreutils
+    ];
+    environment = {
+      GIT_SSH_COMMAND = "ssh -o BatchMode=yes";
+      JJ_USER = identity.name;
+      JJ_EMAIL = identity.email;
+    };
+    serviceConfig = {
+      Type = "oneshot";
+      User = "infra";
+      Group = "infra";
+      WorkingDirectory = home;
+      ExecStart = clone checkout;
+    };
+  };
+  cloneTimer = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "15min";
+      OnUnitInactiveSec = "15min";
+    };
+  };
 in
 {
   # Dave's shell (fish, aliases, zoxide, direnv, tmux) for the launcher sessions.
@@ -229,6 +292,14 @@ in
         IdentityFile ${secretsDir}/github
         IdentitiesOnly yes
 
+      # The secrets repo's own deploy key, against the same pinned keys.
+      Host ${secretsHost}
+        HostName github.com
+        User git
+        HostKeyAlias github.com
+        IdentityFile ${secretsDir}/secrets-github
+        IdentitiesOnly yes
+
       Host ${lib.concatStringsSep " " cfg.fleetCertAuthority.hostNames}
         User root
         IdentityFile ${secretsDir}/ssh
@@ -241,6 +312,9 @@ in
       pkgs.jujutsu
       pkgs.openssh
       config.nix.package
+      # the TPM age identity (./default.nix, Identities)
+      pkgs.age
+      pkgs.age-plugin-tpm
     ];
 
     # Builds go through the host's nix-daemon (the container gets its
@@ -261,44 +335,10 @@ in
     environment.variables.JJ_USER = identity.name;
     environment.variables.JJ_EMAIL = identity.email;
 
-    # The checkout each instance works in. Absent until the clone succeeds:
-    # it is retried at boot and every 15 minutes until the checkout exists
-    # (then the condition skips it).
-    systemd.services.infra-space-clone = {
-      description = "Clone hyperconfig for infra";
-      wantedBy = [ "multi-user.target" ];
-      wants = [ "network-online.target" ];
-      requires = [ "infra-space-secrets.service" ];
-      after = [
-        "network-online.target"
-        "infra-space-secrets.service"
-      ];
-      unitConfig.ConditionPathExists = "!${checkout}";
-      path = [
-        pkgs.git
-        pkgs.jujutsu
-        pkgs.openssh
-        pkgs.coreutils
-      ];
-      environment = {
-        GIT_SSH_COMMAND = "ssh -o BatchMode=yes";
-        JJ_USER = identity.name;
-        JJ_EMAIL = identity.email;
-      };
-      serviceConfig = {
-        Type = "oneshot";
-        User = "infra";
-        Group = "infra";
-        WorkingDirectory = home;
-        ExecStart = clone;
-      };
-    };
-    systemd.timers.infra-space-clone = {
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnBootSec = "15min";
-        OnUnitInactiveSec = "15min";
-      };
-    };
+    # The checkouts each instance works in (cloneService above).
+    systemd.services.infra-space-clone = cloneService checkouts.hyperconfig;
+    systemd.timers.infra-space-clone = cloneTimer;
+    systemd.services.infra-space-clone-secrets = cloneService checkouts.secrets;
+    systemd.timers.infra-space-clone-secrets = cloneTimer;
   };
 }

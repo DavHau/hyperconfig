@@ -9,9 +9,13 @@
 # certificate), without a prompt; the credentials sit in
 # /run/infra-space/secrets, 0400 infra, on the guest's own /run; `nix
 # build` works as infra; the guest sshd answers on the mesh address only;
-# the clone fails softly without GitHub. The members run networkd as som
-# and amy do: it keeps off the veth, also across a restart. managed also
-# plays a LAN peer routing to a member's guest net: refused on sshd and on
+# both clones (hyperconfig, the secrets repo) fail softly without GitHub.
+# Each member has a software TPM: infra makes its age identity on it in
+# the guest and decrypts with it; `tenant` on the host can neither read
+# that identity nor, with a copy, use it (no access to the TPM). The
+# members run networkd as som and amy do: it keeps off the veth, also
+# across a restart. managed also plays a LAN peer routing to a member's
+# guest net: refused on sshd and on
 # a host-only guest service the guest's firewall opened, which the host
 # itself reaches. afk (./afk.nix) runs as infra, `p0-api-key` and
 # `teamclaude-api-key` print the credentials, and web_search, fetch and
@@ -117,6 +121,8 @@ let
       # the container runs hermes' gateway and dashboard
       virtualisation.memorySize = 3072;
       virtualisation.cores = 2;
+      # som's and amy's TPM, for infra's age identity
+      virtualisation.tpm.enable = true;
       # the test build's builder, in the store the daemon serves (no
       # substituters in the sandbox)
       virtualisation.additionalPaths = [ pkgs.pkgsStatic.busybox ];
@@ -207,6 +213,7 @@ let
       environment.etc = {
         "test-vars/infra-space-ssh/id_ed25519" = secret (keys + "/infra-space");
         "test-vars/infra-space-github/id_ed25519" = secret (pkgs.writeText "github" "not a key\n");
+        "test-vars/infra-space-secrets-github/id_ed25519" = secret (pkgs.writeText "secrets-github" "not a key\n");
         "test-vars/infra-space-age/key.txt" = secret (pkgs.writeText "age" "not a key\n");
         "test-vars/infra-space-hostkey/ssh_host_ed25519_key" = secret (keys + "/hostkey-${me}");
         "test-vars/inference-api-key/token" = secret (pkgs.writeText "p0-token" "test-p0-token\n");
@@ -272,11 +279,12 @@ pkgs.testers.runNixOSTest {
       for m in members.values():
           m.wait_for_unit("container@infra-space.service")
           m.wait_until_succeeds("nixos-container run infra-space -- systemctl is-active sshd.service infra-space-secrets.service", timeout=120)
-          m.wait_until_succeeds("nixos-container run infra-space -- systemctl show -p ActiveState --value infra-space-clone.service | grep -qx inactive", timeout=120)
+          for unit in ["infra-space-clone", "infra-space-clone-secrets"]:
+              m.wait_until_succeeds(f"nixos-container run infra-space -- systemctl show -p ActiveState --value {unit}.service | grep -qx inactive", timeout=120)
 
       with subtest("credentials: 0400 infra on the guest's own /run"):
           for m in members.values():
-              for name in ["ssh", "github", "sops-age"]:
+              for name in ["ssh", "github", "secrets-github", "sops-age"]:
                   out = guest_root(m, f"stat -c '%a %U %G' /run/infra-space/secrets/{name}").strip()
                   assert out == "400 infra infra", (name, out)
               out = guest_root(m, "findmnt -n -o TARGET,FSTYPE -T /run/infra-space/secrets/ssh").split()
@@ -345,11 +353,30 @@ pkgs.testers.runNixOSTest {
               out = guest(m, f"nix build --impure --no-link --print-out-paths --expr {shlex.quote(expr)}").strip()
               assert guest(m, f"cat {out}").strip() == "built", out
 
-      with subtest("without GitHub the clone gives up softly"):
+      with subtest("without GitHub the clones give up softly"):
           for m in members.values():
-              guest_root(m, "test ! -e /home/infra/hyperconfig")
-              guest_root(m, "journalctl -u infra-space-clone.service | grep -q 'trying again in 15 min'")
-              guest_root(m, "systemctl is-active infra-space-clone.timer")
+              for unit, checkout in [("infra-space-clone", "hyperconfig"), ("infra-space-clone-secrets", "hyperconfig-secrets")]:
+                  guest_root(m, f"test ! -e /home/infra/{checkout}")
+                  guest_root(m, f"journalctl -u {unit}.service | grep -q 'trying again in 15 min'")
+                  guest_root(m, f"systemctl is-active {unit}.timer")
+
+      with subtest("infra's age identity on the host's TPM, out of tenant's reach"):
+          identities = "/var/lib/infra-space/home/.config/age/identities"
+          host_age = "PATH=${pkgs.age}/bin:${pkgs.age-plugin-tpm}/bin:$PATH"
+          for m in members.values():
+              guest(m, "mkdir -p ~/.config/age && age-plugin-tpm --generate -o ~/.config/age/identities")
+              recipient = guest(m, "age-plugin-tpm -y ~/.config/age/identities").strip()
+              out = guest(m, f"set -o pipefail; echo tpm-secret | age -r {recipient} | age -d -i ~/.config/age/identities").strip()
+              assert out == "tpm-secret", out
+              m.succeed(f"echo tpm-secret | {host_age} age -r {recipient} -o /tmp/secret.age", "chmod 0644 /tmp/secret.age")
+              m.fail(f"runuser -u tenant -- cat {identities}")
+              m.fail(f"runuser -u tenant -- env {host_age} age -d -i {identities} /tmp/secret.age")
+              # a copy is no use without the TPM, which only root and the
+              # guest's infra may open
+              m.succeed(f"install -m 0644 {identities} /tmp/identities")
+              m.fail(f"runuser -u tenant -- env {host_age} age -d -i /tmp/identities /tmp/secret.age")
+              assert m.succeed(f"{host_age} age -d -i /tmp/identities /tmp/secret.age").strip() == "tpm-secret"
+              m.succeed("rm /tmp/identities /tmp/secret.age")
 
       with subtest("afk as infra: runs, finds its keys, no web tools"):
           import json

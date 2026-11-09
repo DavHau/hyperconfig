@@ -42,6 +42,13 @@
       rebuilds. A plain directory, on som too: som's entity storage
       (../entity-storage) manages /home/<user> of host users only, and
       /var/lib lies on som's snapshotted root dataset anyway.
+    - This host's TPM, for the guest's age identity (below): its resource
+      manager /dev/tpmrm0 is bound into the guest and allowed in its device
+      cgroup. Access is a POSIX ACL for the guest's `infra` uid on the node,
+      set by a udev rule here; the ACL lives on the node itself, so it holds
+      inside the guest too. Not the tss group: its gid is dynamic (970 on
+      amy, 986 on som) and would have to match the guest's. No host user
+      has that uid, so no one here gains the TPM.
     - The identities below, as clan vars. Their secrets reach the guest
       only as systemd credentials (nspawn --load-credential, read by root
       on this host), never through a bind mount. Inside, every entry of
@@ -65,19 +72,36 @@
     chattr -i /var/lib/nixos-containers/infra-space/var/lib/hermes/infra/home/{.env,.op.env,config.yaml,active_profile,gateway.json,plugins,hooks,profiles,lib,patches}
   /var/lib/infra-space (the guest's /home/infra) is separate and stays.
 
-  Identities (clan vars; two manual steps once, noted per var):
+  Identities (clan vars, and one TPM key; manual steps once, noted per
+  entry):
     infra-space-ssh      shared: root on every clan machine
                          (./fleet-access.nix), `infra` in every member's
                          container; credential `ssh`
     infra-space-github   shared: GitHub deploy key of DavHau/hyperconfig;
                          credential `github`. Manual: add its public
                          value on GitHub as a deploy key with write access.
+    infra-space-secrets-github
+                         shared: GitHub deploy key of
+                         DavHau/hyperconfig-secrets, the clan vars' encrypted
+                         store (deploy keys are per repository, so not the
+                         one above); credential `secrets-github`. Manual: add
+                         its public value on that repository as a deploy key
+                         with write access.
     infra-space-age      shared: age key; credential `sops-age`. Manual:
                          `clan secrets users add infra-space <its pub>`,
                          add it to group admins, `clan vars fix`.
     infra-space-hostkey  per member: the guest's ssh host key, pinned by
                          the other members and Dave's launcher from its
                          public value
+    TPM age identity     per member, not a clan var: made in the guest and
+                         sealed to this host's TPM, it never leaves either.
+                         /home/infra/.config/age/identities in the guest
+                         (here under /var/lib/infra-space/home, 0700 infra).
+                         Manual, as infra in the container, no PIN:
+                           mkdir -p ~/.config/age
+                           age-plugin-tpm --generate -o ~/.config/age/identities
+                         and add `age-plugin-tpm -y ~/.config/age/identities`
+                         (its recipient) to the clan's age recipients.
 */
 {
   config,
@@ -259,6 +283,13 @@ in
         runtimeInputs = [ pkgs.openssh ];
         script = sshKeygen "infra-space@DavHau/hyperconfig";
       };
+      infra-space-secrets-github = {
+        share = true;
+        files.id_ed25519.restartUnits = [ containerUnit ];
+        files."id_ed25519.pub".secret = false;
+        runtimeInputs = [ pkgs.openssh ];
+        script = sshKeygen "infra-space@DavHau/hyperconfig-secrets";
+      };
       infra-space-age = {
         share = true;
         files."key.txt".restartUnits = [ containerUnit ];
@@ -282,6 +313,7 @@ in
     hyper.infraSpace.credentials = {
       ssh = vars.infra-space-ssh.files.id_ed25519.path;
       github = vars.infra-space-github.files.id_ed25519.path;
+      secrets-github = vars.infra-space-secrets-github.files.id_ed25519.path;
       sops-age = vars.infra-space-age.files."key.txt".path;
       # Inference for the guest's hermes (./hermes.nix) and afk (./afk.nix):
       # p0's token (../inference-api-key.nix) and the TeamClaude client key
@@ -310,6 +342,17 @@ in
         hostPath = homeDir;
         isReadOnly = false;
       };
+      # The TPM for the guest's age identity; access: the ACL below.
+      bindMounts."/dev/tpmrm0" = {
+        hostPath = "/dev/tpmrm0";
+        isReadOnly = false;
+      };
+      allowedDevices = [
+        {
+          node = "/dev/tpmrm0";
+          modifier = "rw";
+        }
+      ];
       extraFlags = lib.mapAttrsToList (n: path: "--load-credential=${n}:${path}") (
         cfg.credentials // { ${hostKeyCredential} = vars.infra-space-hostkey.files.ssh_host_ed25519_key.path; }
       );
@@ -351,20 +394,29 @@ in
     # those take this host's veth addresses as their source.
     services.udev.extraRules = ''
       ACTION=="add", SUBSYSTEM=="net", KERNEL=="${veth}", RUN+="${pkgs.iproute2}/bin/ip link set dev $name up"
+      # the guest's infra on the TPM (the header); on change events too, as
+      # udev then applies the node's mode again
+      ACTION!="remove", KERNEL=="tpmrm0", RUN+="${pkgs.acl}/bin/setfacl -m u:${toString uid}:rw /dev/tpmrm0"
     '';
     systemd.network.networks."10-${veth}" = lib.mkIf config.systemd.network.enable {
       matchConfig.Name = veth;
       linkConfig.Unmanaged = true;
     };
-    systemd.services."container@${name}".postStart = lib.mkAfter ''
-      ip route replace ${localAddress} dev ${veth} src ${hostAddress}
-      # a source only once its duplicate address detection is over
-      for _ in {1..100}; do
-        [ -z "$(ip -6 addr show dev ${veth} to ${hostAddress6} tentative)" ] && break
-        sleep 0.1
-      done
-      ip -6 route replace ${localAddress6} dev ${veth} src ${hostAddress6}
-    '';
+    systemd.services."container@${name}" = {
+      # The bind mount needs the TPM node, and the guest its ACL: udev
+      # announces the device to systemd after running the rule above.
+      requires = [ "dev-tpmrm0.device" ];
+      after = [ "dev-tpmrm0.device" ];
+      postStart = lib.mkAfter ''
+        ip route replace ${localAddress} dev ${veth} src ${hostAddress}
+        # a source only once its duplicate address detection is over
+        for _ in {1..100}; do
+          [ -z "$(ip -6 addr show dev ${veth} to ${hostAddress6} tentative)" ] && break
+          sleep 0.1
+        done
+        ip -6 route replace ${localAddress6} dev ${veth} src ${hostAddress6}
+      '';
+    };
 
     # Only this host opens connections into the guest, and on this host
     # only root and the forwarders; the guest's own connections and their
