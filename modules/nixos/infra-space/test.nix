@@ -164,7 +164,12 @@ let
           { config, pkgs, ... }:
           {
             services.hyperhermes.settings.providers.p0.base_url = lib.mkForce "http://127.0.0.1:${toString llmPort}/v1";
-            services.hyperhermes.initialModel.base_url = lib.mkForce "http://127.0.0.1:${toString llmPort}/v1";
+            # The real model is Anthropic's (no internet here): the stub as p0.
+            services.hyperhermes.initialModel = lib.mkForce {
+              provider = "custom:p0";
+              base_url = "http://127.0.0.1:${toString llmPort}/v1";
+              default = "qwen";
+            };
             systemd.services.fake-llm = {
               wantedBy = [ "multi-user.target" ];
               before = [ "hermes-agent-infra.service" ];
@@ -371,10 +376,11 @@ pkgs.testers.runNixOSTest {
               # no personal skills: nothing links ~/.agents/skills
               guest(m, "test ! -e ~/.agents/skills")
               guest(m, "tmux -V")
-      allowlist = ["file", "skills", "terminal", "todo"]
-      # what the four toolsets hold, and hermes' tool search over them
-      allowed_tools = {"patch", "process_manage", "read_file", "search_files", "skill_manage", "skill_view",
-                       "skills_list", "terminal", "todo_list", "write_file", "tool_call", "tool_describe", "tool_search"}
+      allowlist = ["delegation", "file", "skills", "terminal", "todo"]
+      # what the five toolsets hold, and hermes' tool search over them
+      allowed_tools = {"delegate_task", "patch", "process_manage", "read_file", "search_files", "skill_manage",
+                       "skill_view", "skills_list", "terminal", "todo_list", "write_file", "tool_call",
+                       "tool_describe", "tool_search"}
 
       with subtest("hermes runs as infra on memberA, its configuration out of infra's reach; none on memberB"):
           memberB.fail("nixos-container run infra-space -- systemctl cat hermes-agent-infra.service")

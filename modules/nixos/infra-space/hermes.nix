@@ -65,11 +65,15 @@ let
   # by hermes-locked-infra (root) through LoadCredential.
   credential = name: "/run/credentials/@system/${name}";
 
+  # delegation: subagents (delegate_task). Children inherit these toolsets
+  # and the disabled_toolsets cap below (tools/delegate_tool.py
+  # _resolve_child_toolsets), so they get nothing the agent lacks.
   allowedToolsets = [
     "terminal"
     "file"
     "todo"
     "skills"
+    "delegation"
   ];
   # Every platform key of hermes v0.22.5's registry, and acp (its adapter
   # resolves `acp`, which has no registry entry).
@@ -123,7 +127,6 @@ let
     "catalog"
     "clarify"
     "code_execution"
-    "delegation"
     "kanban"
     "discord"
     "discord_admin"
