@@ -39,7 +39,7 @@
   Inference: Claude Opus 5.5 through TeamClaude (the model) with the
   shared client key (../teamclaude-api-key.nix, booked as `hyperconfig`),
   and p0's Qwen as a provider (machines/som/hermes-inference.nix) for
-  titles. Both keys arrive as the host's credentials
+  titles and as the vision describer for text-only models. Both keys arrive as the host's credentials
   `p0-api-key` and `teamclaude-api-key`, the dashboard's OIDC client secret
   (som only) as `dashboard-oidc-secret`; hermes-locked-infra takes them
   from the guest's system credentials into the root-owned .env.
@@ -272,8 +272,18 @@ in
           key_env = "P0_API_KEY";
           default_model = "qwen";
           extra_body.chat_template_kwargs.enable_thinking = true;
+          models = {
+            qwen.supports_vision = true;
+            "Qwen3.8-27B-FP8".supports_vision = true;
+          };
         };
         settings.auxiliary.title_generation = {
+          provider = "p0";
+          model = "qwen";
+        };
+        # Same describer for text-only models as on som; moot while the
+        # vision toolset is disabled and the model is Claude (native).
+        settings.auxiliary.vision = {
           provider = "p0";
           model = "qwen";
         };

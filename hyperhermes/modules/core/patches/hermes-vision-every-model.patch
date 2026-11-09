@@ -1,0 +1,164 @@
+hermes v0.22.5: vision for every main model, whatever the image's source
+(chat upload, downloaded file, browser screenshot).
+
+Three problems, one patch (all three decide whether a session sees images):
+
+1. agent/image_routing.py decide_image_input_mode(): an explicit
+   `auxiliary.vision` backend (provider other than auto, or a model or
+   base_url) forced the text-description path for EVERY main model,
+   including vision-capable ones. So configuring a describer for the
+   text-only models (GLM on OpenRouter, whose auto route finds none:
+   _vision_auto_route skips the main provider as text-only and then
+   skips OpenRouter as "already tried") took native pixels away from
+   Claude. Now the explicit backend is the describer for main models that
+   cannot see; a model the capability lookup attests as vision-capable
+   stays native. `agent.image_input_mode: text` still forces the
+   description path for everyone.
+
+2. tools/browser_camofox.py camofox_vision(): always described the
+   screenshot through call_llm(task="vision"), never native, unlike
+   browser_vision on the agent-browser backend (tools/browser_tool.py),
+   which attaches the screenshot when _should_use_native_vision_fast_path()
+   holds. Now camofox does the same (tools/browser_tool_vision.py
+   _native_vision_result); the redacted accessibility snippet of
+   `annotate` rides in the text part.
+
+3. tools/registry.py _check_fn_cached() and model_tools.py
+   _tool_defs_cache_key(): both caches were keyed by function and profile
+   only, but check_vision_requirements() answers per main model (native
+   fast path or a vision backend for it). In one gateway, a turn of a
+   text-only model without a vision backend cached False, and the next
+   session on Claude got a tool list without vision_analyze and
+   browser_vision (and the reverse: the text-only model was offered a
+   vision_analyze that then failed with "No LLM provider configured for
+   task=vision"). Both keys now include the main provider+model
+   (main_runtime_cache_key: set_runtime_main()'s context, else
+   config.yaml).
+
+Upstream status: not reported upstream yet; unchanged in v0.23.0 and the
+canary of 2026-11-09. REBASE on the hermes update (v0.23.x): camofox moves
+into a plugin there (hunk 2 moves with it), image_routing.py,
+auxiliary_client.py, registry.py and model_tools.py may move or change.
+
+diff --git a/agent/image_routing.py b/agent/image_routing.py
+index 763f20a5..7194e4ad 100644
+--- a/agent/image_routing.py
++++ b/agent/image_routing.py
+@@ -384,11 +384,14 @@ def decide_image_input_mode(
+     mode_cfg = _coerce_mode(_dict_or_empty(_dict_or_empty(cfg).get("agent")).get("image_input_mode"))
+     if mode_cfg != "auto":
+         return mode_cfg
+-    if _explicit_aux_vision_override(cfg):  # auto: an explicit auxiliary.vision backend wins
+-        return "text"
+     # Keep the three-argument call contract for callers/tests that replace the lookup hook.
+     extra = {"requested_provider": requested_provider} if requested_provider else {}
+-    return "native" if _lookup_supports_vision(provider, model, cfg, **extra) is True else "text"
++    if _lookup_supports_vision(provider, model, cfg, **extra) is True:
++        # hyperhermes: an explicit auxiliary.vision backend is the describer for
++        # main models that cannot see; it no longer takes pixels away from one
++        # that can (agent.image_input_mode: text still does).
++        return "native"
++    return "text"
+ 
+ 
+ # Image size handling is REACTIVE: attach at full size and let
+diff --git a/model_tools.py b/model_tools.py
+index 011d32dc..4b86b520 100644
+--- a/model_tools.py
++++ b/model_tools.py
+@@ -18,7 +18,8 @@ import threading
+ import time
+ from typing import Dict, Any, List, Optional, Tuple
+ 
+-from tools.registry import CHECK_FN_CACHE_BYPASS, check_fn_cache_scope, discover_builtin_tools, registry, tool_error
++from tools.registry import (
++    CHECK_FN_CACHE_BYPASS, check_fn_cache_scope, discover_builtin_tools, main_runtime_cache_key, registry, tool_error)
+ from tools.registry import _MAX_TOOL_ERROR_CHARS as _TOOL_ERROR_MAX_LEN
+ from toolsets import resolve_toolset, validate_toolset
+ from tools.arg_coercion import coerce_tool_args
+@@ -277,6 +278,7 @@ def _tool_defs_cache_key(
+         frozenset(disabled_toolsets) if disabled_toolsets else None, registry._generation, cfg_fp,
+         bool(os.environ.get("HERMES_KANBAN_TASK")), bool(skip_tool_search_assembly),
+         _is_delegated_child_context(), _is_dispatcher_owned_worker(), profile_scope,
++        main_runtime_cache_key(),  # hyperhermes: check_fn verdicts are per main model
+     )
+ 
+ 
+diff --git a/tools/browser_camofox.py b/tools/browser_camofox.py
+index 66e601e3..14a2a2b2 100644
+--- a/tools/browser_camofox.py
++++ b/tools/browser_camofox.py
+@@ -584,6 +584,15 @@ def camofox_vision(question: str, annotate: bool = False, task_id: Optional[str]
+         # The screenshot itself cannot be redacted, but the text-based accessibility snippet
+         # sent alongside it must not leak secret values.
+         from agent.redact import redact_sensitive_text
++        # hyperhermes: a main model with native vision gets the screenshot itself,
++        # as browser_vision does on the agent-browser backend (browser_tool.py).
++        from tools.vision_tools import _should_use_native_vision_fast_path
++        if _should_use_native_vision_fast_path():
++            from tools.browser_tool_vision import _native_vision_result
++            native = _native_vision_result(Path(screenshot_path), question, False, {}, None)
++            if annotation_context:
++                native["content"][0]["text"] += redact_sensitive_text(annotation_context)
++            return native
+         from agent.auxiliary_client import call_llm
+         vision_prompt = f"Analyze this browser screenshot and answer: {question}{redact_sensitive_text(annotation_context)}"
+         timeout, temperature = _vision_llm_settings()
+diff --git a/tools/registry.py b/tools/registry.py
+index bc6e1ab7..1ab3191e 100644
+--- a/tools/registry.py
++++ b/tools/registry.py
+@@ -260,10 +260,10 @@ _CHECK_FN_TTL_SECONDS = 30.0
+ # so a genuinely-down backend is reflected within a couple of turns.
+ _CHECK_FN_FAILURE_GRACE_SECONDS = 60.0
+ _CHECK_FN_CACHE_MAX = 512
+-_check_fn_cache: dict[tuple[Callable, Optional[str]], tuple[float, bool]] = {}
+-_check_fn_last_good: dict[tuple[Callable, Optional[str]], float] = {}
+-_check_fn_ever_good: set[tuple[Callable, Optional[str]]] = set()  # probes that admitted tools this process
+-_check_fn_core_drop_warned: set[tuple[Callable, Optional[str]]] = set()  # once-per-process WARNING gate
++_check_fn_cache: dict[tuple, tuple[float, bool]] = {}
++_check_fn_last_good: dict[tuple, float] = {}
++_check_fn_ever_good: set[tuple] = set()  # probes that admitted tools this process
++_check_fn_core_drop_warned: set[tuple] = set()  # once-per-process WARNING gate
+ _check_fn_cache_lock = threading.Lock()
+ CHECK_FN_CACHE_BYPASS = ""
+ _NO_CACHE_CHECK_FNS: set[Callable] = set()
+@@ -326,6 +326,20 @@ def check_fn_cache_scope() -> Optional[str]:
+         return CHECK_FN_CACHE_BYPASS
+ 
+ 
++def main_runtime_cache_key() -> tuple[str, str]:
++    """hyperhermes: the main provider+model the current context runs (``set_runtime_main``, else
++    config.yaml). Availability checks such as ``check_vision_requirements`` answer per main model,
++    so one gateway session's verdict (a text-only model without a vision backend) must not leak
++    into another session's tool list. ("", "") until the auxiliary client is loaded."""
++    aux = sys.modules.get("agent.auxiliary_client")
++    if aux is None:
++        return ("", "")
++    try:
++        return (str(aux._read_main_provider() or ""), str(aux._read_main_model() or ""))
++    except Exception:
++        return ("", "")
++
++
+ def _run_check_fn_uncached(fn: Callable) -> bool:
+     """Run an availability check without cache/grace handling."""
+     from agent.secret_scope import UnscopedSecretError, current_secret_scope
+@@ -365,7 +379,7 @@ def _check_fn_cached(fn: Callable) -> bool:
+     scope = check_fn_cache_scope()
+     if scope == CHECK_FN_CACHE_BYPASS:
+         return _run_check_fn_uncached(fn)
+-    cache_key = (fn, scope)
++    cache_key = (fn, scope, main_runtime_cache_key())
+     with _check_fn_cache_lock:
+         _prune_check_fn_caches(now)  # leaves only entries within TTL
+         cached = _check_fn_cache.get(cache_key)
+@@ -455,7 +469,7 @@ def get_cached_check_fn_result(fn: Callable) -> Optional[bool]:
+         # Unresolved profile identity bypasses the cache; nothing trustworthy to report.
+         return None
+     with _check_fn_cache_lock:
+-        cached = _check_fn_cache.get((fn, scope))
++        cached = _check_fn_cache.get((fn, scope, main_runtime_cache_key()))
+     return cached[1] if cached is not None and now - cached[0] < _CHECK_FN_TTL_SECONDS else None
+ 
+ 

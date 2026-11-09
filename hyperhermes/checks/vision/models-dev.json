@@ -1,0 +1,81 @@
+{
+  "anthropic": {
+    "env": [
+      "ANTHROPIC_API_KEY"
+    ],
+    "id": "anthropic",
+    "models": {
+      "claude-opus-5-5": {
+        "attachment": true,
+        "id": "claude-opus-5-5",
+        "limit": {
+          "context": 1000000,
+          "output": 128000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "Claude Opus 5.5",
+        "reasoning": true,
+        "tool_call": true
+      }
+    },
+    "name": "Anthropic",
+    "npm": "@ai-sdk/anthropic"
+  },
+  "openrouter": {
+    "env": [
+      "OPENROUTER_API_KEY"
+    ],
+    "id": "openrouter",
+    "models": {
+      "nvidia/nemotron-3-ultra-550b-a55b:free": {
+        "attachment": false,
+        "id": "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "limit": {
+          "context": 1000000,
+          "output": 65536
+        },
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "Nemotron 3 Ultra (free)",
+        "reasoning": true,
+        "tool_call": true
+      },
+      "z-ai/glm-5.3": {
+        "attachment": false,
+        "id": "z-ai/glm-5.3",
+        "limit": {
+          "context": 1048576,
+          "output": 943718
+        },
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "GLM-5.3",
+        "reasoning": true,
+        "tool_call": true
+      }
+    },
+    "name": "OpenRouter",
+    "npm": "@openrouter/ai-sdk-provider"
+  }
+}

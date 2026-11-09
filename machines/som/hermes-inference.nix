@@ -56,6 +56,28 @@ in
         # Qwen only reasons when the chat template is told to; hermes spelling
         # of omp's compat.thinkingFormat: qwen-chat-template (omp-common.nix).
         extra_body.chat_template_kwargs.enable_thinking = true;
+        # p0's vLLM Qwen sees images, but hermes knows that only from a
+        # catalog (models.dev), which has no entry for a custom provider:
+        # unknown counts as text-only (v0.22.5 agent/image_routing.py
+        # _lookup_supports_vision, decide_image_input_mode), so a Qwen
+        # session got descriptions instead of pixels. Both names the
+        # endpoint answers to (guests/bam-inference/vllm-qwen36-27b.nix).
+        models = {
+          qwen.supports_vision = true;
+          "Qwen3.8-27B-FP8".supports_vision = true;
+        };
+      };
+      # The vision backend for main models that cannot see (GLM on
+      # OpenRouter, GLM subagents): without it hermes' auto route finds none
+      # for them (v0.22.5 agent/auxiliary_client.py _vision_auto_route
+      # skips OpenRouter as the main provider) and vision_analyze and
+      # browser_vision fail or vanish. hyperhermes' hermes-vision-every-model
+      # patch keeps vision-capable models (Claude, p0's Qwen above) on
+      # native pixels despite this setting; unpatched hermes would route
+      # every model's images through this describer.
+      settings.auxiliary.vision = {
+        provider = "p0";
+        model = "qwen";
       };
       # Anthropic prompt-cache tier (agent/agent_init.py reads
       # prompt_caching.cache_ttl; "5m" | "1h", clamped back to 5m per

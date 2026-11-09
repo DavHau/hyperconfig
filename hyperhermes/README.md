@@ -116,7 +116,9 @@ secrets; `lib.clan` has the per-agent ones):
 `nix flake check`: VM tests `core`, `hardening`, `local-sso`, `public`, `publish`,
 `browser`, `wallet`, `mail`, `slots`, `slots-local`, `container-slots-storage`,
 `local-deployment`;
-evaluation-only `client-features` and `clan-eval`.
+evaluation-only `client-features` and `clan-eval`; offline `vision` (image
+routing, vision backend and vision tools per main model, on the patched
+package; a consumer passes its own `settings` and package to it).
 
 ## hermes patches
 
@@ -141,3 +143,9 @@ evaluation-only `client-features` and `clan-eval`.
   `https://api.anthropic.com` (what the model picker writes) yields to
   `ANTHROPIC_BASE_URL`, so a TeamClaude agent's profiles keep using the
   gateway; another configured endpoint still wins.
+- `hermes-vision-every-model`: an explicit `auxiliary.vision` backend
+  describes images only for main models that cannot see them (upstream it
+  takes native images away from every model); Camofox's `browser_vision`
+  attaches the screenshot for a vision-capable model; the tool-availability
+  caches are per main model, so one session's text-only model no longer
+  drops `vision_analyze`/`browser_vision` from another session's tool list.

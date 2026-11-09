@@ -36,6 +36,7 @@ let
     ./patches/hermes-dashboard-oidc-allowed-groups.patch
     ./patches/hermes-vault-generate-password.patch
     ./patches/hermes-anthropic-env-base-url.patch
+    ./patches/hermes-vision-every-model.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {

@@ -160,6 +160,10 @@
         slots = import ./checks/slots { inherit pkgs self; };
         slots-local = import ./checks/slots/local.nix { inherit pkgs self; };
         container-slots-storage = import ./checks/container-slots-storage { inherit pkgs self; };
+        # Offline: every main model gets a working image path on the
+        # patched package (native for vision-capable ones, p0's Qwen as
+        # the describer for text-only ones).
+        vision = import ./checks/vision { inherit pkgs hermesPackage; };
         # Evaluation only: teamclaude, claude-auth, desktop and rea on a
         # system without clan, secrets as runtime paths.
         client-features = import ./checks/client-features { inherit pkgs self; };

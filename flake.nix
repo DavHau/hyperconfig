@@ -279,6 +279,18 @@
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
             inherit (inputs) hyperhermes;
           };
+        # som's agents see images whatever the model: hyperhermes' vision
+        # check on som's hermes package and its p0/auxiliary settings
+        # (machines/som/hermes-inference.nix).
+        hermes-vision =
+          let
+            hyperhermes = self.nixosConfigurations.som.config.services.hyperhermes;
+          in
+          import "${inputs.hyperhermes}/checks/vision" {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+            hermesPackage = hyperhermes.package;
+            settings = { inherit (hyperhermes.settings) providers auxiliary; };
+          };
         # infra-space's containers on two members, root on a third machine.
         infra-space =
           import ./modules/nixos/infra-space/test.nix {
