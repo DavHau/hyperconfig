@@ -364,6 +364,20 @@ in
         # language does not persist; set stt.language (or
         # stt.<provider>.language) in Nix to pin one.
         stt.language = lib.mkDefault "";
+
+        # Shared metrics off, and the offer answered "No thanks", so no
+        # surface asks (the dashboard banner, Desktop's "Share usage
+        # stats?" strip, the TUI). Every surface reads consent_state
+        # (hermes_cli/observability/shared_metrics_consent.py) from the raw
+        # config.yaml: answered once enabled or send is written, but an
+        # "off" without offer_version == OFFER_VERSION (2 in v0.22.5) is
+        # asked again; recheck it on a hermes bump. enabled is also the
+        # only collection gate (relay_shared_metrics.py, enabled).
+        telemetry.shared_metrics = {
+          enabled = lib.mkDefault false;
+          send = lib.mkDefault false;
+          offer_version = lib.mkDefault 2;
+        };
       };
 
       forwards.dashboard = {

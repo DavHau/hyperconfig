@@ -1,5 +1,5 @@
-# Evaluation-only check of teamclaude, claude-auth, desktop, rea and the
-# browser's per-agent opt-out: each
+# Evaluation-only check of teamclaude, claude-auth, desktop, rea, the
+# browser's per-agent opt-out and core's shared-metrics answer: each
 # module evaluates on a plain NixOS system (no clan; nixosModules.clan
 # imported anyway, where it must do nothing) with its secrets as runtime
 # path strings, and produces what its header promises. A Nix path literal
@@ -144,6 +144,29 @@ let
     (sys.config.systemd.sockets ? "hermes-camofox-fwd-${name}")
   ];
 
+  # The settings core writes to each agent's config.yaml (the managed one
+  # and the merged one, or the pinned one of a lockedConfig agent): bob is
+  # locked and has settings of his own.
+  telemetry = evalWith [
+    self.nixosModules.core
+    withAgents
+    {
+      services.hyperhermes.agents.bob = {
+        lockedConfig = true;
+        settings.terminal.timeout = 60;
+      };
+    }
+  ];
+  agentSettingsOf =
+    sys: name:
+    (import ../../modules/core/agent-config.nix {
+      inherit lib pkgs;
+      hlib = import ../../lib/core.nix { inherit lib; };
+      cfg = sys.config.services.hyperhermes;
+    }).agentSettings
+      name
+      (agentCfg sys name);
+
   # Everything imported, nothing enabled: no agent, no launcher.
   idle = evalWith [ self.nixosModules.default ];
 
@@ -257,6 +280,18 @@ let
         false
         false
       ];
+
+    telemetry-evaluates = evaluates telemetry && failedAssertions telemetry == [ ];
+    # Shared metrics off and the offer answered "No thanks" at the current
+    # offer_version, so no surface asks (core's options.nix).
+    telemetry-answered-no = lib.all (
+      name:
+      (agentSettingsOf telemetry name).telemetry.shared_metrics == {
+        enabled = false;
+        send = false;
+        offer_version = 2;
+      }
+    ) (lib.attrNames agents);
 
     idle-evaluates = evaluates idle && failedAssertions idle == [ ];
     idle-adds-nothing =
