@@ -5,8 +5,7 @@
 # which vit's GPU host reads too (roman's, kept out of it, in its entry).
 # Who signs in to which agent's dashboard, and the front door:
 # ./hermes-dashboards.nix. The brain:
-# ./hermes-inference.nix. bumper, the nixpkgs-bump agent, is apart
-# (./bumper.nix): of the site shape below it has only the dashboard.
+# ./hermes-inference.nix.
 #
 # Site shape on top of hyperhermes, per agent:
 #   - reader on /vault/parquet (`vault-ro`, ../../modules/nixos/vault-ids.nix),
@@ -318,7 +317,7 @@ in
     gpuSkill
     storageSkill
   ];
-  # The storage skill for every agent, bumper included.
+  # The storage skill for every agent.
   services.hyperhermes.skillDirs = [ "${storageSkill}/share/skills" ];
 
   # The agents' private /tmp, as in their own sessions

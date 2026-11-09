@@ -5,7 +5,7 @@
 
   The key goes into root's authorizedKeys.keyFiles, not into the clan
   instance's authorizedKeys: several modules copy root's `keys` list to
-  other accounts (som's hermes agents and bumper as their adminKeys, bam's
+  other accounts (som's hermes agents as their adminKeys, bam's
   dave, nas' users) or into the initrd, and the infra-space identity must
   reach none of them. Nothing reads `keyFiles` but sshd's own
   /etc/ssh/authorized_keys.d/root (which carries both, so hosts whose sshd

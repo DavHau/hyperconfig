@@ -30,8 +30,6 @@ in
     ../../modules/nixos/vault-nfs-client.nix
     ../../modules/nixos/users/hsjobeki-vault.nix
     ./hermes-agents.nix
-    # The nixpkgs bump: its pipeline and bumper, its agent.
-    ./bumper.nix
     # roman's MCP into Roman's two Home Assistant instances.
     ./roman-home-assistant.nix
     # roman's ESPHome builds and OTA uploads for those instances' devices.
@@ -168,7 +166,6 @@ in
       # Logins are refused while entity-storage-migrate copies a home.
       adam.homeQuota = "30G";
       b3x = { };
-      bumper = { };
       chris = { };
       dave = { };
       # hermes/workspace (~25G) stays backed up; omd2's rebuildable data
@@ -428,7 +425,6 @@ in
     dave-hermes.storage.enable = true;
     adam.storage.enable = true;
     b3x.storage.enable = true;
-    bumper.storage.enable = true;
     chris.storage.enable = true;
     domi.storage.enable = true;
     egg.storage.enable = true;
@@ -487,8 +483,9 @@ in
         b3x = 15;
         joe = 16;
         thaigersprint = 17;
-        # 18: bumper (./bumper.nix), not in hermes-agents-data.nix.
-        # roman is not in it either (./hermes-agents.nix), added below.
+        # 18: retired (was bumper, removed); never reuse.
+        # roman is not in hermes-agents-data.nix (./hermes-agents.nix),
+        # added below.
         roman = 19;
       };
       # Container names are capped at 11 chars (nspawn veth names,
@@ -550,13 +547,7 @@ in
     ++ lib.optionals (mullvadStage >= 2) ([ "searx" ] ++ agents);
     dns.services = lib.optionals (mullvadStage >= 2) (
       [ "searx" ]
-      # An agent without the web tools (bumper) has no Camofox unit.
-      ++ lib.concatMap (
-        a:
-        lib.filter (
-          u: u != "hermes-camofox-${a}" || config.services.hyperhermes.agents.${a}.browser.enable
-        ) (hermesLib.agentUnits a)
-      ) agents
+      ++ lib.concatMap hermesLib.agentUnits agents
     );
     # The LAN's public /64: on-link, and inference.p0.contact lives on it
     # (../../modules/nixos/virtualisation.nix). p0 is our own authenticated
@@ -569,9 +560,7 @@ in
   # zt-eu routes Roman's site LANs to every member, som included
   # (../../home-networks). Of the agents only Roman's and Dave's own (by
   # their dashboard account, ./hermes-dashboards.nix) may reach them; the
-  # human logins, root and system services keep them too. bumper, though
-  # Dave's, stays off them: its own table (./bumper.nix) refuses every
-  # private destination.
+  # human logins, root and system services keep them too.
   hyper.ztEuLanGuard.refusedUsers =
     let
       inherit (import ./hermes-dashboards.nix) accounts;

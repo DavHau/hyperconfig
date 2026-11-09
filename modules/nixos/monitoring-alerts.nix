@@ -221,10 +221,10 @@ in
                 uid = "fleet-unit-failed";
                 title = "Systemd unit failed";
                 # All system units, not clan's nixos_systemd_unit_state:
-                # that one only covers services.<name>.enable services, and
-                # som's nixpkgs-bump (plain systemd.services) failed for
-                # days unseen. Coredump handlers fail with the crash they
-                # record; the crashed unit itself alerts.
+                # that one only covers services.<name>.enable services, so
+                # plain systemd.services failures went unseen. Coredump
+                # handlers fail with the crash they record; the crashed unit
+                # itself alerts.
                 expr = ''node_systemd_unit_state{state="failed", name!~"systemd-coredump@.*"} == 1'';
                 for = "15m";
                 severity = "warning";

@@ -39,20 +39,18 @@
 #
 # /vault/parquet's "other" r-x lets any uid read most of it. Agents kept
 # off the vault (`vault = false`, machines/som/hermes-agents-data.nix, and
-# som's bumper, machines/som/bumper.nix, and roman,
-# machines/som/hermes-agents.nix, which are no vault agents at all)
+# roman, machines/som/hermes-agents.nix, which is no vault agent at all)
 # therefore get a named-user deny on the pool root, which blocks every
 # dataset below it:
 #
 #   setfacl -m u:<uid>:--- /vault                             # thaigersprint 1114
-#   setfacl -m u:<uid>:--- /vault                             # bumper 1115
 #   setfacl -m u:<uid>:--- /vault                             # roman 1116
 #
 # Pinned ids: 1002 stefan, 1004 egg, 1005 dave-hermes, 1100 momentum,
 # 1101 vault (gid), 1102 hsjobeki, 1103 vault-ro (gid), 1104 pinpox,
 # 1105 adam, 1106 j, 1107 vault-parquet-rw (gid), 1108 willi, 1109 domi, 1110 rti, 1111 chris, 1112 b3x, 1113 joe,
-# 1114 thaigersprint (no vault access, denied above), 1115 bumper (som's
-# nixpkgs-bump agent, no vault access, denied above), 1116 roman (som's
+# 1114 thaigersprint (no vault access, denied above), 1115 (was bumper,
+# retired, do not reuse), 1116 roman (som's
 # Home Assistant agent, no vault access, denied above), 1200 agent,
 # 1201 slot-asof, 1202 slot-mm, 1203 infra (uid and gid; the infra-space
 # container's user, no host account: infra-space/default.nix; not a vault

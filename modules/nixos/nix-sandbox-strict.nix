@@ -1,8 +1,7 @@
 # som's nix-daemon builds for users it does not trust: every container on
 # som (all are services.container-slots: the hyperhermes agents' slots and
 # the others like asof; each talks to this host daemon socket,
-# hyperhermes/modules/container-slots.nix), every hyperhermes agent, the
-# nightly nixpkgs-bump pipeline and
+# hyperhermes/modules/container-slots.nix), every hyperhermes agent and
 # `nixremote`, the remote-building builder account
 # (../clan/remote-building). ./nix-gc.nix sets sandbox = "relaxed", which
 # lets any of them run a `__noChroot` derivation unsandboxed on the host as
