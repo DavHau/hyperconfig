@@ -12,6 +12,8 @@
 #      quota from the rate-limit headers of the traffic it forwards and of
 #      its own probes, so no omp database or per-account token is involved.
 #      A failed fetch keeps the last published values, marked stale.
+#      Upstream gateways pooled as accounts of last resort (`fallback`,
+#      hyper.teamclaudeGateway.upstreamAccounts) are left out.
 #   2. a `hyperconfig/anthropic-usage` noctalia plugin (plugin/, Luau)
 #      rendering one thin gauge per account, placed in the bar's end
 #      section just before the toggle buttons.

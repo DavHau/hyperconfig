@@ -26,12 +26,12 @@ KEY = "tc-client-key"
 STATUS_PATH = "/teamclaude/status"
 
 
-def account(name, weekly, fable, weekly_reset, fable_reset):
+def account(name, weekly, fable, weekly_reset, fable_reset, type="oauth"):
     """One entry of TeamClaude's /teamclaude/status `accounts` (fields we touch
     plus some we ignore)."""
     return {
         "name": name,
-        "type": "oauth",
+        "type": type,
         "orgName": None,
         "enabled": True,
         "rateLimitedUntil": None,
@@ -139,6 +139,22 @@ def test_happy_path_two_accounts(tmp, url):
           f"got {accounts!r}")
 
 
+def test_upstream_gateway_left_out(tmp, url):
+    """An upstream gateway pooled as an "apikey" account (`fallback`) gets no
+    bar; only the gateway's own oauth accounts are published."""
+    StubGateway.response = {
+        "currentAccount": "alice@example.com",
+        "accounts": [
+            account("alice@example.com", 0.5, 0.25, 1_793_552_400_000, 1_793_552_399_000),
+            {**account("fallback", 0.9, 0.8, 1_793_552_400_000, 1_793_552_399_000,
+                       type="apikey"), "priority": 100},
+        ],
+    }
+    got = run_poller(tmp, url, write_key(tmp))
+    emails = [a["email"] for a in got["accounts"]]
+    check("fallback left out", emails == ["alice@example.com"], f"got {emails}")
+
+
 def assert_kept_stale(name, first, got):
     want = {a["email"]: a for a in first["accounts"]}
     accounts = got["accounts"]
@@ -208,6 +224,7 @@ def main():
 
     tests = [
         test_happy_path_two_accounts,
+        test_upstream_gateway_left_out,
         test_server_error_keeps_previous_values,
         test_wrong_key_keeps_previous_values,
         test_missing_key_file_keeps_previous_values,

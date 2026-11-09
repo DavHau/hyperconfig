@@ -7,6 +7,10 @@ saw for it (from the rate-limit headers of the traffic it forwards and of
 its own probes). The request carries a TeamClaude client key as
 `x-api-key`; any client key may read the status.
 
+Only the gateway's own accounts are published. Other gateways pooled as
+accounts of last resort (`fallback`, type "apikey") are left out: their
+quota is whichever upstream account last served, not an account of ours.
+
 The poller atomically writes a small state file the noctalia
 `anthropic-usage` plugin watches:
 
@@ -70,6 +74,11 @@ def current_accounts(status, now_ms):
     accounts = []
     for acc in status["accounts"]:
         if not isinstance(acc, dict) or not acc.get("name"):
+            continue
+        # Upstream gateways join as "apikey" accounts. Skip exactly that type
+        # rather than all but "oauth": an own account of a new or missing
+        # type then still shows up instead of silently vanishing.
+        if acc.get("type") == "apikey":
             continue
         quota = acc.get("quota") or {}
         accounts.append({
