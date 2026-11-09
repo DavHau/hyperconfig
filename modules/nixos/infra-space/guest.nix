@@ -28,8 +28,9 @@
   them, never forced. Run by the `clan` on PATH (a wrapper: pull before,
   push after the real clan, holding the sync's lock throughout) and by
   infra-space-secrets-push on every commit and every 5 minutes, so
-  commits made otherwise go up too; a run fired by clan's own commits
-  waits for the wrapper's end instead of pulling under clan. A
+  commits made otherwise go up too; a run fired while the wrapper holds
+  the lock (clan's own commits) does nothing: the wrapper's push takes
+  them up. A
   conflict (one var written on both sides) is never resolved here: the
   rebase is aborted, the run fails and the push unit stays failed, which
   makes the wrapper refuse until infra resolves it by hand
@@ -77,9 +78,9 @@ let
   runbook = ''the infra-space skill (modules/nixos/infra-space/hermes-skill/SKILL.md), section "Secrets store conflict"'';
 
   # The clan vars store's sync with GitHub (see the header); one run at a
-  # time (the wrapper and the push unit both run it). The wrapper holds
-  # the lock for its whole run and tells its two runs so
-  # (CLAN_SECRETS_SYNC_LOCKED=1).
+  # time (the wrapper, the push unit and infra by hand run it). The
+  # wrapper and the push unit hold the lock across both their runs and
+  # tell them so (CLAN_SECRETS_SYNC_LOCKED=1).
   secretsSync = pkgs.writeShellApplication {
     name = "clan-secrets-sync";
     runtimeInputs = [
@@ -157,9 +158,9 @@ let
     name = "clan";
     text = ''
       store=''${CLAN_AGE_STORE_DIR:?CLAN_AGE_STORE_DIR is not set}
-      # The sync's lock for the whole run (pull, clan, push): the push
-      # unit, fired by clan's commits, runs after it, not under clan. No
-      # checkout: the pull below says so.
+      # The sync's lock for the whole run (pull, clan, push), waited for:
+      # the push unit, fired by clan's commits, skips instead of running
+      # under clan (secretsPush below). No checkout: the pull below says so.
       if git_dir=$(${pkgs.git}/bin/git -C "$store" rev-parse --absolute-git-dir 2>/dev/null); then
         exec 9>"$git_dir/clan-secrets-sync.lock"
         ${pkgs.util-linux}/bin/flock 9
@@ -185,6 +186,31 @@ let
         [ "$rc" != 0 ] || rc=1
       fi
       exit "$rc"
+    '';
+  };
+
+  # infra-space-secrets-push's run: pull, then push, under one try of the
+  # lock. Never waits for it: the holder is a wrapped clan run, which can
+  # outlast the unit's start timeout (`clan machines update`), and a unit
+  # killed waiting would stay failed and block the wrapper. The wrapper's
+  # push covers the commits that fired this run, so skipping is a success.
+  secretsPush = pkgs.writeShellApplication {
+    name = "infra-space-secrets-push";
+    runtimeInputs = [
+      pkgs.git
+      pkgs.util-linux
+    ];
+    text = ''
+      cd "''${CLAN_AGE_STORE_DIR:?CLAN_AGE_STORE_DIR is not set}"
+      exec 9>"$(git rev-parse --git-dir)/clan-secrets-sync.lock"
+      if ! flock -n 9; then
+        echo "a clan run holds the secrets store; its own push takes these commits up"
+        exit 0
+      fi
+      export CLAN_SECRETS_SYNC_LOCKED=1
+      # in order, the push only after a successful pull
+      ${lib.getExe secretsSync} pull
+      ${lib.getExe secretsSync} push
     '';
   };
 
@@ -497,11 +523,7 @@ in
         Type = "oneshot";
         User = "infra";
         Group = "infra";
-        # in order, the push only after a successful pull
-        ExecStart = [
-          "${lib.getExe secretsSync} pull"
-          "${lib.getExe secretsSync} push"
-        ];
+        ExecStart = lib.getExe secretsPush;
         # a hung connection would keep it active and the triggers idle
         TimeoutStartSec = "5min";
       };

@@ -18,8 +18,9 @@
 # local commit intact, and the runbook (./hermes-skill/SKILL.md) resolves
 # it; a failed infra-space-secrets-push makes it refuse, pointing at the
 # unit's journal, until infra starts the unit again; the path unit pushes
-# a commit on its own, and, fired by clan's commits mid-run, waits for the
-# wrapper's end instead of failing on clan's half-written store.
+# a commit on its own, and, fired by clan's commits mid-run, leaves the
+# store to the run (whose push takes them up) instead of failing on clan's
+# half-written store or timing out waiting for it.
 # Each member has a software TPM: infra makes its age identity on it in
 # the guest and decrypts with it; `tenant` on the host can neither read
 # that identity nor, with a copy, use it (no access to the TPM); with the
@@ -182,10 +183,13 @@ let
           # the real clan-cli needs the fleet's flake; the wrapper around it
           # is what is tested. `clan slow-commit` writes and commits vars
           # slowly, as `clan vars generate` does, so the push unit fires
-          # mid-run.
+          # mid-run, and holds the wrapper's lock (~10 s) longer than the
+          # push unit's start timeout, cut to 5 s here (5 min in
+          # production, where a `clan machines update` outlasts that).
           (
-            { pkgs, ... }:
+            { pkgs, lib, ... }:
             {
+              systemd.services.infra-space-secrets-push.serviceConfig.TimeoutStartSec = lib.mkForce "5s";
               infraSpace.clanPackage = pkgs.writeShellScriptBin "clan" ''
                 set -eu
                 [ "''${1:-}" = slow-commit ] || exit 0
@@ -472,8 +476,9 @@ pkgs.testers.runNixOSTest {
           m.wait_until_succeeds("nixos-container run infra-space -- runuser -u infra -- bash -lc "
                                 + shlex.quote(f"test $(git -C {remote} rev-parse main) = $(git -C {store} rev-parse main)"), timeout=60)
 
-          # the path unit fires on clan's commits mid-run, and waits for
-          # the run's end instead of pulling under it
+          # the path unit fires on clan's commits mid-run, and leaves the
+          # store to the run (whose push takes those commits up) instead of
+          # pulling under it or waiting for it past its start timeout
           since = guest_root(m, "date +%s").strip()
           guest(m, "clan slow-commit")
           assert tip(remote) == tip(store)
@@ -481,7 +486,7 @@ pkgs.testers.runNixOSTest {
                                 + shlex.quote("case $(systemctl show -p ActiveState --value infra-space-secrets-push.service) in inactive|failed) ;; *) exit 1;; esac"), timeout=60)
           guest_root(m, "sh -c '! systemctl is-failed --quiet infra-space-secrets-push.service'")
           out = guest_root(m, f"journalctl -o cat -u infra-space-secrets-push.service --since @{since}")
-          assert "Starting" in out and "Failed" not in out, out
+          assert "Starting" in out and "Failed" not in out and "timeout" not in out.lower(), out
 
       with subtest("afk as infra: runs, finds its keys, no web tools"):
           import json
