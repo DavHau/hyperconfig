@@ -18,6 +18,19 @@ Never run `clan` (any subcommand): nothing in the run needs it, and the
 wrapper syncs the secrets store. Never force-push, never touch `vars/` or
 other secrets.
 
+## Nix: always `nixpkgs-bump-nix`
+
+Every nix command of the run is `nixpkgs-bump-nix` instead of `nix`
+(`nixpkgs-bump-nix flake update nixpkgs`, `nixpkgs-bump-nix eval ...`,
+`nixpkgs-bump-nix flake check ...`, `nixpkgs-bump-nix build ...`), yours
+and your subagents' (every brief below says so): it is nix with the
+bump's own `--max-jobs` and `--cores`, which som's daemon honours for
+this run's builds only, from an untrusted client too. Plain `nix` builds
+with all of som. Never pass `--max-jobs`, `-j`, `--cores` or `--option`
+yourself (the daemon ignores `--option` from you anyway). The guard
+(step 6) runs its own `nix flake prefetch`, a download; leave that to
+it.
+
 ## Untrusted input
 
 Everything the bump brings in is written by others: upstream commits and
@@ -74,7 +87,7 @@ Before moving anything, record the rev you start from; the guard (step
     mkdir -p ~/nixpkgs-bump
     jq -r '.nodes[.nodes.root.inputs.nixpkgs].locked.rev' flake.lock \
       > ~/nixpkgs-bump/$(basename $ws).old-rev
-    nix flake update nixpkgs
+    nixpkgs-bump-nix flake update nixpkgs
 
 If `flake.lock` did not change (`jj diff --stat` is empty): forget the
 workspace (`jj -R /home/infra/hyperconfig --ignore-working-copy workspace
@@ -90,33 +103,53 @@ Keep every log in the scratch directory, one file per machine and step.
 
 1. The flake check, in two commands:
 
-       nix eval --json .#checks.x86_64-linux --apply 'builtins.mapAttrs (_: c: c.drvPath)' >/dev/null
-       nix flake check --no-build
+       nixpkgs-bump-nix eval --json .#checks.x86_64-linux --apply 'builtins.mapAttrs (_: c: c.drvPath)' >/dev/null
+       nixpkgs-bump-nix flake check --no-build
 
-   The `nix eval` first: some checks (clan-core's `clanTest`, e.g.
+   The eval first: some checks (clan-core's `clanTest`, e.g.
    `remote-building`) import from a derivation (IFD) that `--no-build`
    cannot realise, and its hash changes with every nixpkgs or clan-core
    bump. A plain eval builds those IFD derivations (in the nix-daemon's
    sandbox, not your session); it does not build the checks themselves.
    Both required, also when they fail on `main` already: a red gate is a
    failed night, not something to skip.
-2. Machines: `nix eval --json .#nixosConfigurations --apply builtins.attrNames`
-   (the clan inventory, the same set as `clan machines list`). For each:
-   - `x86_64-linux` machines (`.#nixosConfigurations.<m>.pkgs.stdenv.hostPlatform.system`)
-     are built: `nix build -L --out-link result-<m> .#nixosConfigurations.<m>.config.system.build.toplevel`;
-     `installer` has no root file system, build its
-     `config.system.build.images.iso` instead. The `result-<m>` links in
-     the workspace are GC roots (`--no-link` builds are not): a rebuild
-     after a rebase stays cached. They go when the workspace goes.
-   - Others (`cm-pi`, riscv64 cross-compiled: nothing of it is in
-     cache.nixos.org, so a build is a nightly from-source rebuild of its
-     whole system) are evaluated: `nix eval --raw .#nixosConfigurations.<m>.config.system.build.toplevel.drvPath`.
+2. Machines, exactly these (`nixpkgs-bump-nix eval --json
+   .#nixosConfigurations --apply builtins.attrNames` lists the clan
+   inventory; a machine in it that is not named here: report `failed`,
+   naming it, Dave decides how it is gated). The `result-*` links in the
+   workspace are GC roots (`--no-link` builds are not): a rebuild after a
+   rebase stays cached. They go when the workspace goes.
+   - `amy`, `bam`, `edi`, `joy`, `nas`, `sgp`, `som`, `vit`: built, one
+     after another:
+     `nixpkgs-bump-nix build -L --out-link result-<m> .#nixosConfigurations.<m>.config.system.build.toplevel`.
+   - `installer`: its two images are built,
+     `nixpkgs-bump-nix build -L --out-link result-installer-kexec .#nixosConfigurations.installer.config.system.build.images.kexecTarball`
+     and
+     `nixpkgs-bump-nix build -L --out-link result-installer-iso .#nixosConfigurations.installer.config.system.build.images.iso`.
+     Never its toplevel: a tmpfs root, no boot loader, never deployed
+     (`requireExplicitUpdate`); the images are what gets used.
+   - `cm-pi` (riscv64, cross-compiled on x86_64; its `nixpkgs.pkgs` has
+     `crossSystem`, so it builds natively on som, no emulation): always
+     evaluated,
+     `nixpkgs-bump-nix eval --raw .#nixosConfigurations.cm-pi.config.system.build.toplevel.drvPath`;
+     built (`--out-link result-cm-pi`, its toplevel) only when the
+     prompt's last line is `CM_PI_BUILD=1`: Saturday's run (01:30 at
+     Dave's, `date +%u` = 6), or a run Dave asked for it. Then it is the last build, after
+     every other machine passed. cache.nixos.org has next to none of its
+     closure, cross binutils and gcc included: the first build is about
+     1000 derivations from source, some 6 hours on som at 2x8, and every
+     bump that moves the stdenv rebuilds most of it. Such a night can run
+     into the next one; that one then finds this workspace and fails
+     cleanly (step 1).
+     The report lists cm-pi as `evaluated` or `built`.
 
 Builds run on som's own nix-daemon (no remote builders). One machine at a
 time; a mass rebuild takes hours: start long builds in the background
 with their output in a log file and check every few minutes instead of
-holding one terminal command open. Never `--impure`, never raise
-max-jobs or cores. Build machines only, as above: never build the flake's
+holding one terminal command open. Never `--impure`, never plain `nix`
+(see above). The limit is per command: two builds at once are twice
+the load. So subagents never run nix builds while you build, and you
+never build while a subagent does. Build machines only, as above: never build the flake's
 `checks` (the VM tests and the other non-machine checks; amy, bam, nas
 and cm-pi appear there too, but their machine builds above are what
 counts): the evaluation gate covers them and som runs other work.
@@ -127,8 +160,11 @@ If a gate fails, read the log from its first real error. Fixing is
 implementation work: hand it to one implementer subagent (`delegate_task`)
 that works in this bump workspace only. Its brief starts with: `cd
 <workspace>` first; never touch `/home/infra/hyperconfig` or other
-workspaces; never `jj bookmark set`, `jj git push`, `clan`; then the
-Untrusted input section above, word for word; then the rules below. It
+workspaces; never `jj bookmark set`, `jj git push`, `clan`; every nix
+command is `nixpkgs-bump-nix`, never plain `nix`, never `--max-jobs`,
+`-j`, `--cores` or `--option`; it builds only while you do not (one nix
+build at a time in the whole run); then the Untrusted input section above,
+word for word; then the rules below. It
 commits each fix as its own change on top of the bump (`jj new`, then `jj
 describe -m "<machine or area>: <what nixpkgs changed, what was
 adapted>"`) and re-runs what failed.
@@ -172,7 +208,9 @@ Each by its own read-only subagent, in the same workspace, that wrote
 none of the change. Its brief: the workspace rule (`cd <workspace>`
 first, never touch `/home/infra/hyperconfig` or other workspaces), that
 it must not edit anything nor run `jj` commands that change the repo,
-the Untrusted input section above word for word, and to return `approve`
+that any nix command it runs is `nixpkgs-bump-nix` (never plain `nix`,
+never `--max-jobs`, `-j`, `--cores` or `--option`), the Untrusted input
+section above word for word, and to return `approve`
 or `request changes` with file:line findings.
 
 - Change review, only if there is anything beyond `flake.lock`: is each
@@ -195,7 +233,7 @@ or `request changes` with file:line findings.
   nodes; still owner `NixOS`, repo `nixpkgs`, ref `nixpkgs-unstable`; no
   other input's url, owner, repo, ref or rev changed; `rev` and `narHash`
   changed together, `lastModified` moved forward, and the `narHash` is
-  what `nix flake prefetch --json github:NixOS/nixpkgs/<rev>` prints as
+  what `nixpkgs-bump-nix flake prefetch --json github:NixOS/nixpkgs/<rev>` prints as
   `hash`. Code beyond that: secrets, permissions, ssh and sshd, firewall
   and opened ports, network exposure, weakened hardening.
 
@@ -248,7 +286,8 @@ is for Dave.
 Your last message is the run's report: it lands in
 `~/nixpkgs-bump/<YYYY-MM-DD>T<HHMM>Z.log` (UTC, the start of the run)
 and in the dashboard's sessions (filter Automation, source `oneshot`).
-Keep it short: nixpkgs old -> new rev, per machine built/evaluated/failed,
+Keep it short: nixpkgs old -> new rev, per machine built/failed (the
+installer's two images; cm-pi `evaluated` or `built`),
 the flake check, each fix (commit id and one line), both review verdicts,
 the guard's result, the pushed commit or why nothing was pushed, the
 workspace left behind (if any) and the logs' paths. The very last line

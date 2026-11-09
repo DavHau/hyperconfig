@@ -732,8 +732,13 @@ pkgs.testers.runNixOSTest {
           assert int(guest_root(memberA, "cat ${llmRecord} | wc -l").strip()) == before
           guest_root(memberA, "systemctl reset-failed nixpkgs-bump.service")
           # the stub's answer has no verdict as its last line: failed
+          # (asked by hand to build cm-pi: the flag file reaches the prompt)
+          guest(memberA, "touch /home/infra/nixpkgs-bump/build-cm-pi")
           code, _ = memberA.execute("nixos-container run infra-space -- systemctl start nixpkgs-bump.service")
           assert code != 0, code
+          prompt = guest(memberA, "cat /home/infra/nixpkgs-bump/last-prompt")
+          assert prompt.rstrip().endswith("CM_PI_BUILD=1"), prompt
+          guest(memberA, "test ! -e /home/infra/nixpkgs-bump/build-cm-pi")
           report = guest(memberA, "cat /home/infra/nixpkgs-bump/*.log")
           assert "locked-pong" in report, report
           assert int(guest_root(memberA, "cat ${llmRecord} | wc -l").strip()) > before
@@ -745,6 +750,22 @@ pkgs.testers.runNixOSTest {
           assert guest(memberA, "stat -c %a /home/infra/nixpkgs-bump/*.log").split() == ["600"]
           guest(memberA, "rm -r /home/infra/hyperconfig /home/infra/nixpkgs-bump")
           guest_root(memberA, "systemctl reset-failed nixpkgs-bump.service")
+
+      with subtest("the nightly bump's nix: its own cores and jobs, from an untrusted client"):
+          busybox = "${pkgs.pkgsStatic.busybox}"
+          def cores_of(nix):
+              expr = (
+                  'derivation { name = "bump-cores"; system = builtins.currentSystem; '
+                  f'builder = "''${{builtins.storePath "{busybox}"}}/bin/sh"; nonce = "{nix}"; '
+                  'args = [ "-c" "echo $NIX_BUILD_CORES > $out" ]; }'
+              )
+              out = guest(memberA, f"{nix} build --impure --no-link --print-out-paths --expr {shlex.quote(expr)}").strip()
+              return guest(memberA, f"cat {out}").strip()
+          assert cores_of("nixpkgs-bump-nix") == "8"  # ./nixpkgs-bump.nix cores (the VM has 2)
+          assert cores_of("nix") != "8"
+          # honoured without trust: infra is no trusted user of the daemon
+          assert "Trusted: 0" in guest(memberA, "nix store info 2>&1"), "infra trusted"
+          memberB.fail("nixos-container run infra-space -- which nixpkgs-bump-nix")
 
       with subtest("the dashboard: som's nginx from the host, refused to a LAN peer, none on amy"):
           origin = "--resolve ${dashboardHost}:80:127.0.0.1 http://${dashboardHost}"

@@ -44,6 +44,19 @@
   exporter, which sees som's units, not the container's; the guest runs
   no exporter. Until there is a bridge, a failed night is seen in the
   dashboard (sessions, source `oneshot`), the log, or by main not moving.
+
+  Resources: the run's nix commands go through `nixpkgs-bump-nix`, nix
+  with the bump's own max-jobs and cores, so som's nix.settings and
+  everyone else's builds keep theirs. Flags, not the unit: the commands
+  run in the gateway, whose environment is the shim's `env -i` allowlist
+  (no NIX_CONFIG from here), and systemd limits on this unit would bind
+  only the shim, never the host daemon's builders. The daemon takes both
+  from untrusted clients too: they are fixed fields of the client's
+  wopSetOptions, applied before the trusted-users check that guards the
+  other overrides (nix 2.35 src/libstore/daemon.cc ClientSettings::apply);
+  `--option max-jobs` would go there and be ignored for infra, which is
+  not, and must not be, a trusted user. The guard keeps plain nix: its
+  only nix command is `nix flake prefetch`, a download, no build.
 */
 {
   config,
@@ -65,6 +78,13 @@ let
     Follow the nixpkgs-bump skill from step 1 to the report. Never deploy.
     End with the skill's NIXPKGS-BUMP line.
   '';
+  # cm-pi's toolchain is built from source (the skill's step 3.2): only
+  # once a week, Saturday's run (01:30 at Dave's, `date +%u` = 6 in +07;
+  # the guest itself runs on UTC), or when Dave
+  # asks for it with ${cmPiFlag} before starting the unit by hand (the
+  # run consumes the file). The skill reads the decision from the
+  # prompt's CM_PI_BUILD line.
+  cmPiFlag = "${logDir}/build-cm-pi";
 
   # The skill's last check before a push (./nixpkgs-bump/guard.sh says
   # what it checks). On the guest's PATH, so the agent's terminal finds it
@@ -96,6 +116,15 @@ let
     '';
   };
 
+  # som has 32 threads: at most two builds of eight cores each, half the
+  # machine. Plain nix sends the guest's own (max-jobs auto = 32, cores 0:
+  # all); the daemon's nix.conf values never apply to daemon clients.
+  maxJobs = 2;
+  cores = 8;
+  bumpNix = pkgs.writeShellScriptBin "nixpkgs-bump-nix" ''
+    exec ${config.nix.package}/bin/nix --max-jobs ${toString maxJobs} --cores ${toString cores} "$@"
+  '';
+
   run = pkgs.writeShellScript "nixpkgs-bump" ''
     set -uo pipefail
     umask 077
@@ -108,12 +137,22 @@ let
     fi
     log=${logDir}/$(date -u +%FT%H%MZ).log
     echo "nixpkgs-bump: report in $log"
+    cm_pi=0
+    if [ "$(TZDIR=${pkgs.tzdata}/share/zoneinfo TZ=Asia/Bangkok date +%u)" = 6 ]; then
+      cm_pi=1
+    fi
+    if [ -e ${cmPiFlag} ]; then
+      cm_pi=1
+      rm -f ${cmPiFlag}
+    fi
+    query=${logDir}/last-prompt
+    { cat ${prompt}; echo "CM_PI_BUILD=$cm_pi"; } >"$query"
     # The agent's shim (core's agents.nix): HERMES_HOME and the gateway's
     # environment, as in Dave's sessions. Hours of polling a mass rebuild
     # outlast hermes' default of 500 tool calls per turn. --in is home,
     # not the checkout: the run never works in the main checkout.
     /run/current-system/sw/bin/hermes chat -Q -s nixpkgs-bump --max-turns 3000 \
-      --in ${home} --query-file ${prompt} 2>&1 | tee "$log"
+      --in ${home} --query-file "$query" 2>&1 | tee "$log"
     rc=''${PIPESTATUS[0]}
     # Logs of the last 60 runs.
     ls -1t ${logDir}/*.log | tail -n +61 | xargs -r rm -f
@@ -123,9 +162,11 @@ let
   '';
 in
 {
+  # On the system PATH, which the gateway's commands (and subagents) end in.
   environment.systemPackages = [
     guard
     verdict
+    bumpNix
   ];
 
   systemd.services.nixpkgs-bump = {
