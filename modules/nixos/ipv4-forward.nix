@@ -59,8 +59,13 @@ let
 
   isGateway = cfg.role == "gateway";
   peerName = if isGateway then backendName else gatewayName;
+  # `+`, not "${}": a path directory (the slots test) stays a path instead
+  # of being copied to the store, which read-only eval cannot read back.
   peerPublicKey = lib.trim (
-    builtins.readFile "${config.clan.core.settings.directory}/vars/per-machine/${peerName}/ipv4-forward-wg/publicKey/value"
+    builtins.readFile (
+      config.clan.core.settings.directory
+      + "/vars/per-machine/${peerName}/ipv4-forward-wg/publicKey/value"
+    )
   );
 in
 {

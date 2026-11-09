@@ -8,13 +8,12 @@
 { pkgs }:
 let
   inherit (pkgs) lib;
-  sshKey = pkgs.runCommand "per-user-tmp-test-key" { nativeBuildInputs = [ pkgs.openssh ]; } ''
-    mkdir $out
-    ssh-keygen -q -t ed25519 -N "" -f $out/key
-  '';
+  # nixpkgs' fixed test key: a generated one in keyFiles is IFD (sshd reads
+  # keyFiles at eval time).
+  sshKeys = import (pkgs.path + "/nixos/tests/ssh-keys.nix") pkgs;
   user = name: {
     isNormalUser = true;
-    openssh.authorizedKeys.keyFiles = [ "${sshKey}/key.pub" ];
+    openssh.authorizedKeys.keys = [ sshKeys.snakeOilEd25519PublicKey ];
   };
 in
 pkgs.testers.runNixOSTest {
@@ -101,7 +100,7 @@ pkgs.testers.runNixOSTest {
         machine.start()
         machine.wait_for_unit("multi-user.target")
         machine.wait_for_unit("sshd.service")
-        machine.succeed("install -m 600 ${sshKey}/key /root/key")
+        machine.succeed("install -m 600 ${sshKeys.snakeOilEd25519PrivateKey} /root/key")
 
     with subtest("/tmp is the rolled-back ZFS dataset"):
         machine.succeed("test \"$(findmnt -no SOURCE,FSTYPE /tmp)\" = 'tpool/tmp zfs'")

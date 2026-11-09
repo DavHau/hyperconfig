@@ -225,7 +225,7 @@ pkgs.testers.runNixOSTest {
 
   nodes.managed = {
     imports = [ ./fleet-access.nix ];
-    hyper.infraSpace.fleetAccess.publicKey = pub "infra-space.pub";
+    hyper.infraSpace.fleetAccess.keyFile = keys + "/infra-space.pub";
     services.openssh = {
       enable = true;
       hostKeys = [

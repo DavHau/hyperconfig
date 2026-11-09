@@ -15,24 +15,19 @@
 {
   config,
   lib,
-  pkgs,
-  inputs,
   ...
 }:
 let
-  cfg = config.hyper.infraSpace.fleetAccess;
-  keyFile = pkgs.writeText "infra-space-root.pub" (cfg.publicKey + "\n");
+  inherit (config.hyper.infraSpace.fleetAccess) keyFile;
 in
 {
-  options.hyper.infraSpace.fleetAccess.publicKey = lib.mkOption {
-    type = lib.types.str;
-    default = lib.trim (
-      inputs.clan-core.clanLib.getPublicValue {
-        flake = config.clan.core.settings.directory;
-        generator = "infra-space-ssh";
-        file = "id_ed25519.pub";
-      }
-    );
+  # A file, not a string: sshd reads keyFiles at eval time, and a file
+  # written from a string (writeText) is IFD, which flake check
+  # --no-build cannot build.
+  options.hyper.infraSpace.fleetAccess.keyFile = lib.mkOption {
+    type = lib.types.path;
+    default =
+      config.clan.core.settings.directory + "/vars/shared/infra-space-ssh/id_ed25519.pub/value";
     defaultText = lib.literalMD "the shared clan var `infra-space-ssh` (./default.nix)";
     description = "The infra-space ssh public key authorized for root here.";
   };

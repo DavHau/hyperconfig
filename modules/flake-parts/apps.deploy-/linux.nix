@@ -75,6 +75,8 @@
         type = "app";
         program = builtins.toString (mkLinuxDeploy {
           inherit attrName;
+          # the mesh name (deployAddress is gone)
+          hostName = "${attrName}.d";
         });
       };
   in {

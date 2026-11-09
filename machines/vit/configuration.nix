@@ -206,18 +206,15 @@
     users.users.dave.hashedPasswordFile = lib.mkForce null;
     users.users.dave.hashedPassword = lib.mkForce "$6$4PW3Q8YUR5.aep1m$fbCWXV2Lfuo53gE0Pz7BZo7V4AgRq6O6dWZ47vnzzgZsUuh7q389xzlSW9ku0SGP2kfMQhJ3BVasp01/NplRx/";  # dave
 
-    virtualisation.qemu.options = [
-      "-device virtio-vga-gl"
-      "-display gtk,gl=on"
-    ];
-    virtualisation.memorySize = 4096;
-    virtualisation.cores = 4;
-
-    # Enable SSH and forward port for debugging
-    virtualisation.forwardPorts = [
-      { from = "host"; host.port = 2222; guest.port = 22; }
-    ];
+    # Display, memory, cores and the 2222->22 forward come from spaces'
+    # vm-debug (a second forward of the same port would clash in qemu).
     services.openssh.enable = true;
+    # spaces' vm-debug wants password login in the VM, ssh.nix forbids it.
+    services.openssh.settings.PasswordAuthentication = lib.mkForce true;
+    # No initrd to reach and no wifi card; their initrd secrets need a
+    # bootloader that appends them, which the VM does not have.
+    hyper.initrdSsh.enable = lib.mkForce false;
+    hyper.initrdWifi.enable = lib.mkForce false;
     home-manager.backupFileExtension = "hm-backup";
 
     # VM (host captures Super) → use Alt as niri's mod-key.

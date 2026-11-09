@@ -113,7 +113,9 @@ in
     description = "boot.initrd.luks.devices entry holding the root.";
   };
 
-  config = lib.mkMerge [
+  # Nothing to unlock without the device: the vmVariant drops all LUKS
+  # devices (qemu-vm.nix), and this must not break `system.build.vm`.
+  config = lib.mkIf (config.boot.initrd.luks.devices ? ${cfg.name}) (lib.mkMerge [
     {
       clan.core.vars.generators.luks-key = {
         # Never installed on the machine whose disk it protects.
@@ -188,5 +190,5 @@ in
         };
       };
     })
-  ];
+  ]);
 }

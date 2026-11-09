@@ -38,6 +38,11 @@
   # imports on the target without forceImportRoot, which clan turns off.
   boot.supportedFilesystems.zfs = true;
 
+  # Only ever runs from RAM (the kexec image below sets its own root and
+  # bootloader); these just let the plain toplevel evaluate.
+  fileSystems."/" = lib.mkDefault { device = "none"; fsType = "tmpfs"; };
+  boot.loader.grub.enable = lib.mkDefault false;
+
   image.modules.kexecTarball = {config, ...}: {
     imports = [
       inputs.nixos-images.nixosModules.kexec-installer
