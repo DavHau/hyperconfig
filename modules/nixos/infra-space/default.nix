@@ -128,6 +128,11 @@ let
   # nspawn's host-side veth: ve-<name>, at most 15 characters.
   veth = "ve-${name}";
   containerUnit = "container@${name}.service";
+  # The containers module's /etc/<prefix>containers/<name>.conf; its
+  # prefix is `nixos-` or none, by stateVersion.
+  containerConf =
+    config.environment.etc."nixos-containers/${name}.conf"
+      or config.environment.etc."containers/${name}.conf";
   hostAddress = "10.235.0.1";
   localAddress = "10.235.0.2";
   hostAddress6 = "fd23:5ace::1";
@@ -336,6 +341,9 @@ in
 
     containers.${name} = {
       autoStart = true;
+      # Also the bound of a reload, the guest's switch in place (below),
+      # which waits for the guest's units it restarts to stop and start.
+      timeoutStartSec = "5min";
       privateNetwork = true;
       inherit
         hostAddress
@@ -405,7 +413,38 @@ in
       matchConfig.Name = veth;
       linkConfig.Unmanaged = true;
     };
+    # A change of the guest alone switches it in place, so the guest's
+    # processes that the change leaves alone (sessions, their tool
+    # commands, background jobs) keep running. The containers module
+    # restarts the container on any change of the guest's system: its
+    # restart triggers are the guest's toplevel and the container's
+    # /etc/[nixos-]containers/<name>.conf, which names that toplevel too
+    # (SYSTEM_PATH). Here the guest's toplevel is a reload trigger instead,
+    # and the unit's ExecReload (the containers module's) runs the guest's
+    # `switch-to-configuration test` with the new SYSTEM_PATH (systemd
+    # rereads the EnvironmentFile for it). Still a restart: whatever else
+    # is in the .conf (bind mounts, credentials, nspawn flags, network,
+    # devices) and any change of the unit itself (its scripts, the
+    # module's or nixpkgs' container@ unit, systemd's options); a
+    # credential's new value restarts it through restartUnits above.
+    # The guest's own switch still restarts the guest units the change
+    # touches: a change of hermes' settings restarts the gateway and the
+    # dashboard, and with the dashboard its sessions' running turns, tool
+    # commands and subagents. A failed guest switch fails the reload (the
+    # host's switch exits 4) and leaves the guest half-switched; the next
+    # container start boots the new SYSTEM_PATH. Deploying this change
+    # itself restarts the container once (new triggers, start timeout).
     systemd.services."container@${name}" = {
+      restartTriggers = lib.mkForce [
+        (builtins.unsafeDiscardStringContext (
+          lib.concatStringsSep "\n" (
+            lib.filter (line: !lib.hasPrefix "SYSTEM_PATH=" line) (
+              lib.splitString "\n" containerConf.text
+            )
+          )
+        ))
+      ];
+      reloadTriggers = [ config.containers.${name}.path ];
       # The bind mount needs the TPM node, and the guest's infra the ACL on
       # it, set at each start: a udev rule would set it only on a device
       # event, and a switch or a restart on a booted host brings none.

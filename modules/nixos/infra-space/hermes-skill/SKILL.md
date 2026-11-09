@@ -124,9 +124,14 @@ yours:
 ## Deploying the machine you run on (@MEMBER@)
 
 clan activates the new system on the target through `systemd-run`, so the
-switch finishes even when your connection does not. When @MEMBER@'s
-configuration of the infra-space container changes, the switch restarts
-the container: your session drops mid-command. Expect it. After it comes
+switch finishes even when your connection does not. A change of the
+container's guest alone switches it in place: the container keeps
+running, and only the guest units the change touches restart. A change
+of hermes' settings still restarts the dashboard and the gateway, which
+ends your running turn, its tool commands and subagents. A change on
+the host's side (bind mounts, credentials, nspawn flags, network, the
+container@ unit) restarts the whole container: your session drops
+mid-command. Expect either. After it comes
 back, verify with `ssh @MEMBER@.d readlink /run/current-system` and check
 the container's own services. If you cannot afford to lose the session
 (a long chain of steps), deploy @MEMBER@ from the other instance instead.

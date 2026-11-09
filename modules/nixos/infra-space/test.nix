@@ -263,6 +263,16 @@ let
       clan.core.vars.generators.inference-api-key.files.token = { };
       clan.core.vars.generators.teamclaude-api-key.files.key = { };
 
+      # A later deploy of som (memberA): a change of the guest alone,
+      # switched in place, and one of the host's side of the container (an
+      # nspawn flag), which restarts it.
+      specialisation = lib.mkIf (me == "memberA") {
+        guest-change.configuration.hyper.infraSpace.guestModules = [
+          { environment.etc."infra-space-guest-change".text = "changed\n"; }
+        ];
+        host-change.configuration.containers.infra-space.extraFlags = [ "--setenv=INFRA_SPACE_TEST=1" ];
+      };
+
       # memberA is som: the dashboard behind its nginx (plain HTTP here).
       hyper.infraSpace.dashboard = lib.mkIf (me == "memberA") {
         enable = true;
@@ -713,5 +723,55 @@ pkgs.testers.runNixOSTest {
           out = guest(m, f"set -o pipefail; echo tpm-secret | age -r {recipient} | age -d -i ~/.config/age/identities").strip()
           assert out == "tpm-secret", out
           guest(m, "age-plugin-tpm --generate -o /tmp/identities-after-restart")
+
+      with subtest("a change of the guest alone switches it in place; one of the host's side restarts it"):
+          m = memberA
+          def leader():
+              return m.succeed("machinectl show infra-space -p Leader --value").strip()
+          def guest_pid(unit):
+              return guest_root(m, f"systemctl show -p MainPID --value {unit}").strip()
+          def switch(spec):
+              return m.succeed(
+                  f"/run/booted-system/specialisation/{spec}/bin/switch-to-configuration test 2>&1")
+          # a session's long tool command: a process of the guest's own
+          # that no unit of the switch owns
+          guest_root(m, "systemd-run --unit=session-marker sleep infinity")
+          marker = guest_pid("session-marker.service")
+          gateway = guest_pid("hermes-agent-infra.service")
+          dashboard = guest_pid("hermes-dashboard-infra.service")
+          def session_ids():
+              # the last column, the id (the rest has relative times)
+              return {l.split()[-1] for l in guest(m, "hermes sessions list").splitlines() if l.strip()}
+          sessions = session_ids()
+          # at least the one `hermes chat` above
+          assert len(sessions) > 1, sessions
+          before = leader()
+          out = switch("guest-change")
+          print(out)
+          assert "reloading the following units: " in out and "container@infra-space.service" in out.split("reloading the following units: ")[1].splitlines()[0], out
+          assert "container@infra-space.service" not in "".join(
+              l for l in out.splitlines() if l.startswith(("stopping the following", "restarting the following", "starting the following"))), out
+          m.succeed("systemctl is-active container@infra-space.service")
+          assert leader() == before, (before, leader())
+          assert guest_root(m, "cat /etc/infra-space-guest-change").strip() == "changed"
+          system = m.succeed("grep ^SYSTEM_PATH= /etc/nixos-containers/infra-space.conf").strip().split("=", 1)[1]
+          assert guest_root(m, "readlink -f /run/current-system").strip() == system, system
+          assert guest_pid("session-marker.service") == marker
+          assert guest_pid("hermes-agent-infra.service") == gateway
+          assert guest_pid("hermes-dashboard-infra.service") == dashboard
+          assert session_ids() >= sessions, (sessions, session_ids())
+          guest(memberA, "hermes chat -Q -q ping")
+          # the host's side of the container: a restart, as before
+          out = switch("host-change")
+          print(out)
+          m.wait_for_unit("container@infra-space.service")
+          m.wait_until_succeeds("nixos-container run infra-space -- systemctl is-active multi-user.target", timeout=120)
+          assert leader() != before
+          m.fail("nixos-container run infra-space -- systemctl is-active session-marker.service")
+          guest_root(m, "test ! -e /etc/infra-space-guest-change")
+          m.wait_until_succeeds(
+              "nixos-container run infra-space -- systemctl is-active hermes-agent-infra.service", timeout=300)
+          # the conversation history survives either way
+          assert session_ids() >= sessions, (sessions, session_ids())
     '';
 }
