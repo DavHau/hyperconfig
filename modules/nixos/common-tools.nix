@@ -1,4 +1,5 @@
 {
+  config,
   pkgs,
   lib,
   ...
@@ -28,7 +29,9 @@
 
   programs.direnv.enable = true;
 
-  programs.bash.interactiveShellInit = ''
+  # Only where fish is enabled: cm-pi turns it off (fish does not
+  # cross-compile to riscv64), and this would pull it in regardless.
+  programs.bash.interactiveShellInit = lib.mkIf config.programs.fish.enable ''
     if [[ $(${pkgs.procps}/bin/ps --no-header --pid=$PPID --format=comm) != "fish" && -z ''${BASH_EXECUTION_STRING} ]]
     then
       shopt -q login_shell && LOGIN_OPTION='--login' || LOGIN_OPTION=""
