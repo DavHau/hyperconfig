@@ -39,6 +39,9 @@
   zramSwap.memoryPercent = 100;
 
   # nix features
+  # At most 10 builds at once on every machine: more (amy and som had 40,
+  # each allowed every core) starves the machine's other work.
+  nix.settings.max-jobs = lib.mkDefault 10;
   nix.settings.system-features = [
     "uid-range"
   ];

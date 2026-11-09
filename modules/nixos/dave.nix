@@ -131,7 +131,6 @@ in
     "tb=/home/grmpf/synced/projects/github/nix-toolbox"
     "nixpkgs=${pkgs.path}"
   ];
-  nix.settings.max-jobs = 40;
 
   # TLP
   # services.tlp.enable = true;
