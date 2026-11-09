@@ -136,6 +136,9 @@
 
       checks.${system} = {
         core = import ./checks/core { inherit pkgs self; };
+        # A dashboard restart drains, keeps the interrupted chat turn and
+        # continues it without a client; a user Stop is not continued.
+        resume = import ./checks/resume { inherit pkgs self; };
         # services.hyperhermes.hardening, with io_uring off host-wide.
         hardening = import ./checks/hardening { inherit pkgs self; };
 

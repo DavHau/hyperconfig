@@ -1,0 +1,414 @@
+hermes v0.23.0: in-flight dashboard (desktop/web chat) turns survive a
+dashboard restart and continue on their own.
+
+Every deploy that changes the agent's environment restarts
+hermes-dashboard-<agent>, which runs the web/desktop chat turns and their
+in-process subagents. Whether such a turn continued afterwards was a race,
+and when it did, only once a client reopened the session within 15 min:
+
+A. Shutdown deleted the restart marker. SIGTERM ->
+   tui_gateway/session_reaper.py _handle_exit_flush_signal ->
+   _stop_turns_before_exit interrupts every running turn exactly like a
+   user Stop; the turn then concludes as "interrupted" and
+   prompt_turn.py (_complete_turn_payload / run_body's finally) retires its
+   crash marker (desktop/interrupted_turns.json, turn_marker.py). The
+   marker survived only when the process died before the turn thread got
+   there. Now the exit path flags the session (_shutdown_interrupted)
+   before interrupting it, the interrupt is labelled "gateway shutdown"
+   (as the messaging gateway's own), and the retire sites keep the marker
+   for such a turn unless it completed (session_auto_continue.py
+   _shutdown_keeps_marker). A user Stop is unchanged: session.interrupt
+   retires the marker itself (methods_session_interrupt.py).
+
+B. Nothing resumed server-side. Auto-continue ran only on session.resume
+   (session_auto_continue.py _maybe_schedule_auto_continue), and saved
+   subagent results only reached a session whose notification poller ran,
+   i.e. an open one; a startup-replayed result even required a live
+   client (session_notifications.py _session_owns_notification_event).
+   New, opt-in `desktop.auto_continue.on_startup` (default false): shortly
+   after the dashboard serves (web_server.py _on_server_started), it
+   reopens, unattached, every session of the launch home and of every
+   profile that has a marker whose writer is dead (within
+   freshness_minutes, below max_attempts) or a pending subagent/background
+   result (recover_abandoned_delegations first). The reopen is the normal
+   session.resume (cold path), so the existing auto-continue runs with
+   its existing prompt ("[System note: Your previous turn was interrupted
+   mid-run ... check the current state before redoing anything ..."),
+   rendered as an auto_continue row, and its attempt cap (max_attempts)
+   still breaks crash loops. Only the dashboard's own chat sessions are
+   reopened (stored source "desktop" or "tui", what
+   agent_factory._resolve_session_source gives the Desktop/Webapp chat and
+   the TUI); everything else (no stored row, a messaging platform, cron, a
+   one-shot CLI run, the "tool" sidecar, a hosted room) is left to its own
+   owner. Such a session is marked _server_resumed and owns its
+   startup-replayed subagent results without a client. A client opening it
+   later attaches to the live session. At most 16 reopened sessions
+   (skipped ones do not count).
+
+D. No drain. New `dashboard.shutdown_drain_seconds` (default 0 = off): on
+   the first SIGTERM while a running turn is inside a tool call
+   (agent._executing_tools), uvicorn keeps serving until no turn has been
+   in a tool call for 1 s (so a model call between two tool batches does
+   not end it) or the budget runs out, then shuts down as before (A then
+   keeps the marker of whatever is still running). A second SIGTERM/SIGINT skips the
+   rest. Needs the service manager to signal only the main process
+   (systemd KillMode=mixed) and a stop timeout above the budget.
+
+C (subagents of the dashboard run in-process and die with it, marked
+"unknown" by recover_abandoned_delegations) is not re-run: their recorded
+partial results now reach the parent turn via B, and the auto-continued
+parent decides what to redo.
+
+Upstream status: none of this is fixed in v0.23.0 or main (9dcf7714);
+turn_marker.py, session_auto_continue.py and the reaper exit path are
+unchanged there. Generated against v0.23.0 (2bd378ed), applies without
+fuzz. v0.23.0 dropped the interrupt_for_session call next to
+request_hard_interrupt in session_lifecycle._interrupt_session_turn; the
+shutdown label rides request_hard_interrupt's tool_reason alone.
+
+diff --git a/hermes_cli/web_server.py b/hermes_cli/web_server.py
+index 22ac93e69..52009f394 100644
+--- a/hermes_cli/web_server.py
++++ b/hermes_cli/web_server.py
+@@ -1087,7 +1087,77 @@ def _build_uvicorn_server(host: str, port: int, *, ssh_isolated: bool = False):
+         # leaves room for lifespan shutdown + cron_stop before the kill.
+         timeout_graceful_shutdown=3,
+     )
+-    return config, uvicorn.Server(config)
++    server = uvicorn.Server(config)
++    _install_shutdown_drain(server, _dash_cfg)
++    return config, server
++
++
++def _turns_still_working() -> bool:
++    """A running in-process turn is mid tool call (a running turn without one is between steps or in a
++    model call, which the resumed turn repeats at no loss)."""
++    from tui_gateway.server import _sessions, _sessions_lock
++    with _sessions_lock:
++        running = [s for s in _sessions.values() if isinstance(s, dict) and s.get("running")]
++    return any(getattr(s.get("agent"), "_executing_tools", False) or s.get("_compute_host_turn_id") for s in running)
++
++
++_DRAIN_IDLE_S = 1.0
++
++
++def _install_shutdown_drain(server, dash_cfg: dict) -> None:
++    """Bounded drain on SIGTERM (``dashboard.shutdown_drain_seconds``, default 0 = off): while a turn is
++    in the middle of a tool call, keep serving until the call returns or the budget runs out, then shut
++    down as before (the exit path interrupts the turns, which keep their restart markers and continue in
++    the next process). A tool call cut in half is the one piece of a turn a resume cannot redo safely; a
++    model call can simply be repeated. A second SIGTERM (or SIGINT) skips the rest of the drain. Keep the
++    service manager's stop timeout above the budget, and let it signal only the main process (systemd
++    KillMode=mixed): a group-wide SIGTERM would end the tool's own process anyway."""
++    import signal as _signal
++    try:
++        budget = max(0.0, float(dash_cfg.get("shutdown_drain_seconds", 0) or 0))
++    except (TypeError, ValueError):
++        budget = 0.0
++    if budget <= 0:
++        return
++    original = server.handle_exit
++    draining = threading.Event()
++
++    def handle_exit(sig, frame):
++        if sig != _signal.SIGTERM or draining.is_set() or server.should_exit:
++            return original(sig, frame)
++        try:
++            busy = _turns_still_working()
++        except Exception:
++            busy = False
++        if not busy:
++            return original(sig, frame)
++        draining.set()
++        _log.warning("SIGTERM: draining for up to %.0fs while a turn finishes its tool call", budget)
++
++        def wait() -> None:
++            # Done once no turn has been in a tool call for a full second: between two tool batches of
++            # one turn the flag drops only for the model call in between, which may last less.
++            deadline = time.monotonic() + budget
++            idle_since = None
++            while time.monotonic() < deadline:
++                try:
++                    busy = _turns_still_working()
++                except Exception:
++                    break
++                if busy:
++                    idle_since = None
++                elif idle_since is None:
++                    idle_since = time.monotonic()
++                elif time.monotonic() - idle_since >= _DRAIN_IDLE_S:
++                    break
++                time.sleep(0.2)
++            else:
++                _log.warning("shutdown drain budget (%.0fs) exhausted; interrupting running turns", budget)
++            original(sig, None)
++
++        threading.Thread(target=wait, name="hermes-shutdown-drain", daemon=True).start()
++
++    server.handle_exit = handle_exit
+ 
+ 
+ def _best_effort(what: str, fn) -> None:
+@@ -1273,6 +1343,15 @@ def _on_server_started(
+ 
+     _best_effort("process-identity registration", _register_identity)
+ 
++    # Finish what the previous process left unfinished (desktop.auto_continue.on_startup): turns a
++    # restart interrupted, and subagent results nobody received, without waiting for a client.
++    def _startup_resume() -> None:
++        from tui_gateway.server import _schedule_startup_auto_continue
++
++        _schedule_startup_auto_continue()
++
++    _best_effort("startup auto-continue", _startup_resume)
++
+     # Host rendezvous (multiplex-only): the host lock + record that let a SECOND `hermes serve`
+     # for any profile find this process and attach instead of binding a second port. Published
+     # after the bind so the record carries the real port, and beside — not instead of — the
+diff --git a/tui_gateway/prompt_turn.py b/tui_gateway/prompt_turn.py
+index c661ee64d..4be4bac0a 100644
+--- a/tui_gateway/prompt_turn.py
++++ b/tui_gateway/prompt_turn.py
+@@ -196,7 +196,7 @@ def _record_turn_marker(session: dict, text: Any, *, auto_continue: bool = True,
+                              if notification_category == "diagnostic" else {}))
+         with session["history_lock"]:
+             marker_cancelled = bool(session.get("_turn_cancel_requested"))
+-        if marker_cancelled:
++        if marker_cancelled and not _shutdown_keeps_marker(session):
+             clear_turn_marker(marker_home, marker_key)
+     return marker_key
+ 
+@@ -995,7 +995,7 @@ def _complete_turn_payload(session: dict, st: _TurnRun, status_note: str | None,
+             "text": raw if isinstance(raw, str) else str(raw),
+             **({"error": str(error_value or raw)} if status == "error" else {})})
+         st.receipt_committed = True
+-    if st.receipt_committed:
++    if st.receipt_committed and not _shutdown_keeps_marker(session, status):
+         _retire_turn_marker(session, st.marker_key)
+     return payload, raw, status
+ 
+@@ -1022,7 +1022,8 @@ def _recover_turn_exception(sid: str, session: dict, st: _TurnRun, e: BaseExcept
+             logger.exception("hosted room terminal receipt commit failed")
+     try:
+         # Same terminal error frame shape as the returned-error path.
+-        _emit_terminal_turn_error(sid, session, e, retire_marker=st.receipt_committed)
++        _emit_terminal_turn_error(
++            sid, session, e, retire_marker=st.receipt_committed and not _shutdown_keeps_marker(session))
+         st.error_retained = True
+         st.error_detail = _turn_failure_detail(e, type(e).__name__, st.prompt_text)
+     except Exception as emit_exc:
+@@ -1229,7 +1230,7 @@ def _run_prompt_submit(
+                     status, st.error_retained, time.monotonic() - _turn_started_monotonic,
+                     st.error_detail)
+                 # Backstop for turns that never reached a terminal frame.
+-                if st.receipt_committed:
++                if st.receipt_committed and not _shutdown_keeps_marker(session, status):
+                     _retire_turn_marker(session, st.marker_key)
+                     with session["history_lock"]:
+                         if session.get("_active_turn_marker_key") == st.marker_key:
+diff --git a/tui_gateway/session_auto_continue.py b/tui_gateway/session_auto_continue.py
+index ba20b94d4..3a842e59c 100644
+--- a/tui_gateway/session_auto_continue.py
++++ b/tui_gateway/session_auto_continue.py
+@@ -47,6 +47,14 @@ def _retire_turn_marker(session: dict, *keys: str) -> None:
+             clear_turn_marker(home, key)
+ 
+ 
++def _shutdown_keeps_marker(session: dict, status: str | None = None) -> bool:
++    """True when a backend shutdown (SIGTERM, not a user Stop) interrupted this session's turn and the
++    turn did not complete: its crash marker must survive so the next process auto-continues it. Without
++    this the interrupt the exit path sends made the turn conclude as ``interrupted`` and retire its own
++    marker, so whether a restart resumed the turn depended on whether the process died first."""
++    return bool(session.get("_shutdown_interrupted")) and status != "complete"
++
++
+ def _auto_continue_note(prompt: str) -> str:
+     # Same opening as the gateway's recovery notes (transcript tooling recognizes both). The prompt is embedded: a hard
+     # crash persists nothing else of the turn.
+@@ -139,6 +147,140 @@ def _maybe_schedule_auto_continue(sid: str, session: dict, session_key: str) ->
+     return {"attempt": attempt, "interrupted_at": marker["started_at"]}
+ 
+ 
++# ── Server-side resume at backend start ─────────────────────────────────
++# A marker or an undelivered subagent result used to wait for a client to reopen its session
++# (session.resume above, the per-session notification poller); a session nobody reopened inside the
++# freshness window lost its turn. With ``desktop.auto_continue.on_startup`` the backend reopens those
++# sessions itself, unattached (the parked-client transport), so the existing auto-continue and the
++# notification poller run without a client; a client that opens the session later attaches to it.
++_STARTUP_RESUME_DELAY_S = 3.0
++_STARTUP_RESUME_MAX_SESSIONS = 16
++
++
++def _startup_resume_enabled() -> bool:
++    desktop = _load_cfg().get("desktop")
++    cfg = desktop.get("auto_continue") if isinstance(desktop, dict) else None
++    return isinstance(cfg, dict) and is_truthy_value(cfg.get("on_startup"), default=False)
++
++
++def _startup_resume_homes() -> list:
++    """``(profile name or None, home)`` for the launch home and every named profile under it."""
++    homes = [(None, Path(_hermes_home))]
++    with contextlib.suppress(Exception):
++        from hermes_cli.profiles import _get_profiles_root
++        root = Path(_get_profiles_root())
++        if root.resolve() != Path(_hermes_home).resolve() and root.is_dir():
++            homes += [(d.name, d) for d in sorted(root.iterdir()) if d.is_dir() and (d / "state.db").exists()]
++    return homes
++
++
++def _startup_resume_targets(home) -> list:
++    """Stored session ids in ``home`` with an unfinished turn (a crash marker whose writer is gone)
++    or an undelivered subagent result."""
++    from tui_gateway import turn_marker as tm
++    enabled, freshness_secs, max_attempts = _auto_continue_config()
++    now, targets = time.time(), []
++    if enabled:
++        with contextlib.suppress(Exception):
++            for key, entry in tm._load(tm._marker_path(home)).items():
++                if (entry.get("auto_continue", True) and int(entry.get("attempts") or 0) < max_attempts
++                        and now - float(entry.get("started_at") or 0) <= freshness_secs
++                        and marker_writer_state(entry) != "alive"):
++                    targets.append(key)
++    db_path = Path(home) / "state.db"
++    if db_path.exists():
++        token = set_hermes_home_override(str(home))
++        try:
++            from tools.async_delegation import recover_abandoned_delegations
++            recover_abandoned_delegations()  # an owner that died with the old process: state -> unknown
++        except Exception:
++            logger.debug("startup resume: delegation recovery failed for %s", home, exc_info=True)
++        finally:
++            reset_hermes_home_override(token)
++        import sqlite3
++        with contextlib.suppress(Exception), contextlib.closing(
++                sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)) as conn:
++            rows = conn.execute(
++                "SELECT DISTINCT origin_session FROM async_delegations WHERE delivery_state='pending' "
++                "AND state NOT IN ('running','finalizing') AND event_json IS NOT NULL AND completed_at > ?",
++                (now - max(freshness_secs, 3600.0),)).fetchall()
++            targets += [r[0] for r in rows if r[0]]
++    return list(dict.fromkeys(targets))
++
++
++# The dashboard's own chat surfaces (tui_gateway/agent_factory.py _resolve_session_source): the Desktop
++# app / Webapp chat sends "desktop", a backend without HERMES_DESKTOP (or its embedded terminal) "tui".
++# Anything else (a messaging platform, cron, a one-shot CLI run, the dashboard's "tool" sidecar, a hosted
++# room) has its own owner or none that wants an unattended continuation.
++_STARTUP_RESUME_SOURCES = frozenset({"desktop", "tui"})
++
++
++def _startup_resume_session(profile, home, key: str) -> bool:
++    """Reopen one stored session server-side; True when it was actually reopened here."""
++    profile_home = None if profile is None else Path(home)
++    if _find_live_session_by_key(key, profile_home) is not None:
++        return False
++    row = None
++    with contextlib.suppress(Exception):
++        import sqlite3
++        with contextlib.closing(sqlite3.connect(f"file:{Path(home) / 'state.db'}?mode=ro", uri=True, timeout=5)) as conn:
++            row = conn.execute("SELECT source FROM sessions WHERE id=?", (key,)).fetchone()
++    source = (row[0] or "").strip().lower() if row else ""
++    # No stored row (a messaging-gateway session key) or not a dashboard chat: left to its own owner
++    # (the messaging gateway recovers and delivers its sessions itself).
++    if source not in _STARTUP_RESUME_SOURCES:
++        logger.debug("startup resume: session %s skipped (source %r)", key, source or None)
++        return False
++    params = {"session_id": key, "source": source, **({"profile": profile} if profile else {})}
++    token = bind_transport(_detached_ws_transport)  # unattached: emits are dropped until a client attaches
++    try:
++        resp = handle_request({"jsonrpc": "2.0", "id": f"startup-resume-{key}", "method": "session.resume",
++                               "params": params}) or {}
++    finally:
++        reset_transport(token)
++    result = resp.get("result") if isinstance(resp, dict) else None
++    if not isinstance(result, dict):
++        logger.warning("startup resume of session %s failed: %s", key, (resp or {}).get("error"))
++        return False
++    if (session := _sessions.get(str(result.get("session_id") or ""))) is not None:
++        session["_server_resumed"] = True
++    logger.info("startup resume: reopened session %s (profile %s) server-side; auto_continue=%s",
++                key, profile or "default", result.get("auto_continue"))
++    return True
++
++
++def _startup_auto_continue() -> int:
++    if not _startup_resume_enabled():
++        return 0
++    resumed = 0
++    for profile, home in _startup_resume_homes():
++        for key in _startup_resume_targets(home):
++            if resumed >= _STARTUP_RESUME_MAX_SESSIONS:
++                logger.warning("startup resume: more than %d sessions pending; the rest wait for a client",
++                               _STARTUP_RESUME_MAX_SESSIONS)
++                return resumed
++            try:
++                # Only sessions actually reopened count toward the cap; skipped ones are free.
++                if _startup_resume_session(profile, home, key):
++                    resumed += 1
++            except Exception:
++                logger.warning("startup resume of session %s failed", key, exc_info=True)
++    return resumed
++
++
++def _schedule_startup_auto_continue(delay_s: float | None = None) -> None:
++    """Once per backend process, shortly after it started serving (the dashboard calls this)."""
++    def run() -> None:
++        try:
++            if count := _startup_auto_continue():
++                logger.info("startup resume: %d session(s) reopened server-side", count)
++        except Exception:
++            logger.warning("startup resume failed", exc_info=True)
++    timer = threading.Timer(_STARTUP_RESUME_DELAY_S if delay_s is None else delay_s, run)
++    timer.daemon = True
++    timer.start()
++
++
+ def _ac_inflight_original(session: dict) -> str:
+     turn = session.get("inflight_turn")
+     return str(turn.get("user") or "").strip() if isinstance(turn, dict) else ""
+diff --git a/tui_gateway/session_lifecycle.py b/tui_gateway/session_lifecycle.py
+index 32af14072..400b5dfdd 100644
+--- a/tui_gateway/session_lifecycle.py
++++ b/tui_gateway/session_lifecycle.py
+@@ -814,7 +814,10 @@ def _interrupt_session_turn(
+     if not use_compute_host:
+         if should_interrupt:
+             from agent.interrupt_compat import request_hard_interrupt
+-            request_hard_interrupt(session.get("agent"))
++            # A backend shutdown labels itself (as the messaging gateway's does): the cancelled tool's
++            # output and the turn record say "gateway shutdown", not a user Stop.
++            request_hard_interrupt(session.get("agent"), **(
++                {"tool_reason": "gateway shutdown"} if session.get("_shutdown_interrupted") else {}))
+         if not run_thread_alive and not compressing:
+             with session["history_lock"]:
+                 if session.get("running"):
+diff --git a/tui_gateway/session_notifications.py b/tui_gateway/session_notifications.py
+index 59d5ed1a9..81a8a3774 100644
+--- a/tui_gateway/session_notifications.py
++++ b/tui_gateway/session_notifications.py
+@@ -101,7 +101,10 @@ def _session_owns_notification_event(sid: str, session: dict, evt: dict) -> bool
+     # requiring a current client prevents it from spending a full model turn unseen.
+     # Shared peer membership excludes stdio, even when it is the real TUI RPC channel
+     # (possibly wrapped for a dashboard sidecar), rather than a headless fallback sink.
++    # A session the backend reopened itself at startup to finish restart-interrupted work
++    # (session_auto_continue._startup_auto_continue) is that owner, client or not.
+     if (evt.get("type") == "async_delegation" and evt.get("startup_replay")
++            and not session.get("_server_resumed")
+             and not (_session_has_live_transport(session)
+                      or (_stdio_is_rpc_channel and session.get("transport") is _stdio_transport))):
+         return False
+diff --git a/tui_gateway/session_reaper.py b/tui_gateway/session_reaper.py
+index c4caa6035..6d278d78f 100644
+--- a/tui_gateway/session_reaper.py
++++ b/tui_gateway/session_reaper.py
+@@ -127,6 +127,10 @@ def _stop_turns_before_exit(budget_s: float | None = None) -> None:
+         running = [(sid, s) for sid, s in _sessions.items() if s.get("running")]
+     threads = []
+     for sid, session in running:
++        # A shutdown stop is not a user Stop: the turn keeps its crash marker (turn_marker.py) so the
++        # next process auto-continues it (session_auto_continue._shutdown_keeps_marker). Set BEFORE the
++        # interrupt, or the turn thread's terminal path can retire the marker first.
++        session["_shutdown_interrupted"] = True
+         with contextlib.suppress(Exception):
+             _interrupt_session_turn(sid, session)
+         if (t := session.get("_run_thread")) is not None and t is not threading.current_thread():

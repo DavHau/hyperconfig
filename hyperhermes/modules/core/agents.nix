@@ -400,6 +400,23 @@ let
             RestartSec = 5;
             UMask = "0007";
             BindPaths = userTmpBinds;
+            # A stop drains: SIGTERM goes to the dashboard alone, which
+            # lets a running tool call finish (dashboard.shutdown_drain_
+            # seconds, ./options.nix), keeps the restart markers of the
+            # turns it then interrupts, and the next start continues them
+            # (patches/hermes-dashboard-resume-after-restart.patch). With
+            # control-group the TERM reached the tool's command at once.
+            # What is left in the cgroup once the dashboard exited gets
+            # SIGKILL: background processes the agent started (terminal
+            # background=true) die with the dashboard as before. Leaving
+            # them running (KillMode=process) would not help: unlike the
+            # gateway, the dashboard never re-adopts a predecessor's
+            # processes (process_registry.recover_from_checkpoint runs in
+            # the gateway only), so they would run on unsupervised, their
+            # completion never reported, and pile up across restarts.
+            KillMode = "mixed";
+            # Above the drain (60s) plus the exit flush (5s) and teardown.
+            TimeoutStopSec = 120;
           }
           // hardening;
         };

@@ -34,6 +34,7 @@ let
     ./patches/hermes-vault-generate-password.patch
     ./patches/hermes-anthropic-env-base-url.patch
     ./patches/hermes-vision-every-model.patch
+    ./patches/hermes-dashboard-resume-after-restart.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {

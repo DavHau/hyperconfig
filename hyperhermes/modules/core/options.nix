@@ -365,6 +365,28 @@ in
         # stt.<provider>.language) in Nix to pin one.
         stt.language = lib.mkDefault "";
 
+        # A dashboard restart (every deploy that changes the agent's
+        # environment) continues the chat turns it interrupted, without
+        # waiting for a client to reopen them, and drains first
+        # (patches/hermes-dashboard-resume-after-restart.patch).
+        # on_startup reopens sessions with an unfinished turn or an
+        # undelivered subagent result server-side; freshness_minutes (15
+        # upstream) bounds how old an interrupted turn may be, a day
+        # covers a session nobody looks at overnight. max_attempts
+        # (upstream 2) counts every restart that interrupts the turn, a
+        # deploy just like a crash: it stops a turn that crashes the
+        # backend, and it is the loop breaker for the infra agent's own
+        # self-deploy (its turn deploys som, the switch restarts it, the
+        # turn is auto-continued, and must not deploy again forever).
+        # shutdown_drain_seconds lets a running tool call finish before the
+        # turn is interrupted; ./agents.nix keeps the dashboard unit's stop
+        # timeout above it.
+        desktop.auto_continue = {
+          on_startup = lib.mkDefault true;
+          freshness_minutes = lib.mkDefault 1440;
+        };
+        dashboard.shutdown_drain_seconds = lib.mkDefault 60;
+
         # Shared metrics off, and the offer answered "No thanks", so no
         # surface asks (the dashboard banner, Desktop's "Share usage
         # stats?" strip, the TUI). Every surface reads consent_state
