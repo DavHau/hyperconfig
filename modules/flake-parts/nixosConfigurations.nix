@@ -46,6 +46,7 @@
         "machines/som/hermes-dashboards.nix names accounts the oidc instance does not declare: ${toString unknown}";
       lib.mapAttrs (name: u: u // { groups = (u.groups or [ ]) ++ dashboardGroups.${name} or [ ]; }) users;
   homeNetworks = import ../../home-networks { inherit lib; };
+  fleetMachines = lib.attrNames (lib.filterAttrs (_: type: type == "directory") (builtins.readDir ../../machines));
 in {
   flake =
     let
@@ -128,6 +129,16 @@ in {
               ../../modules/nixos/common.nix
               ../../modules/nixos/networkmanager-restart-late.nix
             ];
+            # Every machine but the installer keeps a mirror of the secrets
+            # repo (../nixos/clan-secrets-mirror.nix); the installer only
+            # boots from RAM and has no state to keep it in. Taken from
+            # ../../machines, so new machines get it too.
+            clan-secrets-mirror = {
+              module.name = "importer";
+              module.input = "clan-core";
+              roles.default.machines = lib.genAttrs (lib.remove "installer" fleetMachines) (_: { });
+              roles.default.extraModules = [ ../nixos/clan-secrets-mirror.nix ];
+            };
             dave-user = { #
               module.name = "users";
               roles.default.tags.all = { }; #

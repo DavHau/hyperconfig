@@ -267,6 +267,11 @@
           import ./modules/nixos/zfs-keylocation-sync/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
+        # The fleet's mirror of the clan secrets repo.
+        clan-secrets-mirror =
+          import ./modules/nixos/clan-secrets-mirror-test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          };
         noctalia-anthropic-usage =
           import ./modules/nixos/noctalia-anthropic-usage/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
