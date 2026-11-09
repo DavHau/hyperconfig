@@ -370,7 +370,7 @@ in
         # stats?" strip, the TUI). Every surface reads consent_state
         # (hermes_cli/observability/shared_metrics_consent.py) from the raw
         # config.yaml: answered once enabled or send is written, but an
-        # "off" without offer_version == OFFER_VERSION (2 in v0.22.5) is
+        # "off" without offer_version == OFFER_VERSION (2 in v0.23.0) is
         # asked again; recheck it on a hermes bump. enabled is also the
         # only collection gate (relay_shared_metrics.py, enabled).
         telemetry.shared_metrics = {

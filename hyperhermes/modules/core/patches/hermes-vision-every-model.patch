@@ -1,4 +1,4 @@
-hermes v0.22.5: vision for every main model, whatever the image's source
+hermes v0.23.0: vision for every main model, whatever the image's source
 (chat upload, downloaded file, browser screenshot).
 
 Three problems, one patch (all three decide whether a session sees images):
@@ -15,13 +15,11 @@ Three problems, one patch (all three decide whether a session sees images):
    stays native. `agent.image_input_mode: text` still forces the
    description path for everyone.
 
-2. tools/browser_camofox.py camofox_vision(): always described the
-   screenshot through call_llm(task="vision"), never native, unlike
-   browser_vision on the agent-browser backend (tools/browser_tool.py),
-   which attaches the screenshot when _should_use_native_vision_fast_path()
-   holds. Now camofox does the same (tools/browser_tool_vision.py
-   _native_vision_result); the redacted accessibility snippet of
-   `annotate` rides in the text part.
+2. Camofox's browser_vision always described the screenshot through the
+   auxiliary model, never native. Since v0.23.0 Camofox is the official
+   `camofox` plugin, so that fix lives in hyperhermes'
+   pkgs/hermes-camofox-plugin/native-vision.patch; this patch makes the
+   gate it uses (_should_use_native_vision_fast_path) per main model.
 
 3. tools/registry.py _check_fn_cached() and model_tools.py
    _tool_defs_cache_key(): both caches were keyed by function and profile
@@ -35,13 +33,16 @@ Three problems, one patch (all three decide whether a session sees images):
    (main_runtime_cache_key: set_runtime_main()'s context, else
    config.yaml).
 
-Upstream status: not reported upstream yet; unchanged in v0.23.0 and the
-canary of 2026-11-09. REBASE on the hermes update (v0.23.x): camofox moves
-into a plugin there (hunk 2 moves with it), image_routing.py,
-auxiliary_client.py, registry.py and model_tools.py may move or change.
+Upstream status: not reported upstream yet; unchanged in v0.23.0. Since
+v0.23.0 the tool-list key also carries upstream's check_fn_cache_epoch();
+the main-model element sits next to it (both are needed: the epoch voids
+the lists of dropped verdicts, the model separates per-model verdicts).
+Also fixes the docstring of tools/vision_tools.py
+_native_tool_result_images, which named the explicit backend as a reason
+for text.
 
 diff --git a/agent/image_routing.py b/agent/image_routing.py
-index 763f20a5..7194e4ad 100644
+index 763f20a56..7194e4adc 100644
 --- a/agent/image_routing.py
 +++ b/agent/image_routing.py
 @@ -384,11 +384,14 @@ def decide_image_input_mode(
@@ -63,54 +64,33 @@ index 763f20a5..7194e4ad 100644
  
  # Image size handling is REACTIVE: attach at full size and let
 diff --git a/model_tools.py b/model_tools.py
-index 011d32dc..4b86b520 100644
+index b9864a454..10f1b8b46 100644
 --- a/model_tools.py
 +++ b/model_tools.py
-@@ -18,7 +18,8 @@ import threading
- import time
- from typing import Dict, Any, List, Optional, Tuple
+@@ -20,7 +20,7 @@ from typing import Dict, Any, List, Optional, Tuple
  
--from tools.registry import CHECK_FN_CACHE_BYPASS, check_fn_cache_scope, discover_builtin_tools, registry, tool_error
-+from tools.registry import (
-+    CHECK_FN_CACHE_BYPASS, check_fn_cache_scope, discover_builtin_tools, main_runtime_cache_key, registry, tool_error)
+ from tools.registry import (
+     CHECK_FN_CACHE_BYPASS, check_fn_cache_epoch, check_fn_cache_scope, check_fn_verdict_window, discover_builtin_tools,
+-    registry, tool_error)
++    main_runtime_cache_key, registry, tool_error)
  from tools.registry import _MAX_TOOL_ERROR_CHARS as _TOOL_ERROR_MAX_LEN
  from toolsets import resolve_toolset, validate_toolset
  from tools.arg_coercion import coerce_tool_args
-@@ -277,6 +278,7 @@ def _tool_defs_cache_key(
+@@ -294,6 +294,7 @@ def _tool_defs_cache_key(
          frozenset(disabled_toolsets) if disabled_toolsets else None, registry._generation, cfg_fp,
          bool(os.environ.get("HERMES_KANBAN_TASK")), bool(skip_tool_search_assembly),
-         _is_delegated_child_context(), _is_dispatcher_owned_worker(), profile_scope,
+         _is_delegated_child_context(), _is_dispatcher_owned_worker(), profile_scope, check_fn_cache_epoch(),
 +        main_runtime_cache_key(),  # hyperhermes: check_fn verdicts are per main model
      )
  
  
-diff --git a/tools/browser_camofox.py b/tools/browser_camofox.py
-index 66e601e3..14a2a2b2 100644
---- a/tools/browser_camofox.py
-+++ b/tools/browser_camofox.py
-@@ -584,6 +584,15 @@ def camofox_vision(question: str, annotate: bool = False, task_id: Optional[str]
-         # The screenshot itself cannot be redacted, but the text-based accessibility snippet
-         # sent alongside it must not leak secret values.
-         from agent.redact import redact_sensitive_text
-+        # hyperhermes: a main model with native vision gets the screenshot itself,
-+        # as browser_vision does on the agent-browser backend (browser_tool.py).
-+        from tools.vision_tools import _should_use_native_vision_fast_path
-+        if _should_use_native_vision_fast_path():
-+            from tools.browser_tool_vision import _native_vision_result
-+            native = _native_vision_result(Path(screenshot_path), question, False, {}, None)
-+            if annotation_context:
-+                native["content"][0]["text"] += redact_sensitive_text(annotation_context)
-+            return native
-         from agent.auxiliary_client import call_llm
-         vision_prompt = f"Analyze this browser screenshot and answer: {question}{redact_sensitive_text(annotation_context)}"
-         timeout, temperature = _vision_llm_settings()
 diff --git a/tools/registry.py b/tools/registry.py
-index bc6e1ab7..1ab3191e 100644
+index 99e8d3d45..1036a7232 100644
 --- a/tools/registry.py
 +++ b/tools/registry.py
-@@ -260,10 +260,10 @@ _CHECK_FN_TTL_SECONDS = 30.0
- # so a genuinely-down backend is reflected within a couple of turns.
- _CHECK_FN_FAILURE_GRACE_SECONDS = 60.0
+@@ -265,10 +265,10 @@ _CHECK_FN_FAILURE_GRACE_SECONDS = 60.0
+ # catalog read or tool_call, which a probe that fails by timing out would block for its full duration.
+ _CHECK_FN_GRACE_REUSE_SECONDS = 5.0
  _CHECK_FN_CACHE_MAX = 512
 -_check_fn_cache: dict[tuple[Callable, Optional[str]], tuple[float, bool]] = {}
 -_check_fn_last_good: dict[tuple[Callable, Optional[str]], float] = {}
@@ -123,7 +103,7 @@ index bc6e1ab7..1ab3191e 100644
  _check_fn_cache_lock = threading.Lock()
  CHECK_FN_CACHE_BYPASS = ""
  _NO_CACHE_CHECK_FNS: set[Callable] = set()
-@@ -326,6 +326,20 @@ def check_fn_cache_scope() -> Optional[str]:
+@@ -343,6 +343,20 @@ def check_fn_cache_scope() -> Optional[str]:
          return CHECK_FN_CACHE_BYPASS
  
  
@@ -144,7 +124,7 @@ index bc6e1ab7..1ab3191e 100644
  def _run_check_fn_uncached(fn: Callable) -> bool:
      """Run an availability check without cache/grace handling."""
      from agent.secret_scope import UnscopedSecretError, current_secret_scope
-@@ -365,7 +379,7 @@ def _check_fn_cached(fn: Callable) -> bool:
+@@ -382,7 +396,7 @@ def _check_fn_cached(fn: Callable) -> bool:
      scope = check_fn_cache_scope()
      if scope == CHECK_FN_CACHE_BYPASS:
          return _run_check_fn_uncached(fn)
@@ -153,7 +133,7 @@ index bc6e1ab7..1ab3191e 100644
      with _check_fn_cache_lock:
          _prune_check_fn_caches(now)  # leaves only entries within TTL
          cached = _check_fn_cache.get(cache_key)
-@@ -455,7 +469,7 @@ def get_cached_check_fn_result(fn: Callable) -> Optional[bool]:
+@@ -481,7 +495,7 @@ def get_cached_check_fn_result(fn: Callable) -> Optional[bool]:
          # Unresolved profile identity bypasses the cache; nothing trustworthy to report.
          return None
      with _check_fn_cache_lock:
@@ -162,3 +142,17 @@ index bc6e1ab7..1ab3191e 100644
      return cached[1] if cached is not None and now - cached[0] < _CHECK_FN_TTL_SECONDS else None
  
  
+diff --git a/tools/vision_tools.py b/tools/vision_tools.py
+index 78d8a431f..28eaa3569 100644
+--- a/tools/vision_tools.py
++++ b/tools/vision_tools.py
+@@ -573,7 +573,8 @@ def _accepts_tool_result_images(provider: str, model: str, cfg: Optional[dict[st
+ def _native_tool_result_images(provider: str, model: str, cfg: Optional[dict[str, Any]]) -> bool:
+     """THE gate for every tool that can hand the main model pixels (``vision_analyze``, browser and
+     ``computer_use`` screenshots, MCP ``ImageContent``): image routing resolves to ``native``
+-    (``agent.image_input_mode``, an explicit ``auxiliary.vision`` backend, the catalog) AND the
++    (``agent.image_input_mode``, else the catalog; hyperhermes: an explicit ``auxiliary.vision``
++    backend only describes for models that cannot see) AND the
+     route accepts images inside tool results. One predicate, so the lane never depends on which
+     tool produced the image."""
+     from agent.image_routing import decide_image_input_mode

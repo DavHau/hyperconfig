@@ -29,9 +29,6 @@ let
   hermesWheelPatches = [
     ./patches/hermes-gateway-restart-foreign-unit.patch
     ./patches/hermes-gateway-no-home-shutdown-broadcast.patch
-    ./patches/hermes-camofox-browser-downloads.patch
-    ./patches/hermes-camofox-solve-captcha.patch
-    ./patches/hermes-camofox-vault.patch
     ./patches/hermes-hosted-ocr-url.patch
     ./patches/hermes-dashboard-oidc-allowed-groups.patch
     ./patches/hermes-vault-generate-password.patch

@@ -122,7 +122,7 @@ package; a consumer passes its own `settings` and package to it).
 
 ## hermes patches
 
-`core`'s package is upstream hermes v0.22.5 with these wheel patches
+`core`'s package is upstream hermes v0.23.0 with these wheel patches
 (`modules/core/patches`; each file's header has symptom, cause and fix):
 
 - `hermes-dashboard-oidc-allowed-groups`: the dashboard's OIDC login admits
@@ -135,8 +135,8 @@ package; a consumer passes its own `settings` and package to it).
   (here `hermes-agent-<agent>`).
 - `hermes-gateway-no-home-shutdown-broadcast`: no shutdown notice to every
   home channel on each restart.
-- `hermes-camofox-browser-downloads`, `-solve-captcha`, `-vault`: downloads,
-  captcha solving and the password vault with the Camofox browser backend.
+- `hermes-vault-generate-password`: `browser_vault action=create_login`
+  generates, saves and fills a password for a new account (local feature).
 - `hermes-hosted-ocr-url`: scanned-PDF OCR against a self-hosted endpoint
   (`browser.ocr.baseUrl`) instead of Firecrawl.
 - `hermes-anthropic-env-base-url`: a config.yaml `model.base_url` of
@@ -145,7 +145,35 @@ package; a consumer passes its own `settings` and package to it).
   gateway; another configured endpoint still wins.
 - `hermes-vision-every-model`: an explicit `auxiliary.vision` backend
   describes images only for main models that cannot see them (upstream it
-  takes native images away from every model); Camofox's `browser_vision`
-  attaches the screenshot for a vision-capable model; the tool-availability
+  takes native images away from every model); the tool-availability
   caches are per main model, so one session's text-only model no longer
   drops `vision_analyze`/`browser_vision` from another session's tool list.
+
+Camofox left hermes core in v0.23.0 for the official `camofox` plugin; the
+browser feature runs it from `pkgs/hermes-camofox-plugin`, which adds
+`browser_downloads` and `browser_solve_captcha` (patches of core up to
+v0.22.5) and attaches `browser_vision`'s screenshot for a vision-capable
+main model (`native-vision.patch`). The vault reaches the Camofox tab
+upstream now.
+
+Rolling back below v0.23.0: on its first start, v0.23.0's one-time
+left-core migration (`hermes_cli/left_core_migration.py`) appends `browser`
+to `agent.disabled_toolsets` in the config.yaml of each Camofox home and of
+its profiles. The browser module's managed list hides that while v0.23.0
+runs, but v0.22.5's configuration has no such managed key, so v0.22.5 reads
+it and loses every browser tool. After a rollback, on the host, as root,
+remove it and restart the agents:
+
+```sh
+nix shell nixpkgs#yq-go -c bash -c '
+for d in /var/lib/hermes/*/state; do
+  [ -d "$d/camofox" ] || continue   # browser agents only
+  for f in "$d"/.hermes/config.yaml "$d"/.hermes/profiles/*/config.yaml; do
+    [ -f "$f" ] || continue
+    # in place, so the file keeps its owner and mode
+    yq "del(.agent.disabled_toolsets[] | select(. == \"browser\"))" "$f" > "$f.new" \
+      && cat "$f.new" > "$f" && rm "$f.new"
+  done
+  systemctl restart "hermes-agent-$(basename "$(dirname "$d")")"
+done'
+```

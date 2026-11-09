@@ -14,11 +14,28 @@ import sys
 home = os.environ["HERMES_HOME"]
 os.makedirs(home, exist_ok=True)
 with open(os.path.join(home, "config.yaml"), "w") as f:
-    f.write("browser:\n  cloud_provider: camofox\n  command_timeout: 65\n  allow_private_urls: true\n")
+    f.write("browser:\n  cloud_provider: camofox\n  command_timeout: 65\n  allow_private_urls: true\n"
+            "plugins:\n  enabled: [camofox]\n"
+            "agent:\n  disabled_toolsets: [browser-use, browser-cdp]\n")
+# The agent's own Camofox plugin (the link the browser module renews in her $HERMES_HOME).
+os.makedirs(os.path.join(home, "plugins"), exist_ok=True)
+if not os.path.lexists(os.path.join(home, "plugins", "camofox")):
+    os.symlink(os.environ["CAMOFOX_PLUGIN"], os.path.join(home, "plugins", "camofox"))
+    # and its installer record, as preStart writes it
+    with open(os.environ["CAMOFOX_PLUGIN_RECORD"]) as src, \
+            open(os.path.join(home, "plugins", ".install-metadata.json"), "w") as dst:
+        dst.write('{"camofox": ' + src.read() + '}')
 os.makedirs(os.environ["TERMINAL_CWD"], exist_ok=True)
 
-import model_tools  # noqa: E402
-import tools.browser_camofox as bc  # noqa: E402
+import importlib  # noqa: E402
+
+import requests  # noqa: E402
+
+import model_tools  # noqa: E402  (discovers the plugins)
+from hermes_cli.config import load_config  # noqa: E402
+from hermes_cli.tools_config import _get_platform_tools  # noqa: E402
+
+bc = importlib.import_module("hermes_plugins.camofox.camofox_client")
 from tools.registry import registry  # noqa: E402
 
 
@@ -39,8 +56,14 @@ def page_text(task, element_id):
 
 
 def captcha(site):
-    names = [t["function"]["name"] for t in
-             model_tools.get_tool_definitions(enabled_toolsets=["hermes-cli"], quiet_mode=True)]
+    cfg = load_config()
+    names = [t["function"]["name"] for t in model_tools.get_tool_definitions(
+        enabled_toolsets=sorted(_get_platform_tools(cfg, "cli")),
+        disabled_toolsets=cfg["agent"]["disabled_toolsets"], quiet_mode=True,
+        # every tool the session has, the ones tool_search defers (plugin tools) included
+        skip_tool_search_assembly=True)]
+    check("browser_navigate" in names and "browser_vault" in names and "browser_exec" not in names,
+          "the cli platform gets the camofox plugin's tools and the vault, not browser_exec")
     check("browser_solve_captcha" in names, "browser_solve_captcha is offered in Camofox mode")
 
     A, B = "cap-a", "cap-b"
@@ -58,16 +81,16 @@ def captcha(site):
 
     # A second camofox userId on the same server: A's tab is not its tab.
     call(B, "browser_navigate", url=site + "/plain")
-    sa, sb = bc._get_session(A), bc._get_session(B)
-    raw = bc.requests.post(f"{bc.get_camofox_url()}/tabs/{sa['tab_id']}/solve-captcha",
+    sa, sb = bc.get_session(A), bc.get_session(B)
+    raw = requests.post(f"{bc.get_camofox_url()}/tabs/{sa['tab_id']}/solve-captcha",
                            json={"userId": sb["user_id"]}, headers=bc._auth_headers(), timeout=30)
     check(raw.status_code in (404, 410), f"camofox refuses B's userId on A's tab (HTTP {raw.status_code})")
 
-    log = bc.requests.get(site + "/log", timeout=10).json()
+    log = requests.get(site + "/log", timeout=10).json()
     check(len(log) >= 1 and not any(e.get("refused") for e in log),
           f"every model request carried an image, the model name and no tools ({len(log)} requests)")
     for session in (sa, sb):
-        bc.requests.delete(f"{bc.get_camofox_url()}/sessions/{session['user_id']}", headers=bc._auth_headers(),
+        requests.delete(f"{bc.get_camofox_url()}/sessions/{session['user_id']}", headers=bc._auth_headers(),
                            timeout=30)
 
 

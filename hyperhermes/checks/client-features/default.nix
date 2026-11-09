@@ -254,7 +254,16 @@ let
       in
       a.settings.browser.cloud_provider == "camofox"
       && a.settings.web.search_backend == "searxng"
-      && a.settings.plugins.enabled == [ "web-local-extract" ]
+      && lib.sort lib.lessThan a.settings.plugins.enabled == [
+        "camofox"
+        "web-local-extract"
+      ]
+      && a.settings.plugins.auto_apply == false
+      && a.settings.webapp.enabled == false
+      && a.settings.agent.disabled_toolsets == [
+        "browser-use"
+        "browser-cdp"
+      ]
       && a.settings.file_tools.hosted_ocr_url == "http://ocr.example.org:8098"
       && a.environment ? SEARXNG_URL
       && lib.length a.skillDirs == 2
@@ -272,6 +281,7 @@ let
         "web"
         "plugins"
         "file_tools"
+        "agent"
       ]
       && !(b.environment ? SEARXNG_URL)
       && b.skillDirs == [ ]

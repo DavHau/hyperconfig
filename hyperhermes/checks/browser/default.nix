@@ -6,8 +6,8 @@
 # and a listener he binds on her backend port while her server is down
 # never receives her traffic.
 #
-# Downloads: hermes' browser_downloads tool (the patched hermes package,
-# ../../modules/core/patches/hermes-camofox-browser-downloads.patch), called through hermes'
+# Downloads: browser_downloads (hyperhermes' addition to hermes' camofox
+# plugin, ../../pkgs/hermes-camofox-plugin), called through hermes'
 # tool registry against alice's real server and a local site, saves the
 # files that a link, a form POST, a form POST redirected to another origin
 # and a script start, and reports their sha256. It refuses paths outside
@@ -15,15 +15,15 @@
 # another camofox userId on her server nor bob sees her downloads, and
 # closing the session deletes the server's copies.
 #
-# Captchas: hermes' browser_solve_captcha (hermes-camofox-solve-captcha.patch)
+# Captchas: browser_solve_captcha (the same plugin)
 # drives the captcha plugin of alice's server (pkgs/camofox-browser) against a
 # local 3x3 grid captcha, with a stand-in for the model that answers only a
 # request carrying an image and no tools: the browser clicks the right tiles
 # and Verify, and the tool reports solved; on a page without a captcha it
 # reports no_captcha. Another camofox userId cannot solve on her tab.
 #
-# Vault: hermes' browser_vault save_login and fill
-# (hermes-camofox-vault.patch) read the origin of alice's tab and
+# Vault: hermes' browser_vault save_login and fill (through the plugin's
+# page backend, upstream since hermes v0.23.0) read the origin of alice's tab and
 # fill a saved password into the site's login form through her server;
 # on another origin the fill refuses and writes nothing. create_login
 # (hermes-vault-generate-password.patch) generates a password on the
@@ -40,15 +40,17 @@ let
   dir = hlib.camofoxDir "alice";
 
   site = ./site.py;
+  plugin = pkgs.callPackage ../../pkgs/hermes-camofox-plugin { };
   captchaSite = ./captcha-site.py;
 
   # Runs the driver as an agent with hermes' own interpreter, the agent's
-  # camofox URL and key from its .env (as hermes reads them) and its
-  # working directory.
+  # camofox URL and key from its .env (as hermes reads them), the camofox
+  # plugin the browser module links into her home, and her working
+  # directory.
   driverScript =
     hermes: script: user: args:
     "runuser -u ${user} -- sh -c 'set -a; . ${hlib.stateDir user}/.hermes/.env; set +a; "
-    + "HERMES_HOME=/home/${user}/hermes-test TERMINAL_CWD=${hlib.workspace user} "
+    + "HERMES_HOME=/home/${user}/hermes-test TERMINAL_CWD=${hlib.workspace user} CAMOFOX_PLUGIN=${plugin} CAMOFOX_PLUGIN_RECORD=${plugin.installRecord} "
     + "exec ${hermes.hermesVenv}/bin/python3 ${script} ${args}' 2>&1";
   privateTmp = "/tmp/systemd-private-*-hermes-camofox-alice.service-*/tmp";
   agents = [
@@ -138,6 +140,20 @@ pkgs.testers.runNixOSTest {
         env = machine.succeed("cat ${hlib.stateDir "alice"}/.hermes/.env")
         assert "CAMOFOX_URL=http://127.0.0.1:${port}\n" in env, env
         assert f"CAMOFOX_API_KEY={key}\n" in env, env
+        machine.succeed("test \"$(readlink ${hlib.stateDir "alice"}/.hermes/plugins/camofox)\" = ${plugin}")
+        machine.succeed("${pkgs.jq}/bin/jq -e '.camofox.catalog.tier == \"official\"' ${hlib.stateDir "alice"}/.hermes/plugins/.install-metadata.json")
+
+    with subtest("every profile gets the link, over an upstream catalog install too"):
+        profiles = "${hlib.stateDir "alice"}/.hermes/profiles"
+        # bare: a profile without plugins/; caught: hermes' own install of
+        # upstream's copy (a real directory) where the link belongs.
+        machine.succeed(f"runuser -u alice -- mkdir -p {profiles}/bare {profiles}/caught/plugins/camofox")
+        machine.succeed(f"runuser -u alice -- touch {profiles}/caught/plugins/camofox/plugin.yaml")
+        machine.succeed("systemctl restart hermes-agent-alice.service")
+        for p in ["bare", "caught"]:
+            machine.succeed(f"test -L {profiles}/{p}/plugins/camofox")
+            machine.succeed(f"test \"$(readlink {profiles}/{p}/plugins/camofox)\" = ${plugin}")
+            machine.succeed(f"${pkgs.jq}/bin/jq -e '.camofox.pinned' {profiles}/{p}/plugins/.install-metadata.json")
 
     with subtest("alice's first connection starts her server"):
         machine.wait_until_succeeds("runuser -u alice -- curl -sf http://127.0.0.1:${port}/health", timeout=120)
@@ -167,7 +183,7 @@ pkgs.testers.runNixOSTest {
         out = machine.succeed("${driver "bob" "other http://127.0.0.1:8765 /tmp/alice-ids.json"}")
         print(out)
         assert "ALL PASSED" in out
-        out = machine.succeed("runuser -u bob -- env CAMOFOX_URL=http://127.0.0.1:${port} CAMOFOX_API_KEY=x HERMES_HOME=/home/bob/hermes-test2 TERMINAL_CWD=/home/bob/ws ${hermes.hermesVenv}/bin/python3 ${./downloads.py} unreachable 2>&1")
+        out = machine.succeed("runuser -u bob -- env CAMOFOX_URL=http://127.0.0.1:${port} CAMOFOX_API_KEY=x CAMOFOX_PLUGIN=${plugin} CAMOFOX_PLUGIN_RECORD=${plugin.installRecord} HERMES_HOME=/home/bob/hermes-test2 TERMINAL_CWD=/home/bob/ws ${hermes.hermesVenv}/bin/python3 ${./downloads.py} unreachable 2>&1")
         print(out)
         assert "ALL PASSED" in out
 

@@ -7,7 +7,7 @@
 # source (secrets.command) that emits gate-weakening keys (the trust note
 # in ../dashboards/default.nix).
 #
-# What hermes (v0.22.5) reads, and what it finds here: root-owned
+# What hermes (v0.23.0) reads, and what it finds here: root-owned
 # entries in $HERMES_HOME with the immutable flag, written by
 # hermes-locked-<name> (./locked-pins.py) before the gateway and the
 # dashboard start:

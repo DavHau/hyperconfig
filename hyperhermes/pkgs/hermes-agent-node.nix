@@ -1,4 +1,4 @@
-# Upstream's hermes package (v0.22.5) takes node from pm/lock.json: the
+# Upstream's hermes package (v0.23.0) takes node from pm/lock.json: the
 # nodejs.org linux-x64 tarball, made to run by autoPatchelfHook
 # (nix/pm-packages.nix). The patchelf of our nixpkgs (0.19.2, also
 # 0.18.0) breaks that binary: once its RPATH or NEEDED entries change it

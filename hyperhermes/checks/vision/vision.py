@@ -11,8 +11,9 @@ two-entry stub on disk, clients are only resolved.
   - vision_analyze is offered to every one of them, also right after
     another model's turn in the same process (the check_fn and tool-list
     caches are per main model);
-  - camofox' browser_vision attaches the screenshot for Claude, asks the
-    describer for GLM.
+  - camofox' browser_vision (official plugin + hyperhermes' patch)
+    attaches the screenshot for Claude, asks the describer for GLM;
+  - agent.image_input_mode: text still forces text, also for Claude.
 """
 
 import struct
@@ -83,9 +84,11 @@ for order in ((GLM, OPUS, QWEN), (OPUS, GLM, QWEN)):
             expect(f"{rt[1]} after {[o[1] for o in order[:order.index(rt)]]}: check", check_vision_requirements(), True)
             expect(f"{rt[1]} after {[o[1] for o in order[:order.index(rt)]]}: tools", vision_tools(), ["vision_analyze"])
 
-# 4. camofox' browser_vision: native for Claude, the describer for GLM.
-import tools.browser_camofox as camofox  # noqa: E402
-import agent.auxiliary_client as aux  # noqa: E402
+# 4. camofox' browser_vision (the official camofox plugin, with hyperhermes'
+# native-vision patch, importable as package `camofox`): native for Claude,
+# the describer for GLM.
+import camofox.camofox_tools as camofox  # noqa: E402
+from camofox import camofox_client  # noqa: E402
 
 
 def png():
@@ -102,24 +105,37 @@ class Raw:
 described = []
 
 
-class Reply:
-    class choices_0:
-        class message:
-            content = "a green pixel"
-    choices = [choices_0]
+class LLM:
+    """ctx.llm as the plugin uses it: complete(messages, task=...) -> .text"""
+
+    def complete(self, messages, **kw):
+        described.append(kw.get("task"))
+
+        class Result:
+            text = "a green pixel"
+        return Result()
 
 
-camofox._require_tab = lambda task_id, action=None: ({"tab_id": "t", "user_id": "u"}, None)
-camofox._get_raw = lambda *a, **k: Raw()
-aux.call_llm = lambda **kw: described.append(kw.get("task")) or Reply()
+camofox_client.get_session = lambda task_id: {"tab_id": "t", "user_id": "u"}
+camofox_client.get_raw = lambda *a, **k: Raw()
 
 with main(OPUS):
-    result = camofox.camofox_vision("what colour?")
+    result = camofox.browser_vision("what colour?", llm=LLM())
     expect("opus: camofox screenshot native", isinstance(result, dict) and result.get("_multimodal"), True)
+    expect("opus: camofox image part", isinstance(result, dict) and result["content"][1]["type"], "image_url")
 expect("opus: camofox asked no describer", described, [])
 with main(GLM):
-    result = camofox.camofox_vision("what colour?")
-    expect("glm: camofox described", ("a green pixel" in result, described), (True, ["vision"]))
+    result = camofox.browser_vision("what colour?", llm=LLM())
+    expect("glm: camofox described", (isinstance(result, str) and "a green pixel" in result, described),
+           (True, [camofox.VISION_TASK]))
+
+# 4b. agent.image_input_mode: text still forces the description path, also
+# for a model that can see.
+forced = {**cfg, "agent": {**(cfg.get("agent") or {}), "image_input_mode": "text"}}
+with main(OPUS):
+    expect("opus, image_input_mode text: upload routing", decide_image_input_mode(OPUS[0], OPUS[1], forced), "text")
+    expect("opus, image_input_mode text: tool-result images native",
+           _native_tool_result_images(OPUS[0], OPUS[1], forced), False)
 
 # 5. Without auxiliary.vision GLM has no vision backend (hermes' auto route
 # finds none) and loses vision_analyze; that verdict must not leak into the

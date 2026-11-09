@@ -1,9 +1,28 @@
 # The agents' browser: per agent a camofox-browser server driving a
 # headful Camoufox (anti-detect Firefox over Juggler, no CDP), behind
-# hermes' built-in browser_* tools (its Camofox backend,
-# tools/browser_camofox.py). With Camofox selected, hermes drops the
-# CDP-only browser_exec tool (tools/browser_use_cli.py,
-# is_browser_use_cli_mode).
+# hermes' browser_* tools. Since hermes v0.23.0 those are the official
+# `camofox` plugin (Camofox left core), with hyperhermes' downloads and
+# captcha tools added (../../pkgs/hermes-camofox-plugin), linked into each
+# agent's $HERMES_HOME/plugins and enabled here; its tools form the
+# `camofox` toolset, on by default on every platform. browser_vault
+# (core's `browser` toolset) fills the Camofox tab through the plugin's
+# page backend.
+#
+# Core's own browser is off for these agents: agent.disabled_toolsets
+# names browser-use (browser_exec, a local Chromium) and browser-cdp
+# (browser_cdp, browser_dialog), as v0.22.5 dropped browser_exec in
+# Camofox mode. Not `browser`: that would take browser_vault too, which
+# is what hermes' one-time left-core conversion of a Camofox home writes
+# into config.yaml (hermes_cli/left_core_migration.py
+# _turn_off_replaced); this managed key wins over it.
+#
+# The vault's page backend is accepted only from a plugin bundled with
+# hermes or installed from its catalog at tier official/verified, read
+# from the installer's record plugins/.install-metadata.json
+# (hermes_cli/plugins_cmd_catalog.py login_backend_provenance_error).
+# preStart writes that record for the link (the plugin's
+# passthru.installRecord). The agent owns that file, as any installer
+# record; the gate is no boundary against the agent itself.
 #
 # Per agent, as the agent's uid:
 #   - the server binds 127.0.0.1:<camofoxBackendBase + uid>; the agent
@@ -38,15 +57,15 @@ let
   # (Camoufox #751/#752, fixed in 156.0.1-beta.36).
   camoufox = pkgs.callPackage ../../pkgs/camoufox/browser.nix { };
   camofox = pkgs.callPackage ../../pkgs/camofox-browser { };
-
+  plugin = pkgs.callPackage ../../pkgs/hermes-camofox-plugin { };
   # Seconds a navigation waits for a challenge interstitial to clear,
   # ticking Cloudflare's Turnstile box when it draws one; non-zero also
   # launches Camoufox with disable_coop so that click reaches the frame
   # (pkgs/camofox-browser/challenge-wait.patch).
   challengeWait = 30;
   # A navigation route's budget is NAVIGATE_TIMEOUT_MS + the challenge
-  # wait + 5 s (patch); hermes gives a navigate 60 s
-  # (browser_camofox.py, _navigate_tab).
+  # wait + 5 s (patch); the plugin gives a navigate 60 s
+  # (camofox_tools.py, _navigate_tab).
   navigateTimeout = 20;
 
   keyFile = user: "${hlib.camofoxDir user}/access-key";
@@ -101,13 +120,32 @@ in
       lib.types.submodule (
         { config, ... }:
         {
-          config.settings.browser = lib.mkIf (cfg.browser.enable && config.browser.enable) {
-            cloud_provider = lib.mkDefault "camofox";
-            # A stable per-agent userId: Camofox keeps that profile's cookies.
-            camofox.managed_persistence = lib.mkDefault true;
-            # Tab creation, which carries the first navigation, may take its
-            # route budget (60 s with the challenge wait) before it answers.
-            command_timeout = lib.mkDefault 65;
+          config.settings = lib.mkIf (cfg.browser.enable && config.browser.enable) {
+            browser = {
+              cloud_provider = lib.mkDefault "camofox";
+              # A stable per-agent userId: Camofox keeps that profile's cookies.
+              camofox.managed_persistence = lib.mkDefault true;
+              # Tab creation, which carries the first navigation, may take its
+              # route budget (60 s with the challenge wait) before it answers.
+              command_timeout = lib.mkDefault 65;
+            };
+            # User plugins load only when listed (a union, core's settingsFor).
+            plugins = {
+              enabled = [ "camofox" ];
+              # The plugin is the store copy linked below; nothing re-pins it
+              # from the live catalog unattended (hermes_cli/plugins_cadence.py,
+              # off by default upstream; managed here so `hermes plugins
+              # auto-update on` cannot turn it on).
+              auto_apply = false;
+            };
+            # The gateway's browser-hosted Desktop (v0.23.0,
+            # gateway/webapp_listener.py), off upstream; pinned off like the
+            # other listeners an agent could open.
+            webapp.enabled = false;
+            agent.disabled_toolsets = lib.mkDefault [
+              "browser-use"
+              "browser-cdp"
+            ];
           };
         }
       )
@@ -198,9 +236,31 @@ in
           after = [ "hermes-camofox-${user}.service" ];
         };
 
-        # The key rides the agent's .env (CAMOFOX_API_KEY is what hermes
-        # sends as its Bearer token); the managed .env is world-readable.
+        # The key rides the agent's .env (CAMOFOX_API_KEY is what the
+        # plugin sends as its Bearer token); the managed .env is
+        # world-readable. The plugin's link is renewed before every start,
+        # after core's preStart created the directory.
         "hermes-agent-${user}".preStart = lib.mkAfter ''
+          # In the home and in each named profile (a home of its own, which
+          # core's merge gives the same plugins.enabled). A profile without
+          # plugins/ gets one: skipped, it would start without the link and
+          # hermes' left-core migration would install upstream's copy there.
+          for home in ${hlib.stateDir user}/.hermes ${hlib.stateDir user}/.hermes/profiles/*/; do
+            [ -d "$home" ] || continue
+            plugins=''${home%/}/plugins
+            mkdir -p "$plugins"
+            # A real directory here is hermes' own catalog install (the
+            # left-core migration of a profile that started without this
+            # link); `ln -sfn` would put the link inside it and leave
+            # upstream's copy, without downloads/captcha/native vision, in
+            # charge. It is only plugin code, so it goes.
+            if [ -d "$plugins/camofox" ] && [ ! -L "$plugins/camofox" ]; then rm -rf "$plugins/camofox"; fi
+            ln -sfn ${plugin} "$plugins/camofox"
+            meta=$plugins/.install-metadata.json
+            { [ -s "$meta" ] && ${pkgs.jq}/bin/jq -e 'type == "object"' "$meta" >/dev/null 2>&1 && cat "$meta" || echo '{}'; } \
+              | ${pkgs.jq}/bin/jq --slurpfile rec ${plugin.installRecord} '.camofox = $rec[0]' > "$meta.tmp"
+            mv "$meta.tmp" "$meta"
+          done
           ${ensureKey user}
           env_file=${hlib.stateDir user}/.hermes/.env
           ${pkgs.gnused}/bin/sed -i \

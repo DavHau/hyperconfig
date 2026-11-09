@@ -12,6 +12,8 @@
 {
   pkgs,
   hermesPackage,
+  # The Camofox plugin the browser feature links into an agent's home.
+  camofoxPlugin ? pkgs.callPackage ../../pkgs/hermes-camofox-plugin { },
   settings ? {
     providers.p0 = {
       base_url = "https://inference.p0.contact/v1";
@@ -46,6 +48,9 @@ pkgs.runCommand "hyperhermes-vision-check" { } ''
   # Fresh (mtime now), so hermes serves it without a refresh.
   install -m 644 ${./models-dev.json} $HERMES_HOME/models_dev_cache.json
   export ANTHROPIC_API_KEY=fake-anthropic OPENROUTER_API_KEY=fake-openrouter P0_API_KEY=fake-p0
+  # The plugin as package `camofox`, the way hermes' loader imports it.
+  mkdir $TMPDIR/plugins && ln -s ${camofoxPlugin} $TMPDIR/plugins/camofox
+  export PYTHONPATH=$TMPDIR/plugins
   cd $TMPDIR
   ${hermesPackage.hermesVenv}/bin/python3 ${./vision.py} 2>&1 | grep -v -i 'nous' | tee $out
   [ "''${PIPESTATUS[0]}" = 0 ]

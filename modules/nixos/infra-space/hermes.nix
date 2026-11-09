@@ -21,7 +21,7 @@
       hardening.nix). clan, nix (through the host's daemon), git, jj and
       ssh still work.
     - toolsets: terminal, file, todo, skills on every platform hermes
-      knows (v0.22.5 hermes_cli/platforms.py, plus acp; the dashboard's
+      knows (v0.23.0 hermes_cli/platforms.py, plus acp; the dashboard's
       chat runs `hermes --tui`, which resolves as `cli`), and
       agent.disabled_toolsets as the hard cap on every other toolset
       (hermes_cli/tools_config.py _get_platform_tools applies it last, on
@@ -79,7 +79,7 @@ let
     "skills"
     "delegation"
   ];
-  # Every platform key of hermes v0.22.5's registry, and acp (its adapter
+  # Every platform key of hermes v0.23.0's registry, and acp (its adapter
   # resolves `acp`, which has no registry entry).
   platforms = [
     "cli"
@@ -105,7 +105,7 @@ let
     "cron"
     "acp"
   ];
-  # Every v0.22.5 toolset that shares no tool with the four above (toolsets.py
+  # Every v0.23.0 toolset that shares no tool with the four above (toolsets.py
   # TOOLSETS; `safe` and `hermes-webhook` are composites of such), and the
   # bundled a2a plugin's.
   disabledToolsets = [

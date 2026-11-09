@@ -1,5 +1,5 @@
-"""Vault driver for the browser check (default.nix; patches/hermes-camofox-vault.patch and
-hermes-vault-generate-password.patch), run as alice with hermes' own interpreter, through hermes' tool
+"""Vault driver for the browser check (default.nix; hermes' vault on the camofox plugin's page backend
+and patches/hermes-vault-generate-password.patch), run as alice with hermes' own interpreter, through hermes' tool
 registry like the agent loop, against her real camofox-browser and the login and signup pages of site.py.
 
   vault <site>   the vault tools read the page's origin and fill a saved password into the page's
@@ -17,11 +17,28 @@ import sys
 home = os.environ["HERMES_HOME"]
 os.makedirs(home, exist_ok=True)
 with open(os.path.join(home, "config.yaml"), "w") as f:
-    f.write("browser:\n  cloud_provider: camofox\n  command_timeout: 65\n  allow_private_urls: true\n")
+    f.write("browser:\n  cloud_provider: camofox\n  command_timeout: 65\n  allow_private_urls: true\n"
+            "plugins:\n  enabled: [camofox]\n"
+            "agent:\n  disabled_toolsets: [browser-use, browser-cdp]\n")
+# The agent's own Camofox plugin (the link the browser module renews in her $HERMES_HOME).
+os.makedirs(os.path.join(home, "plugins"), exist_ok=True)
+if not os.path.lexists(os.path.join(home, "plugins", "camofox")):
+    os.symlink(os.environ["CAMOFOX_PLUGIN"], os.path.join(home, "plugins", "camofox"))
+    # and its installer record, as preStart writes it
+    with open(os.environ["CAMOFOX_PLUGIN_RECORD"]) as src, \
+            open(os.path.join(home, "plugins", ".install-metadata.json"), "w") as dst:
+        dst.write('{"camofox": ' + src.read() + '}')
 os.makedirs(os.environ["TERMINAL_CWD"], exist_ok=True)
 
-import model_tools  # noqa: E402,F401  (registers the tools)
-import tools.browser_camofox as bc  # noqa: E402
+import importlib  # noqa: E402
+
+import requests  # noqa: E402
+
+import model_tools  # noqa: E402  (discovers the plugins)
+from hermes_cli.config import load_config  # noqa: E402
+from hermes_cli.tools_config import _get_platform_tools  # noqa: E402
+
+bc = importlib.import_module("hermes_plugins.camofox.camofox_client")
 from agent.vault_store import get_vault_store  # noqa: E402
 from tools.registry import registry  # noqa: E402
 
@@ -91,7 +108,7 @@ def vault(site):
     check(out.get("error_type") == "no_password_field" and len(store.list_items()) == saved,
           "create_login without a password field saves nothing")
 
-    bc.requests.delete(f"{bc.get_camofox_url()}/sessions/{bc._get_session(T)['user_id']}",
+    requests.delete(f"{bc.get_camofox_url()}/sessions/{bc.get_session(T)['user_id']}",
                        headers=bc._auth_headers(), timeout=30)
 
 

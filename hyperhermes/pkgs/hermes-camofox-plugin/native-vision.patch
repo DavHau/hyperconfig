@@ -1,0 +1,63 @@
+browser_vision attaches the screenshot for a main model with native vision.
+
+Symptom: on the Camofox backend browser_vision always sent the screenshot to
+the auxiliary vision model and returned its text, even for Claude or p0's
+Qwen, which can look at it themselves; core's browser_exec (agent-browser /
+browser-use) attaches its screenshots natively for such models.
+Fix: when tools.vision_tools._should_use_native_vision_fast_path() holds
+(hermes' one gate for images in tool results, which the core patch
+hermes-vision-every-model makes per main model), return the multimodal
+tool result (resized like vision_analyze's native embed); else, or on any
+failure, describe as before. Was hunk 2 of hermes-vision-every-model while
+Camofox lived in core (v0.22.5). Not upstream.
+
+--- a/camofox_tools.py
++++ b/camofox_tools.py
+@@ -318,12 +318,45 @@
+     return str(path)
+ 
+ 
+-def browser_vision(question: str, task_id: Optional[str] = None, *, llm: Any = None) -> str:
++def _native_screenshot(screenshot_path: str, question: str) -> Optional[dict[str, Any]]:
++    """hyperhermes: the screenshot as a multimodal tool result when the main model sees images
++    natively (hermes' one gate, ``tools.vision_tools._should_use_native_vision_fast_path``), as
++    core's ``browser_exec`` attaches its screenshots (``tools.browser_use_cli``); None otherwise or
++    on any failure, so the caller falls back to the auxiliary describer."""
++    try:
++        from pathlib import Path
++        from tools.vision_tools import (
++            _EMBED_MAX_DIMENSION, _resize_image_for_vision, _should_use_native_vision_fast_path)
++        from tools.vision_tools_history_budget import resolve_embed_target_bytes
++        if not _should_use_native_vision_fast_path():
++            return None
++        # The data URL stays in the conversation and is re-sent every later turn: the same size cap
++        # as vision_analyze's native embed.
++        data_url = _resize_image_for_vision(
++            Path(screenshot_path), mime_type="image/png", max_base64_bytes=resolve_embed_target_bytes(),
++            max_dimension=_EMBED_MAX_DIMENSION, force_jpeg=True)
++    except Exception as e:
++        logger.debug("Native Camofox screenshot attach failed (falling back to the describer): %s", e)
++        return None
++    summary = _dumps({"success": True, "question": question, "screenshot_path": screenshot_path,
++                      "native_vision": True})
++    return {"_multimodal": True, "text_summary": summary,
++            "meta": {"screenshot_path": screenshot_path, "native_vision": True},
++            "content": [{"type": "text", "text": summary + "\n\nThe screenshot of the page is attached: "
++                                                          "inspect it with your native vision to answer."},
++                        {"type": "image_url", "image_url": {"url": data_url}}]}
++
++
++def browser_vision(question: str, task_id: Optional[str] = None, *, llm: Any = None) -> Any:
+     """Screenshot the tab and answer ``question`` with the auxiliary vision model (``ctx.llm``,
+-    task ``camofox_vision``, which inherits ``auxiliary.vision``)."""
++    task ``camofox_vision``, which inherits ``auxiliary.vision``); hyperhermes: a main model with
++    native vision gets the screenshot itself (``_native_screenshot``)."""
+     def body(session):
+         resp = client.get_raw(client.tab_path(session, "screenshot"), params=client.user_params(session))
+         screenshot_path = _save_screenshot(resp.content)
++        native = _native_screenshot(screenshot_path, question)
++        if native is not None:
++            return native
+         img_b64 = base64.b64encode(resp.content).decode("utf-8")
+         timeout, temperature = _vision_settings()
+         try:

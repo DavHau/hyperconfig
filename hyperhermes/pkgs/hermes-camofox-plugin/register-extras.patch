@@ -1,0 +1,26 @@
+--- a/__init__.py
++++ b/__init__.py
+@@ -64,6 +64,12 @@
+     for schema, handler, emoji in tools:
+         ctx.register_tool(name=schema["name"], toolset=TOOLSET, schema=schema, handler=handler,
+                           check_fn=t.check_camofox_configured, emoji=emoji)
++    # hyperhermes: downloads and captcha solving (./camofox_extras.py); not routed anywhere else.
++    from . import camofox_extras as x
++    for schema, handler, emoji in ((x.BROWSER_DOWNLOADS, x.handle_downloads, "📥"),
++                                   (x.BROWSER_SOLVE_CAPTCHA, x.handle_solve_captcha, "🧩")):
++        ctx.register_tool(name=schema["name"], toolset=TOOLSET, schema=schema, handler=handler,
++                          check_fn=t.check_camofox_configured, emoji=emoji)
+     # Offered only with CAMOFOX_API_KEY set: the server's cookie route checks that bearer token.
+     ctx.register_tool(name=s.BROWSER_IMPORT_COOKIES["name"], toolset=TOOLSET, schema=s.BROWSER_IMPORT_COOKIES,
+                       handler=t.handle_import_cookies, check_fn=t.check_cookie_import_available, emoji="🍪")
+--- a/plugin.yaml
++++ b/plugin.yaml
+@@ -25,6 +25,8 @@
+   - browser_vision
+   - browser_console
+   - browser_import_cookies
++  - browser_downloads
++  - browser_solve_captcha
+ provides_hooks:
+   - on_session_end
+   - on_session_finalize
