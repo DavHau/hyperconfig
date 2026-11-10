@@ -39,9 +39,8 @@
     ../../modules/nixos/oomd.nix
     # The fleet-managing container (also on som).
     ../../modules/nixos/infra-space
-    # Agent spaces for other projects (gi-infra, agave), none a fleet
-    # admin, and Dave's way into them (launchers, herdr machines).
-    ../../modules/nixos/spaces
+    # Dave's way into the agent spaces (gi-infra, agave; they run on
+    # som since 2026-11-10): launchers, pinned host keys, herdr machines.
     ../../modules/nixos/spaces/client.nix
     ./disko.nix
   ];
@@ -61,11 +60,6 @@
 
   hyper.infraSpace.enable = true;
 
-  # Generate their vars right after adding a space (generators run on
-  # Dave's machine): `clan vars generate amy`; modules/nixos/spaces/README.md
-  # has which public keys go where.
-  hyper.spaces.gi-infra.enable = true;
-  hyper.spaces.agave.enable = true;
   hyper.spacesClient.herdrUser = "grmpf";
 
   networking.extraHosts = "10.0.0.1 127.0.0.0";

@@ -76,6 +76,9 @@ in
     ../../modules/nixos/disk-hygiene
     # The fleet-managing container (also on amy).
     ../../modules/nixos/infra-space
+    # Agent spaces for other projects (gi-infra, agave), none a fleet
+    # admin; Dave reaches them from amy (spaces/client.nix there).
+    ../../modules/nixos/spaces
   ];
 
   # Public IPv4 38.89.142.76, borrowed from sgp through a WireGuard tunnel
@@ -127,11 +130,18 @@ in
   hyper.agentUser.enable = false;
 
   hyper.infraSpace.enable = true;
+
   # The always-on infra agent runs here only; amy's member is the backup.
   hyper.infraSpace.hermes = true;
   # Its deploys build here, on som, and upload the closures to the
   # targets (som offloads nothing: no nix.buildMachines).
   hyper.infraSpace.buildOnHost = true;
+
+  # Their vars came from amy (`clan vars cp amy som <gen>/<file>`, the
+  # keys are registered at the forges and the other clans);
+  # modules/nixos/spaces/README.md has which public keys go where.
+  hyper.spaces.gi-infra.enable = true;
+  hyper.spaces.agave.enable = true;
   # The infra-space agent's dashboard at https://infra-space.davhau.fyi/,
   # Dave only: its pocket-id client from the inventory
   # (../../modules/nixos/infra-space/dashboard-account.nix), TLS and the

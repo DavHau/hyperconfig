@@ -17,14 +17,14 @@
 # space too (at most 12 characters: the host's veth is ve-<name>).
 {
   gi-infra = {
-    machine = "amy";
+    machine = "som";
     index = 1;
     sshPort = 2224;
     uid = 1205;
     proxyUid = 1206;
   };
   agave = {
-    machine = "amy";
+    machine = "som";
     index = 2;
     sshPort = 2225;
     uid = 1207;

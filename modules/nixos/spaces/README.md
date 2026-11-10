@@ -1,22 +1,36 @@
 # Named agent spaces
 
 `hyper.spaces.<name>`: a NixOS container per job, built like infra-space
-(`../infra-space`) but with none of its fleet rights. Two on amy:
+(`../infra-space`) but with none of its fleet rights. Two on som:
 `gi-infra` and `agave`. Design and isolation: `./default.nix` (host side
 `./host.nix`, shared with infra-space; guest `./guest.nix` on
 `./guest-base.nix`, also infra-space's base).
 
-| space    | ssh                         | user     | veth             | TPM | own keys (clan vars of amy) |
+| space    | ssh                         | user     | veth             | TPM | own keys (clan vars of som) |
 |----------|-----------------------------|----------|------------------|-----|-----------------------------|
-| gi-infra | `[amy's ygg address]:2224`  | gi-infra | 10.235.0.4/30, fd23:5ace:0:1::/64 | yes | root-ssh, git-geninf, git-clan-lol, token-geninf, token-clan-lol |
-| agave    | `[amy's ygg address]:2225`  | agave    | 10.235.0.8/30, fd23:5ace:0:2::/64 | no  | root-ssh, git-geninf, token-geninf |
+| gi-infra | `[som's ygg address]:2224`  | gi-infra | 10.235.0.4/30, fd23:5ace:0:1::/64 | yes | root-ssh, git-geninf, git-clan-lol, token-geninf, token-clan-lol |
+| agave    | `[som's ygg address]:2225`  | agave    | 10.235.0.8/30, fd23:5ace:0:2::/64 | no  | root-ssh, git-geninf, token-geninf |
 
-Homes persist on amy at `/var/lib/spaces/<name>/home`. Dave's admin keys
-log in. On amy, the launchers "gi-infra space" / "agave space" and herdr
+Homes persist on som at `/var/lib/spaces/<name>/home`. Dave's admin keys
+log in. On amy (Dave's desktop), the launchers "gi-infra space" / "agave space" and herdr
 machines `gi-infra` / `agave` (`./client.nix`) appear once the host keys
 are generated.
 
+## History
+
+Both ran on amy until 2026-11-10 and moved to som with their keys: each
+var copied with `clan vars cp amy som <generator>/<file>` (the keys are
+registered at the forges and in the other clans, so they were not
+regenerated; the comments still say `@amy`), the homes copied over.
+Moving a space again works the same way: point ./registry.nix at the
+new machine, enable it there, `clan vars cp` every `space-<name>-*`
+var while the old machine still declares them, copy
+`/var/lib/spaces/<name>` with the container stopped, then disable it
+on the old machine.
+
 ## Bringing them up (Dave)
+
+(Written for amy, their first machine; read amy as the space's machine.)
 
 1. On a machine with the clan secrets: `clan vars generate amy`. Until
    then every `clan machines update` stops at the new vars. Generates
@@ -58,7 +72,7 @@ are generated.
 `tea` in each space has a login per forge (`tea logins list`): gi-infra
 as davhau-gi-bot on git.geninf.io and davhau-clan-bot on git.clan.lol,
 agave as davhau-agave-bot on git.geninf.io, with the tokens of the
-prompted vars `space-*-token-*` (`clan vars generate amy --generator
+prompted vars `space-*-token-*` (`clan vars generate som --generator
 <name>` to set or rotate one; the space restarts). The config with the
 tokens is written to the guest's /run at boot, never to the home
 (`./forges.nix`). The agents' how-to is the `forge-prs` skill
