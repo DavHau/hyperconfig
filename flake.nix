@@ -121,18 +121,14 @@
     fast-nix-gc.url = "github:DavHau/fast-nix-gc/prune-stale-auto-roots";
     fast-nix-gc.inputs.nixpkgs.follows = "nixpkgs";
 
-    # llm-agents keeps its OWN nixpkgs on purpose: upstream tracks nixpkgs
-    # faster than spaces does (2026-09: omp 18.2.10 needs bun >= 1.3.14, t3code electron_44;
-    # spaces' pin has neither). Following our nixpkgs would rebuild every
-    # agent from source on each bump and currently cannot build at all.
-    # afk (the omp harness) shares this pin so its patch set and omp agree.
-    llm-agents.url = "github:numtide/llm-agents.nix";
-    llm-agents.inputs.flake-parts.follows = "flake-parts";
-    llm-agents.inputs.systems.follows = "systems";
-
-    afk.url = "github:DavHau/afk/4e3d6ac33f57fa25aa493e7c6ca3996803f7099f";
-    afk.inputs.nixpkgs.follows = "nixpkgs";
-    afk.inputs.llm-agents.follows = "llm-agents";
+    # afk (the omp harness) owns the llm-agents pin, with afk's own lock
+    # exactly as Dave tests it: its patch set is written against the omp of
+    # ITS llm-agents and nixpkgs. hyperconfig takes llm-agents from afk
+    # (herdr, pi and omp-joy too), so an afk bump is one line here. afk's
+    # nixpkgs is deliberately not ours: agents track nixpkgs faster than we
+    # do (2026-09: omp 18.2.10 needs bun >= 1.3.14).
+    afk.url = "github:DavHau/afk/24b7822e1fe4e122ded09296c3027d59639842dc";
+    llm-agents.follows = "afk/llm-agents";
 
     # ntop: nix-native htop (live builds, transfers, store, remotes).
     # Every input is fetchable (no git+file:): som's nightly nixpkgs bump
