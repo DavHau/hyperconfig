@@ -30,7 +30,12 @@
                            /run/<name>/secrets/<credential> (0400, the
                            user), never in the home on this host.
   Plus the p0 and TeamClaude keys for afk (the same shared vars as
-  infra-space and the desktops).
+  infra-space and the desktops). nspawn copies credentials in at
+  container start only, so a rotation of any of them (and every change
+  of the container's .conf: bind mounts, nspawn flags, addresses)
+  restarts the space; a change of its guest alone switches it in place
+  (`switch-to-configuration test` inside, as `nixos-rebuild switch`
+  would), its users' sessions and processes kept (./host.nix).
 
   `tpm`: this host's /dev/tpmrm0 for an age identity sealed to it, made
   in the guest (`age-plugin-tpm --generate -o ~/.config/age/identities`),

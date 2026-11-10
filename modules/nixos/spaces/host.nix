@@ -28,6 +28,9 @@
 
   A change of the guest alone switches it in place (reload); anything on
   this side restarts it (../infra-space/default.nix has the details).
+  The ssh forward never starts the container (PartOf=, no Requires=): a
+  client reconnecting while a switch has it stopped would start it from
+  the old unit and the old .conf, booting the old guest.
 */
 {
   config,
@@ -222,7 +225,12 @@ in
   };
   systemd.services."${name}-ssh" = {
     description = "Forward to the ${name} container's sshd";
-    requires = [ "container@${name}.service" ];
+    # Never starts the container: a connection while a switch restarts
+    # it (between its stop and the daemon-reload) would start it from the
+    # old unit and the old .conf, i.e. boot the old guest, and the
+    # switch's own start would then find it running. Until the container
+    # is up a connection is refused; its stop ends the forwarded ones.
+    partOf = [ "container@${name}.service" ];
     after = [ "container@${name}.service" ];
     serviceConfig = {
       ExecStart = "${config.systemd.package}/lib/systemd/systemd-socket-proxyd ${localAddress}:22";

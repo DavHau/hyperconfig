@@ -22,7 +22,14 @@
 #     (`herdr machine list`, targets the ssh aliases `space-<name>`); the
 #     bridge herdr runs over ssh at attach starts each guest's herdr
 #     server, and `herdr machine status` then finds both ok;
-#   - infra-space beside them still starts and admits its own ssh port.
+#   - infra-space beside them still starts and admits its own ssh port;
+#   - deploys (specialisations, `switch-to-configuration test`): a change
+#     of the guests alone reloads each container (the guest's own switch
+#     inside), its leader, a user's process outside any unit, Dave's tmux
+#     session and its child and the herdr server all kept, the guest's
+#     /run/current-system the new system; one of the host's side
+#     (gi-infra's nspawn flags) restarts it into the new guest, also while
+#     clients keep connecting to the ssh forwards during the switch.
 #
 # ./test-keys is test-only material: admin(.pub) stands in for Dave's key,
 # hostkey-<space>(.pub) for the spaces' host keys; infra-space's are its
@@ -159,6 +166,27 @@ pkgs.testers.runNixOSTest {
           inherit address;
           hostKey = pub "hostkey-${name}.pub";
         }) registry;
+      };
+
+      # A later deploy: a change of the guests alone (every space and
+      # infra-space), switched in place, and one of gi-infra's host side
+      # (an nspawn flag), which restarts it.
+      specialisation = {
+        guest-change.configuration = {
+          hyper.infraSpace.guestModules = [ { environment.etc."guest-change".text = "changed\n"; } ];
+          hyper.spaces = lib.genAttrs spaceNames (_: {
+            guestModules = [
+              (
+                { pkgs, ... }:
+                {
+                  environment.etc."guest-change".text = "changed\n";
+                  environment.systemPackages = [ pkgs.hello ];
+                }
+              )
+            ];
+          });
+        };
+        host-change.configuration.containers.gi-infra.extraFlags = [ "--setenv=SPACE_TEST=1" ];
       };
 
       clan.core.vars.generators.inference-api-key.files.token = { };
@@ -363,5 +391,76 @@ pkgs.testers.runNixOSTest {
               assert "error" not in line and "unreachable" not in line, out
           # Dave's login through the alias (the launchers' way)
           assert host.succeed("runuser -u dave -- ssh -o BatchMode=yes space-agave id -un").strip() == "agave"
+
+      users = {"infra-space": "infra", **{n: n for n in spaces}}
+      def system_path(name):
+          # /etc/nixos-containers or /etc/containers, by stateVersion
+          out = host.succeed(f"grep -hs ^SYSTEM_PATH= /etc/nixos-containers/{name}.conf /etc/containers/{name}.conf || true").strip()
+          assert out, name
+          return out.split("=", 1)[1]
+      def leader(name):
+          return host.succeed(f"machinectl show {name} -p Leader --value").strip()
+      def switch(spec):
+          out = host.succeed(f"/run/booted-system/specialisation/{spec}/bin/switch-to-configuration test 2>&1")
+          print(out)
+          return out
+      def listed(out, what, unit):
+          return any(l.startswith(f"{what} the following units: ") and unit in l for l in out.splitlines())
+
+      with subtest("a change of the guests alone switches them in place, their users' processes kept"):
+          procs = {}
+          for name, user in users.items():
+              # a long-running process of the user's own, outside any unit
+              space_root(name, f"systemd-run --uid={user} --unit=marker sleep infinity")
+              procs[name] = {"marker": space_root(name, "systemctl show -p MainPID --value marker.service").strip()}
+          for name, s in spaces.items():
+              # Dave's tmux in an ssh login, as the launchers start it
+              peer.succeed(f"timeout 30 ssh -o BatchMode=yes -p {s['port']} {name}@${hostV6} \"tmux new -d -s main 'sleep 86400'\"")
+              procs[name]["tmux"] = peer.succeed(f"timeout 30 ssh -o BatchMode=yes -p {s['port']} {name}@${hostV6} \"tmux display -p -t main '#{{pid}}'\"").strip()
+              procs[name]["tmux-child"] = space_root(name, f"pgrep -o -u {name} -fx 'sleep 86400'").strip()
+              # the herdr server the subtest above started
+              host.wait_until_succeeds(f"nixos-container run {name} -- pgrep -u {name} -f 'herdr server'", timeout=30)
+              procs[name]["herdr"] = space_root(name, f"pgrep -o -u {name} -f 'herdr server'").strip()
+          leaders = {name: leader(name) for name in users}
+          old = {name: system_path(name) for name in users}
+          out = switch("guest-change")
+          for name, user in users.items():
+              unit = f"container@{name}.service"
+              assert listed(out, "reloading", unit), (name, out)
+              for what in ["stopping", "restarting", "starting"]:
+                  assert not listed(out, what, unit), (name, what, out)
+              host.succeed(f"systemctl is-active {unit}")
+              assert leader(name) == leaders[name], name
+              new = system_path(name)
+              assert new != old[name], name
+              assert space_root(name, "readlink -f /run/current-system").strip() == new, name
+              assert space_root(name, "cat /etc/guest-change").strip() == "changed", name
+              for what, pid in procs[name].items():
+                  space_root(name, f"test -d /proc/{pid}")
+              assert space_root(name, "systemctl show -p MainPID --value marker.service").strip() == procs[name]["marker"], name
+          for name, s in spaces.items():
+              in_space(name, "hello")
+              out = peer.succeed(f"timeout 30 ssh -o BatchMode=yes -p {s['port']} {name}@${hostV6} tmux ls")
+              assert out.startswith("main:"), (name, out)
+
+      with subtest("one of the host's side restarts it into the new guest, also with clients knocking"):
+          # Dave's herdr and ssh reconnect at once when the restart drops
+          # them: a connection in the switch's window must not start the
+          # container from the old unit (the old guest, the old credentials)
+          peer.succeed("(while [ ! -e /tmp/knock-stop ]; do for p in ${lib.concatMapStringsSep " " (s: toString s.port) (lib.attrValues spaces)} 2223; do nc -z -w 1 ${hostV6} $p; done; sleep 0.05; done) >/dev/null 2>&1 &")
+          before = leader("gi-infra")
+          out = switch("host-change")
+          assert listed(out, "stopping", "container@gi-infra.service") and listed(out, "starting", "container@gi-infra.service"), out
+          host.wait_for_unit("container@gi-infra.service")
+          host.wait_until_succeeds("nixos-container run gi-infra -- systemctl is-active multi-user.target", timeout=120)
+          assert leader("gi-infra") != before
+          new = system_path("gi-infra")
+          assert space_root("gi-infra", "readlink -f /run/current-system").strip() == new, new
+          assert space_root("gi-infra", "readlink -f /run/booted-system").strip() == new, new
+          space_root("gi-infra", "test ! -e /etc/guest-change")
+          # started by the new unit: its nspawn flag
+          host.succeed("tr '\\0' '\\n' < /proc/$(systemctl show -p MainPID --value container@gi-infra.service)/cmdline | grep -qx --  --setenv=SPACE_TEST=1")
+          peer.succeed("touch /tmp/knock-stop")
+          peer.succeed("timeout 30 ssh -o BatchMode=yes -p ${toString spaces.gi-infra.port} gi-infra@${hostV6} id -un")
     '';
 }
