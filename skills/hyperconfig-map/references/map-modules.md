@@ -379,6 +379,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/zfs-keylocation-sync/test.nix — An encrypted pool whose keylocation names a key file that no longer exists (the key moved, as clan's vars did on bam) s… <- flake.nix
 - modules/nixos/zfs-remote-unlock/ask-key.sh — Unlock an encrypted ZFS root in the initrd. <- m/zfs-remote-unlock/default.nix
 - modules/nixos/zfs-remote-unlock/default.nix — Encrypted ZFS root, unlockable three ways, key held by clan. <- som
+- modules/nixos/zfs-remote-unlock/vars.nix — The clan vars generators of a ZFS passphrase and its clevis JWE, shared by som (./default.nix) and nas (machines/nas/au… <- machines/nas/automount/default.nix, machines/nas/automount/tang-bind.nix, m/zfs-remote-unlock/default.nix
 - modules/nixos/zt-eu-lan-guard/default.nix — Keeps listed users off the zt-eu sites' routed LANs (Roman's playa and casa, ../../../home-networks/sites.nix). <- som, m/hermes-agents-gpu-host.nix, m/zt-eu-lan-guard/test.nix
 - modules/nixos/zt-eu-lan-guard/test.nix — ./default.nix: `site` plays a routed site LAN (playa's 192.168.10.0/24 and fd2a:8abf:35da::/48, from home-networks) beh… <- flake.nix
 ### modules/clan

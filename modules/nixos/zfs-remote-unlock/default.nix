@@ -14,6 +14,7 @@ let
   dataset = "zroot/root";
   tang = config.hyper.tangClient;
   jwePath = "/etc/clevis/zfs-key.jwe";
+  vars = import ./vars.nix { inherit pkgs; };
 
   askKey = pkgs.writeShellApplication {
     name = "zfs-ask-key";
@@ -103,44 +104,21 @@ in
         fi
       '';
 
-      clan.core.vars.generators.zfs-key = {
-        files.passphrase = {
-          secret = true;
-          # Never installed on the machine whose disk it protects.
-          deploy = false;
-          # ... but `clan machines install` must hand it to disko before it can
-          # create the encrypted dataset. This phase uploads it to the *installer*
-          # as /run/partitioning-secrets/zfs-key/passphrase (nixos-anywhere
-          # --disk-encryption-keys) and nowhere else. Only the partitioning phase
-          # consults neededFor, so deploy = false still holds for the target.
-          neededFor = "partitioning";
-        };
-        runtimeInputs = [
-          pkgs.coreutils
-          pkgs.xkcdpass
-        ];
-        script = ''
-          xkcdpass --numwords 6 --delimiter - --count 1 | tr -d "\n" > "$out"/passphrase
-        '';
-      };
+      # ./vars.nix, shared with nas.
+      clan.core.vars.generators.zfs-key = vars.zfs-key { };
     }
 
     (lib.mkIf tang.enable {
-      clan.core.vars.generators.zfs-tang = {
-        dependencies = [ "zfs-key" ];
+      clan.core.vars.generators.zfs-tang = vars.zfs-tang {
         # Useless without a server, yet a secret: anyone holding it who can
         # also reach a server on the LAN gets the passphrase. neededFor =
         # activation: clan uploads it before the switch and it persists, so
         # append-initrd-secrets finds it even on a `boot`-only switch, which
         # runs no activation (clan-core's age backend only decrypts services
         # secrets into /run/secrets during activation, i.e. at the next boot).
-        files."zfs-key.jwe".neededFor = "activation";
+        neededFor = "activation";
         validation.servers = tang.validation;
-        runtimeInputs = [ pkgs.clevis ];
-        script = ''
-          clevis encrypt sss ${lib.escapeShellArg tang.clevisPolicy} \
-            < "$in/zfs-key/passphrase" > "$out/zfs-key.jwe"
-        '';
+        encrypt = "clevis encrypt sss ${lib.escapeShellArg tang.clevisPolicy}";
       };
 
       boot.initrd.secrets.${jwePath} =

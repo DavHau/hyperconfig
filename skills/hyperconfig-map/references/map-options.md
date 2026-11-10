@@ -20,6 +20,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - controller: modules/clan/wireguard/default.nix
 - dashboard.url: hyperhermes/modules/dashboards/default.nix
 - domain: modules/clan/wireguard/default.nix
+- encGuard: machines/nas/automount/enc-guard.nix
 - files: modules/nixos/infra-space/test-clan-stub.nix, modules/nixos/ipv4-forward-slots-test/default.nix, modules/nixos/spaces/test.nix
 - hyper.afk.defaultModel: modules/nixos/afk.nix
 - hyper.afk.extraSkills: modules/nixos/afk.nix
@@ -171,6 +172,6 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - wifi-parasit: modules/nixos/role-parasit.nix
 - wireguard-network-${instanceName}: modules/clan/wireguard/default.nix
 - x: modules/nixos/infra-space/nixpkgs-bump/guard-test.nix
-- zfs-key: modules/nixos/zfs-remote-unlock/default.nix
+- zfs-key: machines/nas/automount/default.nix, modules/nixos/zfs-remote-unlock/default.nix
 - zfs-passphrase: machines/nas/automount/default.nix
-- zfs-tang: modules/nixos/zfs-remote-unlock/default.nix
+- zfs-tang: machines/nas/automount/default.nix, modules/nixos/zfs-remote-unlock/default.nix

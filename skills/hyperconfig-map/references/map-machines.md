@@ -49,7 +49,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 
 ### nas
 - header: Edit this configuration file to define what should be installed on your system.
-- own files: automount/default.nix, file-browser-roman.nix, firewall.nix, hardware-configuration.nix, notes.md, porkbun.nix, smokeping.nix, sync-from-manu.nix, users.nix
+- own files: automount/default.nix, automount/enc-guard.nix, automount/snapshots.nix, automount/tang-bind.nix, automount/test.nix, file-browser-roman.nix, firewall.nix, hardware-configuration.nix, notes.md, porkbun.nix, smokeping.nix, sync-from-manu.nix, users.nix
 - imports: m/common.nix, m/common-tools.nix, m/sbox.nix, m/role-parasit.nix, m/role-sshuttle-server/default.nix, m/role-iodine/default.nix
 - input modules: srvos.nixosModules.mixins-systemd-boot
 - vars generated: hyprspace openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version wireguard-keys-wg-casa wireguard-keys-wg-edi wireguard-network-wg-casa wireguard-network-wg-edi yggdrasil
@@ -96,6 +96,7 @@ Shared vars generated (vars/shared): agave-geninf-ro clan-secrets-pull esphome-c
 - space-gui: modules/nixos/space-gui/test.nix
 - user-manager-restart: modules/nixos/user-manager-restart/test.nix
 - zfs-keylocation-sync: modules/nixos/zfs-keylocation-sync/test.nix
+- nas-enc-guard: machines/nas/automount/test.nix
 - clan-secrets-mirror: modules/nixos/clan-secrets-mirror-test.nix
 - clan-vars-restart-units: modules/nixos/clan-vars-restart-units-test.nix
 - noctalia-anthropic-usage: modules/nixos/noctalia-anthropic-usage/test.nix
