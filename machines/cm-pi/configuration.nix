@@ -17,6 +17,12 @@
   clan.core.networking.targetHost= "root@cm-pi.local";
   # clan.core.networking.buildHost= "root@cm-pi.local";
 
+  # The VisionFive 2 loads no linux-firmware file (none in five boots'
+  # kernel logs; its only USB device is the Zigbee dongle, cdc_acm): the
+  # board firmware lives in SPI flash (nixos-hardware's firmware.nix).
+  # ../../modules/nixos/firmware-only.nix
+  hyper.firmwareOnly = [ ];
+
   system.stateVersion = "25.05";
   systemd.tpm2.enable = false;
   boot.initrd.systemd.tpm2.enable = false;

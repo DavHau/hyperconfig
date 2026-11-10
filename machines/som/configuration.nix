@@ -222,6 +222,24 @@ in
   # wlan0 network unit just never matches.
   boot.blacklistedKernelModules = [ "iwlwifi" ];
 
+  # Firmware this desktop loads (../../modules/nixos/firmware-only.nix),
+  # from its PCI/USB ids and the drivers' firmware names: the Raphael iGPU
+  # (amdgpu: GC 10.3.6, PSP 13.0.5, SDMA 5.2.6, VCN 3.1.2, DCN 3.1.5; also
+  # in the initrd), the RTL8125B (r8169, also the initrd's unlock NIC), the
+  # AX210's Bluetooth half (btintel; Intel platform 55 variant 23, the
+  # same chip amy loads ibt-0041-0041 for). The AX210's wifi half stays
+  # unbound (above), so no iwlwifi files.
+  hyper.firmwareOnly = [
+    "amdgpu/gc_10_3_6_*"
+    "amdgpu/psp_13_0_5_*"
+    "amdgpu/sdma_5_2_6*"
+    "amdgpu/vcn_3_1_2*"
+    "amdgpu/dcn_3_1_5_*"
+    "rtl_nic/rtl8125b-*"
+    "intel/ibt-0041-0041.*"
+  ];
+  hardware.cpu.amd.updateMicrocode = true;
+
   # Fans/water block (on the board's ARGB headers) and RAM LEDs dark.
   hyper.rgbOff.colorfulArgb = true;
 

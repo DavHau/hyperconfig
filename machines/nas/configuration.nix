@@ -58,6 +58,12 @@
   networking.hostName = "nas"; # Define your hostname.
   networking.hostId = "d523969b"; # Define your hostname.
   networking.useDHCP = true;
+
+  # Firmware this box loads (../../modules/nixos/firmware-only.nix): its
+  # only NIC, an RTL8168g (r8169, XID 4c0). The Haswell iGPU (i915) and the
+  # SAS HBAs (mpt3sas) load no file.
+  hyper.firmwareOnly = [ "rtl_nic/rtl8168g-*" ];
+  hardware.cpu.intel.updateMicrocode = true;
   # networking.interfaces.enp3s0.useDHCP = true;
   # networking.interfaces.enp3s0.ipv4.addresses = [
   #   { address = "192.168.178.2"; prefixLength = 24; }

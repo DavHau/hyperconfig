@@ -15,6 +15,10 @@
 
   clan.core.networking.targetHost = "root@38.89.142.76:21";
 
+  # Proxmox guest (virtio only): loads no firmware file, and its host owns
+  # the microcode. ../../modules/nixos/firmware-only.nix
+  hyper.firmwareOnly = [ ];
+
   # 1G of RAM: zram (common.nix) plus a disk swapfile so a nix evaluation or
   # a service spike does not hit the OOM killer.
   swapDevices = [

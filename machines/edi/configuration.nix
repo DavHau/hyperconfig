@@ -15,6 +15,10 @@
 
   networking.useDHCP = true;
 
+  # KVM guest (virtio only): loads no firmware file, and its host owns the
+  # microcode. ../../modules/nixos/firmware-only.nix
+  hyper.firmwareOnly = [ ];
+
   services.porkbun.ipv4Entries = [
     "bruch-bu.de/A/casa"
     "bruch-bu.de/A/playa"
