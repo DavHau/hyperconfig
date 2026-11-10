@@ -43,8 +43,45 @@ let
       fileset = dir + "/SKILL.md";
     };
   pinnedSettingsFile = (pkgs.formats.yaml { }).generate "afk-pinned-settings.yml" cfg.pinnedSettings;
+  # afk with our default model in its distribution config (the lowest
+  # config layer, OMP_DISTRO_CONFIG): afk's wrapper points at two store
+  # files (with and without superpowers); copy the package and repoint both
+  # at edited copies. afk's own default stays visible in its source.
+  afkUpstream = inputs.afk.packages.${pkgs.stdenv.hostPlatform.system}.afk;
+  afkWithDefaultModel =
+    pkgs.runCommand "afk"
+      {
+        nativeBuildInputs = [ pkgs.yq-go ];
+        inherit (afkUpstream) meta;
+        passthru = afkUpstream.passthru or { };
+      }
+      ''
+        cp -a ${afkUpstream} $out
+        chmod -R u+w $out
+        # bin/afk is a symlink to the inner wrapper: make it a real file
+        for f in $out/bin/*; do
+          if [ -L "$f" ]; then cp --remove-destination "$(readlink -f "$f")" "$f"; chmod u+w "$f"; fi
+        done
+        found=0
+        for f in $(grep -rlE 'distro-config[a-z-]*\.yml' $out/bin); do
+          for orig in $(grep -oE '/nix/store/[a-z0-9]{32}-distro-config[a-z-]*\.yml' "$f" | sort -u); do
+            new=$out/share/afk/$(basename "$orig" | cut -d- -f2-)
+            mkdir -p $out/share/afk
+            yq '.modelRoles.default = "${cfg.defaultModel}"' "$orig" > "$new"
+            substituteInPlace "$f" --replace-fail "$orig" "$new"
+            found=$((found + 1))
+          done
+        done
+        [ "$found" -ge 2 ] || { echo "afk: expected 2 distro configs, patched $found" >&2; exit 1; }
+      '';
 in
 {
+  options.hyper.afk.defaultModel = lib.mkOption {
+    type = lib.types.str;
+    default = "anthropic/claude-opus-5-5:medium";
+    description = "afk's default model (omp `modelRoles.default`) in afk's distribution layer: below the user's config.yml, so /model and the user's own config still win.";
+  };
+
   options.hyper.afk.pinnedSettings = lib.mkOption {
     type = (pkgs.formats.yaml { }).type;
     default = { };
@@ -64,7 +101,7 @@ in
   config.environment.systemPackages = [
     (inputs.wrappers.lib.wrapPackage {
       inherit pkgs;
-      package = inputs.afk.packages.${pkgs.stdenv.hostPlatform.system}.afk;
+      package = afkWithDefaultModel;
       preHook = ''
         config_dir="$HOME/.omp/profiles/afk/agent"
         mkdir -p "$config_dir/rules" "$config_dir/extensions" "$config_dir/skills"
