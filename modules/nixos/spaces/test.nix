@@ -175,6 +175,7 @@ pkgs.testers.runNixOSTest {
         "test-vars/space-gi-infra-root-ssh/id_ed25519" = fake "gi-infra-root-ssh";
         "test-vars/space-gi-infra-git-geninf/id_ed25519" = fake "gi-infra-git-geninf";
         "test-vars/space-gi-infra-git-clan-lol/id_ed25519" = fake "gi-infra-git-clan-lol";
+        "test-vars/space-agave-root-ssh/id_ed25519" = fake "agave-root-ssh";
         "test-vars/space-agave-git-geninf/id_ed25519" = fake "agave-git-geninf";
         "test-vars/space-gi-infra-token-geninf/token" = fake "gi-infra-token-geninf";
         "test-vars/space-gi-infra-token-clan-lol/token" = fake "gi-infra-token-clan-lol";
@@ -217,7 +218,7 @@ pkgs.testers.runNixOSTest {
       spaces = json.loads('${builtins.toJSON spaces}')
       expected_creds = {
           "gi-infra": {"p0-api-key", "teamclaude-api-key", "root-ssh", "git-geninf", "git-clan-lol", "token-geninf", "token-clan-lol"},
-          "agave": {"p0-api-key", "teamclaude-api-key", "git-geninf", "token-geninf"},
+          "agave": {"p0-api-key", "teamclaude-api-key", "root-ssh", "git-geninf", "token-geninf"},
       }
       # tea's logins: forge -> (bot user, token credential, default)
       expected_forges = {
@@ -302,6 +303,9 @@ pkgs.testers.runNixOSTest {
               space_root(name, "sh -c '! grep -q \"\\.d$\" /etc/hosts'")
           in_space("gi-infra", "test -r /dev/tpmrm0 -a -w /dev/tpmrm0")
           space_root("agave", "test ! -e /dev/tpmrm0")
+          # agave-infra's vars: clan's age store takes the root-ssh key
+          assert in_space("agave", "echo $AGE_KEYFILE").strip() == "/run/agave/secrets/root-ssh"
+          in_space("agave", "test -r $AGE_KEYFILE")
 
       with subtest("tea: a login per forge, its token from the credential, on tmpfs only"):
           for name, forges in expected_forges.items():

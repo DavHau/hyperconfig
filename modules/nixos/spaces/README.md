@@ -9,7 +9,7 @@
 | space    | ssh                         | user     | veth             | TPM | own keys (clan vars of amy) |
 |----------|-----------------------------|----------|------------------|-----|-----------------------------|
 | gi-infra | `[amy's ygg address]:2224`  | gi-infra | 10.235.0.4/30, fd23:5ace:0:1::/64 | yes | root-ssh, git-geninf, git-clan-lol, token-geninf, token-clan-lol |
-| agave    | `[amy's ygg address]:2225`  | agave    | 10.235.0.8/30, fd23:5ace:0:2::/64 | no  | git-geninf, token-geninf |
+| agave    | `[amy's ygg address]:2225`  | agave    | 10.235.0.8/30, fd23:5ace:0:2::/64 | no  | root-ssh, git-geninf, token-geninf |
 
 Homes persist on amy at `/var/lib/spaces/<name>/home`. Dave's admin keys
 log in. On amy, the launchers "gi-infra space" / "agave space" and herdr
@@ -38,11 +38,20 @@ are generated.
    - `space-gi-infra-git-clan-lol`: the same on git.clan.lol.
    - `space-agave-git-geninf`: git.geninf.io, write on the agave
      repositories.
+   - `space-agave-root-ssh`: agave-infra repository, `clan.nix`
+     `adminKeys` (the sshd instance's authorizedKeys, root on every agave
+     machine). agave-infra appends plain ssh-ed25519 admin keys to its
+     age recipients (`adminAgeKeys`), so the same key decrypts its vars
+     (the space's AGE_KEYFILE points at it); an existing admin runs
+     `clan vars fix` there and deploys agave-infra's machines once.
 4. gi-infra's vars: in the gi-infra space, `mkdir -p ~/.config/age &&
    age-plugin-tpm --generate -o ~/.config/age/identities`, then add
    `age-plugin-tpm -y ~/.config/age/identities` to gi-infra's recipients
    (`orgAdminAgeKeys`) and `clan vars fix` there. Optional: without it the
    space deploys only machines whose vars it does not need to decrypt.
+5. agave's host keys for agave-infra's machines are pinned from
+   agave-infra's `openssh` vars (`./agave.nix`); update them there when
+   a machine is added.
 
 ## Pull requests
 
