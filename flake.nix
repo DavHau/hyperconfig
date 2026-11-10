@@ -259,6 +259,27 @@
           import ./modules/nixos/zfs-keylocation-sync/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
+        # nas: clevis/tang unlock of pool11/enc and rpool/enc, and nothing
+        # writes under them unless mounted (machines/nas/automount).
+        nas-enc-guard =
+          import ./machines/nas/automount/test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          };
+        # nas' real zfs-passphrase-tang generator binds offline, without a
+        # prompt, against the pinned advertisement of the casa tang.
+        nas-zfs-tang-bind =
+          let
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+            gen = self.nixosConfigurations.nas.config.clan.core.vars.generators.zfs-passphrase-tang;
+          in
+          pkgs.runCommand "nas-zfs-tang-bind" { nativeBuildInputs = gen.runtimeInputs; } ''
+            export in=$PWD/in out=$PWD/gen
+            mkdir -p $in/zfs-passphrase $out
+            printf %s not-the-passphrase > $in/zfs-passphrase/passphrase
+            (${gen.script}) < /dev/null
+            test -s $out/jwe
+            touch ${placeholder "out"}
+          '';
         # The fleet's mirror of the clan secrets repo.
         clan-secrets-mirror =
           import ./modules/nixos/clan-secrets-mirror-test.nix {

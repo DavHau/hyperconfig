@@ -1,4 +1,7 @@
 {lib, config, pkgs, ...}: {
+  # Writes into pool11/enc/data: only while it is mounted (automount/enc-guard.nix).
+  encGuard.services.rsync = [ "/pool11/enc/data/home/manu/manuel/current" ];
+
   # define systemd service that runs rsync in a loop
   systemd.services.rsync = {
     description = "rsync service";
