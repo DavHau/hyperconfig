@@ -1,7 +1,7 @@
 /*
   The agave space: an agent's place to work on generational-
-  infrastructure's agave project (agave, agave-marketplace, agave-vm-host
-  on git.geninf.io). What else it needs is open (./README.md lists the
+  infrastructure's agave project (agave and every agave-* repo on
+  git.geninf.io). What else it needs is open (./README.md lists the
   questions); for now git on git.geninf.io and the common base. Nothing
   of this clan's: ./default.nix has what every space leaves out.
 
@@ -67,6 +67,8 @@ in
             agave = repo "agave";
             agave-marketplace = repo "agave-marketplace";
             agave-vm-host = repo "agave-vm-host";
+            agave-infra = repo "agave-infra";
+            agave-testbench = repo "agave-testbench";
           };
         }
       ];
