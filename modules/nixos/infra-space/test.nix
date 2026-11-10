@@ -54,7 +54,8 @@
 # serves every skill it offers. memberB (amy) is the plain backup: no
 # hermes unit in its guest. memberA also plays som with the dashboard
 # (./dashboard.nix): its nginx vhost answers from the host, gated by
-# hermes' OIDC login (lazy discovery, so no issuer is needed for that),
+# hermes' OIDC login (its issuer a loopback stand-in in the guest,
+# ./test-oidc.py, which also signs sessions for the secret page's tests),
 # the guest's dashboard port is refused to a LAN peer, and memberB (amy)
 # has none. A user on a member (`tenant`) reaches no port of its guest,
 # nginx only the dashboard's; root and the sshd forward still do.
@@ -80,6 +81,11 @@ let
   # the guest's dashboard port for the host's nginx (./dashboard.nix)
   dashboardPort = 9119;
   dashboardHost = "infra-space.test";
+  # clan-secret-prompt's guest port (./dashboard.nix)
+  secretPromptPort = 9121;
+  # a loopback OIDC issuer in memberA's guest (./test-oidc.py): a real
+  # dashboard session for the secret page, without pocket-id
+  oidcPort = 9898;
   lockedHome = inputs.hyperhermes.lib.lockedHermesHome "infra";
   # the guest's veth addresses (./default.nix)
   guestV4 = "10.235.0.2";
@@ -234,6 +240,39 @@ let
                       sleep 0.5
                     done
                     ;;
+                  vars)
+                    # as clan's age store: encrypted to infra's TPM
+                    # identity, committed; generator `fail` echoes what
+                    # it was given (the service must not pass that on)
+                    cmd=$2
+                    shift 2
+                    if [ "''${1:-}" = --flake ]; then shift 2; fi
+                    case "$cmd" in
+                      set)
+                        machine=$1 gen=''${2%/*} file=''${2#*/}
+                        if [ "$gen" = fail ]; then
+                          echo "error: refusing $(cat)" >&2
+                          exit 1
+                        fi
+                        if [ "$gen" = hang ]; then
+                          # clan stuck, with a child: the service's
+                          # timeout must take the whole group
+                          cat > /dev/null
+                          sleep 601 &
+                          sleep 601
+                        fi
+                        dir=$CLAN_AGE_STORE_DIR/clan-vars/per-machine/$machine/$gen/$file
+                        mkdir -p "$dir"
+                        export PATH=${pkgs.age}/bin:${pkgs.age-plugin-tpm}/bin:$PATH
+                        age -r "$(age-plugin-tpm -y "$HOME/.config/age/identities")" -o "$dir/$file.age"
+                        cd "$CLAN_AGE_STORE_DIR"
+                        git add "$dir" && git commit --quiet -m "vars: update $gen/$file for machine $machine"
+                        ;;
+                      generate)
+                        printf '%s\n' "$@" > "$HOME/clan-generated"
+                        ;;
+                    esac
+                    ;;
                 esac
               '';
             }
@@ -263,7 +302,16 @@ let
               (pkgs.writeShellScriptBin "infra-space-toolsets" ''
                 exec ${config.services.hyperhermes.package.hermesVenv}/bin/python3 ${./test-toolsets.py}
               '')
+              pkgs.curl
             ];
+            # the dashboard's issuer (below): signs sessions for its group
+            systemd.services.test-oidc = {
+              wantedBy = [ "multi-user.target" ];
+              before = [ "hermes-dashboard-infra.service" ];
+              serviceConfig.ExecStart = "${config.services.hyperhermes.package.hermesVenv}/bin/python3 ${./test-oidc.py} ${toString oidcPort} ${config.infraSpace.hermes.dashboard.clientId} ${config.infraSpace.hermes.dashboard.allowedGroup}";
+            };
+            # clan-secret-prompt's clan timeout, short for the hang case
+            systemd.services.clan-secret-prompt.environment.CLAN_SECRET_PROMPT_CLAN_TIMEOUT = "30";
           }
         );
       };
@@ -286,10 +334,13 @@ let
         enable = true;
         host = dashboardHost;
         url = "http://${dashboardHost}";
-        # never contacted: hermes discovers its issuer at the first sign-in
-        issuer = "https://id.test";
+        # ./test-oidc.py in the guest (hermes takes http on loopback)
+        issuer = "http://127.0.0.1:${toString oidcPort}";
         clientSecretFile = "/etc/test-vars/oidc/secret";
       };
+      # nginx's warnings (a request body spooled to a temp file) in the
+      # journal: the secret page must never cause one
+      services.nginx.logError = lib.mkIf (me == "memberA") "stderr info";
 
       environment.etc = {
         "test-vars/infra-space-ssh/id_ed25519" = secret (keys + "/infra-space");
@@ -793,7 +844,7 @@ pkgs.testers.runNixOSTest {
       with subtest("on the host only root and the forwarders reach the guest"):
           for m in members.values():
               for addr in ["${guestV4}", "${guestV6}"]:
-                  for port in [22, ${toString probePort}, ${toString dashboardPort}]:
+                  for port in [22, ${toString probePort}, ${toString dashboardPort}, ${toString secretPromptPort}]:
                       m.fail(f"runuser -u tenant -- nc -z -w 5 {addr} {port}")
                   m.succeed(f"nc -z -w 5 {addr} 22", f"nc -z -w 5 {addr} ${toString probePort}")
           # nginx: the dashboard port only (on v4, where the guest serves it)
@@ -989,5 +1040,259 @@ pkgs.testers.runNixOSTest {
           out = guest(m, f"{socat} -t 30 - UNIX-CONNECT:/run/infra-space-gcroots/socket </dev/null").strip()
           assert out.startswith("refused: no request"), out
           m.succeed("rm /nix/var/nix/gcroots/test-busybox")
+
+      with subtest("clan-secret-prompt: Dave's value into the vars store, nowhere else"):
+          import re, secrets, urllib.parse
+          m = memberA
+          store = "/home/infra/clan-secrets"
+          remote = "/home/infra/secrets-remote.git"
+          service = "http://${guestV4}:${toString secretPromptPort}"
+          origin = "--resolve ${dashboardHost}:80:127.0.0.1 http://${dashboardHost}"
+          # a clan flake's generators, as the tool reads them (nix eval)
+          flake = "/home/infra/testclan"
+          flake_nix = """{ outputs = _: { nixosConfigurations.testbox.config.clan.core.vars.generators = {
+            api.files = { token = { }; pub.secret = false; };
+            wifi = { files.psk = { }; prompts.psk = { description = "password of the test Wi-Fi"; type = "hidden"; persist = true; }; };
+            wifi2 = { files.psk = { }; prompts.psk = { description = "another Wi-Fi"; type = "hidden"; persist = true; }; };
+            tls = { files.key = { }; prompts.key = { description = "a PEM key"; type = "multiline-hidden"; persist = true; }; };
+            fail.files.x = { };
+            hang.files.x = { };
+          }; }; }"""
+          guest(m, f"mkdir -p {flake} && cd {flake} && printf %s {shlex.quote(flake_nix)} > flake.nix && git init --quiet && git add flake.nix && git commit --quiet -m flake")
+          m.wait_until_succeeds(f"curl -sf {origin}/api/status", timeout=180)
+          m.wait_until_succeeds("nixos-container run infra-space -- systemctl is-active clan-secret-prompt.service", timeout=60)
+          assert guest_root(m, "systemctl show -p User --value clan-secret-prompt.service").strip() == "infra"
+          memberB.fail("nixos-container run infra-space -- which clan-secret-prompt")
+
+          def ask(args, env=""):
+              out = guest(m, f"{env} clan-secret-prompt --flake {flake} {args} 2>/dev/null").strip()
+              match = re.fullmatch(r"http://${dashboardHost}/secret/([0-9a-f]{32})", out)
+              assert match, out
+              return match.group(1)
+
+          def page(rid):
+              return m.succeed(f"curl -s {service}/secret/{rid}")
+
+          def post(rid, fields, headers=""):
+              # the body from a file: no value in any command line
+              body = urllib.parse.urlencode(fields)
+              m.succeed(f"install -m 0600 /dev/null /tmp/body && printf %s '{body}' > /tmp/body")
+              out = m.succeed(f"curl -s -o /tmp/answer -w '%{{http_code}}' {headers} -H 'Content-Type: application/x-www-form-urlencoded' --data-binary @/tmp/body {service}/secret/{rid}; rm /tmp/body")
+              return int(out), m.succeed("cat /tmp/answer; rm /tmp/answer")
+
+          def token(rid):
+              match = re.search(r'name="token" value="([^"]+)"', page(rid))
+              assert match, rid
+              return match.group(1)
+
+          def wait(rid):
+              return guest(m, f"clan-secret-prompt --wait {rid} --timeout 60", check=False)[1].strip()
+
+          def decrypt(machine, gen, file):
+              return guest(m, f"age -d -i ~/.config/age/identities {store}/clan-vars/per-machine/{machine}/{gen}/{file}/{file}.age")
+
+          value = "v4lue-" + secrets.token_hex(12)
+
+          # a request: only its URL; its file infra's alone
+          rid = ask("testbox api token")
+          assert guest_root(m, "stat -c '%a %U' /run/clan-secret-prompt").strip() == "700 infra"
+          assert guest_root(m, f"stat -c '%a %U' /run/clan-secret-prompt/{rid}.json").strip() == "600 infra"
+          html = page(rid)
+          assert "testbox" in html and "api/token" in html and "not set yet" in html, html
+
+          # behind the dashboard's login: without a session nginx sends
+          # the browser to the sign-in (and back), the service never sees it
+          out = m.succeed(f"curl -s -o /dev/null -w '%{{http_code}} %{{redirect_url}}' {origin}/secret/{rid}").split()
+          assert out == ["302", "http://${dashboardHost}/login?next=/secret/" + rid], out
+          body = urllib.parse.urlencode({"token": token(rid), "v0": value, "v0_confirm": value})
+          m.succeed(f"install -m 0600 /dev/null /tmp/body && printf %s '{body}' > /tmp/body")
+          code = m.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' -H 'Content-Type: application/x-www-form-urlencoded' --data-binary @/tmp/body {origin}/secret/{rid}; rm /tmp/body").strip()
+          assert code == "302", code
+          # a forged session cookie neither
+          code = m.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' -b hermes_session_at=forged {origin}/secret/{rid}").strip()
+          assert code != "200", code
+          # a real session (signed by the test's issuer for the allowed
+          # group): the page, through nginx. The access-token cookie: the
+          # __Host- one wins over a bare one, whatever their order
+          guest_root(m, "curl -sf -o /run/test-at http://127.0.0.1:${toString oidcPort}/mint")
+          at = guest_root(m, "cat /run/test-at").strip()
+          def via_nginx(rid, cookie, extra=""):
+              return m.succeed(f"curl -s -o /tmp/answer -w '%{{http_code}}' -H {shlex.quote('Cookie: ' + cookie)} {extra} {origin}/secret/{rid}").strip()
+          assert via_nginx(rid, f"hermes_session_at={at}") == "200"
+          assert "api/token" in m.succeed("cat /tmp/answer; rm /tmp/answer")
+          assert via_nginx(rid, f"hermes_session_at=forged; __Host-hermes_session_at={at}") == "200"
+          assert via_nginx(rid, f"__Host-hermes_session_at=forged; hermes_session_at={at}") == "302"
+          # only the id-shaped page: the rest of the service stays unreachable
+          code = m.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {origin}/secret/{rid}x").strip()
+          assert code != "200", code
+
+          # the port: nginx (the host's veth address) only; inside the guest
+          # infra is reset by the owner gate, root refused by the service
+          rc, _ = guest(m, f"curl -s -o /dev/null --max-time 5 {service}/secret/{rid}", check=False)
+          assert rc != 0, rc
+          assert guest_root(m, f"curl -s -o /dev/null -w '%{{http_code}}' {service}/secret/{rid}").strip() == "403"
+          m.succeed("runuser -u nginx -- nc -z -w 5 ${guestV4} ${toString secretPromptPort}")
+
+          # refused: another page's post, a wrong token, unconfirmed values
+          code, _ = post(rid, {"token": token(rid), "v0": value, "v0_confirm": value}, "-H 'Sec-Fetch-Site: cross-site'")
+          assert code == 403, code
+          code, _ = post(rid, {"token": "wrong", "v0": value, "v0_confirm": value})
+          assert code == 400, code
+          code, _ = post(rid, {"token": token(rid), "v0": value, "v0_confirm": value + "x"})
+          assert code == 400, code
+          guest(m, f"test ! -e {store}/clan-vars/per-machine/testbox/api")
+
+          # Dave's answer: set, encrypted, committed and pushed
+          code, html = post(rid, {"token": token(rid), "v0": value, "v0_confirm": value})
+          assert code == 200 and "Stored" in html, (code, html)
+          assert wait(rid) == "set"
+          assert decrypt("testbox", "api", "token") == value
+          assert guest(m, f"git -C {store} rev-parse main") == guest(m, f"git -C {remote} rev-parse main")
+          assert guest(m, "cat ~/clan-argv").split() == ["vars", "set", "--flake", flake, "testbox", "api/token"]
+          # used up
+          code, _ = post(rid, {"token": "x", "v0": "other", "v0_confirm": "other"})
+          assert code == 410, code
+          assert "answered already" in page(rid)
+          assert decrypt("testbox", "api", "token") == value
+          # the next request for it says a value is there
+          rid2 = ask("testbox api token")
+          assert "a value is set already" in page(rid2)
+          assert guest(m, f"clan-secret-prompt --cancel {rid2}").strip() == "cancelled"
+          assert wait(rid2) == "cancelled"
+
+          # one lock per request for every state change: while it is held
+          # (here by infra), a submission and --cancel both wait; the
+          # submission then wins and --cancel reports it
+          rid2 = ask("testbox api token")
+          tok2 = token(rid2)
+          guest_root(m, f"systemd-run --uid=infra --unit=sp-lockholder ${pkgs.util-linux}/bin/flock /run/clan-secret-prompt/{rid2}.lock ${pkgs.coreutils}/bin/sleep 10")
+          m.succeed("sleep 1")
+          guest_root(m, "systemctl is-active sp-lockholder.service")
+          rc, _ = guest(m, f"timeout 3 clan-secret-prompt --cancel {rid2}", check=False)
+          assert rc == 124, rc
+          body = urllib.parse.urlencode({"token": tok2, "v0": value, "v0_confirm": value})
+          m.succeed(f"install -m 0600 /dev/null /tmp/body && printf %s '{body}' > /tmp/body")
+          code = m.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' -H 'Content-Type: application/x-www-form-urlencoded' --data-binary @/tmp/body {service}/secret/{rid2}; rm /tmp/body").strip()
+          assert code == "200", code
+          assert guest(m, f"clan-secret-prompt --cancel {rid2}").strip() == "set"
+
+          # bound to the var it names: no public, unknown or foreign var
+          for args in ["testbox api pub", "testbox api nope", "nobox api token", "testbox nope", "testbox api",
+                       "'testbox;x' api token", "test.box api token", "testbox a.b", "testbox api token --reason " + "x" * 301]:
+              rc, out = guest(m, f"clan-secret-prompt --flake {flake} {args} 2>&1", check=False)
+              assert rc != 0 and "/secret/" not in out, (args, out)
+          code, _ = post("0" * 32, {"token": "x", "v0": "a", "v0_confirm": "a"})
+          assert code == 404, code
+
+          # expired
+          rid3 = ask("testbox api token", env="CLAN_SECRET_PROMPT_TTL=1")
+          m.succeed("sleep 2")
+          assert wait(rid3) == "expired"
+          code, _ = post(rid3, {"token": "x", "v0": "late", "v0_confirm": "late"})
+          assert code == 410, code
+
+          # a generator asked as a whole: its prompts set, then it runs
+          rid4 = ask("testbox wifi")
+          assert "password of the test Wi-Fi" in page(rid4)
+          code, _ = post(rid4, {"token": token(rid4), "v0": value + "-wifi", "v0_confirm": value + "-wifi"})
+          assert code == 200, code
+          assert wait(rid4) == "set"
+          assert decrypt("testbox", "wifi", "psk") == value + "-wifi"
+          assert guest(m, "cat ~/clan-generated").split() == ["testbox", "--generator", "wifi"]
+          # an existing generator is not generated again: refused at the
+          # request, and at the submission if it appeared meanwhile
+          rc, out = guest(m, f"clan-secret-prompt --flake {flake} testbox wifi 2>&1", check=False)
+          assert rc != 0 and "exists already" in out and "--regenerate" in out, out
+          rid4 = ask("testbox wifi2")
+          tok4 = token(rid4)
+          guest(m, f"mkdir -p {store}/clan-vars/per-machine/testbox/wifi2/psk && touch {store}/clan-vars/per-machine/testbox/wifi2/psk/psk.age")
+          code, html = post(rid4, {"token": tok4, "v0": value + "-w2", "v0_confirm": value + "-w2"})
+          assert code == 409 and "exists already" in html, (code, html)
+          assert wait(rid4).startswith("error: refused"), rid4
+          guest(m, f"rm -r {store}/clan-vars/per-machine/testbox/wifi2")
+
+          # what Dave sees is what is stored: a change of the flake between
+          # the request and the submission refuses it (nothing written)
+          rid6 = ask("testbox api token")
+          tok6 = token(rid6)
+          guest(m, f"sed -i 's/api.files = {{ token = {{ }};/api.files = {{ token.secret = false;/' {flake}/flake.nix && grep -q 'token.secret = false' {flake}/flake.nix")
+          before = guest(m, f"git -C {store} rev-parse main")
+          code, html = post(rid6, {"token": tok6, "v0": value + "-toctou", "v0_confirm": value + "-toctou"})
+          assert code == 409 and "changed since the agent asked" in html, (code, html)
+          assert wait(rid6).startswith("error: refused: the flake or the generator changed"), rid6
+          assert guest(m, f"git -C {store} rev-parse main") == before
+          guest(m, f"git -C {flake} checkout --quiet flake.nix")
+
+          # clan's failure: the agent gets the exit status only, never
+          # clan's output; Dave's page gets it, the value scrubbed; a
+          # multi-line value too
+          multi = f"{value}-m1\n{value}-m2"
+          rid5 = ask("testbox fail x")
+          code, html = post(rid5, {"token": token(rid5), "v0": multi, "v0_confirm": multi})
+          assert code == 500 and value not in html and "&lt;redacted&gt;" in html, (code, html)
+          assert wait(rid5) == "error: clan vars set failed (exit 1)"
+
+          # a stuck clan: killed whole after the timeout (30 s here), the
+          # request ends in error, no clan left holding the store's lock
+          rid7 = ask("testbox hang x")
+          code, _ = post(rid7, {"token": token(rid7), "v0": value + "-hang", "v0_confirm": value + "-hang"})
+          assert code == 500, code
+          assert wait(rid7) == "error: clan vars set timed out"
+          guest_root(m, "sh -c '! pgrep -f \"sleep 60[1]\"'")
+
+          # with Dave's session through nginx: a 200 KiB value (in memory
+          # all the way: no nginx temp file, no "buffered to a temporary
+          # file" warning) and a multi-line one (masked textarea, CRLF as
+          # the browser sends it, stored with LF)
+          def nginx_warnings():
+              return int(m.succeed("journalctl -u nginx.service --no-pager | grep -c 'buffered to a temporary file' || true").strip())
+          def post_big(path, marker, n, tok, cookie):
+              m.succeed(f"""bash -c 'set -e; v={marker}$(head -c {n} /dev/zero | tr "\\0" A){marker}
+                install -m 0600 /dev/null /root/body
+                printf "token=%s&v0=%s&v0_confirm=%s" {tok} "$v" "$v" > /root/body'""")
+              return m.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' -H {shlex.quote('Cookie: ' + cookie)} -H 'Content-Type: application/x-www-form-urlencoded' --data-binary @/root/body {origin}{path}; rm /root/body").strip()
+          # the check sees a spool: the dashboard's own location buffers 16k
+          warned = nginx_warnings()
+          post_big("/api/nope", "control" + secrets.token_hex(8), 200000, "x", "x=y")
+          m.wait_until_succeeds(f"test $(journalctl -u nginx.service --no-pager | grep -c 'buffered to a temporary file') -gt {warned}", timeout=30)
+          warned = nginx_warnings()
+          guest_root(m, "curl -sf -o /run/test-at http://127.0.0.1:${toString oidcPort}/mint")
+          at = guest_root(m, "cat /run/test-at").strip()
+          guest_root(m, "rm /run/test-at")
+          rid8 = ask("testbox api token")
+          code = post_big(f"/secret/{rid8}", value, 200000, token(rid8), f"hermes_session_at={at}")
+          assert code == "200", code
+          assert wait(rid8) == "set"
+          assert guest(m, f"age -d -i ~/.config/age/identities {store}/clan-vars/per-machine/testbox/api/token/token.age | wc -c").strip() == str(200000 + 2 * len(value))
+          rid9 = ask("testbox tls key")
+          assert via_nginx(rid9, f"hermes_session_at={at}") == "200"
+          html = m.succeed("cat /tmp/answer; rm /tmp/answer")
+          assert "<textarea" in html and "-webkit-text-security" in html and "not verified" in html, html
+          crlf = f"{value}-l1\r\n{value}-l2\r\n"
+          body = urllib.parse.urlencode({"token": token(rid9), "v0": crlf, "v0_confirm": crlf})
+          m.succeed(f"install -m 0600 /dev/null /root/body && printf %s '{body}' > /root/body")
+          code = m.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' -H {shlex.quote('Cookie: hermes_session_at=' + at)} -H 'Content-Type: application/x-www-form-urlencoded' --data-binary @/root/body {origin}/secret/{rid9}; rm /root/body").strip()
+          assert code == "200", code
+          assert wait(rid9) == "set"
+          assert decrypt("testbox", "tls", "key") == f"{value}-l1\n{value}-l2\n"
+          assert nginx_warnings() == warned, "nginx spooled a secret page's body"
+
+          # the value nowhere but the store's ciphertext: no journal (any
+          # field), no log (nginx's either), no request file, no state of
+          # hermes, in the guest or on the host. Scanned from the host with
+          # the value in a pattern file: a command line carrying it would
+          # land in the journal itself (_CMDLINE).
+          pattern = "/root/secret-prompt-pattern"
+          m.succeed(f"install -m 0600 /dev/null {pattern} && printf '%s\\n' {value} > {pattern}")
+          guest_leader = m.succeed("machinectl show infra-space -p Leader --value").strip()
+          places = ["/var/lib/nixos-containers/infra-space", "/var/lib/infra-space/home",
+                    f"/proc/{guest_leader}/root/run", f"/proc/{guest_leader}/root/tmp",
+                    "/var/log", "/var/lib/nginx", "/var/cache/nginx", "/run", "/tmp", "/etc", "/root"]
+          rc, out = m.execute(f"grep -rsF -l -f {pattern} --exclude=secret-prompt-pattern {' '.join(places)}")
+          if rc == 0:
+              _, entries = m.execute(f"journalctl -D /var/lib/nixos-containers/infra-space/var/log/journal -o verbose --no-pager | grep -F -B40 -f {pattern}")
+              print(entries)
+          assert rc != 0, out
+          m.succeed(f"rm {pattern}")
     '';
 }

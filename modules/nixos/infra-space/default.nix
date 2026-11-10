@@ -33,10 +33,10 @@
       admits, so the same table's output chain refuses every other uid
       (users, agents, services) on every port and address of the guest,
       link-local included. Passing: root, the sshd socket proxy (its own
-      uid, below) to port 22, nginx to the dashboard port (som,
-      ./dashboard.nix); packets of the guest's own connections (replies
-      of this host's resolved) and socketless ones (the kernel's: ND,
-      resets).
+      uid, below) to port 22, nginx to the dashboard's and
+      clan-secret-prompt's ports (som, ./dashboard.nix); packets of the
+      guest's own connections (replies of this host's resolved) and
+      socketless ones (the kernel's: ND, resets).
     - /home/infra in the guest is /var/lib/infra-space/home here,
       read-write, so the checkout and the agents' state survive container
       rebuilds. A plain directory, on som too: som's entity storage
@@ -383,7 +383,8 @@ in
         };
       };
       # som's nginx to the dashboard port (./dashboard.nix)
-      toGuestRules = lib.optionalString cfg.dashboard.enable "meta skuid ${toString config.users.users.${config.services.nginx.user}.uid} tcp dport ${toString cfg.dashboard.port} return";
+      # and to clan-secret-prompt's page (./secret-prompt)
+      toGuestRules = lib.optionalString cfg.dashboard.enable "meta skuid ${toString config.users.users.${config.services.nginx.user}.uid} tcp dport { ${toString cfg.dashboard.port}, ${toString cfg.dashboard.secretPromptPort} } return";
     })
   ]);
 }

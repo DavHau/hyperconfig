@@ -352,6 +352,8 @@ in
   imports = [
     ../shell-profile.nix
     ../spaces/guest-base.nix
+    # off unless the dashboard is published (./dashboard.nix)
+    ./secret-prompt
   ];
 
   options.infraSpace = {
@@ -413,6 +415,13 @@ in
       default = inputs.clan-core.packages.${pkgs.stdenv.hostPlatform.system}.clan-cli;
       defaultText = lib.literalExpression "inputs.clan-core.packages.\${system}.clan-cli";
       description = "The real clan-cli the `clan` wrapper runs (a stub in ./test.nix).";
+    };
+    clanWrapper = lib.mkOption {
+      type = lib.types.package;
+      readOnly = true;
+      default = clanWrapper;
+      defaultText = lib.literalMD "the `clan` wrapper of ./guest.nix";
+      description = "The `clan` on PATH: the real one between a pull and a push of the secrets store.";
     };
   };
 

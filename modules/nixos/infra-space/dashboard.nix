@@ -28,6 +28,21 @@
   This host's nginx (and root) is all that may dial the guest's dashboard
   port: ./default.nix's output gate.
 
+  clan-secret-prompt's page (./secret-prompt: the agent asks Dave for a
+  clan var's value there, never in chat) is on the same host, at
+  /secret/<id>, from its own guest port. nginx lets a request through only
+  with a session the dashboard accepts: an auth subrequest to hermes'
+  /api/auth/me with the access-token cookie only (never the refresh token:
+  a refresh there would rotate it into a response nobody keeps, and
+  pocket-id's reuse detection would end the session), a GET without body.
+  Without one it sends the browser to the dashboard's sign-in, back to the
+  page afterwards. The page's own limits: the sign-in's request rate, a
+  small body; its value is in the POST body only, which nginx logs nowhere
+  (the default access log has the request line, the id at most) and keeps
+  in memory (client_body_buffer_size = client_max_body_size: no temp
+  file). The session's access-token cookie: the __Host- one if present,
+  else the bare one (never both, never the first of several).
+
   The pocket-id client (`clientId`, callback <url>/auth/callback, admitting
   `allowedGroup` only, which Dave's account joins) is declared in the clan
   inventory from ./dashboard-account.nix
@@ -65,6 +80,50 @@ let
       proxy_read_timeout 1h;
       proxy_send_timeout 1h;
       client_max_body_size 256m;
+    '';
+  };
+  # clan-secret-prompt's page (./secret-prompt), Dave's session checked first
+  secretPage = {
+    proxyPass = "http://${guestAddress}:${toString cfg.secretPromptPort}";
+    recommendedProxySettings = false;
+    extraConfig = ''
+      auth_request /_infra_space_secret_auth;
+      error_page 401 = @infra_space_secret_login;
+      proxy_set_header Host $host;
+      proxy_set_header X-Forwarded-For $remote_addr;
+      proxy_set_header X-Forwarded-Proto $scheme;
+      proxy_set_header Cookie "";
+      proxy_set_header Authorization "";
+      proxy_buffering off;
+      proxy_read_timeout 35m;
+      # The body holds the value: nginx keeps it in memory whole, never
+      # in a temp file (a body beyond client_body_buffer_size would be
+      # spooled to client_body_temp_path in plaintext). The cap is the
+      # buffer, so no accepted body is ever larger than it.
+      client_max_body_size 1m;
+      client_body_buffer_size 1m;
+      client_body_in_file_only off;
+      limit_req zone=infra_space_dashboard_login burst=10 nodelay;
+      limit_req_status 429;
+    '';
+  };
+  secretAuth = {
+    proxyPass = "http://${guestAddress}:${toString port}/api/auth/me";
+    recommendedProxySettings = false;
+    extraConfig = ''
+      internal;
+      proxy_method GET;
+      proxy_pass_request_body off;
+      proxy_set_header Content-Length "";
+      proxy_set_header Host $host;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $remote_addr;
+      proxy_set_header X-Forwarded-Proto $scheme;
+      proxy_set_header X-Forwarded-Host $host;
+      proxy_set_header X-Forwarded-Prefix "";
+      proxy_set_header Forwarded "";
+      proxy_set_header Authorization "";
+      proxy_set_header Cookie $infra_space_secret_session;
     '';
   };
   signIn = location // {
@@ -119,6 +178,11 @@ in
       default = 9119;
       description = "The guest's dashboard port on its veth address.";
     };
+    secretPromptPort = lib.mkOption {
+      type = lib.types.port;
+      default = 9121;
+      description = "The guest's clan-secret-prompt port on its veth address.";
+    };
     virtualHost = lib.mkOption {
       type = lib.types.attrsOf lib.types.anything;
       default = { };
@@ -142,6 +206,12 @@ in
           listenAddress = guestAddress;
           inherit port;
         };
+        infraSpace.secretPrompt = {
+          enable = true;
+          inherit (cfg) url;
+          listenAddress = guestAddress;
+          port = cfg.secretPromptPort;
+        };
       }
     ];
 
@@ -157,6 +227,22 @@ in
         limit_req_zone $infra_space_dashboard_client_net zone=infra_space_dashboard_requests:10m rate=50r/s;
         limit_conn_zone $infra_space_dashboard_client_net zone=infra_space_dashboard_conns:10m;
         limit_conn_zone $host zone=infra_space_dashboard_host_conns:1m;
+        # the access-token cookie alone (the secret page's auth subrequest):
+        # the __Host- one (as hermes sets it on https), else the bare one
+        # (plain http, tests). Never a bare one beside a __Host- one: a
+        # sibling host may toss a stale bare cookie in front.
+        map $http_cookie $infra_space_secret_at_host {
+          "~(?:^|;)\s*(?<at>__Host-hermes_session_at=[^;\s]+)" $at;
+          default "";
+        }
+        map $http_cookie $infra_space_secret_at_bare {
+          "~(?:^|;)\s*(?<at>hermes_session_at=[^;\s]+)" $at;
+          default "";
+        }
+        map $infra_space_secret_at_host $infra_space_secret_session {
+          "" $infra_space_secret_at_bare;
+          default $infra_space_secret_at_host;
+        }
         map $upstream_http_x_frame_options $infra_space_dashboard_frame_options {
           "" SAMEORIGIN;
           default "";
@@ -177,6 +263,13 @@ in
         '';
         locations."/" = location;
         locations."= /auth/login" = signIn;
+        # (no `{32}`: a brace would end nginx's location line; the service
+        # takes exactly 32)
+        locations."~ ^/secret/(?<infra_space_secret_id>[0-9a-f]+)$" = secretPage;
+        locations."= /_infra_space_secret_auth" = secretAuth;
+        locations."@infra_space_secret_login".extraConfig = ''
+          return 302 /login?next=/secret/$infra_space_secret_id;
+        '';
         locations."= /auth/native/authorize" = signIn // {
           extraConfig = signIn.extraConfig + ''
             proxy_redirect "~^(${lib.escapeRegex cfg.authorizationEndpoint}\?.*)$" "$1&prompt=login";

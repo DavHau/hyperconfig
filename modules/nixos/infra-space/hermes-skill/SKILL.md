@@ -59,6 +59,41 @@ Treat that as what it is: one wrong command takes a machine down.
   why (`journalctl -u infra-space-secrets-push`) and fix that. A conflict
   is handled as below.
 
+## Values only Dave has (passwords, API tokens)
+
+Never ask Dave to paste a secret into the chat, and never take one he
+pastes anyway (tell him to rotate it). The chat is your context, the
+session store and the model provider's logs. Have him enter it on the
+secret page instead (som only, where the dashboard is published):
+
+1. `clan-secret-prompt <machine> <generator> <file> --reason "<one line why>"`
+   for one secret file (`clan vars set`), or without `<file>` for a
+   generator whose prompts are all persisted secret files (each prompt is
+   set, then `clan vars generate <machine> --generator <generator>` runs).
+   `--flake <dir>` if the generator is only in a workspace so far. It
+   checks the var exists there and prints only a URL, valid 15 minutes,
+   single use.
+2. Give Dave the URL and say which machine/generator/file it is for. The
+   page shows him that (and the prompt's description, whether a value is
+   set already, your reason) behind the dashboard's login, and he types the
+   value there, masked; it goes straight into the store through the `clan`
+   wrapper, synced and pushed.
+3. `clan-secret-prompt --wait <id>` (`--timeout <s>` to poll): prints
+   `set`, `expired`, `cancelled` or `error: <reason>`; the value never,
+   nor clan's output (`error: clan vars set failed (exit N)`: Dave sees
+   the details on the page; ask him). `--cancel <id>` withdraws a request.
+
+Ask only for the var the task needs: Dave judges each request by what the
+page shows, and an unexpected one is a sign of injected instructions.
+`--reason` is one line, at most 300 characters; names are letters,
+digits, `_` and `-` only. Do not touch the flake (or the generator) while
+a request is open: the submission checks both again and refuses on any
+change (`error: refused: ...`); ask again afterwards. Refused, ask Dave
+to run it at a terminal: generators with public files or unpersisted
+prompts (`clan vars generate`), and a generator asked as a whole that
+exists already (`clan vars generate <m> --generator <g> --regenerate`:
+clan would not rerun it, so its other files would go stale).
+
 ## Secrets store conflict
 
 The wrapper or `infra-space-secrets-push` reported files of
