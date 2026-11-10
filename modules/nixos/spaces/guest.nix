@@ -13,7 +13,8 @@
   No fleet: no infra-space key, no fleet CA, no `<machine>.d` names. The
   space's own ssh/git targets come with its module (./gi-infra.nix,
   ./agave.nix) as programs.ssh settings over its credentials in
-  /run/<name>/secrets.
+  /run/<name>/secrets, its forges' API logins (`tea`, for PRs) as
+  `space.forges` (./forges.nix).
 
   `space.tpm`: the host's TPM is bound in (./host.nix) for an age
   identity made here, at ~/.config/age/identities, for the space's own
@@ -49,6 +50,7 @@ in
 {
   imports = [
     ./guest-base.nix
+    ./forges.nix
     ../herdr-jj.nix
   ];
 

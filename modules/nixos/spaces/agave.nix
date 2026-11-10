@@ -8,6 +8,10 @@
   Identity (a clan var of the space's machine, no prompt):
     space-agave-git-geninf   git on git.geninf.io (a Gitea account's key);
                              credential `git-geninf`.
+  API token (a prompted clan var, entered by Dave) of the bot account the
+  key belongs to, for PRs with `tea` (./forges.nix):
+    space-agave-token-geninf davhau-agave-bot on git.geninf.io;
+                             credential `token-geninf`.
 */
 {
   config,
@@ -38,18 +42,21 @@ in
     # API token of the forge bot account (PRs: open, comment, merge), entered
     # by Dave: `clan vars generate <machine> --generator space-agave-token-geninf`.
     clan.core.vars.generators.space-agave-token-geninf = lib.mkIf cfg.enable {
-        prompts.token = {
-          type = "hidden";
-          persist = true;
-          description = "git.geninf.io API token of davhau-agave-bot (write:repository, write:issue, read:user)";
-        };
-        files.token.restartUnits = [ containerUnit ];
+      prompts.token = {
+        type = "hidden";
+        persist = true;
+        description = "git.geninf.io API token of davhau-agave-bot (write:repository, write:issue, read:user)";
       };
+      files.token.restartUnits = [ containerUnit ];
+    };
 
     # Its own definitions not under its `enable` (that would recurse);
     # inert while the space is off.
     hyper.spaces.${name} = {
-      credentials.git-geninf = vars.space-agave-git-geninf.files.id_ed25519.path;
+      credentials = {
+        git-geninf = vars.space-agave-git-geninf.files.id_ed25519.path;
+        token-geninf = vars.space-agave-token-geninf.files.token.path;
+      };
       guestModules = [
         {
           programs.ssh.knownHosts = { inherit (import ./forge-host-keys.nix) git-geninf-io; };
@@ -63,6 +70,11 @@ in
           # same rewrite for Dave's own key.
           programs.git.config.url."ssh://gitea@git.geninf.io/generational-infrastructure/agave".insteadOf =
             "https://git.geninf.io/generational-infrastructure/agave";
+          # PRs: `tea` (./forges.nix)
+          space.forges."git.geninf.io" = {
+            user = "davhau-agave-bot";
+            credential = "token-geninf";
+          };
           space.checkouts = {
             agave = repo "agave";
             agave-marketplace = repo "agave-marketplace";

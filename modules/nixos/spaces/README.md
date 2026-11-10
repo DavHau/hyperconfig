@@ -8,8 +8,8 @@
 
 | space    | ssh                         | user     | veth             | TPM | own keys (clan vars of amy) |
 |----------|-----------------------------|----------|------------------|-----|-----------------------------|
-| gi-infra | `[amy's ygg address]:2224`  | gi-infra | 10.235.0.4/30, fd23:5ace:0:1::/64 | yes | root-ssh, git-geninf, git-clan-lol |
-| agave    | `[amy's ygg address]:2225`  | agave    | 10.235.0.8/30, fd23:5ace:0:2::/64 | no  | git-geninf |
+| gi-infra | `[amy's ygg address]:2224`  | gi-infra | 10.235.0.4/30, fd23:5ace:0:1::/64 | yes | root-ssh, git-geninf, git-clan-lol, token-geninf, token-clan-lol |
+| agave    | `[amy's ygg address]:2225`  | agave    | 10.235.0.8/30, fd23:5ace:0:2::/64 | no  | git-geninf, token-geninf |
 
 Homes persist on amy at `/var/lib/spaces/<name>/home`. Dave's admin keys
 log in. On amy, the launchers "gi-infra space" / "agave space" and herdr
@@ -43,6 +43,19 @@ are generated.
    `age-plugin-tpm -y ~/.config/age/identities` to gi-infra's recipients
    (`orgAdminAgeKeys`) and `clan vars fix` there. Optional: without it the
    space deploys only machines whose vars it does not need to decrypt.
+
+## Pull requests
+
+`tea` in each space has a login per forge (`tea logins list`): gi-infra
+as davhau-gi-bot on git.geninf.io and davhau-clan-bot on git.clan.lol,
+agave as davhau-agave-bot on git.geninf.io, with the tokens of the
+prompted vars `space-*-token-*` (`clan vars generate amy --generator
+<name>` to set or rotate one; the space restarts). The config with the
+tokens is written to the guest's /run at boot, never to the home
+(`./forges.nix`). The agents' how-to is the `forge-prs` skill
+(`./forge-prs-skill/SKILL.md`). After a deploy, in each space:
+`space-forge-check` (each token authenticates as its bot; the
+repositories it can push to).
 
 ## Adding a space
 

@@ -176,6 +176,9 @@ pkgs.testers.runNixOSTest {
         "test-vars/space-gi-infra-git-geninf/id_ed25519" = fake "gi-infra-git-geninf";
         "test-vars/space-gi-infra-git-clan-lol/id_ed25519" = fake "gi-infra-git-clan-lol";
         "test-vars/space-agave-git-geninf/id_ed25519" = fake "agave-git-geninf";
+        "test-vars/space-gi-infra-token-geninf/token" = fake "gi-infra-token-geninf";
+        "test-vars/space-gi-infra-token-clan-lol/token" = fake "gi-infra-token-clan-lol";
+        "test-vars/space-agave-token-geninf/token" = fake "agave-token-geninf";
         "dave-ssh/id_ed25519" = {
           source = keys + "/admin";
           mode = "0400";
@@ -213,8 +216,16 @@ pkgs.testers.runNixOSTest {
 
       spaces = json.loads('${builtins.toJSON spaces}')
       expected_creds = {
-          "gi-infra": {"p0-api-key", "teamclaude-api-key", "root-ssh", "git-geninf", "git-clan-lol"},
-          "agave": {"p0-api-key", "teamclaude-api-key", "git-geninf"},
+          "gi-infra": {"p0-api-key", "teamclaude-api-key", "root-ssh", "git-geninf", "git-clan-lol", "token-geninf", "token-clan-lol"},
+          "agave": {"p0-api-key", "teamclaude-api-key", "git-geninf", "token-geninf"},
+      }
+      # tea's logins: forge -> (bot user, token credential, default)
+      expected_forges = {
+          "gi-infra": {
+              "git.geninf.io": ("davhau-gi-bot", "token-geninf", True),
+              "git.clan.lol": ("davhau-clan-bot", "token-clan-lol", False),
+          },
+          "agave": {"git.geninf.io": ("davhau-agave-bot", "token-geninf", True)},
       }
 
       def in_space(name, cmd, check=True):
@@ -291,6 +302,37 @@ pkgs.testers.runNixOSTest {
               space_root(name, "sh -c '! grep -q \"\\.d$\" /etc/hosts'")
           in_space("gi-infra", "test -r /dev/tpmrm0 -a -w /dev/tpmrm0")
           space_root("agave", "test ! -e /dev/tpmrm0")
+
+      with subtest("tea: a login per forge, its token from the credential, on tmpfs only"):
+          for name, forges in expected_forges.items():
+              host.wait_until_succeeds(f"nixos-container run {name} -- systemctl is-active {name}-forge-cli.service", timeout=60)
+              conf = f"/run/{name}/tea/tea/config.yml"
+              out = space_root(name, f"stat -c '%a %U' {conf}").strip()
+              assert out == f"600 {name}", out
+              out = space_root(name, f"findmnt -n -o TARGET,FSTYPE -T {conf}").split()
+              assert out == ["/run", "tmpfs"], out
+              # what the agent sees, without the network
+              rows = in_space(name, "tea logins list -o tsv").strip().splitlines()
+              print(rows)
+              got = {r.split("\t")[0]: r.split("\t") for r in rows[1:]}
+              assert set(got) == set(forges), got
+              tokens = {l["name"]: l.get("token") for l in json.loads(in_space(name, f"cat {conf}"))["logins"]}
+              for host_, (user, cred, default) in forges.items():
+                  _, url, ssh_host, u, d = got[host_]
+                  assert (url, ssh_host, u, d) == (f"https://{host_}", host_, user, str(default).lower()), got[host_]
+                  # the fake var's content (`fake` above), newline trimmed
+                  assert tokens[host_] == f"test {name}-{cred}", host_
+              # a checkout's ssh remote picks its forge's login (the request
+              # then fails, no network; the error names the URL)
+              for host_ in forges:
+                  out = in_space(name, f"cd $(mktemp -d) && git init -q && git remote add origin gitea@{host_}:org/repo.git && timeout 60 tea pr ls </dev/null 2>&1 || true")
+                  assert f"https://{host_}/api/v1/repos/org/repo/pulls" in out, out
+              # no token in the persisted home
+              rc, hits = host.execute(f"grep -rls 'test {name}-token' /var/lib/spaces/{name}/home")
+              assert rc == 1, hits
+              in_space(name, "command -v space-forge-check")
+              # afk links the forge-prs skill
+              in_space(name, 'grep -q forge-prs "$(readlink -f "$(command -v afk)")"')
 
       with subtest("without the forges the clones give up softly"):
           for name, unit in [("gi-infra", "gi-infra"), ("agave", "agave")]:

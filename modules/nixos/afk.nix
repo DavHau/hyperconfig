@@ -54,6 +54,13 @@ in
     description = "omp settings for afk that override the user's config.yml (an omp config overlay).";
   };
 
+  options.hyper.afk.extraSkills = lib.mkOption {
+    type = lib.types.attrsOf lib.types.path;
+    default = { };
+    example = lib.literalExpression "{ forge-prs = ./forge-prs-skill; }";
+    description = "Skill name -> directory with its SKILL.md, linked into afk's skills beside the personal ones (a space's own how-tos).";
+  };
+
   config.environment.systemPackages = [
     (inputs.wrappers.lib.wrapPackage {
       inherit pkgs;
@@ -81,6 +88,12 @@ in
         # `herdr integration install omp` writes; see herdr-omp-agent-state/.
         ln -sf ${common.herdrOmpExtension} "$config_dir/extensions/herdr-omp-agent-state.ts"
       ''
+      # A space's own skills (hyper.afk.extraSkills); nothing elsewhere.
+      + lib.concatStrings (
+        lib.mapAttrsToList (name: dir: ''
+          ln -sfn ${skill dir} "$config_dir/skills/${name}"
+        '') cfg.extraSkills
+      )
       # After any PI_CONFIG_FILES the caller set: later overlays win.
       + lib.optionalString (cfg.pinnedSettings != { }) ''
         export PI_CONFIG_FILES="''${PI_CONFIG_FILES:+$PI_CONFIG_FILES:}${pinnedSettingsFile}"

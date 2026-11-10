@@ -14,6 +14,12 @@
                                  key); credential `git-geninf`.
     space-gi-infra-git-clan-lol  git on git.clan.lol (likewise);
                                  credential `git-clan-lol`.
+  API tokens (prompted clan vars, entered by Dave) of the bot accounts the
+  ssh keys belong to, for PRs with `tea` (./forges.nix):
+    space-gi-infra-token-geninf    davhau-gi-bot on git.geninf.io;
+                                   credential `token-geninf`.
+    space-gi-infra-token-clan-lol  davhau-clan-bot on git.clan.lol;
+                                   credential `token-clan-lol`.
   One key per forge, not one for both: the two Gitea instances are run by
   different groups and each key is registered on one account there, so
   either can be revoked or rotated without touching the other, and a key
@@ -96,6 +102,8 @@ in
         root-ssh = vars.space-gi-infra-root-ssh.files.id_ed25519.path;
         git-geninf = vars.space-gi-infra-git-geninf.files.id_ed25519.path;
         git-clan-lol = vars.space-gi-infra-git-clan-lol.files.id_ed25519.path;
+        token-geninf = vars.space-gi-infra-token-geninf.files.token.path;
+        token-clan-lol = vars.space-gi-infra-token-clan-lol.files.token.path;
       };
       guestModules = [
         {
@@ -123,6 +131,18 @@ in
               IdentityFile ${secretsDir}/root-ssh
               IdentitiesOnly yes
           '';
+          # PRs: `tea` (./forges.nix)
+          space.forges = {
+            "git.geninf.io" = {
+              user = "davhau-gi-bot";
+              credential = "token-geninf";
+            };
+            "git.clan.lol" = {
+              user = "davhau-clan-bot";
+              credential = "token-clan-lol";
+            };
+          };
+          space.defaultForge = "git.geninf.io";
           space.checkouts.gi-infra = "gitea@git.geninf.io:generational-infrastructure/gi-infra.git";
         }
       ];
