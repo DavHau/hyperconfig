@@ -2,7 +2,6 @@
   imports = [
     (inputs.nixos-hardware + "/starfive/visionfive/v2")
     ../../modules/nixos/common.nix
-    ../../modules/nixos/monitoring.nix
     ../../modules/nixos/common-tools.nix
     ../../modules/nixos/sbox.nix
     ../../modules/nixos/riscv64.nix
