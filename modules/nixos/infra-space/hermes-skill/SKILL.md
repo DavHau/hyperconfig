@@ -139,6 +139,25 @@ so you stay free for Dave's next request.
 - Verify on the target: `ssh <m>.d readlink /run/current-system` must
   print the system you built; check the units you changed
   (`ssh <m>.d systemctl --failed`).
+- GC roots on @MEMBER@ (the host's side: `modules/nixos/infra-space/gcroots.nix`): your
+  `result` links and `nix build` roots are NOT GC roots. Builds go
+  through the host's nix-daemon, which drops roots under the container's
+  paths (`/home/infra/...`) as dangling, and the host's daily GC deletes
+  everything not built within the last day. After building or deploying
+  a machine from main, root it on the host:
+  `infra-space-gcroot <m>` in the checkout (evaluates
+  `.#nixosConfigurations.<m>`'s toplevel; it must be built), or
+  `infra-space-gcroot <m> <result link | system path | .drv>`. The host
+  keeps `current` and `previous` per machine in
+  `/nix/var/nix/gcroots/infra-space/<m>/`, and for cm-pi the whole build
+  closure of `current` (`closure/`, the cross toolchain), so a mostly
+  offline machine (joy, cm-pi) can be deployed whenever it comes online
+  without a rebuild. The nightly bump roots every machine it merged.
+  A system substituted from a cache may name a deriver `.drv` this host
+  doesn't have ("no such derivation"): root a locally built system.
+  It replaces the machine's `current`: root main's system, not a
+  throwaway experiment. `refused: ...` says why (unknown machine, not a
+  nixos system of that machine, not built).
 
 ## Deploying the machine you run on (@MEMBER@)
 

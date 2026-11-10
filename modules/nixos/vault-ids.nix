@@ -53,7 +53,9 @@
 # retired, do not reuse), 1116 roman (som's
 # Home Assistant agent, no vault access, denied above), 1200 agent,
 # 1201 slot-asof, 1202 slot-mm, 1203 infra (uid and gid; the infra-space
-# container's user, no host account: infra-space/default.nix; not a vault
+# container's user, no host account: infra-space/default.nix; on members
+# the gid is also the memberless host group infra-space-gcroot,
+# infra-space/gcroots.nix; not a vault
 # principal, only kept clear of host users because it owns the container's
 # home on the host), 1204 infra-space-ssh (uid and gid; the members' system
 # user forwarding to the container's sshd, pinned for the host's nftables

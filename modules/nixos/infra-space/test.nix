@@ -164,6 +164,14 @@ let
         # som (memberA) builds every deploy itself; amy (memberB) does not.
         buildOnHost = me == "memberA";
         member = me;
+        # the guest's test systems below (machines/ is the fleet's)
+        gcRoots = {
+          machines = [
+            "testbox"
+            "testpi"
+          ];
+          closureMachines = [ "testpi" ];
+        };
         meshInterface = "eth1";
         members = lib.genAttrs memberNames (m: {
           address = nodes.${m}.networking.primaryIPv6Address;
@@ -866,5 +874,120 @@ pkgs.testers.runNixOSTest {
               "nixos-container run infra-space -- systemctl is-active hermes-agent-infra.service", timeout=300)
           # the conversation history survives either way
           assert session_ids() >= sessions, (sessions, session_ids())
+
+      with subtest("GC roots on the host for the guest's builds: rooted ones survive a GC, invalid requests are refused"):
+          # Last: the GCs below drop whatever earlier subtests left unrooted.
+          m = memberA
+          roots = "/nix/var/nix/gcroots/infra-space"
+          busybox = "${pkgs.pkgsStatic.busybox}"
+          # the test builds' builder (additionalPaths, no root of its own)
+          m.succeed(f"ln -sfn {busybox} /nix/var/nix/gcroots/test-busybox")
+          guest_root(m, "test -S /run/infra-space-gcroots/socket")
+
+          socat = "${pkgs.socat}/bin/socat"
+
+          def sys_expr(machine, n):
+              # a system with a build-only input: the toolchain is read at
+              # build time, its path not kept in the output
+              sh = f'"''${{builtins.storePath "{busybox}"}}/bin/sh"'
+              tool = (f'derivation {{ name = "{machine}-toolchain-{n}"; system = builtins.currentSystem; '
+                      f'builder = {sh}; args = [ "-c" "echo tool-{n} > $out" ]; }}')
+              return (f'(let tool = {tool}; in derivation {{ name = "nixos-system-{machine}-{n}"; '
+                      f'system = builtins.currentSystem; builder = {sh}; '
+                      f'args = [ "-c" "read t < ''${{tool}}; echo $t system > $out" ]; }} // {{ inherit tool; }})')
+
+          def ev(e):
+              return guest(m, f"nix eval --impure --raw --expr {shlex.quote(e)}").strip()
+
+          def build(machine, n, link=None):
+              """(system, its .drv, the toolchain's output)"""
+              e = sys_expr(machine, n)
+              out_link = f"--out-link {link}" if link else "--no-link"
+              out = guest(m, f"nix build --impure {out_link} --print-out-paths --expr {shlex.quote(e)}").strip()
+              return out, ev(e + ".drvPath"), ev(e + ".tool.outPath")
+
+          def gc():
+              m.succeed("nix-collect-garbage >&2")
+
+          def valid(path):
+              return m.execute(f"nix-store --check-validity {path}")[0] == 0
+
+          def request(line):
+              return guest(m, f"printf '%s\\n' {shlex.quote(line)} | {socat} -t 30 - UNIX-CONNECT:/run/infra-space-gcroots/socket").strip()
+
+          # the problem: the guest's own result link is no root on the host
+          v0, _, _ = build("testbox", "0", link="/home/infra/result-testbox-0")
+          gc()
+          assert not valid(v0), v0
+          guest(m, "rm /home/infra/result-testbox-0")
+
+          # a plain machine: current and previous, its runtime closure only
+          b1, _, b1tool = build("testbox", "1")
+          assert valid(b1tool), b1tool
+          out = guest(m, f"infra-space-gcroot testbox {b1}")
+          assert out.startswith("ok testbox: current " + b1), out
+          b2, b2drv, _ = build("testbox", "2")
+          # the .drv form too, and the same system again changes nothing
+          for _ in range(2):
+              out = guest(m, f"infra-space-gcroot testbox {b2drv}")
+              assert f"current {b2}, previous {b1}" in out, out
+          b3, _, _ = build("testbox", "3", link="/home/infra/result-testbox-3")
+          out = guest(m, "infra-space-gcroot testbox /home/infra/result-testbox-3")
+          assert f"current {b3}, previous {b2}" in out, out
+          m.succeed(f"test \"$(readlink {roots}/testbox/current)\" = {b3}",
+                    f"test \"$(readlink {roots}/testbox/previous)\" = {b2}",
+                    f"test ! -e {roots}/testbox/closure")
+
+          # the slow cross machine: plus the whole build closure of current
+          p1, p1drv, p1tool = build("testpi", "1")
+          out = guest(m, f"infra-space-gcroot testpi {p1}")
+          assert "build closure" in out, out
+          m.succeed(f"test -L {roots}/testpi/closure/$(basename {p1tool})",
+                    f"test -L {roots}/testpi/closure/$(basename {p1drv})")
+          # neither the guest nor a host user can touch the roots
+          for path in [roots, f"{roots}/testpi", f"{roots}/testpi/closure"]:
+              assert m.succeed(f"stat -c '%U %a' {path}").strip() == "root 755", path
+
+          gc()
+          for path in [b3, b2, p1, p1tool, p1drv]:
+              assert valid(path), path
+          # dropped from previous, and build-only paths of a plain machine
+          for path in [b1, b1tool]:
+              assert not valid(path), path
+
+          # a new testpi: the old closure goes, the old system stays as previous
+          p2, _, p2tool = build("testpi", "2")
+          guest(m, f"infra-space-gcroot testpi {p2}")
+          gc()
+          for path in [p2, p2tool, p1]:
+              assert valid(path), path
+          assert not valid(p1tool), p1tool
+
+          # refused: anything but a built nixos system of a known machine
+          unbuilt = ev(sys_expr("testbox", "9") + ".drvPath")
+          before = m.succeed(f"find {roots} | sort")
+          fake = "/nix/store/" + "a" * 32 + "-nixos-system-testbox-1.drv"
+          for line, why in [
+              (f"evil {b2drv}", "unknown machine"),
+              (f"../testbox {b2drv}", "unknown machine"),
+              (f"testpi {b2drv}", "not a nixos system derivation of testpi"),
+              (f"testbox {b2}", "not a nixos system derivation"),
+              ("testbox /nix/store/../../etc/nixos-system-testbox-1.drv", "not a nixos system derivation"),
+              (f"testbox {fake}", "no such derivation"),
+              (f"testbox {unbuilt}", "not built"),
+              (f"testbox {b2drv} extra", "expected"),
+              ("", "expected"),
+          ]:
+              out = request(line)
+              assert out.startswith("refused: ") and why in out, (line, out)
+          code, out = guest(m, "infra-space-gcroot testbox " + unbuilt + " 2>&1", check=False)
+          assert code != 0 and "not built" in out, out
+          assert m.succeed(f"find {roots} | sort") == before
+          # only root and the guest's infra may connect
+          m.fail(f"runuser -u tenant -- {socat} -t 5 - UNIX-CONNECT:/run/infra-space-gcroots/socket </dev/null")
+          # nothing at all: refused too
+          out = guest(m, f"{socat} -t 30 - UNIX-CONNECT:/run/infra-space-gcroots/socket </dev/null").strip()
+          assert out.startswith("refused: no request"), out
+          m.succeed("rm /nix/var/nix/gcroots/test-busybox")
     '';
 }

@@ -170,6 +170,7 @@ in
   imports = [
     ./afk.nix
     ./dashboard.nix
+    ./gcroots.nix
   ];
 
   options.hyper.infraSpace = {

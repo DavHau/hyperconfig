@@ -117,8 +117,11 @@ Keep every log in the scratch directory, one file per machine and step.
    .#nixosConfigurations --apply builtins.attrNames` lists the clan
    inventory; a machine in it that is not named here: report `failed`,
    naming it, Dave decides how it is gated). The `result-*` links in the
-   workspace are GC roots (`--no-link` builds are not): a rebuild after a
-   rebase stays cached. They go when the workspace goes.
+   workspace are NOT GC roots on som: the daemon is som's, and it drops
+   result links under the container's paths as dangling; what you build
+   survives som's daily GC (00:14-01:14) only through its one-day
+   `--keep-recent`, and through `infra-space-gcroot` once merged (step
+   6). Keep the `result-*` links anyway: step 6 roots from them.
    - `amy`, `bam`, `edi`, `joy`, `nas`, `sgp`, `som`, `vit`: built, one
      after another:
      `nixpkgs-bump-nix build -L --out-link result-<m> .#nixosConfigurations.<m>.config.system.build.toplevel`.
@@ -127,7 +130,8 @@ Keep every log in the scratch directory, one file per machine and step.
      and
      `nixpkgs-bump-nix build -L --out-link result-installer-iso .#nixosConfigurations.installer.config.system.build.images.iso`.
      Never its toplevel: a tmpfs root, no boot loader, never deployed
-     (`requireExplicitUpdate`); the images are what gets used.
+     (`requireExplicitUpdate`); the images are what gets used. Not rooted
+     (`infra-space-gcroot` takes nixos systems only).
    - `cm-pi` (riscv64, cross-compiled on x86_64; its `nixpkgs.pkgs` has
      `crossSystem`, so it builds natively on som, no emulation): always
      evaluated,
@@ -246,8 +250,8 @@ and both reviews again. A second rejection is a failed night.
     jj rebase -d main@origin     # only if main@origin moved
 
 After a rebase run ALL of step 3 again: the flake check, every machine's
-evaluation, every build (the `result-<m>` roots keep unchanged ones
-cached, so this costs only what changed). If `jj diff --from main@origin`
+evaluation, every build (cached where nothing changed: everything built
+within the last day survives som's GC, see step 3.2). If `jj diff --from main@origin`
 then changed beyond `flake.lock`'s `nixpkgs` node compared to what the
 reviews saw, both reviews run again. A conflict in `flake.lock` means
 someone else bumped: push nothing, report `failed`.
@@ -273,9 +277,24 @@ and never passes; `PASS-OFFLINE` with exit 3 is not a permit). Then:
 top). A refused push (main moved again): fetch, rebase, all of step 3,
 both reviews again first if `jj diff --from main@origin` changed beyond
 the `nixpkgs` node compared to what they saw, the guard, push. Never
-force. Afterwards
+force.
+
+Once pushed, root what is now main on som, every machine you built, from
+`$ws` (the links point at what you built last, i.e. what was pushed):
+
+    for m in amy bam edi joy nas sgp som vit; do infra-space-gcroot $m result-$m; done
+    infra-space-gcroot cm-pi result-cm-pi    # only if built tonight
+
+som keeps per machine `current` (this build) and `previous` (the one
+before), and for cm-pi also the whole build closure of `current` (the
+cross toolchain included), so the next night reuses what did not change
+and every machine (joy, cm-pi: mostly offline) stays deployable when it
+comes online. A night that does not build cm-pi leaves its roots at the
+last Saturday's. Each prints `ok <m>: ...`; anything else (`refused:
+...`, no socket) goes in the report as a finding, the night still counts
+as merged. Afterwards
 `jj -R /home/infra/hyperconfig --ignore-working-copy workspace forget $(basename $ws)`,
-remove the directory (and with it the `result-*` roots) and the
+remove the directory (and the `result-*` links) and the
 `.old-rev` file.
 
 On failure push nothing; leave the workspace (and its `.old-rev`) as it
@@ -290,6 +309,7 @@ Keep it short: nixpkgs old -> new rev, per machine built/failed (the
 installer's two images; cm-pi `evaluated` or `built`),
 the flake check, each fix (commit id and one line), both review verdicts,
 the guard's result, the pushed commit or why nothing was pushed, the
+GC roots (`infra-space-gcroot`: ok, or its refusals), the
 workspace left behind (if any) and the logs' paths. The very last line
 of the message is exactly one of
 

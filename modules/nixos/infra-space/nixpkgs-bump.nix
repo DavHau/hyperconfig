@@ -76,6 +76,8 @@ let
     This is the nightly nixpkgs bump of hyperconfig, started by
     nixpkgs-bump.timer on ${config.infraSpace.member}; nobody is watching.
     Follow the nixpkgs-bump skill from step 1 to the report. Never deploy.
+    Once merged, root the merged systems on the host with
+    infra-space-gcroot (the skill's step 6).
     End with the skill's NIXPKGS-BUMP line.
   '';
   # cm-pi's toolchain is built from source (the skill's step 3.2): only

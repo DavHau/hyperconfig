@@ -55,6 +55,8 @@ let
   cfg = config.infraSpace;
   secretsDir = "/run/infra-space/secrets";
   hostKeyPath = "/run/infra-space/ssh_host_ed25519_key";
+  # bound from the host (./gcroots.nix)
+  gcrootSocket = "/run/infra-space-gcroots/socket";
   home = "/home/infra";
   # Commits from each instance say which one made them.
   identity = {
@@ -237,6 +239,46 @@ let
   };
 
   aliasOf = member: "infra-space-${member}";
+
+  # The host's GC roots for this guest's builds (./gcroots.nix): the
+  # guest's own result links are no roots there. Sends `<machine> <drv>`
+  # to the host's root-owned socket, prints its answer, fails unless it
+  # rooted.
+  gcroot = pkgs.writeShellApplication {
+    name = "infra-space-gcroot";
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.socat
+      config.nix.package
+    ];
+    text = ''
+      usage() {
+        echo "usage: infra-space-gcroot <machine> [<drv> | <built system or result link>]" >&2
+        echo "  without a path: the toplevel of .#nixosConfigurations.<machine> of the flake here" >&2
+        exit 2
+      }
+      [ $# = 1 ] || [ $# = 2 ] || usage
+      machine=$1
+      if [ $# = 1 ]; then
+        drv=$(nix eval --raw ".#nixosConfigurations.$machine.config.system.build.toplevel.drvPath")
+      else
+        path=$(readlink -f -- "$2")
+        case "$path" in
+          *.drv) drv=$path ;;
+          *) drv=$(nix-store -q --deriver "$path") ;;
+        esac
+      fi
+      socket=${gcrootSocket}
+      [ -S "$socket" ] || { echo "infra-space-gcroot: no $socket: this host keeps no roots for the guest" >&2; exit 1; }
+      # the host waits out a running collection (up to 2 h)
+      reply=$(printf '%s %s\n' "$machine" "$drv" | socat -t 7300 -T 7300 - "UNIX-CONNECT:$socket")
+      echo "$reply"
+      case "$reply" in
+        "ok "*) exit 0 ;;
+      esac
+      exit 1
+    '';
+  };
 
   githubHostKeys = import ../../github-host-keys.nix;
 
@@ -499,6 +541,7 @@ in
     environment.systemPackages = [
       clanWrapper
       secretsSync
+      gcroot
       pkgs.git
       pkgs.jujutsu
       pkgs.openssh
