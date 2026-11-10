@@ -1,6 +1,6 @@
 # The named spaces (./default.nix) on one host beside infra-space, and
-# Dave's side of them (./client.nix) on the same host as amy has it.
-# `host` stands in for amy (both spaces, infra-space, networkd, nftables,
+# Dave's side of them (./client.nix) on the same host (the test keeps both on one host).
+# `host` stands in for som (both spaces, infra-space, networkd, nftables,
 # its TPM), `peer` for everything else: a LAN neighbour (its v4,
 # 192.168.1.0/24, private) and a machine on the internet (its v6, the
 # test VLAN's 2001:db8:1::/64, global) at once. Covered:
@@ -56,7 +56,8 @@ let
       options.clan.core.settings = {
         machine.name = lib.mkOption {
           type = lib.types.str;
-          default = "amy";
+          # the machine ./registry.nix puts the spaces on
+          default = "som";
         };
         directory = lib.mkOption {
           type = lib.types.str;
