@@ -1,0 +1,273 @@
+hermes v0.23.0: model_catalog.openrouter_all_models lists every OpenRouter
+model hermes can drive, not only the curated manifest.
+
+The OpenRouter picker list (hermes_cli/models.py fetch_openrouter_models)
+is hermes' remote catalog manifest (model_catalog.url,
+get_curated_openrouter_models) intersected with the live
+https://openrouter.ai/api/v1/models catalog and filtered to models that
+support tool calling. A model missing from the manifest never shows, on
+any surface (e.g. reflection/beam-1.0-501b-a23b; live: 465 models, 401
+with tools, the manifest picks ~60).
+
+With `model_catalog.openrouter_all_models: true` the list is the curated
+rows first (order and badges unchanged), then every other live model
+that advertises `tools` and is not an image/video generator
+(chat_catalog.catalog_item_is_generation), sorted by id, badge "free"
+where free. Off (the default) the list is upstream's.
+
+Every surface reads this one list: model_ids() and so
+provider_model_ids / cached_provider_model_ids("openrouter")
+(provider_models_cache.json), which feed list_authenticated_providers and
+so build_model_options_payload: the desktop app and the dashboard
+(GET /api/model/options), the TUI (model.options), and `hermes model`;
+list_picker_providers (the messaging /model picker; openrouter is
+uncapped there, Telegram pages, Discord shows the first 75);
+curated_models_for_provider; and the bare-name lookup
+_find_openrouter_slug (/model beam-1.0-501b-a23b).
+
+Caches: openrouter_curated_catalog.json records which list it holds
+("all_models"); a fresh read with the other setting refetches (the
+cache-only read path still serves any copy). The in-process slot is
+separate per setting. The option is part of _credential_fingerprint
+("openrouter"), so provider_models_cache.json's row does not keep serving
+the other list for its week-long stale window. Size: ~400 rows, the disk
+cache 22 KB, the /api/model/options payload ~50 KB.
+
+Upstream status: not reported; hyperhermes-only option.
+
+diff --git a/hermes_cli/config_defaults.py b/hermes_cli/config_defaults.py
+index 50117f6fb..b2369174e 100644
+--- a/hermes_cli/config_defaults.py
++++ b/hermes_cli/config_defaults.py
+@@ -2027,6 +2027,9 @@ DEFAULT_CONFIG = {
+         # CLI refetches on the next /model or `hermes model` once the cache is older. Network
+         # failures silently use the stale cache. Legacy `ttl_hours` is honoured if set.
+         "ttl_minutes": 20,
++        # true: the OpenRouter picker lists the curated models above first, then every other model
++        # of OpenRouter's live catalog that supports tool calling (sorted by id).
++        "openrouter_all_models": False,
+         # Per-provider override URLs for self-hosted curation lists using the same schema, e.g.
+         # providers: {openrouter: {url: https://example.com/my-curation.json}}.
+         "providers": {},
+diff --git a/hermes_cli/model_catalog.py b/hermes_cli/model_catalog.py
+index 8927b9c95..f921efea7 100644
+--- a/hermes_cli/model_catalog.py
++++ b/hermes_cli/model_catalog.py
+@@ -284,6 +284,17 @@ def get_catalog(*, force_refresh: bool = False) -> dict[str, Any]:
+     return {}
+ 
+ 
++def openrouter_all_models_enabled() -> bool:
++    """``model_catalog.openrouter_all_models``: the OpenRouter picker lists the curated models first,
++    then every other live model that supports tool calling (``hermes_cli.models.fetch_openrouter_models``)."""
++    try:
++        from hermes_cli.config import load_config_readonly
++        raw = (load_config_readonly() or {}).get("model_catalog")
++    except Exception:
++        return False
++    return isinstance(raw, dict) and raw.get("openrouter_all_models") is True
++
++
+ def refresh_interval_seconds() -> float:
+     """Return the configured catalog TTL in seconds (the gateway poll cadence)."""
+     return max(60.0, _load_catalog_config()["ttl_hours"] * 3600.0)
+diff --git a/hermes_cli/models.py b/hermes_cli/models.py
+index 0a0025081..d57b18a29 100644
+--- a/hermes_cli/models.py
++++ b/hermes_cli/models.py
+@@ -137,6 +137,9 @@ def _custom_provider_ssl_context(base_url: str):
+ 
+ # Process-lifetime picker lists refreshed from the live catalogs (see fetch_*_models).
+ _openrouter_catalog_cache: list[tuple[str, str]] | None = None
++# The same list with ``model_catalog.openrouter_all_models`` on (curated rows, then every other
++# live tool-capable model): its own slot, so flipping the option never serves the other shape.
++_openrouter_all_catalog_cache: list[tuple[str, str]] | None = None
+ 
+ # The in-memory ``_openrouter_catalog_cache`` is per-process, so without a disk cache every cold
+ # picker open re-downloads the full ~686KB /api/v1/models catalog. The *curated* result
+@@ -157,10 +160,22 @@ def _openrouter_catalog_disk_path() -> Path:
+     return get_hermes_home() / "cache" / "openrouter_curated_catalog.json"
+ 
+ 
++def _openrouter_all_models_enabled() -> bool:
++    """``model_catalog.openrouter_all_models``: list every live tool-capable OpenRouter model after
++    the curated ones, not only the manifest's picks."""
++    try:
++        from hermes_cli.model_catalog import openrouter_all_models_enabled
++        return openrouter_all_models_enabled()
++    except Exception:
++        return False
++
++
+ def _read_openrouter_catalog_disk(*, allow_stale: bool = False) -> list[tuple[str, str]] | None:
+     """Fresh curated catalog from disk, or None (missing, corrupt, expired, or empty).
+ 
+-    ``allow_stale`` ignores the TTL — the cache-only read path prefers a stale copy over a live GET."""
++    ``allow_stale`` ignores the TTL — the cache-only read path prefers a stale copy over a live GET.
++    A fresh read also requires the copy to have been built with the current
++    ``model_catalog.openrouter_all_models``, so flipping it refetches instead of serving the old shape."""
+     obj = _read_json_cache(_openrouter_catalog_disk_path())
+     if obj is None:
+         return None
+@@ -169,6 +184,8 @@ def _read_openrouter_catalog_disk(*, allow_stale: bool = False) -> list[tuple[st
+             return None
+     except (TypeError, ValueError):
+         return None
++    if not allow_stale and bool(obj.get("all_models", False)) != _openrouter_all_models_enabled():
++        return None
+     items = obj.get("curated")
+     if not isinstance(items, list):
+         return None
+@@ -176,11 +193,11 @@ def _read_openrouter_catalog_disk(*, allow_stale: bool = False) -> list[tuple[st
+     return out or None
+ 
+ 
+-def _write_openrouter_catalog_disk(curated: list[tuple[str, str]]) -> None:
++def _write_openrouter_catalog_disk(curated: list[tuple[str, str]], *, all_models: bool = False) -> None:
+     try:
+         _write_json_cache(
+             _openrouter_catalog_disk_path(),
+-            {"fetched_at": time.time(), "curated": [list(c) for c in curated]})
++            {"fetched_at": time.time(), "all_models": bool(all_models), "curated": [list(c) for c in curated]})
+     except Exception as exc:
+         logger.debug("openrouter curated catalog disk write failed: %s", exc)
+ _ai_gateway_catalog_cache: list[tuple[str, str]] | None = None
+@@ -659,7 +676,9 @@ def fetch_openrouter_models(
+     # ``<home>/cache`` copy), so a routed profile keeps its own slot instead of the module one.
+     from hermes_cli.models_profile_cache import profile_slot_get, profile_slot_set
+     _me = sys.modules[__name__]
+-    cached = profile_slot_get(_me, "_openrouter_catalog_cache")
++    all_models = _openrouter_all_models_enabled()
++    slot = "_openrouter_all_catalog_cache" if all_models else "_openrouter_catalog_cache"
++    cached = profile_slot_get(_me, slot)
+ 
+     if cached is not None and not force_refresh:
+         return list(cached)
+@@ -670,7 +689,7 @@ def fetch_openrouter_models(
+         disk = _read_openrouter_catalog_disk(allow_stale=cache_only)
+         if disk:
+             if not cache_only:  # a stale copy is served, never memoized as fresh
+-                profile_slot_set(_me, "_openrouter_catalog_cache", disk)
++                profile_slot_set(_me, slot, disk)
+             return list(disk)
+     if cache_only:
+         return list(OPENROUTER_MODELS)
+@@ -711,12 +730,23 @@ def fetch_openrouter_models(
+             desc = "free" if _openrouter_model_is_free(live_item.get("pricing")) else ""
+         curated.append((preferred_id, desc))
+ 
++    if curated and not curated[0][1]:
++        curated[0] = (curated[0][0], "recommended")
++    if all_models:
++        # Every other live model hermes can drive (tool calling, chat output), sorted by id after
++        # the curated rows, which keep their order and badges.
++        from hermes_cli.chat_catalog import catalog_item_is_generation
++        shown = {mid for mid, _ in curated}
++        for mid in sorted(live_by_id):
++            item = live_by_id[mid]
++            if mid in shown or not _openrouter_model_supports_tools(item) or catalog_item_is_generation(item):
++                continue
++            curated.append((mid, "free" if _openrouter_model_is_free(item.get("pricing")) else ""))
++
+     if not curated:
+         return list(cached or fallback)
+-    if not curated[0][1]:
+-        curated[0] = (curated[0][0], "recommended")
+-    profile_slot_set(_me, "_openrouter_catalog_cache", curated)
+-    _write_openrouter_catalog_disk(curated)
++    profile_slot_set(_me, slot, curated)
++    _write_openrouter_catalog_disk(curated, all_models=all_models)
+     return list(curated)
+ 
+ 
+@@ -1954,6 +1984,11 @@ def _credential_fingerprint(provider: str) -> str:
+             path = os.path.expanduser(rel)
+             _mtime_part(path, path)
+ 
++    if provider == "openrouter":
++        # The cached catalog is model_ids()' list, whose shape this option decides: flipping it must
++        # not keep serving the other list from provider_models_cache.json for up to a week.
++        parts.append(f"model_catalog.openrouter_all_models={_openrouter_all_models_enabled()}")
++
+     blob = "|".join(parts).encode("utf-8", errors="replace")
+     # blake2b, not sha256: fingerprint only (collisions = a harmless cache miss), and CodeQL's
+     # weak-sensitive-data-hashing rule flags sha256 over env vars named *API_KEY*/*TOKEN*.
+diff --git a/tests/hermes_cli/test_openrouter_all_models.py b/tests/hermes_cli/test_openrouter_all_models.py
+new file mode 100644
+index 000000000..f97d17478
+--- /dev/null
++++ b/tests/hermes_cli/test_openrouter_all_models.py
+@@ -0,0 +1,73 @@
++"""``model_catalog.openrouter_all_models``: curated OpenRouter rows first, then every other live
++tool-capable chat model (sorted by id, ``free`` where free)."""
++
++import json
++
++import pytest
++
++import hermes_cli.models as _models_mod
++from hermes_cli.models import fetch_openrouter_models
++
++TOOLS = ["tools"]
++PAID = {"prompt": "0.000001", "completion": "0.000002"}
++FREE = {"prompt": "0", "completion": "0"}
++LIVE = [
++    {"id": "zeta/curated", "supported_parameters": TOOLS, "pricing": PAID},
++    {"id": "alpha/curated-free", "supported_parameters": TOOLS, "pricing": FREE},
++    {"id": "reflection/beam-1.0-501b-a23b", "supported_parameters": TOOLS, "pricing": PAID},
++    {"id": "aaa/extra:free", "supported_parameters": TOOLS, "pricing": FREE},
++    {"id": "mmm/no-tools", "supported_parameters": ["temperature"], "pricing": PAID},
++    {"id": "img/painter", "supported_parameters": TOOLS, "pricing": PAID,
++     "architecture": {"output_modalities": ["image"]}},
++]
++CURATED = [("zeta/curated", "recommended"), ("alpha/curated-free", "free")]
++FULL = CURATED + [("aaa/extra:free", "free"), ("reflection/beam-1.0-501b-a23b", "")]
++
++
++@pytest.fixture
++def catalog(monkeypatch):
++    calls = []
++
++    def fake_index(url, timeout, opener):
++        calls.append(url)
++        return list(LIVE), {i["id"]: i for i in LIVE}
++
++    monkeypatch.setattr(_models_mod, "_fetch_live_catalog_index", fake_index)
++    monkeypatch.setattr("hermes_cli.model_catalog.get_curated_openrouter_models",
++                        lambda: [("zeta/curated", ""), ("alpha/curated-free", ""), ("gone/x", "")])
++    monkeypatch.setattr(_models_mod, "get_preferred_silent_default_model", lambda provider="openrouter": "")
++    monkeypatch.setattr(_models_mod, "_openrouter_catalog_cache", None)
++    monkeypatch.setattr(_models_mod, "_openrouter_all_catalog_cache", None)
++    return calls
++
++
++def _option(monkeypatch, value):
++    monkeypatch.setattr("hermes_cli.model_catalog.openrouter_all_models_enabled", lambda: value)
++
++
++def test_off_keeps_the_curated_list(monkeypatch, catalog):
++    _option(monkeypatch, False)
++    assert fetch_openrouter_models(force_refresh=True) == CURATED
++
++
++def test_on_appends_every_other_tool_model_sorted(monkeypatch, catalog):
++    _option(monkeypatch, True)
++    assert fetch_openrouter_models(force_refresh=True) == FULL
++    assert json.loads(_models_mod._openrouter_catalog_disk_path().read_text())["all_models"] is True
++
++
++def test_flipping_the_option_does_not_serve_the_other_disk_copy(monkeypatch, catalog):
++    _option(monkeypatch, False)
++    fetch_openrouter_models(force_refresh=True)
++    _option(monkeypatch, True)
++    _models_mod._openrouter_catalog_cache = None
++    calls = len(catalog)
++    assert fetch_openrouter_models() == FULL
++    assert len(catalog) == calls + 1
++
++
++def test_option_is_part_of_the_provider_cache_fingerprint(monkeypatch):
++    _option(monkeypatch, False)
++    off = _models_mod._credential_fingerprint("openrouter")
++    _option(monkeypatch, True)
++    assert _models_mod._credential_fingerprint("openrouter") != off

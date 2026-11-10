@@ -38,6 +38,7 @@ let
     # After the dashboard resume patch: it extends that patch's startup
     # resume and shutdown drain.
     ./patches/hermes-subagents-resume-after-restart.patch
+    ./patches/hermes-openrouter-all-models.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {

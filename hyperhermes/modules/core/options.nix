@@ -399,6 +399,12 @@ in
           resume_max_attempts = lib.mkDefault 3;
         };
 
+        # The OpenRouter model picker (desktop app, dashboard, TUI, /model)
+        # lists every OpenRouter model that supports tool calling, after
+        # hermes' curated picks, not only the curated manifest
+        # (patches/hermes-openrouter-all-models.patch).
+        model_catalog.openrouter_all_models = lib.mkDefault true;
+
         # Shared metrics off, and the offer answered "No thanks", so no
         # surface asks (the dashboard banner, Desktop's "Share usage
         # stats?" strip, the TUI). Every surface reads consent_state

@@ -1,5 +1,6 @@
 # Evaluation-only check of teamclaude, claude-auth, desktop, rea, the
-# browser's per-agent opt-out and core's shared-metrics answer: each
+# browser's per-agent opt-out and core's shared-metrics answer and
+# OpenRouter catalog setting: each
 # module evaluates on a plain NixOS system (no clan; nixosModules.clan
 # imported anyway, where it must do nothing) with its secrets as runtime
 # path strings, and produces what its header promises. A Nix path literal
@@ -301,6 +302,12 @@ let
         send = false;
         offer_version = 2;
       }
+    ) (lib.attrNames agents);
+
+    # The OpenRouter picker lists every tool-capable model, curated
+    # first (core's options.nix, patches/hermes-openrouter-all-models.patch).
+    openrouter-all-models = lib.all (
+      name: (agentSettingsOf telemetry name).model_catalog.openrouter_all_models == true
     ) (lib.attrNames agents);
 
     idle-evaluates = evaluates idle && failedAssertions idle == [ ];
