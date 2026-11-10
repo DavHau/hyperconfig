@@ -24,7 +24,6 @@
     log-lines = 25;
     min-free = 10 * 1000 * 1000 * 1000;
     max-free = 20 * 1000 * 1000 * 1000;
-    connect-timeout = lib.mkForce 2;
   };
   nix.nrBuildUsers = 100;
   # Hourly re-hashed the whole store (minutes of CPU, GBs of reads) each run.

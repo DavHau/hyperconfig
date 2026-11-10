@@ -139,7 +139,22 @@
                     inherit url;
                     priority = 20;
                   }) publicCaches;
-                cache.mass_query.upstream_cooldown = "60s";
+                cache.mass_query = {
+                  upstream_cooldown = "60s";
+                  # ncro holds each upstream to this many narinfo requests at
+                  # once and queues the rest (default 8). A build of many
+                  # uncached derivations makes nix ask for hundreds of
+                  # paths that are in no cache; each miss waits ~0.3 s for
+                  # cache.nixos.org's 404, so with 8 slots 32 nix
+                  # connections saw ~1.1 s per lookup and the tail ran into
+                  # nix's connect-timeout (see below). cache.nixos.org is a
+                  # CDN and the peers answer within milliseconds; nix
+                  # itself would open up to http-connections to them.
+                  per_upstream_max_inflight = 64;
+                  # Lookups racing at once across all upstreams (default 64);
+                  # above what one nix daemon opens, so it never queues them.
+                  max_concurrent_races = 256;
+                };
                 # Outside health tracking and cooldown: a last resort that
                 # still answers if the routing itself misbehaves. ncro needs
                 # the URL spelled out in a config file.
@@ -159,6 +174,15 @@
             nix.settings.substituters = lib.mkBefore [ local ];
             # A path no substituter can deliver gets built.
             nix.settings.fallback = true;
+            # Back to nix's own default (clan's recommended defaults set 5).
+            # libcurl counts the time a request waits in nix's queue for one
+            # of the http-connections against connect-timeout, and nix
+            # queues up to 5x that many narinfo lookups at once. In a burst
+            # of misses (~0.3 s each) a short limit fails healthy lookups
+            # with "Operation timed out ... 0 bytes received". Slow or dead
+            # peers are ncro's job (narinfo_timeout + cooldown); nix itself
+            # only talks to the local ncro and the public caches.
+            nix.settings.connect-timeout = lib.mkOverride 90 15;
           };
       };
   };
