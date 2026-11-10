@@ -15,6 +15,11 @@
     #     display_name: DavHau
     #     features:
     #       automatic_user_linking: true   # OIDC `dave` -> existing HA user `dave`
+    # Reverse proxy (edi's nginx, bearhouse.davhau.com): since HA 2026.10 the
+    # http settings live in /var/lib/hass/.storage/http (YAML `http:` is
+    # ignored after its one-time migration). data.stable needs
+    #   use_x_forwarded_for = true, trusted_proxies = [ <edi.d's ygg address> ]
+    # or every proxied request gets 400.
     customComponents = [ pkgs.home-assistant-custom-components.auth_oidc ];
     extraComponents = [
       # List of components required to complete the onboarding
