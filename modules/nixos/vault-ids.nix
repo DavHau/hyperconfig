@@ -59,8 +59,11 @@
 # principal, only kept clear of host users because it owns the container's
 # home on the host), 1204 infra-space-ssh (uid and gid; the members' system
 # user forwarding to the container's sshd, pinned for the host's nftables
-# owner gate: infra-space/default.nix; not a vault principal). gid 1100
-# stays unallocated.
+# owner gate: infra-space/default.nix; not a vault principal), 1205
+# gi-infra and 1206 gi-infra-ssh, 1207 agave and 1208 agave-ssh (the same
+# pair for the named spaces on amy: each space's container user, owning
+# its home under /var/lib/spaces, and its sshd forwarder there;
+# spaces/registry.nix; not vault principals). gid 1100 stays unallocated.
 {
   users.groups.vault.gid = 1101;
   users.groups.vault-ro.gid = 1103;

@@ -54,7 +54,6 @@
 let
   cfg = config.infraSpace;
   secretsDir = "/run/infra-space/secrets";
-  hostKeyPath = "/run/infra-space/ssh_host_ed25519_key";
   # bound from the host (./gcroots.nix)
   gcrootSocket = "/run/infra-space-gcroots/socket";
   home = "/home/infra";
@@ -282,16 +281,6 @@ let
 
   githubHostKeys = import ../../github-host-keys.nix;
 
-  installSecrets = pkgs.writeShellScript "infra-space-secrets" ''
-    set -eu
-    install -d -m 0755 /run/infra-space
-    install -d -m 0500 -o infra -g infra ${secretsDir}
-    for name in ${lib.escapeShellArgs cfg.credentials}; do
-      install -m 0400 -o infra -g infra "$CREDENTIALS_DIRECTORY/$name" ${secretsDir}/"$name"
-    done
-    install -m 0600 "$CREDENTIALS_DIRECTORY/${cfg.hostKeyCredential}" ${hostKeyPath}
-  '';
-
   # Into a temporary directory first, so a failed clone leaves nothing
   # that would stop the next attempt (the timer below, every 15 min).
   clone =
@@ -354,8 +343,16 @@ let
   };
 in
 {
-  # Dave's shell (fish, aliases, zoxide, direnv, tmux) for the launcher sessions.
-  imports = [ ../shell-profile.nix ];
+  # The base every space shares (../spaces/guest-base.nix): resolver,
+  # inbound rule, the user `infra`, the credentials, sshd; and through it
+  # Dave's shell (fish, aliases, zoxide, direnv, tmux) for the launcher
+  # sessions.
+  # (shell-profile first: the base imports it too, and this order keeps
+  # the guest's package list as it was before the base was factored out.)
+  imports = [
+    ../shell-profile.nix
+    ../spaces/guest-base.nix
+  ];
 
   options.infraSpace = {
     member = lib.mkOption {
@@ -420,65 +417,21 @@ in
   };
 
   config = {
-    system.stateVersion = "26.05";
-
-    networking.useHostResolvConf = false;
-    networking.nameservers = [ cfg.resolver ];
-    networking.extraHosts = cfg.extraHosts;
-
-    networking.firewall.extraInputRules = ''
-      ip saddr ${cfg.hostAddress} accept
-      ip6 saddr ${cfg.hostAddress6} accept
-    '';
-    networking.firewall.extraCommands = lib.mkIf (config.networking.firewall.backend == "iptables") ''
-      iptables -A nixos-fw -s ${cfg.hostAddress} -j nixos-fw-accept
-      ip6tables -A nixos-fw -s ${cfg.hostAddress6} -j nixos-fw-accept
-    '';
-
-    users.groups.infra.gid = cfg.uid;
-    users.users.infra = {
-      isNormalUser = true;
-      inherit (cfg) uid;
-      group = "infra";
+    space = {
+      name = "infra-space";
+      user = "infra";
+      inherit (cfg)
+        uid
+        credentials
+        hostKeyCredential
+        resolver
+        hostAddress
+        hostAddress6
+        extraHosts
+        ;
       inherit home;
       description = "infra-space";
-      openssh.authorizedKeys.keys = [ cfg.sshPublicKey ] ++ cfg.adminKeys;
-    };
-
-    systemd.services.infra-space-secrets = {
-      description = "Install infra-space credentials for infra";
-      wantedBy = [ "multi-user.target" ];
-      before = [ "systemd-user-sessions.service" ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-        LoadCredential = cfg.credentials ++ [ cfg.hostKeyCredential ];
-        ExecStart = installSecrets;
-      };
-    };
-
-    services.openssh = {
-      enable = true;
-      # reached through the host's proxy, admitted by the rules above
-      openFirewall = false;
-      # The host key arrives as a credential; never one made up here.
-      generateHostKeys = false;
-      hostKeys = [
-        {
-          type = "ed25519";
-          path = hostKeyPath;
-        }
-      ];
-      settings = {
-        PasswordAuthentication = false;
-        KbdInteractiveAuthentication = false;
-        PermitRootLogin = "no";
-        AllowUsers = [ "infra" ];
-      };
-    };
-    systemd.services.sshd = {
-      requires = [ "infra-space-secrets.service" ];
-      after = [ "infra-space-secrets.service" ];
+      authorizedKeys = [ cfg.sshPublicKey ] ++ cfg.adminKeys;
     };
 
     # Fleet host keys through the CA the hosts' certificates come from,

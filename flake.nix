@@ -293,6 +293,13 @@
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
             inherit inputs;
           };
+        # The named agent spaces beside infra-space on one host (amy), and
+        # Dave's herdr machines for them.
+        spaces =
+          import ./modules/nixos/spaces/test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+            inherit inputs;
+          };
         # The nightly bump's pre-push guard in a scratch repo, with stubs
         # for GitHub and the prefetch (no network).
         nixpkgs-bump-guard = import ./modules/nixos/infra-space/nixpkgs-bump/guard-test.nix {

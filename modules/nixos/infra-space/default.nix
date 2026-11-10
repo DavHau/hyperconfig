@@ -124,15 +124,10 @@ let
   cfg = config.hyper.infraSpace;
   vars = config.clan.core.vars.generators;
 
+  spaceHost = import ../spaces/host.nix { inherit config lib pkgs; };
+
   name = "infra-space";
-  # nspawn's host-side veth: ve-<name>, at most 15 characters.
-  veth = "ve-${name}";
   containerUnit = "container@${name}.service";
-  # The containers module's /etc/<prefix>containers/<name>.conf; its
-  # prefix is `nixos-` or none, by stateVersion.
-  containerConf =
-    config.environment.etc."nixos-containers/${name}.conf"
-      or config.environment.etc."containers/${name}.conf";
   hostAddress = "10.235.0.1";
   localAddress = "10.235.0.2";
   hostAddress6 = "fd23:5ace::1";
@@ -158,7 +153,6 @@ let
   };
 
   self = cfg.members.${cfg.member};
-  bracket = address: if lib.hasInfix ":" address then "[${address}]" else address;
 
   sshKeygen = comment: ''
     ssh-keygen -q -t ed25519 -N "" -C ${lib.escapeShellArg comment} -f "$out"/id_ed25519
@@ -274,7 +268,8 @@ in
     };
   };
 
-  config = lib.mkIf cfg.enable {
+  config = lib.mkIf cfg.enable (lib.mkMerge [
+  {
     assertions = [
       {
         assertion = cfg.members ? ${cfg.member};
@@ -335,43 +330,31 @@ in
     # The always-on agent, where enabled (som); its dashboard: ./dashboard.nix.
     hyper.infraSpace.guestModules = lib.optional cfg.hermes ./hermes.nix;
 
-    systemd.tmpfiles.rules = [
-      "d ${stateDir} 0755 root root -"
-      "d ${homeDir} 0700 ${toString uid} ${toString uid} -"
-    ];
-
-    containers.${name} = {
-      autoStart = true;
-      # Also the bound of a reload, the guest's switch in place (below),
-      # which waits for the guest's units it restarts to stop and start.
-      timeoutStartSec = "5min";
-      privateNetwork = true;
+    }
+    # The container itself, its network, isolation and sshd forward: the
+    # host side shared with the named spaces (../spaces/host.nix).
+    (spaceHost {
       inherit
+        name
+        uid
         hostAddress
         localAddress
         hostAddress6
         localAddress6
+        stateDir
+        homeDir
         ;
-      bindMounts."/home/infra" = {
-        hostPath = homeDir;
-        isReadOnly = false;
+      proxyUser = sshProxyUser;
+      proxyUid = sshProxyUid;
+      guestHome = "/home/infra";
+      inherit (self) address sshPort;
+      inherit (cfg) meshInterface;
+      tpm = true;
+      credentials = cfg.credentials // {
+        ${hostKeyCredential} = vars.infra-space-hostkey.files.ssh_host_ed25519_key.path;
       };
-      # The TPM for the guest's age identity; access: the ACL below.
-      bindMounts."/dev/tpmrm0" = {
-        hostPath = "/dev/tpmrm0";
-        isReadOnly = false;
-      };
-      allowedDevices = [
-        {
-          node = "/dev/tpmrm0";
-          modifier = "rw";
-        }
-      ];
-      extraFlags = lib.mapAttrsToList (n: path: "--load-credential=${n}:${path}") (
-        cfg.credentials // { ${hostKeyCredential} = vars.infra-space-hostkey.files.ssh_host_ed25519_key.path; }
-      );
       specialArgs = { inherit inputs; };
-      config = {
+      guestConfig = {
         imports = [ ./guest.nix ] ++ cfg.guestModules;
         infraSpace = {
           inherit uid hostKeyCredential;
@@ -386,152 +369,21 @@ in
           adminKeys = lib.attrValues cfg.adminKeys;
           resolver = hostAddress;
           inherit hostAddress hostAddress6;
-          inherit (config.networking) extraHosts;
+          # minus the named spaces' `<name>.containers` lines (the
+          # containers module adds one per container): nothing of theirs
+          # is infra-space's business, nor reachable from it
+          extraHosts = lib.concatStringsSep "\n" (
+            lib.filter (
+              line:
+              !lib.any (space: lib.hasSuffix " ${space}.containers" line) (
+                lib.attrNames (import ../spaces/registry.nix)
+              )
+            ) (lib.splitString "\n" config.networking.extraHosts)
+          );
         };
       };
-    };
-
-    networking.nat = {
-      enable = true;
-      enableIPv6 = true;
-      internalInterfaces = [ veth ];
-    };
-
-    # The veth is up the moment it exists, whatever runs this host's
-    # network: the containers module brings it up only after the guest has
-    # booted, and the guest's boot waits for its carrier. systemd-networkd
-    # (som and amy) keeps out of it: its 80-container-ve.network would add
-    # a link-local and a /28 address, a DHCP server and masquerading, so
-    # the forward's source would no longer be hostAddress, the one source
-    # the guest admits (./guest.nix); and a networkd restart could drop the
-    # guest's route as foreign. NetworkManager leaves ve-* alone already
-    # (the containers module), which sets the addresses and the routes;
-    # those take this host's veth addresses as their source.
-    services.udev.extraRules = ''
-      ACTION=="add", SUBSYSTEM=="net", KERNEL=="${veth}", RUN+="${pkgs.iproute2}/bin/ip link set dev $name up"
-    '';
-    systemd.network.networks."10-${veth}" = lib.mkIf config.systemd.network.enable {
-      matchConfig.Name = veth;
-      linkConfig.Unmanaged = true;
-    };
-    # A change of the guest alone switches it in place, so the guest's
-    # processes that the change leaves alone (sessions, their tool
-    # commands, background jobs) keep running. The containers module
-    # restarts the container on any change of the guest's system: its
-    # restart triggers are the guest's toplevel and the container's
-    # /etc/[nixos-]containers/<name>.conf, which names that toplevel too
-    # (SYSTEM_PATH). Here the guest's toplevel is a reload trigger instead,
-    # and the unit's ExecReload (the containers module's) runs the guest's
-    # `switch-to-configuration test` with the new SYSTEM_PATH (systemd
-    # rereads the EnvironmentFile for it). Still a restart: whatever else
-    # is in the .conf (bind mounts, credentials, nspawn flags, network,
-    # devices) and any change of the unit itself (its scripts, the
-    # module's or nixpkgs' container@ unit, systemd's options); a
-    # credential's new value restarts it through restartUnits above.
-    # The guest's own switch still restarts the guest units the change
-    # touches: a change of hermes' settings restarts the gateway and the
-    # dashboard, and with the dashboard its sessions' running turns, tool
-    # commands and subagents. A failed guest switch fails the reload (the
-    # host's switch exits 4) and leaves the guest half-switched; the next
-    # container start boots the new SYSTEM_PATH. Deploying this change
-    # itself restarts the container once (new triggers, start timeout).
-    systemd.services."container@${name}" = {
-      restartTriggers = lib.mkForce [
-        (builtins.unsafeDiscardStringContext (
-          lib.concatStringsSep "\n" (
-            lib.filter (line: !lib.hasPrefix "SYSTEM_PATH=" line) (
-              lib.splitString "\n" containerConf.text
-            )
-          )
-        ))
-      ];
-      reloadTriggers = [ config.containers.${name}.path ];
-      # The bind mount needs the TPM node, and the guest's infra the ACL on
-      # it, set at each start: a udev rule would set it only on a device
-      # event, and a switch or a restart on a booted host brings none.
-      # udev's change events leave it: they chmod the node only when its
-      # mode differs from the rules' (0660 with tss, else none), and the
-      # entry's rw mask keeps it at 0660.
-      requires = [ "dev-tpmrm0.device" ];
-      after = [ "dev-tpmrm0.device" ];
-      preStart = lib.mkAfter ''
-        ${pkgs.acl}/bin/setfacl -m u:${toString uid}:rw /dev/tpmrm0
-      '';
-      postStart = lib.mkAfter ''
-        ip route replace ${localAddress} dev ${veth} src ${hostAddress}
-        # a source only once its duplicate address detection is over
-        for _ in {1..100}; do
-          [ -z "$(ip -6 addr show dev ${veth} to ${hostAddress6} tentative)" ] && break
-          sleep 0.1
-        done
-        ip -6 route replace ${localAddress6} dev ${veth} src ${hostAddress6}
-      '';
-    };
-
-    # Only this host opens connections into the guest, and on this host
-    # only root and the forwarders; the guest's own connections and their
-    # replies pass (see the header).
-    networking.nftables.enable = true;
-    networking.nftables.tables.infra-space = {
-      family = "inet";
-      content = ''
-        chain forward {
-          type filter hook forward priority filter; policy accept;
-          oifname "${veth}" ct state new drop
-        }
-        # Every packet a local socket sends in the original direction, not
-        # only a flow's first (two UDP sockets with SO_REUSEADDR share a
-        # port whatever their uid). Socketless packets never match skuid.
-        chain output {
-          type filter hook output priority filter; policy accept;
-          oifname "${veth}" ct direction original jump to-guest
-        }
-        chain to-guest {
-          meta skuid 0 return
-          meta skuid ${toString sshProxyUid} tcp dport 22 return
-          ${lib.optionalString cfg.dashboard.enable "meta skuid ${toString config.users.users.${config.services.nginx.user}.uid} tcp dport ${toString cfg.dashboard.port} return"}
-          meta skuid != 0 jump refuse
-        }
-        chain refuse {
-          meta l4proto tcp reject with tcp reset
-          reject with icmpx admin-prohibited
-        }
-      '';
-    };
-
-    services.resolved.settings.Resolve.DNSStubListenerExtra = lib.mkIf config.services.resolved.enable [
-      hostAddress
-    ];
-    networking.firewall.interfaces.${veth} = {
-      allowedUDPPorts = [ 53 ];
-      allowedTCPPorts = [ 53 ];
-    };
-
-    systemd.sockets.infra-space-ssh = {
-      description = "infra-space sshd on the mesh address";
-      wantedBy = [ "sockets.target" ];
-      listenStreams = [ "${bracket self.address}:${toString self.sshPort}" ];
-      socketConfig.FreeBind = true;
-    };
-    systemd.services.infra-space-ssh = {
-      description = "Forward to the infra-space container's sshd";
-      requires = [ "container@${name}.service" ];
-      after = [ "container@${name}.service" ];
-      serviceConfig = {
-        ExecStart = "${config.systemd.package}/lib/systemd/systemd-socket-proxyd ${localAddress}:22";
-        # the static user below, still with DynamicUser's sandbox
-        DynamicUser = true;
-        User = sshProxyUser;
-        Group = sshProxyUser;
-        PrivateTmp = true;
-      };
-    };
-    users.users.${sshProxyUser} = {
-      isSystemUser = true;
-      uid = sshProxyUid;
-      group = sshProxyUser;
-    };
-    users.groups.${sshProxyUser}.gid = sshProxyUid;
-    networking.firewall.interfaces.${cfg.meshInterface}.allowedTCPPorts = [ self.sshPort ];
-  };
+      # som's nginx to the dashboard port (./dashboard.nix)
+      toGuestRules = lib.optionalString cfg.dashboard.enable "meta skuid ${toString config.users.users.${config.services.nginx.user}.uid} tcp dport ${toString cfg.dashboard.port} return";
+    })
+  ]);
 }
