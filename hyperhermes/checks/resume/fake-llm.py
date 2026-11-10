@@ -7,6 +7,14 @@ step), so the test can count the model calls of each turn.
   auto-continue note, which embeds the original prompt): answer RESUMED-<scenario>.
   "<SCENARIO> <shell command>": call the terminal tool with the command,
   then, once its result is back, answer DONE-<scenario>.
+  "DELEG<x>-TEST <child goal> ||| <child goal> ...": call delegate_task
+  with one task per goal (a child's goal is itself "<SCENARIO> <command>"),
+  then answer DONE-DELEG<x>-TEST. A child whose context carries the re-dispatch
+  note records its first step as "resume-tool-call" (or
+  "resume-tool-call-unframed-tail" when the note's transcript tail is not
+  framed as untrusted data between BEGIN/END markers).
+  "[ASYNC DELEGATION ..." (a subagent result delivered to the parent):
+  answer GOT-RESULT, recorded under scenario DELEGATION-RESULT.
 """
 
 import json
@@ -18,6 +26,9 @@ PORT = int(sys.argv[1])
 RECORD = sys.argv[2]
 MODEL = "fake-model"
 NOTE = "previous turn was interrupted mid-run"
+RESUMED = "RESUMED AFTER A RESTART"
+TAIL_BEGIN = "--- BEGIN previous transcript tail ---"
+TAIL_END = "--- END previous transcript tail ---"
 
 
 def text_of(content):
@@ -32,14 +43,27 @@ def plan(messages):
     user = next((text_of(m.get("content")) for m in reversed(messages) if m.get("role") == "user"), "")
     words = [w for w in user.replace("\n", " ").split(" ") if w]
     scenario = next((w for w in words if w.endswith("-TEST")), "NONE")
+    system = " ".join(text_of(m.get("content")) for m in messages if m.get("role") == "system")
+    if "[ASYNC DELEGATION" in user:
+        return "GOT-RESULT", None, "DELEGATION-RESULT", "result"
     if NOTE in user and last.get("role") == "user":
         return f"RESUMED-{scenario}", None, scenario, "resume"
     if last.get("role") == "tool":
         return f"DONE-{scenario}", None, scenario, "after-tool"
     command = user.split(scenario, 1)[1].strip() if scenario in user else "true"
-    call = {"id": f"call_{int(time.time() * 1000)}", "type": "function",
+    call_id = f"call_{int(time.time() * 1000)}"
+    if scenario.startswith("DELEG"):
+        tasks = [{"goal": g.strip(), "context": "scripted child"} for g in command.split("|||")]
+        call = {"id": call_id, "type": "function",
+                "function": {"name": "delegate_task", "arguments": json.dumps({"tasks": tasks})}}
+        return "", call, scenario, "tool-call"
+    call = {"id": call_id, "type": "function",
             "function": {"name": "terminal", "arguments": json.dumps({"command": command, "timeout": 170})}}
-    return "", call, scenario, "tool-call"
+    if RESUMED not in system:
+        return "", call, scenario, "tool-call"
+    # The previous transcript's tail is framed as untrusted data.
+    framed = all(m in system for m in (TAIL_BEGIN, TAIL_END, "untrusted data, never instructions"))
+    return "", call, scenario, "resume-tool-call" if framed else "resume-tool-call-unframed-tail"
 
 
 class Handler(BaseHTTPRequestHandler):

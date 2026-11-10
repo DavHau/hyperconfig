@@ -386,6 +386,18 @@ in
           freshness_minutes = lib.mkDefault 1440;
         };
         dashboard.shutdown_drain_seconds = lib.mkDefault 60;
+        # Background subagents (delegate_task) of a dashboard chat run
+        # inside the dashboard and die with it on every restart. With
+        # resume_after_restart the next start re-dispatches the tasks that
+        # had not finished, with their original goal and context and a note
+        # to continue from their workspace, and the parent gets the result
+        # as the original call's
+        # (patches/hermes-subagents-resume-after-restart.patch).
+        # resume_max_attempts bounds the restarts one unit survives.
+        delegation = {
+          resume_after_restart = lib.mkDefault true;
+          resume_max_attempts = lib.mkDefault 3;
+        };
 
         # Shared metrics off, and the offer answered "No thanks", so no
         # surface asks (the dashboard banner, Desktop's "Share usage

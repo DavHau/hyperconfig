@@ -35,6 +35,9 @@ let
     ./patches/hermes-anthropic-env-base-url.patch
     ./patches/hermes-vision-every-model.patch
     ./patches/hermes-dashboard-resume-after-restart.patch
+    # After the dashboard resume patch: it extends that patch's startup
+    # resume and shutdown drain.
+    ./patches/hermes-subagents-resume-after-restart.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {
