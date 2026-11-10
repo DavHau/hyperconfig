@@ -15,6 +15,19 @@ in {
     };
   };
 
+  # The ZFS passphrase of pool11/enc and rpool/enc, kept in the clan vars
+  # store only (deploy = false): manual recovery, and the input of the
+  # planned clevis/tang binding. Entered once by Dave:
+  #     clan vars set nas zfs-passphrase/passphrase
+  clan.core.vars.generators.zfs-passphrase = {
+    prompts.passphrase = {
+      type = "hidden";
+      persist = true;
+      description = "ZFS passphrase of pool11/enc and rpool/enc";
+    };
+    files.passphrase.deploy = false;
+  };
+
   environment.systemPackages = [
     # program to enter password by hand to be stored in temporary memory
     (pkgs.writeShellScriptBin "enter-password" ''
