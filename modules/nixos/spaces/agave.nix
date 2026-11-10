@@ -35,6 +35,17 @@ in
       '';
     };
 
+    # API token of the forge bot account (PRs: open, comment, merge), entered
+    # by Dave: `clan vars generate <machine> --generator space-agave-token-geninf`.
+    clan.core.vars.generators.space-agave-token-geninf = lib.mkIf cfg.enable {
+        prompts.token = {
+          type = "hidden";
+          persist = true;
+          description = "git.geninf.io API token of davhau-agave-bot (write:repository, write:issue, read:user)";
+        };
+        files.token.restartUnits = [ containerUnit ];
+      };
+
     # Its own definitions not under its `enable` (that would recurse);
     # inert while the space is off.
     hyper.spaces.${name} = {

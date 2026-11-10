@@ -67,6 +67,24 @@ in
       space-gi-infra-root-ssh = sshKey "gi-infra-space@${machine} (root on gi-infra)";
       space-gi-infra-git-geninf = sshKey "gi-infra-space@${machine} (git.geninf.io)";
       space-gi-infra-git-clan-lol = sshKey "gi-infra-space@${machine} (git.clan.lol)";
+      # API tokens of the forge bot accounts (PRs: open, comment, merge),
+      # entered by Dave: `clan vars generate <machine> --generator <name>`.
+      space-gi-infra-token-geninf = {
+        prompts.token = {
+          type = "hidden";
+          persist = true;
+          description = "git.geninf.io API token of davhau-gi-bot (write:repository, write:issue, read:user)";
+        };
+        files.token.restartUnits = [ containerUnit ];
+      };
+      space-gi-infra-token-clan-lol = {
+        prompts.token = {
+          type = "hidden";
+          persist = true;
+          description = "git.clan.lol API token of davhau-clan-bot (write:repository, write:issue, read:user)";
+        };
+        files.token.restartUnits = [ containerUnit ];
+      };
     };
 
     # Its own definitions not under its `enable` (that would recurse);
