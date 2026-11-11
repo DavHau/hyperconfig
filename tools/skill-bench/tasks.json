@@ -1,0 +1,187 @@
+{
+  "_doc": "Discovery questions with machine-checkable answers (tools/skill-bench/README.md). grade.all: every regex must match the final answer (case-insensitive); grade.any: per group, at least one regex must match. Taken from real recent work in this repo; update the answers when the repo moves (the bench prints which regexes failed).",
+  "tasks": [
+    {
+      "id": "afk-default-model",
+      "prompt": "Where is afk's default model set for the fleet, and by which mechanism (which config layer of omp/afk) does that value reach the running agent? Name the file, the NixOS option, its current value, and the layer.",
+      "grade": {
+        "all": [
+          "modules/nixos/afk\\.nix",
+          "hyper\\.afk\\.defaultModel",
+          "claude-opus-5-5:medium"
+        ],
+        "any": [
+          [
+            "distro",
+            "OMP_DISTRO_CONFIG",
+            "distribution"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "hermes-agent-files",
+      "prompt": "Which repository files must be edited to add a new hermes agent (a new person's agent, with no vault access) on som? List every file path that needs an edit and say in a few words what goes into each.",
+      "grade": {
+        "all": [
+          "machines/som/hermes-agents\\.nix",
+          "machines/som/hermes-dashboards\\.nix",
+          "machines/som/configuration\\.nix",
+          "modules/nixos/vault-ids\\.nix",
+          "modules/flake-parts/nixosConfigurations\\.nix"
+        ],
+        "any": [
+          [
+            "slotIds",
+            "slot id"
+          ],
+          [
+            "deniedUsers"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "spaces-ports-uids",
+      "prompt": "Where are the agent spaces' ssh ports and uids allocated? Give the file, and the sshPort, uid and proxyUid of the `agave` space, and the machine it runs on.",
+      "grade": {
+        "all": [
+          "modules/nixos/spaces/registry\\.nix",
+          "2225",
+          "1207",
+          "1208",
+          "\\bsom\\b"
+        ]
+      }
+    },
+    {
+      "id": "ncro-limits",
+      "prompt": "How are ncro's per-upstream limits configured in this fleet? Give the file, the setting that caps concurrent narinfo requests per upstream and its value, and the narinfo timeout used for the clan peers.",
+      "grade": {
+        "all": [
+          "modules/clan/nix-cache/default\\.nix",
+          "per_upstream_max_inflight",
+          "\\b64\\b",
+          "narinfo_timeout",
+          "\\b1 ?s\\b"
+        ]
+      }
+    },
+    {
+      "id": "restart-units-age",
+      "prompt": "clan's age secret backend ignores vars' `restartUnits`. Which module in this repo makes restartUnits work anyway, by what mechanism, and where is it enabled for every machine?",
+      "grade": {
+        "all": [
+          "modules/nixos/clan-vars-restart-units\\.nix",
+          "activation-restart-list",
+          "modules/flake-parts/nixosConfigurations\\.nix"
+        ],
+        "any": [
+          [
+            "inventory",
+            "importer",
+            "instance"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "bump-denylist",
+      "prompt": "Where is the denylist of paths that the nightly nixpkgs bump must never change? Give the file and the shell variable name(s), and name the related flake check that tests it.",
+      "grade": {
+        "all": [
+          "modules/nixos/infra-space/nixpkgs-bump/guard\\.sh",
+          "denied_paths",
+          "nixpkgs-bump-guard"
+        ]
+      }
+    },
+    {
+      "id": "pocket-id-users",
+      "prompt": "Where are the pocket-id (OIDC) user accounts declared, which clan service module implements pocket-id, and on which machine does the pocket-id server run?",
+      "grade": {
+        "all": [
+          "modules/flake-parts/nixosConfigurations\\.nix",
+          "modules/clan/oidc",
+          "\\bedi\\b"
+        ]
+      }
+    },
+    {
+      "id": "entity-storage-unit",
+      "prompt": "On som, which systemd unit creates the per-user home ZFS datasets, which file defines it, and when does it run (at boot and on a switch, relative to which units)?",
+      "grade": {
+        "all": [
+          "entity-storage(\\.service)?",
+          "modules/nixos/entity-storage/default\\.nix",
+          "tmpfiles",
+          "sysinit"
+        ],
+        "any": [
+          [
+            "sysinit-reactivation",
+            "tmpfiles-resetup"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "forge-tokens-space",
+      "prompt": "How does the agave space's forge API token (for git.geninf.io) get from where it is stored to the `tea` CLI inside the space? Name the clan vars generator, the files involved, the unit that writes tea's config, and where that config lives.",
+      "grade": {
+        "all": [
+          "space-agave-token-geninf",
+          "modules/nixos/spaces/forges\\.nix",
+          "modules/nixos/spaces/agave\\.nix",
+          "forge-cli",
+          "/run/"
+        ],
+        "any": [
+          [
+            "credential"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "vit-connect-timeout",
+      "prompt": "On machine vit, what is the effective value of nix.settings.connect-timeout, and which file in this repo sets it (with what priority mechanism)?",
+      "grade": {
+        "all": [
+          "\\b15\\b",
+          "modules/clan/nix-cache/default\\.nix"
+        ],
+        "any": [
+          [
+            "mkOverride",
+            "override 90",
+            "priority"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "machines-importing",
+      "prompt": "Which machines import modules/nixos/tang-server.nix, and which machines import modules/nixos/vault-nfs-client.nix (directly in their machine config)? List machine names for each.",
+      "grade": {
+        "all": [
+          "tang-server",
+          "vault-nfs-client",
+          "\\bamy\\b",
+          "\\bsom\\b",
+          "\\bvit\\b"
+        ]
+      }
+    },
+    {
+      "id": "next-agent-uid",
+      "prompt": "A new hermes agent on som needs a uid. Per this repo's id ladder, which uid is the next free one (never reuse retired ids), and in which file is the ladder kept?",
+      "grade": {
+        "all": [
+          "\\b1119\\b",
+          "modules/nixos/vault-ids\\.nix"
+        ]
+      }
+    }
+  ]
+}
