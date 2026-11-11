@@ -20,9 +20,10 @@
 # disk.
 #
 # nixpkgs deprecated the activation-restart-list in 26.05 ("will be removed
-# in 26.11"). The build check below fails the system build once the
-# switch-to-configuration in use no longer knows the file, so that day
-# this comes back as a build error instead of silently dropped restarts.
+# in 26.11"). The guard is the VM test (checks.<system>.clan-vars-restart-units,
+# ./clan-vars-restart-units-test.nix): it fails once a real switch stops
+# restarting on a changed secret. Run it with every nixpkgs bump. (A build
+# check here would break every machine's build at once on that day.)
 {
   config,
   lib,
@@ -156,17 +157,5 @@ in
       text = script;
       supportsDryActivation = true;
     };
-
-    # Fail the build, not the restarts, once nixpkgs drops the interface.
-    system.checks = [
-      (pkgs.runCommand "clan-vars-restart-units-check" { } ''
-        if ! grep -rqa /run/nixos/activation-restart-list ${pkgs.switch-to-configuration-ng}; then
-          echo "switch-to-configuration no longer reads /run/nixos/activation-restart-list:" >&2
-          echo "clan vars' restartUnits (modules/nixos/clan-vars-restart-units.nix) would be ignored." >&2
-          exit 1
-        fi
-        touch $out
-      '')
-    ];
   };
 }
