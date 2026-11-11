@@ -119,6 +119,26 @@ pkgs.testers.runNixOSTest {
       specialisation.changed.configuration = {
         hyper.entityStorage.users.alice.homeQuota = "48M";
         hyper.entityStorage.users.dan = { };
+        # A new account, listed in the same switch, whose home tmpfiles and
+        # an agent-like service write into at once (like hyperhermes'
+        # ~/hermes rules and hermes-agent-<user>): the datasets must come
+        # first. Nothing orders the service after entity-storage, so this
+        # covers the switch's own ordering.
+        users.users.erin.isNormalUser = true;
+        hyper.entityStorage.users.erin = { };
+        systemd.tmpfiles.rules = [
+          "d /home/erin/hermes 0755 erin users -"
+          "d /home/erin/hermes/workspace 0755 erin users -"
+        ];
+        systemd.services.agent-erin = {
+          wantedBy = [ "multi-user.target" ];
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+            User = "erin";
+            ExecStart = "${pkgs.coreutils}/bin/touch /home/erin/hermes/state";
+          };
+        };
       };
       # dan has lived here before he is listed.
       systemd.tmpfiles.rules = [ "f /home/dan/keep 0600 dan users - mine" ];
@@ -251,12 +271,29 @@ pkgs.testers.runNixOSTest {
         machine.fail("entity-storage-migrate --finalize alice")
 
     with subtest("switch: a quota change applies, a newly listed user's home is not shadowed"):
+        cursor = machine.succeed("journalctl -n0 --show-cursor | sed -n 's/^-- cursor: //p'").strip()
         machine.execute("/run/current-system/specialisation/changed/bin/switch-to-configuration test")
-        log = last_run()
-        assert "alice: set refquota=48M" in log, log
-        assert "dan: REFUSED: /home/dan is not empty" in log, log
+        # Every run of this switch: dan's refusal fails the unit in
+        # sysinit-reactivation, and the switch's start phase runs it again.
+        switch_log = machine.succeed(f"journalctl -o cat -u entity-storage.service --after-cursor='{cursor}'")
+        assert "alice: set refquota=48M" in switch_log, switch_log
+        assert "dan: REFUSED: /home/dan is not empty" in switch_log, switch_log
         assert prop("refquota", "tpool/root/home/alice") == str(48 * 2**20)
         machine.fail("zfs list tpool/root/home/dan")
         machine.succeed("test \"$(cat /home/dan/keep)\" = mine")
+
+    with subtest("switch: a new user gets the datasets before tmpfiles and her service write the home"):
+        # Had tmpfiles-resetup or agent-erin run first, /home/erin would no
+        # longer be empty and erin would be refused like dan.
+        assert "erin: created tpool/root/home/erin" in switch_log, switch_log
+        assert "erin: REFUSED" not in switch_log, switch_log
+        assert source("/home/erin") == "tpool/root/home/erin"
+        assert source("/home/erin/scratch") == "tpool/root/nobackup/scratch/erin"
+        machine.succeed("systemctl is-active agent-erin.service")
+        # What tmpfiles and the service wrote is on her dataset, not
+        # hidden below it on the parent.
+        machine.succeed("test -d /home/erin/hermes/workspace && test -e /home/erin/hermes/state")
+        machine.succeed("test \"$(stat -c %d /home/erin)\" = \"$(stat -c %d /home/erin/hermes/state)\"")
+        machine.succeed("test \"$(stat -c '%U %a' /home/erin)\" = 'erin 700'")
   '';
 }

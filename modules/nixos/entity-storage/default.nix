@@ -19,6 +19,19 @@
   directory, so a newly listed user with an existing home is refused
   (logged, unit fails) until `entity-storage-migrate <user>` moved the
   home onto its datasets.
+
+  A NEW user (account and entry in the same switch) gets the datasets
+  before anything writes the home. On a switch NixOS runs: stop changed
+  units, activation (creates the account and its empty home), restart
+  sysinit-reactivation.target (systemd-tmpfiles-resetup, which creates
+  tmpfiles' directories inside homes, e.g. hyperhermes' ~/hermes), then
+  start or restart the other units (agents, linger's user manager). A
+  changed unit is stopped first, so the users' list being in the script
+  makes the target's restart start this unit again, in order: before
+  tmpfiles-resetup, as it runs before tmpfiles-setup at boot. Restarted
+  with the normal units instead it would come after tmpfiles and refuse
+  the home tmpfiles just filled. Units that write into a home may still
+  order after this one (som's hermes agents do) to make it explicit.
 */
 {
   config,
@@ -141,7 +154,13 @@ in
       # Early, so tmpfiles, logins, user managers and the users' services
       # (hermes-agent-<user>, ...) all find the datasets mounted. Users
       # exist by then: the activation script creates them.
-      wantedBy = [ "sysinit.target" ];
+      # On a switch: restarted (when changed) with the sysinit units, ahead
+      # of tmpfiles-resetup and of every normal unit (header comment).
+      # Wanted, not required: one refused user must not fail the target.
+      wantedBy = [
+        "sysinit.target"
+        "sysinit-reactivation.target"
+      ];
       after = [
         "zfs-import.target"
         "zfs-mount.service"
@@ -149,7 +168,9 @@ in
       ];
       before = [
         "sysinit.target"
+        "sysinit-reactivation.target"
         "systemd-tmpfiles-setup.service"
+        "systemd-tmpfiles-resetup.service"
         "systemd-user-sessions.service"
         "shutdown.target"
       ];

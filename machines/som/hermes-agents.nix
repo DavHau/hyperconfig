@@ -285,6 +285,62 @@ in
     }
   ];
 
+  # Every agent's home on its own datasets (../../modules/nixos/entity-storage),
+  # with the defaults unless ./configuration.nix gives it a quota. A new
+  # agent gets them on the switch that creates its account, before
+  # anything writes its home (the module's header says how); its units
+  # also order after the reconciler, so they never fill a home that is
+  # not mounted yet.
+  hyper.entityStorage.users = lib.mapAttrs (_: _: { }) config.services.hyperhermes.agents;
+  systemd.services = lib.mkMerge (
+    lib.mapAttrsToList (
+      name: _:
+      # The units running in the home (camofox keeps to the state dir).
+      lib.genAttrs [ "hermes-agent-${name}" "hermes-dashboard-${name}" ] (_: {
+        after = [ "entity-storage.service" ];
+        wants = [ "entity-storage.service" ];
+        # Never fill a home whose dataset is missing (a refused reconcile
+        # would then need a migration): fail to start instead.
+        unitConfig.AssertPathIsMountPoint = config.users.users.${name}.home;
+      })
+    ) config.services.hyperhermes.agents
+  );
+
+  # What is easy to forget when adding an agent and can be checked here.
+  # (A missing dashboards account, slot id or uid fails on its own.)
+  assertions =
+    let
+      agents = config.services.hyperhermes.agents;
+      denied = config.hyper.vaultIds.deniedUsers;
+      # Agents without vault-ro: `vault = false` in the data file, or not
+      # in it at all.
+      offVault = lib.filterAttrs (name: _: !(vaultReaders ? ${name})) agents;
+      undenied = lib.filter (name: denied.${name} or null != offVault.${name}.uid) (
+        lib.attrNames offVault
+      );
+      deniedReaders = lib.filter (name: denied ? ${name}) (lib.attrNames vaultReaders);
+      slotless = lib.filter (name: !agents.${name}.slot.enable) (lib.attrNames agents);
+    in
+    [
+      {
+        assertion = undenied == [ ];
+        message = ''
+          machines/som: hermes agents without vault access need a deny ACL on
+          bam's /vault: add them with their uid to hyper.vaultIds.deniedUsers
+          (modules/nixos/vault-ids.nix) and run its setfacl on bam: ${
+            lib.concatMapStringsSep ", " (n: "${n} (uid ${toString offVault.${n}.uid})") undenied
+          }'';
+      }
+      {
+        assertion = deniedReaders == [ ];
+        message = "machines/som: vault-ro agents listed in hyper.vaultIds.deniedUsers: ${toString deniedReaders}";
+      }
+      {
+        assertion = slotless == [ ];
+        message = "machines/som: hermes agents without a slot (services.hyperhermes.agents in ./configuration.nix): ${toString slotless}";
+      }
+    ];
+
   # Every agent's dashboard and published ports, signed in through the
   # clan's pocket-id: the inventory declares the clients sso.oidcClients
   # lists (from the same ./hermes-dashboards.nix; the serve ports' client

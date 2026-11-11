@@ -173,33 +173,22 @@ in
 
   # Users move over one at a time: list one, deploy, then
   # `entity-storage-migrate <user>` (../../modules/nixos/entity-storage).
+  # Every hermes agent is listed by ./hermes-agents.nix with the defaults;
+  # only the logins that are no agents and the agents' quota overrides
+  # are here.
   hyper.entityStorage = {
     enable = true;
     users = {
       # Logins are refused while entity-storage-migrate copies a home.
       adam.homeQuota = "30G";
-      b3x = { };
-      chris = { };
-      daniel = { };
-      daniel-meli = { };
       dave = { };
       # hermes/workspace (~25G) stays backed up; omd2's rebuildable data
       # moved to ~/scratch (2026-11-07).
       dave-hermes.homeQuota = "40G";
-      domi = { };
-      egg = { };
       hsjobeki = { };
-      j = { };
       # 22.8G when moved over (hermes/workspace): room until joe sorts it.
       joe.homeQuota = "30G";
-      momentum = { };
       nixremote = { };
-      pinpox = { };
-      rti = { };
-      roman = { };
-      thaigersprint = { };
-      stefan = { };
-      willi = { };
     };
   };
 

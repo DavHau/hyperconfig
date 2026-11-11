@@ -39,14 +39,15 @@
 #
 # /vault/parquet's "other" r-x lets any uid read most of it. Agents kept
 # off the vault (`vault = false`, machines/som/hermes-agents-data.nix, and
-# roman and daniel-meli, machines/som/hermes-agents.nix, which are no vault
-# agents at all)
+# the agents of machines/som/hermes-agents.nix that are not in that file)
 # therefore get a named-user deny on the pool root, which blocks every
-# dataset below it:
+# dataset below it. They are listed in `hyper.vaultIds.deniedUsers` below
+# (som asserts that every such agent is, with its uid); on bam, for each:
 #
-#   setfacl -m u:<uid>:--- /vault                             # thaigersprint 1114
-#   setfacl -m u:<uid>:--- /vault                             # roman 1116
-#   setfacl -m u:<uid>:--- /vault                             # daniel-meli 1118
+#   setfacl -m u:<uid>:--- /vault
+#
+# Applied by hand, like the ACLs above (/vault's datasets are nofail
+# mounts); `getfacl /vault` on bam shows what is applied.
 #
 # Pinned ids: 1002 stefan, 1004 egg, 1005 dave-hermes, 1100 momentum,
 # 1101 vault (gid), 1102 hsjobeki, 1103 vault-ro (gid), 1104 pinpox,
@@ -68,12 +69,28 @@
 # pair for the named spaces on amy: each space's container user, owning
 # its home under /var/lib/spaces, and its sshd forwarder there;
 # spaces/registry.nix; not vault principals). gid 1100 stays unallocated.
+{ lib, ... }:
 {
-  users.groups.vault.gid = 1101;
-  users.groups.vault-ro.gid = 1103;
-  users.groups.vault-parquet-rw.gid = 1107;
+  options.hyper.vaultIds.deniedUsers = lib.mkOption {
+    type = lib.types.attrsOf lib.types.int;
+    readOnly = true;
+    description = ''
+      uids with a named-user deny ACL on bam's /vault (name -> uid), set
+      by hand (see the header). Data for checks only: nothing applies it.
+    '';
+  };
 
-  users.users.momentum = {
+  config.hyper.vaultIds.deniedUsers = {
+    thaigersprint = 1114;
+    roman = 1116;
+    daniel-meli = 1118;
+  };
+
+  config.users.groups.vault.gid = 1101;
+  config.users.groups.vault-ro.gid = 1103;
+  config.users.groups.vault-parquet-rw.gid = 1107;
+
+  config.users.users.momentum = {
     isNormalUser = true;
     uid = 1100;
     description = "momentum - read-only vault consumer";
