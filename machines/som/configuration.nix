@@ -165,15 +165,6 @@ in
   # (../../modules/nixos/infra-space/default.nix).
   clan.core.vars.generators."oidc-client-${config.hyper.infraSpace.dashboard.clientId}".files.secret.restartUnits =
     [ "container@infra-space.service" ];
-  # Test var for clan-secret-prompt (infra-space): nothing reads it.
-  clan.core.vars.generators.secret-prompt-test = {
-    prompts.value = {
-      description = "Any test value (clan-secret-prompt check)";
-      type = "hidden";
-      persist = true;
-    };
-    files.value.deploy = false;
-  };
   services.hyperhermes.exposure.fetchMetadataGate.virtualHosts = [ "infra-space-dashboard" ];
   # Explicit, as the dashboards module gives its names: the wildcard would
   # stop answering once a name below it exists.
