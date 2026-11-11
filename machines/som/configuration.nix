@@ -527,6 +527,7 @@ in
         # roman is not in hermes-agents-data.nix (./hermes-agents.nix),
         # added below.
         roman = 19;
+        daniel = 20;
       };
       # Container names are capped at 11 chars (nspawn veth names,
       # hyperhermes container-slots); longer agent names get a short one

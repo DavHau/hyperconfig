@@ -28,6 +28,7 @@
   chris.uid = 1111;
   b3x.uid = 1112;
   joe.uid = 1113;
+  daniel.uid = 1117;
   thaigersprint = {
     uid = 1114;
     vault = false;

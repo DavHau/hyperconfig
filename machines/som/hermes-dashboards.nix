@@ -36,5 +36,6 @@
     thaigersprint = "dave";
     momentum = "momentum";
     roman = "roman";
+    daniel = "daniel";
   };
 }

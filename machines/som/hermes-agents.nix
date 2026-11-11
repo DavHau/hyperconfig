@@ -236,6 +236,17 @@ in
         openrouter = true;
       };
 
+      # daniel: Daniel's agent, read-only vault consumer. No keys of his
+      # known yet, so no ssh login; he signs in to its dashboard.
+      daniel = {
+        description = "daniel - hermes agent, read-only vault consumer";
+        sshKeys = [ ];
+        # Claude through the TeamClaude gateway, as client `daniel`.
+        teamclaude.enable = true;
+        # The shared OpenRouter key as OPENROUTER_API_KEY (./hermes-inference.nix).
+        openrouter = true;
+      };
+
       # momentum: OpenRouter brain, and a Telegram bot in ONE group chat where
       # several allow-listed people prompt it (connected on its dashboard).
       # Identity (uid 1100, vault-ro) in ../../modules/nixos/vault-ids.nix;
