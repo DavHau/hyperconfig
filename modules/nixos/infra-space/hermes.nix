@@ -29,8 +29,10 @@
       four share: the cap works per tool (_prune_toolsets_stripped_by_
       disabled), so a composite like `debugging` would take terminal and
       file with it. Checkpoints off.
-    - skills: the infra skill (./hermes-skill) and the nightly bump's
-      (./nixpkgs-bump), and of the bundled ones only systematic-debugging
+    - skills: the infra skill (./hermes-skill), the nightly bump's
+      (./nixpkgs-bump) and the repo's own map of hyperconfig
+      (../../../skills/hyperconfig-map, for the agent and its subagents),
+      and of the bundled ones only systematic-debugging
       and codebase-inspection: the rest of what the package ships is
       disabled, read from its source at eval time (hermes has no
       allowlist), but for hermes' essential hermes-agent,
@@ -224,10 +226,22 @@ let
     );
   };
 
+  # Where things live in hyperconfig: SKILL.md, hand-written area
+  # references and the generated map (../../flake-parts/repo-map.nix keeps
+  # it fresh). Only the skill's directory goes into the store.
+  mapSkill = hlib.mkAgentSkill pkgs {
+    name = "hyperconfig-map";
+    src = lib.fileset.toSource {
+      root = ../../../skills/hyperconfig-map;
+      fileset = ../../../skills/hyperconfig-map;
+    };
+  };
+
   # The skill roots built here: the agent's skills.external_dirs.
   nixSkills = [
     skill
     bumpSkill
+    mapSkill
   ];
 
   dashboardPort = hlib.dashboardPortFor user;

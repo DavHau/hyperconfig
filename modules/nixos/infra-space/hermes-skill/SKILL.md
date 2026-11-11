@@ -138,6 +138,10 @@ so you stay free for Dave's next request.
   subagent's terminal starts in the main checkout). The subagent
   implements, runs the checks and `jj describe`; it never runs
   `jj bookmark set`, `jj git push` or `clan`.
+- Every brief also says: "load the `hyperconfig-map` skill first" (the
+  repo's own map: where things live, eval one-liners, recipes per area;
+  `skills/hyperconfig-map` in the repo). It saves the subagent the
+  survey; don't paste layout into briefs.
 - Larger changes get reviewed by an independent, read-only subagent (one
   that did not write the change) in the same workspace: verdict approve
   or request changes, findings with file:line. Push only on approve;
