@@ -39,6 +39,9 @@
     ../../modules/nixos/oomd.nix
     # The fleet-managing container (also on som).
     ../../modules/nixos/infra-space
+    # "Hermes (infra-space)": the hermes app in that container, on Dave's
+    # session (../../modules/nixos/space-gui).
+    ../../modules/nixos/infra-space/desktop-app.nix
     # Dave's way into the agent spaces (geninf-space, on som): launchers,
     # pinned host keys, herdr machines.
     ../../modules/nixos/spaces/client.nix

@@ -57,7 +57,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/herdr-jj.nix — jj workspace support for herdr via the community herdr-jj plugin (OliverGilan/herdr-jj, MIT): <- m/dave.nix, m/spaces/guest.nix, m/spaces/test.nix
 - modules/nixos/herdr-pin-config.py — - <- m/herdr-jj.nix
 - modules/nixos/hermes-agents-gpu-host.nix — GPU host for som's hermes agents: <- vit
-- modules/nixos/hermes-desktop.nix — Hermes launchers on the dave desktops for som's agents (machines/som/hermes-agents.nix), through hyperhermes' desktop m… <- m/dave.nix
+- modules/nixos/hermes-desktop.nix — Hermes launchers on the dave desktops for som's agents (machines/som/hermes-agents.nix), through hyperhermes' desktop m… <- m/dave.nix, m/infra-space/desktop-app.nix
 - modules/nixos/home-manager.nix — - <- m/dave.nix
 - modules/nixos/houses-grmpf.nix — grmpf's nix-housing houses (see houses.nix): <- amy
 - modules/nixos/houses.nix — nix-housing (codeberg.org/decentstates/nix-housing): <- m/houses-grmpf.nix
@@ -198,9 +198,10 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/hyprspace/default.nix — -
 - modules/nixos/infra-space/afk.nix — afk in the infra-space container, for Dave's interactive sessions as `infra` (hermes never starts it): <- m/infra-space/default.nix, m/spaces/afk.nix
 - modules/nixos/infra-space/age-recipients.nix — The clan vars' age recipients (vars.settings.recipients.default in ../../flake-parts/nixosConfigurations.nix): <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/default.nix, m/infra-space/guest.nix, m/spaces/default.nix
-- modules/nixos/infra-space/dashboard-account.nix — Who signs in to the infra-space dashboard (./dashboard.nix, on som), as plain data for the two evaluations that need it: <- som, modules/flake-parts/nixosConfigurations.nix, m/infra-space/dashboard.nix
-- modules/nixos/infra-space/dashboard.nix — The infra-space agent's hermes dashboard, published by this host's nginx (som only: <- m/infra-space/default.nix, m/infra-space/hermes.nix, m/infra-space/secret-prompt/default.nix
+- modules/nixos/infra-space/dashboard-account.nix — Who signs in to the infra-space dashboard (./dashboard.nix, on som), as plain data for the two evaluations that need it: <- som, modules/flake-parts/nixosConfigurations.nix, m/infra-space/dashboard.nix, m/infra-space/desktop-app.nix
+- modules/nixos/infra-space/dashboard.nix — The infra-space agent's hermes dashboard, published by this host's nginx (som only: <- m/infra-space/default.nix, m/infra-space/desktop-app.nix, m/infra-space/hermes.nix, m/infra-space/secret-prompt/default.nix
 - modules/nixos/infra-space/default.nix — infra-space: a NixOS container on every member machine (./members.nix), identical on each, from which the fleet is mana… <- amy, som, m/infra-space/afk.nix, m/infra-space/dashboard.nix, m/infra-space/fleet-access.nix, m/infra-space/gcroots.nix, m/infra-space/guest.nix, m/infra-space/hermes.nix, +6
+- modules/nixos/infra-space/desktop-app.nix — "Hermes (infra-space)": the hermes desktop app run in this host's infra-space container (as `infra`, through ../space-g… <- amy
 - modules/nixos/infra-space/fleet-access.nix — infra-space's root access on every clan machine (wired via the `sshd` instance's server extraModules in modules/flake-p… <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/default.nix, m/infra-space/test.nix
 - modules/nixos/infra-space/gcroots.nix — GC roots on this host for systems built from the infra-space guest (a host module, imported by ./default.nix; <- m/infra-space/default.nix
 - modules/nixos/infra-space/guest.nix — The system inside the infra-space container (./default.nix sets the options below from the host side). <- m/infra-space/default.nix, m/infra-space/gcroots.nix, m/infra-space/hermes.nix, m/infra-space/secret-prompt/default.nix, m/spaces/guest-base.nix
@@ -263,6 +264,9 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/short-videos/short-videos.sh — !/usr/bin/env bash List video files in DIR (default: <- m/short-videos/default.nix
 - modules/nixos/skills/external-scripts/SKILL.md — >
 - modules/nixos/skills/project-init/SKILL.md — >
+- modules/nixos/space-gui/default.nix — space-gui: GUI apps of a space container (infra-space, a hyper.spaces container, ...) on the host user's Wayland sessio… <- m/infra-space/desktop-app.nix, m/space-gui/test.nix
+- modules/nixos/space-gui/helper.py — - <- m/space-gui/default.nix
+- modules/nixos/space-gui/test.nix — space-gui (./default.nix) on one machine: <- flake.nix, m/space-gui/default.nix
 - modules/nixos/spaces/afk.nix — afk in a space's guest, for Dave's interactive sessions: <- m/infra-space/afk.nix, m/spaces/default.nix, m/spaces/guest.nix
 - modules/nixos/spaces/client.nix — Dave's way into the named spaces (./default.nix), on the machine that imports this (amy): <- amy, m/spaces/default.nix, m/spaces/guest.nix, m/spaces/test.nix
 - modules/nixos/spaces/default.nix — Named agent spaces: NixOS containers like infra-space (../infra-space), each for one job, none of them a fleet admin. h… <- som, m/spaces/afk.nix, m/spaces/client.nix, m/spaces/forges.nix, m/spaces/geninf-space.nix, m/spaces/guest.nix, m/spaces/host.nix, m/spaces/test.nix
@@ -367,7 +371,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyperhermes/modules/core/options.nix — The agent registry `services.hyperhermes.agents` and the host-wide collection points every agent's config.yaml, .env an… <- hyperhermes/modules/core/default.nix
 - hyperhermes/modules/core/package.nix — The hermes package the agents run: <- hyperhermes/modules/core/options.nix
 - hyperhermes/modules/dashboards/default.nix — Every agent's hermes web dashboard at its own host name, <agent>.<domain> (exposure), with hermes' own OIDC login (sso)…
-- hyperhermes/modules/desktop/connections.py — - <- hyperhermes/modules/desktop/default.nix
+- hyperhermes/modules/desktop/connections.py — - <- hyperhermes/modules/desktop/default.nix, m/infra-space/desktop-app.nix
 - hyperhermes/modules/desktop/default.nix — Hermes launchers on a workstation for the agents of a hyperhermes host (`services.hyperhermes.desktop`):
 - hyperhermes/modules/local-container/default.nix — The local deployment on a workstation, in one import:
 - hyperhermes/modules/local-container/guest.nix — Inside the local container (./default.nix): <- hyperhermes/modules/local-container/default.nix

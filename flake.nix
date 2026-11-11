@@ -247,6 +247,11 @@
           import ./modules/nixos/entity-storage/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
+        # Space containers' GUI apps on a Wayland session.
+        space-gui =
+          import ./modules/nixos/space-gui/test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          };
         user-manager-restart =
           import ./modules/nixos/user-manager-restart/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
