@@ -2,7 +2,7 @@
   Pull requests from a space: `tea` (Gitea's own CLI) with one login per
   forge of `space.forges`, each with the bot account's API token from the
   space's credential (./default.nix passes it in from a prompted clan var,
-  ./gi-infra.nix, ./agave.nix). git itself stays on ssh with the space's
+  ./geninf-space.nix). git itself stays on ssh with the space's
   per-forge keys.
 
   The token never reaches the persistent home: tea keeps tokens only inline

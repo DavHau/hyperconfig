@@ -65,9 +65,10 @@
 # home on the host), 1204 infra-space-ssh (uid and gid; the members' system
 # user forwarding to the container's sshd, pinned for the host's nftables
 # owner gate: infra-space/default.nix; not a vault principal), 1205
-# gi-infra and 1206 gi-infra-ssh, 1207 agave and 1208 agave-ssh (the same
-# pair for the named spaces on amy: each space's container user, owning
-# its home under /var/lib/spaces, and its sshd forwarder there;
+# geninf-space (was gi-infra) and 1206 geninf-space-ssh, 1207/1208 (were
+# agave and agave-ssh, retired, do not reuse) (the same pair for the
+# named spaces on som: each space's container user, owning its home
+# under /var/lib/spaces, and its sshd forwarder there;
 # spaces/registry.nix; not vault principals). gid 1100 stays unallocated.
 { lib, ... }:
 {

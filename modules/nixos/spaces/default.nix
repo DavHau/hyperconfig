@@ -25,7 +25,7 @@
   update` stops at them, so generate right after adding a space):
     space-<name>-hostkey   the guest's ssh host key; the desktops pin it
                            (./client.nix)
-    whatever the space's own module adds (./gi-infra.nix, ./agave.nix),
+    whatever the space's own module adds (./geninf-space.nix),
                            each as a credential at
                            /run/<name>/secrets/<credential> (0400, the
                            user), never in the home on this host.
@@ -166,8 +166,7 @@ let
 in
 {
   imports = [
-    ./gi-infra.nix
-    ./agave.nix
+    ./geninf-space.nix
   ];
 
   options.hyper.spaces = lib.mkOption {

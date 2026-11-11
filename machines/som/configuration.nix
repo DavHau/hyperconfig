@@ -76,7 +76,7 @@ in
     ../../modules/nixos/disk-hygiene
     # The fleet-managing container (also on amy).
     ../../modules/nixos/infra-space
-    # Agent spaces for other projects (gi-infra, agave), none a fleet
+    # Agent spaces for other projects (geninf-space), none a fleet
     # admin; Dave reaches them from amy (spaces/client.nix there).
     ../../modules/nixos/spaces
   ];
@@ -137,11 +137,10 @@ in
   # targets (som offloads nothing: no nix.buildMachines).
   hyper.infraSpace.buildOnHost = true;
 
-  # Their vars came from amy (`clan vars cp amy som <gen>/<file>`, the
-  # keys are registered at the forges and the other clans);
+  # Its keys are the gi-infra and agave spaces' (renamed, not
+  # regenerated: they are registered at the forges and the other clans);
   # modules/nixos/spaces/README.md has which public keys go where.
-  hyper.spaces.gi-infra.enable = true;
-  hyper.spaces.agave.enable = true;
+  hyper.spaces.geninf-space.enable = true;
   # The infra-space agent's dashboard at https://infra-space.davhau.fyi/,
   # Dave only: its pocket-id client from the inventory
   # (../../modules/nixos/infra-space/dashboard-account.nix), TLS and the

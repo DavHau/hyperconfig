@@ -15,19 +15,16 @@
 #
 # The guest's user is the space's name; its container is named after the
 # space too (at most 12 characters: the host's veth is ve-<name>).
+#
+# Retired slots, never reused: index 2, sshPort 2225, uids 1207/1208
+# (the agave space, merged into geninf-space 2026-11-11). geninf-space
+# took over gi-infra's slot (index 1, 2224, 1205/1206) with its keys.
 {
-  gi-infra = {
+  geninf-space = {
     machine = "som";
     index = 1;
     sshPort = 2224;
     uid = 1205;
     proxyUid = 1206;
-  };
-  agave = {
-    machine = "som";
-    index = 2;
-    sshPort = 2225;
-    uid = 1207;
-    proxyUid = 1208;
   };
 }

@@ -1,12 +1,12 @@
 # The named spaces (./default.nix) on one host beside infra-space, and
 # Dave's side of them (./client.nix) on the same host (the test keeps both on one host).
-# `host` stands in for som (both spaces, infra-space, networkd, nftables,
+# `host` stands in for som (the spaces, infra-space, networkd, nftables,
 # its TPM), `peer` for everything else: a LAN neighbour (its v4,
 # 192.168.1.0/24, private) and a machine on the internet (its v6, the
 # test VLAN's 2001:db8:1::/64, global) at once. Covered:
 #
-#   - both spaces start, with sshd at [host's mesh address]:<sshPort> only
-#     (2224, 2225): `peer` logs in with Dave's key and the host key it
+#   - the space (geninf-space) starts, with sshd at [host's mesh
+#     address]:<sshPort> only (2224): `peer` logs in with Dave's key and the host key it
 #     pinned (the space's host key credential); not on the host's v4, not
 #     by routing to the guest's veth address through the host;
 #   - isolation: from each space, neither the other space, infra-space
@@ -16,19 +16,21 @@
 #     port of a space;
 #   - credentials: each space has exactly its own in /run/<name>/secrets
 #     (0400 the user, the guest's own tmpfs), none of infra-space's keys
-#     anywhere in its file system, the TPM in gi-infra only;
-#   - the clones of its repositories fail softly without the forges;
-#   - herdr: Dave's user activation saves both spaces as herdr machines
+#     anywhere in its file system, the TPM bound in, AGE_KEYFILE the
+#     main root key;
+#   - the clones of its org's repositories fail softly without the forges;
+#   - herdr: Dave's user activation saves the spaces as herdr machines
 #     (`herdr machine list`, targets the ssh aliases `space-<name>`); the
 #     bridge herdr runs over ssh at attach starts each guest's herdr
-#     server, and `herdr machine status` then finds both ok;
+#     server, and `herdr machine status` then finds them ok; an entry of a
+#     space no longer declared (retired) is removed, Dave's own kept;
 #   - infra-space beside them still starts and admits its own ssh port;
 #   - deploys (specialisations, `switch-to-configuration test`): a change
 #     of the guests alone reloads each container (the guest's own switch
 #     inside), its leader, a user's process outside any unit, Dave's tmux
 #     session and its child and the herdr server all kept, the guest's
 #     /run/current-system the new system; one of the host's side
-#     (gi-infra's nspawn flags) restarts it into the new guest, also while
+#     (geninf-space's nspawn flags) restarts it into the new guest, also while
 #     clients keep connecting to the ssh forwards during the switch.
 #
 # ./test-keys is test-only material: admin(.pub) stands in for Dave's key,
@@ -170,7 +172,7 @@ pkgs.testers.runNixOSTest {
       };
 
       # A later deploy: a change of the guests alone (every space and
-      # infra-space), switched in place, and one of gi-infra's host side
+      # infra-space), switched in place, and one of geninf-space's host side
       # (an nspawn flag), which restarts it.
       specialisation = {
         guest-change.configuration = {
@@ -187,7 +189,7 @@ pkgs.testers.runNixOSTest {
             ];
           });
         };
-        host-change.configuration.containers.gi-infra.extraFlags = [ "--setenv=SPACE_TEST=1" ];
+        host-change.configuration.containers.geninf-space.extraFlags = [ "--setenv=SPACE_TEST=1" ];
       };
 
       clan.core.vars.generators.inference-api-key.files.token = { };
@@ -199,16 +201,13 @@ pkgs.testers.runNixOSTest {
         "test-vars/infra-space-hostkey/ssh_host_ed25519_key" = secret (isKeys + "/hostkey-memberA");
         "test-vars/inference-api-key/token" = fake "p0-token";
         "test-vars/teamclaude-api-key/key" = fake "teamclaude-key";
-        "test-vars/space-gi-infra-hostkey/ssh_host_ed25519_key" = secret (keys + "/hostkey-gi-infra");
-        "test-vars/space-agave-hostkey/ssh_host_ed25519_key" = secret (keys + "/hostkey-agave");
-        "test-vars/space-gi-infra-root-ssh/id_ed25519" = fake "gi-infra-root-ssh";
-        "test-vars/space-gi-infra-git-geninf/id_ed25519" = fake "gi-infra-git-geninf";
-        "test-vars/space-gi-infra-git-clan-lol/id_ed25519" = fake "gi-infra-git-clan-lol";
-        "test-vars/space-agave-root-ssh/id_ed25519" = fake "agave-root-ssh";
-        "test-vars/space-agave-git-geninf/id_ed25519" = fake "agave-git-geninf";
-        "test-vars/space-gi-infra-token-geninf/token" = fake "gi-infra-token-geninf";
-        "test-vars/space-gi-infra-token-clan-lol/token" = fake "gi-infra-token-clan-lol";
-        "test-vars/space-agave-token-geninf/token" = fake "agave-token-geninf";
+        "test-vars/space-geninf-space-hostkey/ssh_host_ed25519_key" = secret (keys + "/hostkey-geninf-space");
+        "test-vars/space-geninf-space-root-ssh/id_ed25519" = fake "geninf-space-root-ssh";
+        "test-vars/space-geninf-space-root-ssh-agave/id_ed25519" = fake "geninf-space-root-ssh-agave";
+        "test-vars/space-geninf-space-git-geninf/id_ed25519" = fake "geninf-space-git-geninf";
+        "test-vars/space-geninf-space-git-clan-lol/id_ed25519" = fake "geninf-space-git-clan-lol";
+        "test-vars/space-geninf-space-token-geninf/token" = fake "geninf-space-token-geninf";
+        "test-vars/space-geninf-space-token-clan-lol/token" = fake "geninf-space-token-clan-lol";
         "dave-ssh/id_ed25519" = {
           source = keys + "/admin";
           mode = "0400";
@@ -246,16 +245,14 @@ pkgs.testers.runNixOSTest {
 
       spaces = json.loads('${builtins.toJSON spaces}')
       expected_creds = {
-          "gi-infra": {"p0-api-key", "teamclaude-api-key", "root-ssh", "git-geninf", "git-clan-lol", "token-geninf", "token-clan-lol"},
-          "agave": {"p0-api-key", "teamclaude-api-key", "root-ssh", "git-geninf", "token-geninf"},
+          "geninf-space": {"p0-api-key", "teamclaude-api-key", "root-ssh", "root-ssh-agave", "git-geninf", "git-clan-lol", "token-geninf", "token-clan-lol"},
       }
       # tea's logins: forge -> (bot user, token credential, default)
       expected_forges = {
-          "gi-infra": {
+          "geninf-space": {
               "git.geninf.io": ("davhau-gi-bot", "token-geninf", True),
               "git.clan.lol": ("davhau-clan-bot", "token-clan-lol", False),
           },
-          "agave": {"git.geninf.io": ("davhau-agave-bot", "token-geninf", True)},
       }
 
       def in_space(name, cmd, check=True):
@@ -330,11 +327,15 @@ pkgs.testers.runNixOSTest {
               assert rc == 1, (name, hits)
               # no fleet names
               space_root(name, "sh -c '! grep -q \"\\.d$\" /etc/hosts'")
-          in_space("gi-infra", "test -r /dev/tpmrm0 -a -w /dev/tpmrm0")
-          space_root("agave", "test ! -e /dev/tpmrm0")
-          # agave-infra's vars: clan's age store takes the root-ssh key
-          assert in_space("agave", "echo $AGE_KEYFILE").strip() == "/run/agave/secrets/root-ssh"
-          in_space("agave", "test -r $AGE_KEYFILE")
+          in_space("geninf-space", "test -r /dev/tpmrm0 -a -w /dev/tpmrm0")
+          # the clans' vars: clan's age store takes the main root-ssh key
+          assert in_space("geninf-space", "echo $AGE_KEYFILE").strip() == "/run/geninf-space/secrets/root-ssh"
+          in_space("geninf-space", "test -r $AGE_KEYFILE")
+          # agave-infra's hosts: its admin key first, then the main one
+          out = in_space("geninf-space", "ssh -G 2.31.31.53 | grep -i ^identityfile")
+          assert out.split() == ["identityfile", "/run/geninf-space/secrets/root-ssh-agave", "identityfile", "/run/geninf-space/secrets/root-ssh"], out
+          out = in_space("geninf-space", "ssh -G 192.0.2.1 | grep -i ^identityfile")
+          assert out.split() == ["identityfile", "/run/geninf-space/secrets/root-ssh"], out
 
       with subtest("tea: a login per forge, its token from the credential, on tmpfs only"):
           for name, forges in expected_forges.items():
@@ -367,13 +368,30 @@ pkgs.testers.runNixOSTest {
               # afk links the forge-prs skill
               in_space(name, 'grep -q forge-prs "$(readlink -f "$(command -v afk)")"')
 
-      with subtest("without the forges the clones give up softly"):
-          for name, unit in [("gi-infra", "gi-infra"), ("agave", "agave")]:
-              host.wait_until_succeeds(f"nixos-container run {name} -- journalctl -u {name}-clone-{unit}.service | grep -q 'trying again in 15 min'", timeout=120)
-              space_root(name, f"test ! -e /home/{name}/{unit}")
+      with subtest("without the forges the org's clones give up softly"):
+          name = "geninf-space"
+          unit = f"{name}-clone-org-git.geninf.io.service"
+          host.wait_until_succeeds(f"nixos-container run {name} -- journalctl -u {unit} | grep -q 'trying again in 15 min'", timeout=120)
+          assert space_root(name, f"systemctl show -p Result --value {unit}").strip() == "success"
+          space_root(name, f"systemctl list-timers {name}-clone-org-git.geninf.io.timer | grep -q clone-org")
 
       with subtest("Dave's herdr: the spaces as machines, attached over ssh"):
           host.wait_for_unit("nixos-activation.service", "dave")
+          # a retired space's entry the script made earlier goes, Dave's own stays
+          import hashlib
+          retired = hashlib.sha256(b"hyperconfig-space:agave").hexdigest()[:32]
+          state = "/home/dave/.local/state/herdr/client"
+          catalog = json.loads(host.succeed(f"cat {state}/endpoints.json"))
+          catalog["ssh"] += [
+              {"id": retired, "label": "agave", "target": "space-agave", "session": "default", "enabled": True},
+              {"id": "0" * 32, "label": "mine", "target": "dave@example.org", "session": "default", "enabled": True},
+          ]
+          managed = json.loads(host.succeed(f"cat {state}/hyperconfig-spaces.json")) + [retired]
+          host.succeed(f"echo {shlex.quote(json.dumps(catalog))} > {state}/endpoints.json")
+          host.succeed(f"echo {shlex.quote(json.dumps(managed))} > {state}/hyperconfig-spaces.json")
+          host.succeed("systemctl --user -M dave@ restart nixos-activation.service")
+          out = host.succeed("runuser -u dave -- herdr machine list")
+          assert "space-agave" not in out and "dave@example.org" in out, out
           out = host.succeed("runuser -u dave -- herdr machine list")
           print(out)
           for name, s in spaces.items():
@@ -386,12 +404,12 @@ pkgs.testers.runNixOSTest {
               host.wait_until_succeeds(f"nixos-container run {name} -- pgrep -u {name} -f 'herdr server'", timeout=30)
           out = host.succeed("runuser -u dave -- herdr machine status 2>&1")
           print(out)
-          # both reached and their herdr servers found (status: ok)
+          # all reached and their herdr servers found (status: ok)
           for name in spaces:
               line = next(l for l in out.splitlines() if f"\t{name}\t" in l)
               assert "error" not in line and "unreachable" not in line, out
           # Dave's login through the alias (the launchers' way)
-          assert host.succeed("runuser -u dave -- ssh -o BatchMode=yes space-agave id -un").strip() == "agave"
+          assert host.succeed("runuser -u dave -- ssh -o BatchMode=yes space-geninf-space id -un").strip() == "geninf-space"
 
       users = {"infra-space": "infra", **{n: n for n in spaces}}
       def system_path(name):
@@ -449,19 +467,19 @@ pkgs.testers.runNixOSTest {
           # them: a connection in the switch's window must not start the
           # container from the old unit (the old guest, the old credentials)
           peer.succeed("(while [ ! -e /tmp/knock-stop ]; do for p in ${lib.concatMapStringsSep " " (s: toString s.port) (lib.attrValues spaces)} 2223; do nc -z -w 1 ${hostV6} $p; done; sleep 0.05; done) >/dev/null 2>&1 &")
-          before = leader("gi-infra")
+          before = leader("geninf-space")
           out = switch("host-change")
-          assert listed(out, "stopping", "container@gi-infra.service") and listed(out, "starting", "container@gi-infra.service"), out
-          host.wait_for_unit("container@gi-infra.service")
-          host.wait_until_succeeds("nixos-container run gi-infra -- systemctl is-active multi-user.target", timeout=120)
-          assert leader("gi-infra") != before
-          new = system_path("gi-infra")
-          assert space_root("gi-infra", "readlink -f /run/current-system").strip() == new, new
-          assert space_root("gi-infra", "readlink -f /run/booted-system").strip() == new, new
-          space_root("gi-infra", "test ! -e /etc/guest-change")
+          assert listed(out, "stopping", "container@geninf-space.service") and listed(out, "starting", "container@geninf-space.service"), out
+          host.wait_for_unit("container@geninf-space.service")
+          host.wait_until_succeeds("nixos-container run geninf-space -- systemctl is-active multi-user.target", timeout=120)
+          assert leader("geninf-space") != before
+          new = system_path("geninf-space")
+          assert space_root("geninf-space", "readlink -f /run/current-system").strip() == new, new
+          assert space_root("geninf-space", "readlink -f /run/booted-system").strip() == new, new
+          space_root("geninf-space", "test ! -e /etc/guest-change")
           # started by the new unit: its nspawn flag
-          host.succeed("tr '\\0' '\\n' < /proc/$(systemctl show -p MainPID --value container@gi-infra.service)/cmdline | grep -qx --  --setenv=SPACE_TEST=1")
+          host.succeed("tr '\\0' '\\n' < /proc/$(systemctl show -p MainPID --value container@geninf-space.service)/cmdline | grep -qx --  --setenv=SPACE_TEST=1")
           peer.succeed("touch /tmp/knock-stop")
-          peer.succeed("timeout 30 ssh -o BatchMode=yes -p ${toString spaces.gi-infra.port} gi-infra@${hostV6} id -un")
+          peer.succeed("timeout 30 ssh -o BatchMode=yes -p ${toString spaces.geninf-space.port} geninf-space@${hostV6} id -un")
     '';
 }

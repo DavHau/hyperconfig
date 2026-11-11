@@ -39,8 +39,8 @@
     ../../modules/nixos/oomd.nix
     # The fleet-managing container (also on som).
     ../../modules/nixos/infra-space
-    # Dave's way into the agent spaces (gi-infra, agave; they run on
-    # som since 2026-11-10): launchers, pinned host keys, herdr machines.
+    # Dave's way into the agent spaces (geninf-space, on som): launchers,
+    # pinned host keys, herdr machines.
     ../../modules/nixos/spaces/client.nix
     ./disko.nix
   ];
