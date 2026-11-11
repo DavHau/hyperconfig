@@ -260,6 +260,11 @@
           import ./modules/nixos/clan-secrets-mirror-test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
+        # restartUnits of clan vars with the age backend, in real switches.
+        clan-vars-restart-units =
+          import ./modules/nixos/clan-vars-restart-units-test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          };
         noctalia-anthropic-usage =
           import ./modules/nixos/noctalia-anthropic-usage/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;

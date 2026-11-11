@@ -40,7 +40,18 @@ let
     (options.systemd ? sysusers && config.systemd.sysusers.enable)
     || config.services.userborn.enable;
 
-  knownUnits = lib.attrNames config.systemd.units;
+  knownUnits = lib.attrNames (lib.filterAttrs (_: u: u.enable) config.systemd.units);
+  # A template instance (container@foo.service) counts as known when its
+  # template (container@.service) is: switch-to-configuration handles both.
+  isKnown =
+    u:
+    lib.elem u knownUnits
+    || (
+      let
+        m = builtins.match "(.*@).*([.][a-z]+)" u;
+      in
+      m != null && lib.elem (lib.concatStrings m) knownUnits
+    );
 
   entries = lib.concatLists (
     lib.mapAttrsToList (
@@ -61,8 +72,8 @@ let
             {
               id = "${genName}/${fileName}";
               inherit (file) path restartUnits;
-              units = lib.filter (u: lib.elem u knownUnits) file.restartUnits;
-              unknown = lib.filter (u: !lib.elem u knownUnits) file.restartUnits;
+              units = lib.filter isKnown file.restartUnits;
+              unknown = lib.filter (u: !isKnown u) file.restartUnits;
             }
         ) gen.files
       )
@@ -78,6 +89,9 @@ let
     ) (lib.filter (e: e.units != [ ]) entries)
   );
 
+  # Runs in a subshell whose failure only warns: activate's ERR trap would
+  # otherwise turn any error here (unwritable state, a vanished file) into
+  # a failed switch, and a missed restart is the lesser harm.
   script = ''
     (
       set -u
@@ -117,7 +131,7 @@ let
           printf '%s\n' "$new" > "$state/$name"
         fi
       done < ${table}
-    )
+    ) || echo "clan-vars-restart-units: failed (exit $?); changed vars may not restart their units" >&2
   '';
 
   hasSetup = name: config.system.activationScripts ? ${name};
