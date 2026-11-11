@@ -247,6 +247,19 @@ in
         openrouter = true;
       };
 
+      # daniel-meli: a second agent of Daniel's. Not in
+      # ./hermes-agents-data.nix: no vault-ro, wallet, REA or account on
+      # vit (uid pinned here; ../../modules/nixos/vault-ids.nix denies it
+      # bam's /vault). No TeamClaude or OpenRouter key: its owner connects
+      # a model provider himself. No ssh keys known; he signs in to its
+      # dashboard.
+      daniel-meli = {
+        uid = 1118;
+        description = "daniel-meli - hermes agent, no vault access";
+        sshKeys = [ ];
+        mail.enable = false;
+      };
+
       # momentum: OpenRouter brain, and a Telegram bot in ONE group chat where
       # several allow-listed people prompt it (connected on its dashboard).
       # Identity (uid 1100, vault-ro) in ../../modules/nixos/vault-ids.nix;

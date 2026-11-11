@@ -37,5 +37,6 @@
     momentum = "momentum";
     roman = "roman";
     daniel = "daniel";
+    daniel-meli = "daniel";
   };
 }

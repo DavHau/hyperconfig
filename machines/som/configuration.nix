@@ -180,6 +180,8 @@ in
       adam.homeQuota = "30G";
       b3x = { };
       chris = { };
+      daniel = { };
+      daniel-meli = { };
       dave = { };
       # hermes/workspace (~25G) stays backed up; omd2's rebuildable data
       # moved to ~/scratch (2026-11-07).
@@ -519,6 +521,8 @@ in
         # added below.
         roman = 19;
         daniel = 20;
+        # not in hermes-agents-data.nix either, added below.
+        daniel-meli = 21;
       };
       # Container names are capped at 11 chars (nspawn veth names,
       # hyperhermes container-slots); longer agent names get a short one
@@ -545,7 +549,7 @@ in
         extraHostnames = slotHostnames.${name} or [ ];
       }
       // lib.optionalAttrs (slotNames ? ${name}) { name = slotNames.${name}; };
-    }) (import ./hermes-agents-data.nix // { roman = { }; });
+    }) (import ./hermes-agents-data.nix // { roman = { }; daniel-meli = { }; });
   services.hyperhermes.slots = {
     legacyDomain = "slots.davhau.com";
     egress = "Mullvad (its outbound address is a Mullvad one, not its own IPv6 or the public IPv4)";
