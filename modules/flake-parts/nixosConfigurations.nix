@@ -140,6 +140,15 @@ in {
               ../../modules/nixos/common.nix
               ../../modules/nixos/networkmanager-restart-late.nix
             ];
+            # clan's age backend ignores vars' restartUnits
+            # (../nixos/clan-vars-restart-units.nix does them), on every
+            # machine of the inventory.
+            clan-vars-restart-units = {
+              module.name = "importer";
+              module.input = "clan-core";
+              roles.default.tags.all = { };
+              roles.default.extraModules = [ ../nixos/clan-vars-restart-units.nix ];
+            };
             # Every machine but the installer keeps a mirror of the secrets
             # repo (../nixos/clan-secrets-mirror.nix); the installer only
             # boots from RAM and has no state to keep it in. Taken from
