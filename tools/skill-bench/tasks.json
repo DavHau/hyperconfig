@@ -43,13 +43,13 @@
     },
     {
       "id": "spaces-ports-uids",
-      "prompt": "Where are the agent spaces' ssh ports and uids allocated? Give the file, and the sshPort, uid and proxyUid of the `agave` space, and the machine it runs on.",
+      "prompt": "Where are the agent spaces' ssh ports and uids allocated? Give the file, and the sshPort, uid and proxyUid of the `geninf-space` space, and the machine it runs on.",
       "grade": {
         "all": [
           "modules/nixos/spaces/registry\\.nix",
-          "2225",
-          "1207",
-          "1208",
+          "2224",
+          "1205",
+          "1206",
           "\\bsom\\b"
         ]
       }
@@ -127,12 +127,12 @@
     },
     {
       "id": "forge-tokens-space",
-      "prompt": "How does the agave space's forge API token (for git.geninf.io) get from where it is stored to the `tea` CLI inside the space? Name the clan vars generator, the files involved, the unit that writes tea's config, and where that config lives.",
+      "prompt": "How does the geninf-space space's forge API token (for git.geninf.io) get from where it is stored to the `tea` CLI inside the space? Name the clan vars generator, the files involved, the unit that writes tea's config, and where that config lives.",
       "grade": {
         "all": [
-          "space-agave-token-geninf",
+          "space-geninf-space-token-geninf",
           "modules/nixos/spaces/forges\\.nix",
-          "modules/nixos/spaces/agave\\.nix",
+          "modules/nixos/spaces/geninf-space\\.nix",
           "forge-cli",
           "/run/"
         ],
