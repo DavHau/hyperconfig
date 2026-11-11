@@ -1360,14 +1360,18 @@ pkgs.testers.runNixOSTest {
           # refused: another page's post, a wrong token, unconfirmed values
           code, _ = post(rid, {"token": token(rid), "v0": value, "v0_confirm": value}, "-H 'Sec-Fetch-Site: cross-site'")
           assert code == 403, code
+          code, _ = post(rid, {"token": token(rid), "v0": value, "v0_confirm": value}, "-H 'Origin: https://evil.example'")
+          assert code == 403, code
           code, _ = post(rid, {"token": "wrong", "v0": value, "v0_confirm": value})
           assert code == 400, code
           code, _ = post(rid, {"token": token(rid), "v0": value, "v0_confirm": value + "x"})
           assert code == 400, code
           guest(m, f"test ! -e {store}/clan-vars/per-machine/testbox/api")
 
-          # Dave's answer: set, encrypted, committed and pushed
-          code, html = post(rid, {"token": token(rid), "v0": value, "v0_confirm": value})
+          # Dave's answer: set, encrypted, committed and pushed. Sent as a
+          # browser does from this no-referrer page: Origin null, but
+          # Sec-Fetch-Site same-origin.
+          code, html = post(rid, {"token": token(rid), "v0": value, "v0_confirm": value}, "-H 'Origin: null' -H 'Sec-Fetch-Site: same-origin'")
           assert code == 200 and "Stored" in html, (code, html)
           assert wait(rid) == "set"
           assert decrypt("testbox", "api", "token") == value

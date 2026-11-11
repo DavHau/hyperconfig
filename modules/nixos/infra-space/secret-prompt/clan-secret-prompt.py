@@ -570,7 +570,14 @@ class Handler(BaseHTTPRequestHandler):
         # Same-origin only (the session cookie is SameSite=Lax; this is belt and braces).
         site = self.headers.get("Sec-Fetch-Site")
         origin = self.headers.get("Origin")
-        if (site and site not in ("same-origin", "none")) or (origin and PUBLIC_URL and origin != PUBLIC_URL):
+        # Sec-Fetch-Site decides when the browser sends it (all current ones
+        # do). Origin is only the fallback: browsers send `Origin: null` for
+        # a form post from a page with a no-referrer policy (like this one).
+        if site:
+            refused = site not in ("same-origin", "none")
+        else:
+            refused = bool(origin and PUBLIC_URL and origin != PUBLIC_URL)
+        if refused:
             self._send(403, _page("clan secret", "<p>Cross-origin submission refused.</p>"))
             return
         try:
