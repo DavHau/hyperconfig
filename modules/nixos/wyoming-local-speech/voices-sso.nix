@@ -49,7 +49,7 @@ in
     scope = "openid email profile groups";
     reverseProxy = true;
     trustedProxyIP = [ "127.0.0.1/32" ];
-    httpAddress = "127.0.0.1:4180";
+    httpAddress = "http://127.0.0.1:4180";
     extraConfig = {
       oidc-email-claim = "preferred_username";
       insecure-oidc-allow-unverified-email = true;
