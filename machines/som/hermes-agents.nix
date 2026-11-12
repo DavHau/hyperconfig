@@ -96,8 +96,8 @@ in
 
   services.hyperhermes.agents = lib.mkMerge [
     (lib.mapAttrs (_: a: { inherit (a) uid; }) data)
-    (lib.mapAttrs (_: _: { wallet.enable = true; }) data)
-    (lib.mapAttrs (_: _: { rea.enable = true; }) data)
+    (lib.mapAttrs (_: _: { wallet.enable = true; }) (lib.filterAttrs (_: a: a.wallet or true) data))
+    (lib.mapAttrs (_: _: { rea.enable = true; }) (lib.filterAttrs (_: a: a.rea or true) data))
     # The gpu-host skill: the agents with an account on vit.
     (lib.mapAttrs (_: _: { skillDirs = [ "${gpuSkill}/share/skills" ]; }) data)
     {
@@ -248,13 +248,12 @@ in
         openrouter = true;
       };
 
-      # daniel-meli: a second agent of Daniel's. Not in
-      # ./hermes-agents-data.nix: no vault-ro, wallet, REA or account on
-      # vit (uid pinned here; ../../modules/nixos/vault-ids.nix denies it
-      # bam's /vault). No TeamClaude or OpenRouter key: its owner connects
+      # daniel-meli: a second agent of Daniel's. In
+      # ./hermes-agents-data.nix for its GPU account on vit, but without
+      # vault-ro (../../modules/nixos/vault-ids.nix denies it bam's /vault),
+      # wallet or REA. No TeamClaude or OpenRouter key: its owner connects
       # a model provider himself.
       daniel-meli = {
-        uid = 1118;
         description = "daniel-meli - hermes agent, no vault access";
         sshKeys = [
           "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO5mN7psSjBGRYcbYtxEt0UHp+1OuyyqPxtKa2vI8kf3 davhau-hermes"

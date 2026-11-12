@@ -10,6 +10,8 @@
 # ../../modules/nixos/vault-ids.nix, whose id ladder lists them all); the
 # values here must match.
 #
+# `wallet = false` / `rea = false` leave those off on som (default on).
+#
 # `vault = false` keeps an agent out of `vault-ro` on som and vit. That
 # alone does not lock it out: /vault/parquet is world-readable on bam, so
 # such an agent's uid also carries a deny ACL on bam's /vault
@@ -32,5 +34,12 @@
   thaigersprint = {
     uid = 1114;
     vault = false;
+  };
+  # Daniel's second agent: GPU account on vit only, no vault, wallet or REA.
+  daniel-meli = {
+    uid = 1118;
+    vault = false;
+    wallet = false;
+    rea = false;
   };
 }
