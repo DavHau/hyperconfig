@@ -16,7 +16,7 @@
 let
   settings = {
     font-family = "FiraCode Nerd Font";
-    font-size = 14;
+    font-size = 11;
 
     # alacritty 0.17's built-in colors
     background = "181818";
