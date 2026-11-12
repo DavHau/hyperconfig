@@ -1,0 +1,295 @@
+hermes v0.23.0: a user message sent while a foreground terminal command
+runs moves the command to the background (still running, notify on
+completion) on every busy path, not only for a text-only redirect.
+
+Symptom: sometimes a message sent mid-command killed the command
+("[Command interrupted]", exit 130) instead of yielding it.
+
+Cause: only AIAgent.redirect() (text-only busy messages in interrupt
+mode) asks the tool workers to yield. Every other busy path either hard-
+or soft-interrupts, and the terminal wait loop kills on the interrupt
+bit: the TUI/desktop prompt.submit fallback for older runtimes, a message
+with attachments (queued, but the turn stays parked behind the command
+until it exits), the messaging gateway's interrupt for media/voice
+(gateway/run_inbound.py, run_busy.py, run_turn.py's pending-message
+monitor) and the classic CLI's typed interrupt.
+
+Fix: agent/interrupt_control.py yield_tool_commands(agent, wait) requests
+the yield for every tool worker while tools execute and (with wait) blocks
+up to 2 s until the terminal took it; each of those paths calls it first.
+The attachment path only yields (the message stays queued as the next
+turn, with its images). Explicit stops (/stop, Esc, Ctrl-C, the Stop
+button, session.interrupt) still kill. Non-local terminal backends have no
+host process to adopt and keep the old behaviour.
+
+diff --git a/agent/interrupt_control.py b/agent/interrupt_control.py
+index af647a1c4f..f00b8e4447 100644
+--- a/agent/interrupt_control.py
++++ b/agent/interrupt_control.py
+@@ -9,6 +9,7 @@ import threading
+ from typing import Optional
+ 
+ from agent.interrupt_compat import request_hard_interrupt
++from tools.interrupt import is_thread_yield_requested as _is_thread_yield_requested
+ from tools.interrupt import request_yield as _request_yield
+ from tools.interrupt import set_interrupt as _set_interrupt
+ 
+@@ -157,6 +158,34 @@ def _ic_signal_tool_workers(agent, active: bool, **kw) -> None:
+             pass
+ 
+ 
++def yield_tool_commands(agent, wait: float = 0.0) -> bool:
++    """Ask ``agent``'s tool workers to YIELD: a foreground terminal command is handed, still
++    running, to the background registry (notify on completion) instead of being killed. Only
++    while the agent executes tools; True when at least one worker was asked. ``wait`` > 0 blocks
++    (bounded) until every worker took the request, so an interrupt that follows can no longer
++    kill the command: the terminal wait loop checks the interrupt bit before the yield.
++    For any user message that arrives mid-command (with attachments too); explicit stops
++    (/stop, Esc, the Stop button) keep killing."""
++    if not getattr(agent, "_executing_tools", False):
++        return False
++    tracker = getattr(agent, "_tool_worker_threads", None)
++    tracker_lock = getattr(agent, "_tool_worker_threads_lock", None)
++    if tracker is None or tracker_lock is None:
++        return False
++    with tracker_lock:
++        worker_tids = list(tracker)
++    for tid in worker_tids:
++        _request_yield(tid)
++    if wait > 0 and worker_tids:
++        import time
++        deadline = time.monotonic() + wait
++        # Consumed by the terminal poll loop (<= 200 ms); a tool that never yields keeps the
++        # bit until its worker exits, so the wait is bounded.
++        while time.monotonic() < deadline and any(_is_thread_yield_requested(t) for t in worker_tids):
++            time.sleep(0.02)
++    return bool(worker_tids)
++
++
+ class InterruptControlMixin:
+     """interrupt()/hard_interrupt()/clear_interrupt()/steer()/redirect() (see module docstring)."""
+ 
+diff --git a/gateway/run_busy.py b/gateway/run_busy.py
+index 2f94d54708..58d6a1c5ad 100644
+--- a/gateway/run_busy.py
++++ b/gateway/run_busy.py
+@@ -828,6 +828,10 @@ class GatewayBusySessionMixin:
+                 )
+             elif not _interrupt_text and _media_urls:
+                 _interrupt_text = _build_media_placeholder(event)
++            # A user message, not a Stop: a running foreground command moves to the background
++            # (still running, notify on completion) instead of being killed by the interrupt.
++            from agent.interrupt_control import yield_tool_commands
++            await asyncio.get_running_loop().run_in_executor(None, lambda: yield_tool_commands(running_agent, wait=2.0))
+             running_agent.interrupt(_interrupt_text)
+         except Exception:
+             pass  # don't let interrupt failure block the ack
+diff --git a/gateway/run_inbound.py b/gateway/run_inbound.py
+index 2391ba5941..fb7e8fb1c8 100644
+--- a/gateway/run_inbound.py
++++ b/gateway/run_inbound.py
+@@ -724,6 +724,10 @@ class GatewayInboundMixin(GatewayInboundHooksMixin, GatewayInboundTranscriptionM
+             _interrupt_text = _build_media_placeholder(event)
+         # Delivered via adapter._pending_messages (read by _run_agent); never also buffered on self
+         # — that copy was never consumed and grew unbounded.
++        # A user message, not a Stop: a running foreground command moves to the background
++        # (still running, notify on completion) instead of being killed by the interrupt.
++        from agent.interrupt_control import yield_tool_commands
++        await asyncio.get_running_loop().run_in_executor(None, lambda: yield_tool_commands(running_agent, wait=2.0))
+         running_agent.interrupt(_interrupt_text)
+ 
+     async def _hm_busy_preempt(self, event: MessageEvent, source: SessionSource, _quick_key: str) -> bool:
+diff --git a/gateway/run_turn.py b/gateway/run_turn.py
+index aa5db488f3..4c584460c8 100644
+--- a/gateway/run_turn.py
++++ b/gateway/run_turn.py
+@@ -1220,6 +1220,10 @@ class GatewayTurnMixin(GatewayBackgroundMixin, GatewayTurnPrepareMixin, GatewayT
+             elif not pending_text and (getattr(_peek_event, "media_urls", None) or []):
+                 pending_text = _build_media_placeholder(_peek_event)
+         log()
++        # A pending user message, not a Stop: yield a running foreground command first.
++        from agent.interrupt_control import yield_tool_commands
++        with suppress(Exception):
++            await asyncio.get_running_loop().run_in_executor(None, lambda: yield_tool_commands(agent, wait=2.0))
+         agent.interrupt(pending_text)
+         _interrupt_detected.set()
+         # Abort streaming TTS on barge-in.
+diff --git a/hermes_cli/cli_chat_turn_mixin.py b/hermes_cli/cli_chat_turn_mixin.py
+index fadca305c3..21a92c9d90 100644
+--- a/hermes_cli/cli_chat_turn_mixin.py
++++ b/hermes_cli/cli_chat_turn_mixin.py
+@@ -434,6 +434,13 @@ class CLIChatTurnMixin:
+                 interrupt_msg = None
+                 continue
+             _cprint(f"\n{t('cli.chat.new_message_interrupting')}")
++            # A typed message, not Ctrl-C: a running foreground command moves to the background
++            # (still running, notify on completion) instead of being killed by the interrupt.
++            try:
++                from agent.interrupt_control import yield_tool_commands
++                yield_tool_commands(self.agent, wait=2.0)
++            except Exception:
++                pass
+             if turn.stop_event is not None:
+                 turn.stop_event.set()
+             self.agent.interrupt(interrupt_msg)
+diff --git a/tests/tools/test_busy_message_yields_command.py b/tests/tools/test_busy_message_yields_command.py
+new file mode 100644
+index 0000000000..25f5cbbda4
+--- /dev/null
++++ b/tests/tools/test_busy_message_yields_command.py
+@@ -0,0 +1,125 @@
++"""A user message sent while a foreground terminal command runs hands the command to the
++background (still running, notify on completion) on EVERY busy path, not only for a
++text-only redirect: a message with an image, the hard-interrupt fallback of the TUI/desktop
++busy submit, and the messaging gateway's interrupt. An explicit stop still kills it.
++"""
++import json
++import os
++import threading
++import time
++
++import pytest
++
++from agent.interrupt_control import InterruptControlMixin, yield_tool_commands
++from tools import interrupt as interrupt_mod
++from tools.process_registry import process_registry
++from tools.terminal_tool import terminal_tool
++
++pytestmark = pytest.mark.platforms("linux")
++
++
++class _Agent(InterruptControlMixin):
++    _executing_tools = True
++    _interrupt_requested = False
++    _pending_steer = None
++    _pending_redirect = None
++    _tool_interrupt_reason = None
++    _interrupt_message = None
++    api_mode = "chat_completions"
++    quiet_mode = True
++
++    def __init__(self):
++        self._pending_steer_lock = threading.Lock()
++        self._pending_redirect_lock = threading.Lock()
++        self._tool_worker_threads = set()
++        self._tool_worker_threads_lock = threading.Lock()
++        self._active_children = []
++        self._active_children_lock = threading.Lock()
++        self._execution_thread_id = None
++
++
++def _start_command(agent, res, command="echo started; sleep 60; echo done"):
++    def worker():
++        with agent._tool_worker_threads_lock:
++            agent._tool_worker_threads.add(threading.current_thread().ident)
++        try:
++            res["result"] = json.loads(terminal_tool(command, task_id="busy-yield-test", timeout=90))
++        finally:
++            with agent._tool_worker_threads_lock:
++                agent._tool_worker_threads.discard(threading.current_thread().ident)
++            interrupt_mod.set_interrupt(False, threading.current_thread().ident)
++
++    t = threading.Thread(target=worker, daemon=True)
++    t.start()
++    time.sleep(1.5)
++    return t
++
++
++def _assert_yielded_and_cleanup(t, res):
++    t.join(timeout=15)
++    assert not t.is_alive(), "terminal tool still blocked on the command"
++    r = res["result"]
++    try:
++        assert r["status"] == "yielded_to_background", r
++        assert r["exit_code"] is None and "started" in r["output"]
++        assert os.path.exists(f"/proc/{r['pid']}")
++        assert process_registry.poll(r["session_id"])["status"] == "running"
++    finally:
++        if r.get("session_id"):
++            process_registry.kill_process(r["session_id"])
++
++
++@pytest.mark.live_system_guard_bypass
++def test_yield_then_interrupt_moves_command_to_background(tmp_path, monkeypatch):
++    """The interrupt that follows a user message (media payload, older runtime, gateway
++    interrupt mode) no longer kills the command: yield_tool_commands(wait=...) returns only
++    once the terminal handed it off."""
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    agent, res = _Agent(), {}
++    t = _start_command(agent, res)
++    assert yield_tool_commands(agent, wait=2.0) is True
++    agent.interrupt("look at this screenshot")
++    _assert_yielded_and_cleanup(t, res)
++
++
++@pytest.mark.live_system_guard_bypass
++def test_busy_submit_with_image_yields_command(tmp_path, monkeypatch):
++    """The desktop/TUI entry point: prompt.submit while busy with an attached image queues the
++    message and yields the running command instead of leaving the turn parked behind it."""
++    from tui_gateway import server
++
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    monkeypatch.setattr(server, "_load_busy_input_mode", lambda: "interrupt")
++    agent, res = _Agent(), {}
++    t = _start_command(agent, res)
++    session = {"agent": agent, "session_key": "k", "history": [], "history_lock": threading.Lock(),
++               "history_version": 0, "running": True, "transport": None,
++               "attached_images": ["/tmp/screenshot.png"]}
++    server._sessions["sid"] = session
++    try:
++        resp = server._methods["prompt.submit"]("r1", {"session_id": "sid", "text": "what is this?"})
++    finally:
++        server._sessions.pop("sid", None)
++    assert resp["result"]["status"] == "queued"
++    assert session["queued_prompt"]["image_paths"] == ["/tmp/screenshot.png"]
++    assert not agent._interrupt_requested  # the turn goes on to the queued message, not killed
++    _assert_yielded_and_cleanup(t, res)
++
++
++@pytest.mark.live_system_guard_bypass
++def test_explicit_stop_still_kills_command(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    agent, res = _Agent(), {}
++    t = _start_command(agent, res)
++    agent.hard_interrupt()
++    t.join(timeout=15)
++    assert not t.is_alive()
++    assert res["result"]["exit_code"] == 130
++
++
++def test_no_yield_outside_tool_execution():
++    agent = _Agent()
++    agent._executing_tools = False
++    agent._tool_worker_threads.add(12345)
++    assert yield_tool_commands(agent) is False
++    assert not interrupt_mod.is_thread_yield_requested(12345)
+diff --git a/tui_gateway/session_auto_continue.py b/tui_gateway/session_auto_continue.py
+index 49a19afe8d..7c19a46fb7 100644
+--- a/tui_gateway/session_auto_continue.py
++++ b/tui_gateway/session_auto_continue.py
+@@ -481,6 +481,12 @@ def _interrupt_busy_session(sid: str, session: dict, agent: Any) -> None:
+ 
+     def interrupt() -> None:
+         try:
++            with contextlib.suppress(Exception):
++                # A user message, not a Stop: a running foreground command moves to the
++                # background (still running, notify on completion) before the interrupt lands.
++                from agent.interrupt_control import yield_tool_commands
++                if use_agent:
++                    yield_tool_commands(agent, wait=2.0)
+             with contextlib.suppress(Exception):
+                 agent.interrupt() if use_agent else _get_compute_host_supervisor().interrupt(sid)
+         finally:
+@@ -697,6 +703,12 @@ def _handle_busy_submit(rid, sid: str, session: dict, text: Any, transport: Any,
+     # pending steer buffer — silently destroying the earlier messages of the burst. See #86134.
+     if mode == "interrupt" and not image_paths:
+         _interrupt_busy_session(sid, session, agent)
++    elif mode == "interrupt" and agent is not None:
++        # Attachments queue without cancelling, but must not wait behind a foreground command:
++        # it yields to the background (not killed) and the turn goes on to the queued message.
++        with contextlib.suppress(Exception):
++            from agent.interrupt_control import yield_tool_commands
++            yield_tool_commands(agent)
+     return _ok(rid, {"status": "queued"})
+ 
+ 

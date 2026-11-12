@@ -148,6 +148,11 @@ package; a consumer passes its own `settings` and package to it).
   takes native images away from every model); the tool-availability
   caches are per main model, so one session's text-only model no longer
   drops `vision_analyze`/`browser_vision` from another session's tool list.
+- `hermes-busy-message-yields-command`: a message sent while a foreground
+  terminal command runs (with an image too, over the messaging gateway or
+  the classic CLI) moves the command to the background, still running,
+  instead of killing it; upstream only a text-only redirect yields. An
+  explicit stop still kills.
 
 Camofox left hermes core in v0.23.0 for the official `camofox` plugin; the
 browser feature runs it from `pkgs/hermes-camofox-plugin`, which adds

@@ -39,6 +39,7 @@ let
     # resume and shutdown drain.
     ./patches/hermes-subagents-resume-after-restart.patch
     ./patches/hermes-openrouter-all-models.patch
+    ./patches/hermes-busy-message-yields-command.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {
