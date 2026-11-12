@@ -301,6 +301,9 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/users/hsjobeki-vault.nix — hsjobeki on som: SSH login with read-only access to /vault/parquet mounted at /vault (vault-nfs-client.nix) via the `va… <- som
 - modules/nixos/users/stefan-vault.nix — stefan on the wg-vault client machines (som, vit): <- vit, machines/som/hermes-agents.nix
 - modules/nixos/users/stefan.nix — - <- machines/nas/users.nix, m/users/stefan-vault.nix
+- modules/nixos/wyoming-local-speech/default.nix — Local speech for Home Assistant (cm-pi) on vit: <- vit
+- modules/nixos/wyoming-local-speech/stt.py — -
+- modules/nixos/wyoming-local-speech/tts.py — -
 - modules/nixos/zfs-keylocation-sync/default.nix — Keep a ZFS encryption root's `keylocation` pointing at its current key file. <- machines/bam/zfs.nix, m/zfs-keylocation-sync/test.nix
 - modules/nixos/zfs-keylocation-sync/test.nix — An encrypted pool whose keylocation names a key file that no longer exists (the key moved, as clan's vars did on bam) s… <- flake.nix
 - modules/nixos/zfs-remote-unlock/ask-key.sh — Unlock an encrypted ZFS root in the initrd. <- m/zfs-remote-unlock/default.nix

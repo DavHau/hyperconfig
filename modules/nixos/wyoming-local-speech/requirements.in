@@ -1,0 +1,15 @@
+# Top-level deps of stt.py / tts.py (versions as benchmarked in
+# dave-hermes's ~/jobs/speechbench envs ov + cpu on vit). Lock with:
+#   uv pip compile --python-version 3.12 --python-platform x86_64-manylinux_2_28 \
+#     --generate-hashes requirements.in -o requirements.txt
+openvino==2026.4.1
+tokenizers==0.22.2
+librosa==1.0.0
+numpy==2.4.6
+wyoming==1.11.0
+supertonic==1.3.1
+onnxruntime==1.31.1
+pythainlp==5.4.0
+huggingface-hub==1.21.0
+soundfile==0.14.0
+fastthaig2p @ https://github.com/awslabs/FastThaiG2P/archive/4e82a291b4cf2876326744c6580121e9986ad354.zip

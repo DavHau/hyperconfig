@@ -11,6 +11,7 @@
     ../../modules/nixos/hermes-agents-gpu-host.nix
     ../../modules/nixos/captchakraken-server.nix
     ../../modules/nixos/ocr-server
+    ../../modules/nixos/wyoming-local-speech
     ../../modules/nixos/users/stefan-vault.nix
     ../../modules/nixos/tang-server.nix
     ../../modules/nixos/luks-unlock
@@ -30,6 +31,9 @@
     interface = "wlo1";
   };
   hyper.luksUnlock.name = "cryptusb";
+
+  # Local STT/TTS for Home Assistant on cm-pi (iGPU + CPU, never the NVIDIA card).
+  hyper.wyomingLocalSpeech.enable = true;
 
   # Recovery while vit waits for its passphrase: `clan-unlock vit` (ssh into
   # the initrd at its fixed link-local address, through som).

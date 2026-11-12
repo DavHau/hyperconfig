@@ -57,6 +57,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.toolchainCacheDirs: modules/nixos/toolchain-cache-dirs/default.nix
 - hyper.unlockTarget: modules/nixos/unlock-target.nix
 - hyper.vaultIds.deniedUsers: modules/nixos/vault-ids.nix
+- hyper.wyomingLocalSpeech: modules/nixos/wyoming-local-speech/default.nix
 - hyper.zfsArcMax: modules/nixos/zfs-arc-max.nix
 - hyper.zfsEphemeralTmp.dataset: modules/nixos/zfs-ephemeral-tmp.nix
 - hyper.ztEuLanGuard.refusedUsers: modules/nixos/zt-eu-lan-guard/default.nix

@@ -70,7 +70,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 ### vit
 - header: -
 - own files: disko.nix
-- imports: m/dave.nix, m/laptop.nix, m/user-dave.nix, m/nvidia.nix, m/vault-nfs-client.nix, m/hermes-agents-gpu-host.nix, m/captchakraken-server.nix, m/ocr-server/default.nix, m/users/stefan-vault.nix, m/tang-server.nix, m/luks-unlock/default.nix, m/initrd-wifi.nix, m/initrd-ssh.nix
+- imports: m/dave.nix, m/laptop.nix, m/user-dave.nix, m/nvidia.nix, m/vault-nfs-client.nix, m/hermes-agents-gpu-host.nix, m/captchakraken-server.nix, m/ocr-server/default.nix, m/wyoming-local-speech/default.nix, m/users/stefan-vault.nix, m/tang-server.nix, m/luks-unlock/default.nix, m/initrd-wifi.nix, m/initrd-ssh.nix
 - input modules: nixos-hardware.nixosModules.asus-zephyrus-gu605cw
 - vars generated: hyprspace initrd-ssh luks-tang nix-cache-nix-cache openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version tang wireguard-keys-wg-edi wireguard-keys-wg-vault wireguard-network-wg-edi wireguard-network-wg-vault yggdrasil
 
