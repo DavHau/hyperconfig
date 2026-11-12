@@ -135,6 +135,8 @@ in
     ../teamclaude-api-key.nix
     # Its A/AAAA record (hyper.porkbunRecords below).
     ../porkbun-records
+    # Usage counters for Grafana (stats.davhau.com).
+    ./metrics.nix
   ];
 
   options.hyper.teamclaudeGateway.clientKeys = lib.mkOption {

@@ -456,6 +456,7 @@ in {
               roles.server.extraModules = [
                 ../../modules/nixos/monitoring-server.nix
                 ../../modules/nixos/monitoring-alerts.nix
+                ../../modules/nixos/monitoring-teamclaude.nix
               ];
             };
           };

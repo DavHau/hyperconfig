@@ -84,6 +84,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/monitoring-alerts.nix — Fleet alerts: Grafana unified alerting on the monitoring server (edi), evaluated against the Mimir datasource the clan-… <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/nixpkgs-bump.nix
 - modules/nixos/monitoring-grafana-sso.nix — Grafana of the clan-core monitoring server, published at stats.davhau.com behind the clan's pocket-id (modules/clan/oid… <- edi
 - modules/nixos/monitoring-server.nix — Local overrides for the clan-core monitoring server (Mimir + Loki). <- modules/flake-parts/nixosConfigurations.nix
+- modules/nixos/monitoring-teamclaude.nix — "TeamClaude usage" dashboard on the monitoring server's Grafana (stats.davhau.com/d/teamclaude-usage), fed by som's exp… <- modules/flake-parts/nixosConfigurations.nix
 - modules/nixos/monitoring-zfs-pools.nix — Pushes ZFS pool health and capacity to Mimir for ./monitoring-alerts.nix. <- modules/flake-parts/nixosConfigurations.nix
 - modules/nixos/nautilus.nix — Nautilus right-click "Open in Ghostty" (folder background and folder items), via the nautilus-open-any-terminal extensi… <- m/dave.nix
 - modules/nixos/nether.nix — -
@@ -292,6 +293,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/sway/sway.config.nix — - <- m/sway/default.nix
 - modules/nixos/sway/waybar.jsonc.nix — - <- m/sway/sway.config.nix
 - modules/nixos/teamclaude-gateway/default.nix — TeamClaude: pooled Claude subscription gateway at https://teamclaude.davhau.com/, after project-zero's pubproxy01 setup… <- som
+- modules/nixos/teamclaude-gateway/metrics.nix — Pushes TeamClaude usage to Mimir for the "TeamClaude usage" dashboard (../monitoring-teamclaude.nix on the monitoring s… <- m/teamclaude-gateway/default.nix
 - modules/nixos/toolchain-cache-dirs/default.nix — Tool defaults that keep rebuildable downloads (module caches, package stores, model files) in ~/.cache, for hosts where… <- som
 - modules/nixos/toolchain-cache-dirs/storage-skill/SKILL.md — Where to put files on this machine. Your home is small and backed up, ~/scratch and ~/.cache are large and not. Read bef <- machines/som/hermes-agents.nix
 - modules/nixos/user-manager-restart/default.nix — Bring a user's `systemd --user` manager back after it dies. <- som, m/user-manager-restart/test.nix
