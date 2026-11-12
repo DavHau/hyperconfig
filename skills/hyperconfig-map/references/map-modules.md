@@ -131,7 +131,6 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/prune-gcroots.nix — CLI to prune stale auto GC roots (nix-direnv devshells and old result links). <- m/common-tools.nix
 - modules/nixos/prune-gcroots.sh — - <- m/prune-gcroots.nix
 - modules/nixos/public-ipv6-token.nix — A stable, hand-picked IPv6 suffix on the LAN uplink, so the host has a predictable public address in whatever /64 the A… <- som
-- modules/nixos/pueue.nix — - <- m/dave.nix
 - modules/nixos/retiolum.nix — -
 - modules/nixos/rgb-off.nix — Control the machine's RGB LEDs. <- bam, som
 - modules/nixos/riscv64.nix — - <- cm-pi

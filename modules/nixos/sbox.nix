@@ -34,8 +34,6 @@
       # on dave's machines since the pi.nix / pi-superpowers.nix wrappers went.
       "$HOME/.omp/profiles/afk/agent" = {};
       "$HOME/.local/share/zoxide" = {};
-      "$HOME/.local/share/pueue" = {};
-      "$XDG_RUNTIME_DIR/pueue_$USER.socket" = {};
       "$HOME/.claude/.credentials.json" = {};
       "$HOME/.claude.json" = {};
       # VSCode state/config (caches, workspaces, settings, etc.)
@@ -61,7 +59,6 @@
       "$HOME/.ssh/id_ed25519_github1.pub".to = "$HOME/.ssh/id_ed25519.pub";
       # VSCode extensions (nix-managed) and CLI
       "$HOME/.vscode" = {};
-      "$HOME/.config/pueue" = {};
     } // lib.optionalAttrs (config ? hyper && config.hyper ? inferenceApiKey) {
       # p0 inference token: omp/afk resolve it INSIDE the sandbox by running
       # `p0-api-key` (models.yml apiKey: "!p0-api-key", inference-api-key.nix),

@@ -105,7 +105,6 @@ in
     ./ssh.nix
     ./locale.nix
     ./nix-gc.nix
-    ./pueue.nix
     ./wdisplays.nix
     # voxtype now arrives via inputs.spaces.nixosModules.spaces (above).
   ];
