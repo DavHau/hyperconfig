@@ -94,6 +94,8 @@ in
     # ./sway
     # ./ups.nix
     ./packages.nix
+    # exec tracing + `infra-unused`: which installed programs get used.
+    ./exec-usage
     ./deluge.nix
     ./boot.nix
     ./desktop.nix

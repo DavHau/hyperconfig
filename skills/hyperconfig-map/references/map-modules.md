@@ -82,6 +82,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/locale.nix — - <- m/dave.nix
 - modules/nixos/low-battery-power-off.nix — - <- m/laptop.nix
 - modules/nixos/monitoring-alerts.nix — Fleet alerts: Grafana unified alerting on the monitoring server (edi), evaluated against the Mimir datasource the clan-… <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/nixpkgs-bump.nix
+- modules/nixos/monitoring-exec-usage.nix — "Unused packages" dashboard on the monitoring server's Grafana (stats.davhau.com/d/exec-usage), fed by ./exec-usage on… <- modules/flake-parts/nixosConfigurations.nix
 - modules/nixos/monitoring-grafana-sso.nix — Grafana of the clan-core monitoring server, published at stats.davhau.com behind the clan's pocket-id (modules/clan/oid… <- edi
 - modules/nixos/monitoring-server.nix — Local overrides for the clan-core monitoring server (Mimir + Loki). <- modules/flake-parts/nixosConfigurations.nix
 - modules/nixos/monitoring-teamclaude.nix — "TeamClaude usage" dashboard on the monitoring server's Grafana (stats.davhau.com/d/teamclaude-usage), fed by som's exp… <- modules/flake-parts/nixosConfigurations.nix
@@ -197,6 +198,9 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/entity-storage/migrate.sh — entity-storage-migrate USER [--to-scratch RELPATH]... <- m/entity-storage/default.nix
 - modules/nixos/entity-storage/reconcile.sh — entity-storage-reconcile [user...]: <- m/entity-storage/default.nix
 - modules/nixos/entity-storage/test.nix — Entity storage (./default.nix) on a ZFS pool on an empty disk. <- flake.nix
+- modules/nixos/exec-usage/default.nix — Exec usage: which installed programs get run, so the config can be slimmed. <- m/dave.nix
+- modules/nixos/exec-usage/infra-unused.py — - <- m/exec-usage/default.nix
+- modules/nixos/exec-usage/tracer.py — - <- m/exec-usage/default.nix
 - modules/nixos/hyprspace/default.nix — -
 - modules/nixos/infra-space/afk.nix — afk in the infra-space container, for Dave's interactive sessions as `infra` (hermes never starts it): <- m/infra-space/default.nix, m/spaces/afk.nix
 - modules/nixos/infra-space/age-recipients.nix — The clan vars' age recipients (vars.settings.recipients.default in ../../flake-parts/nixosConfigurations.nix): <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/default.nix, m/infra-space/guest.nix, m/spaces/default.nix

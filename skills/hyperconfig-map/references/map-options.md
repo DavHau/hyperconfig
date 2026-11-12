@@ -28,6 +28,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.coolerLcd.usbPort: modules/nixos/cooler-lcd/default.nix
 - hyper.encryptedDns: modules/nixos/encrypted-dns.nix
 - hyper.entityStorage: modules/nixos/entity-storage/default.nix
+- hyper.execUsage: modules/nixos/exec-usage/default.nix
 - hyper.firmwareOnly: modules/nixos/firmware-only.nix
 - hyper.inferenceApiKey: modules/nixos/inference-api-key.nix
 - hyper.infraSpace: modules/nixos/infra-space/default.nix
@@ -70,7 +71,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - networking.publicIPv6: modules/nixos/public-ipv6-token.nix
 - niri.outputExtras: modules/nixos/niri-output-extras.nix
 - openrouter: machines/som/hermes-inference.nix
-- path: modules/nixos/infra-space/test.nix, modules/nixos/ipv4-forward-slots-test/default.nix, modules/nixos/monitoring-teamclaude.nix, modules/nixos/spaces/test.nix
+- path: modules/nixos/infra-space/test.nix, modules/nixos/ipv4-forward-slots-test/default.nix, modules/nixos/monitoring-exec-usage.nix, modules/nixos/monitoring-teamclaude.nix, modules/nixos/spaces/test.nix
 - port: modules/clan/wireguard/default.nix
 - publish.enable: hyperhermes/modules/publish/default.nix
 - rea.enable: hyperhermes/modules/rea/default.nix
@@ -92,7 +93,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - services.spaces.niri.modKey: modules/nixos/niri-spaces/niri.nix
 - services.sshTpmAgent.confirmTtl: modules/nixos/ssh-tpm-agent.nix
 - slot: hyperhermes/modules/slots/default.nix
-- sortBy: modules/nixos/monitoring-teamclaude.nix
+- sortBy: modules/nixos/monitoring-exec-usage.nix, modules/nixos/monitoring-teamclaude.nix
 - space: modules/nixos/spaces/guest-base.nix, modules/nixos/spaces/guest.nix
 - space.defaultForge: modules/nixos/spaces/forges.nix
 - space.forges: modules/nixos/spaces/forges.nix
