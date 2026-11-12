@@ -79,6 +79,9 @@ in
     # Agent spaces for other projects (geninf-space), none a fleet
     # admin; Dave reaches them from amy (spaces/client.nix there).
     ../../modules/nixos/spaces
+    # their web apps at https://<port>.<space>.davhau.fyi/, behind the
+    # agents' serve-port login
+    ../../modules/nixos/spaces/publish.nix
   ];
 
   # Public IPv4 38.89.142.76, borrowed from sgp through a WireGuard tunnel

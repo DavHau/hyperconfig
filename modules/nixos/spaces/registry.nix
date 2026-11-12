@@ -9,6 +9,9 @@
 #             0 is infra-space's (10.235.0.0/30, fd23:5ace::/64).
 #   sshPort   2222 is the unlock initrd's sshd, 2223 infra-space's
 #             (../infra-space/members.nix).
+#   owners    pocket-id accounts that open the space's published apps
+#             (https://<port>.<name>.davhau.fyi/, ./publish.nix): the clan
+#             inventory puts them in the group space-<name>; default dave.
 #   uid       the guest user's uid and gid (it owns the space's home on
 #             the host); proxyUid the host's sshd forwarder. Id ladder in
 #             ../vault-ids.nix; no host user has either.
@@ -26,5 +29,6 @@
     sshPort = 2224;
     uid = 1205;
     proxyUid = 1206;
+    owners = [ "dave" ];
   };
 }

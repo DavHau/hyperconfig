@@ -20,6 +20,37 @@ geninf-space clones every repository of the generational-infrastructure
 org on git.geninf.io that davhau-gi-bot sees (listed from the API every
 15 min, new ones included; `space.orgCheckouts`, `./guest.nix`).
 
+## Web apps: https://<port>.<space>.davhau.fyi/
+
+Anything the space's user listens on at `0.0.0.0:<port>` (or the
+guest's veth address), port 8000-8099, is
+`https://<port>.<space>.davhau.fyi/`, e.g.
+https://8095.geninf-space.davhau.fyi/, with no command per port. Dave
+opens the link and signs in with pocket-id (once per port host, later
+silently); only the space's `owners` (`./registry.nix`, default dave;
+option `hyper.spaces.<name>.publish.accounts`) get through, anyone else
+gets 403.
+
+- An app that binds 127.0.0.1 only: give it `--host 0.0.0.0` /
+  `--bind 0.0.0.0` / `HOST=0.0.0.0` (most dev servers), or run
+  `space-publish <port>` beside it (socat from the veth address to
+  127.0.0.1, until Ctrl-C; prints the URL). `space-publish` alone lists
+  what listens in the window.
+- The agents learn it from the `space-publish` skill
+  (`./publish-skill/SKILL.md`), `$SPACE_PUBLIC_URL_TEMPLATE` and
+  `$SPACE_PUBLISH_PORTS` in every session, and the motd.
+- Path: som's nginx (`./publish.nix`, one vhost per space, the hermes
+  agents' serve-port login `oauth2-proxy-serve` and its pocket-id client
+  `hermes-serve`, which got the callback pattern and the group
+  `space-<name>`; wildcard cert and DNS `*.<space>.davhau.fyi`) ->
+  `http://10.235.0.<4i+2>:<port>`. The host's output gate lets only
+  nginx's uid (and root) into the guest's window; the guest admits only
+  the host's veth address. Ports outside the window are not published.
+- Fallback without the browser login: ssh port forwarding from Dave's
+  machine, e.g. `ssh -L 8095:127.0.0.1:8095 space-geninf-space`, then
+  http://127.0.0.1:8095/ (the guest's sshd allows TCP forwarding,
+  sshd's default).
+
 ## History
 
 The gi-infra and agave spaces ran on amy until 2026-11-10 and moved to

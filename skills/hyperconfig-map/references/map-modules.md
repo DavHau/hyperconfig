@@ -269,20 +269,23 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/space-gui/test.nix — space-gui (./default.nix) on one machine: <- flake.nix, m/space-gui/default.nix
 - modules/nixos/spaces/afk.nix — afk in a space's guest, for Dave's interactive sessions: <- m/infra-space/afk.nix, m/spaces/default.nix, m/spaces/guest.nix
 - modules/nixos/spaces/client.nix — Dave's way into the named spaces (./default.nix), on the machine that imports this (amy): <- amy, m/spaces/default.nix, m/spaces/guest.nix, m/spaces/test.nix
-- modules/nixos/spaces/default.nix — Named agent spaces: NixOS containers like infra-space (../infra-space), each for one job, none of them a fleet admin. h… <- som, m/spaces/afk.nix, m/spaces/client.nix, m/spaces/forges.nix, m/spaces/geninf-space.nix, m/spaces/guest.nix, m/spaces/host.nix, m/spaces/test.nix
+- modules/nixos/spaces/default.nix — Named agent spaces: NixOS containers like infra-space (../infra-space), each for one job, none of them a fleet admin. h… <- som, m/spaces/afk.nix, m/spaces/client.nix, m/spaces/forges.nix, m/spaces/geninf-space.nix, m/spaces/guest.nix, m/spaces/host.nix, m/spaces/publish-guest.nix, +2
 - modules/nixos/spaces/forge-check.sh — Post-deploy check of a space's forge logins (./forges.nix), run in the space as its user: <- m/spaces/forges.nix
 - modules/nixos/spaces/forge-cli-config.sh — Writes tea's config for the space's user: <- m/spaces/forges.nix
 - modules/nixos/spaces/forge-host-keys.nix — The forges' ssh host keys, as `programs.ssh.knownHosts` entries: <- m/spaces/geninf-space.nix
 - modules/nixos/spaces/forges.nix — Pull requests from a space: <- m/spaces/geninf-space.nix, m/spaces/guest.nix
 - modules/nixos/spaces/geninf-space.nix — The geninf-space: an agent's place for generational-infrastructure's work: its own clan (gi-infra: the repository on gi… <- m/spaces/default.nix, m/spaces/forges.nix, m/spaces/guest.nix
-- modules/nixos/spaces/guest-base.nix — The base of every space's guest system (infra-space's ../infra-space/guest.nix and the named spaces' ./guest.nix import… <- m/infra-space/guest.nix, m/spaces/default.nix, m/spaces/guest.nix
+- modules/nixos/spaces/guest-base.nix — The base of every space's guest system (infra-space's ../infra-space/guest.nix and the named spaces' ./guest.nix import… <- m/infra-space/guest.nix, m/spaces/default.nix, m/spaces/guest.nix, m/spaces/publish-guest.nix, m/spaces/publish.nix
 - modules/nixos/spaces/guest.nix — The system inside a named space's container (./default.nix sets `space.*` from the host side): <- m/spaces/client.nix, m/spaces/default.nix, m/spaces/geninf-space.nix, m/spaces/guest-base.nix
 - modules/nixos/spaces/herdr-space-machines.py — - <- m/spaces/client.nix
-- modules/nixos/spaces/host.nix — The host side of one space container: <- m/infra-space/default.nix, m/spaces/default.nix, m/spaces/guest-base.nix, m/spaces/guest.nix
+- modules/nixos/spaces/host.nix — The host side of one space container: <- m/infra-space/default.nix, m/spaces/default.nix, m/spaces/guest-base.nix, m/spaces/guest.nix, m/spaces/publish-guest.nix, m/spaces/publish.nix
 - modules/nixos/spaces/public.nix — Every space of ./registry.nix with its machine's mesh address and its guest's pinned host key, from the public clan var… <- m/spaces/client.nix
-- modules/nixos/spaces/registry.nix — The named agent spaces (./default.nix): <- m/infra-space/default.nix, m/spaces/client.nix, m/spaces/default.nix, m/spaces/public.nix, m/spaces/test.nix
+- modules/nixos/spaces/publish-guest.nix — A space's published web apps, the guest's side (./publish.nix has the host's, ./default.nix wires both from hyper.space… <- m/spaces/default.nix, m/spaces/publish.nix
+- modules/nixos/spaces/publish.nix — The spaces' published web apps, the host's front (som: <- som, m/spaces/default.nix, m/spaces/publish-guest.nix
+- modules/nixos/spaces/registry.nix — The named agent spaces (./default.nix): <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/default.nix, m/spaces/client.nix, m/spaces/default.nix, m/spaces/public.nix, m/spaces/publish.nix, m/spaces/test.nix
 - modules/nixos/spaces/test.nix — The named spaces (./default.nix) on one host beside infra-space, and Dave's side of them (./client.nix) on the same hos… <- flake.nix
 - modules/nixos/spaces/forge-prs-skill/SKILL.md — > <- m/spaces/forges.nix
+- modules/nixos/spaces/publish-skill/SKILL.md — >
 - modules/nixos/sway/default.nix — -
 - modules/nixos/sway/sway.config.nix — - <- m/sway/default.nix
 - modules/nixos/sway/waybar.jsonc.nix — - <- m/sway/sway.config.nix

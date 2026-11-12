@@ -13,6 +13,7 @@
 | `afk.nix` | afk in a guest: pinned settings (no web), keys from secretsDir |
 | `client.nix` | Dave's desktops: launchers, pinned host keys, herdr machines |
 | `public.nix` | registry + mesh addresses (no other machine's config) |
+| `publish.nix`, `publish-guest.nix`, `publish-skill/` | web apps on the window 8000-8099 at https://<port>.<space>.davhau.fyi (som's nginx + the agents' serve login; guest `space-publish`, env, skill); owners in `registry.nix` -> pocket-id group `space-<name>` (nixosConfigurations.nix) |
 | `test.nix` | `checks.x86_64-linux.spaces` (VM test; names machines: grep it on moves) |
 
 Token path, e.g. geninf-space: prompted generator `space-geninf-space-token-geninf`

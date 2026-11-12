@@ -37,7 +37,19 @@
     inherit (somDashboards) domain;
     accounts = infraSpaceAccounts;
   };
-  dashboardGroups = hermesSso.accountGroups (somDashboards.accounts // infraSpaceAccounts);
+  # The spaces on som publish their port windows behind the serve ports'
+  # login (modules/nixos/spaces/publish.nix): the client hermes-serve gets
+  # a callback pattern per space and admits its group space-<name>, which
+  # the space's owners (registry.nix) join.
+  somSpaces = lib.filterAttrs (_: s: s.machine == "som") (import ../nixos/spaces/registry.nix);
+  spaceGroupOf = name: "space-${name}";
+  spaceGroups = lib.foldlAttrs (acc: name: s:
+    lib.foldl' (a: o: a // { ${o} = (a.${o} or [ ]) ++ [ (spaceGroupOf name) ]; }) acc (s.owners or [ "dave" ])
+  ) { } somSpaces;
+  dashboardGroups = lib.zipAttrsWith (_: lib.concatLists) [
+    (hermesSso.accountGroups (somDashboards.accounts // infraSpaceAccounts))
+    spaceGroups
+  ];
   withDashboardGroups = users:
     let
       unknown = lib.filter (a: !(users ? ${a})) (lib.attrValues somDashboards.accounts);
@@ -302,6 +314,12 @@ in {
               # ports' oauth2-proxy (hermes-serve), plus one client per agent
               # dashboard, and infra-space's (from its own data file).
               roles.client.machines.som.settings.clients = somHermesClients // infraSpaceClients // {
+                ${hermesSso.publishClientId} = somHermesClients.${hermesSso.publishClientId} // {
+                  callbackURLs = somHermesClients.${hermesSso.publishClientId}.callbackURLs
+                    ++ lib.mapAttrsToList (name: _: "https://*.${name}.${somDashboards.domain}${hermesSso.publishLoginPrefix}/callback") somSpaces;
+                  allowedGroups = somHermesClients.${hermesSso.publishClientId}.allowedGroups
+                    ++ map spaceGroupOf (lib.attrNames somSpaces);
+                };
                 hermes = somHermesClients.hermes // {
                   callbackURLs = somHermesClients.hermes.callbackURLs ++ [
                     "https://mailgate.${somDashboards.frontDoor}/oauth2/callback"

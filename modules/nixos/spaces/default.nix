@@ -140,11 +140,16 @@ let
         };
         confine = true;
         inherit blockedDestinations;
+        # this host's nginx into the published port window (./publish.nix)
+        toGuestRules = lib.optionalString (cfg.publish.enable && config.services.nginx.enable) "meta skuid ${
+          toString config.users.users.${config.services.nginx.user}.uid
+        } tcp dport ${toString cfg.publish.from}-${toString cfg.publish.to} return";
         specialArgs = { inherit inputs; };
         guestConfig = {
           imports = [
             ./guest.nix
             (import ./afk.nix "/run/${name}/secrets")
+            ./publish-guest.nix
           ]
           ++ cfg.guestModules;
           space = {
@@ -159,6 +164,16 @@ let
             hostAddress = v4 1;
             hostAddress6 = v6 1;
             inherit (cfg) tpm gitIdentity;
+            publish = {
+              inherit (cfg.publish)
+                enable
+                from
+                to
+                domain
+                accounts
+                ;
+              address = v4 2;
+            };
           };
         };
       })
@@ -168,6 +183,8 @@ in
   imports = [
     ./geninf-space.nix
   ];
+  # The host's front of the published apps (nginx, login, TLS) is
+  # ./publish.nix, imported where hyperhermes' publish runs (som).
 
   options.hyper.spaces = lib.mkOption {
     default = { };
@@ -213,6 +230,34 @@ in
               default = meshAddress;
               defaultText = lib.literalMD "this machine's yggdrasil address (its public clan var)";
               description = "Address the guest's sshd is reached at.";
+            };
+            publish = {
+              enable = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = "Publish the port window: an app the space's user listens on at 0.0.0.0:<port> is https://<port>.${name}.<domain>/ for `accounts` (this host's nginx in front, ./publish.nix; ./publish-guest.nix in the guest).";
+              };
+              from = lib.mkOption {
+                type = lib.types.port;
+                default = 8000;
+                description = "First port of the published window.";
+              };
+              to = lib.mkOption {
+                type = lib.types.port;
+                default = 8099;
+                description = "Last port of the published window.";
+              };
+              domain = lib.mkOption {
+                type = lib.types.str;
+                default = "davhau.fyi";
+                description = "Apps are https://<port>.${name}.<domain>/ (som: the hermes agents' exposure domain).";
+              };
+              accounts = lib.mkOption {
+                type = lib.types.listOf lib.types.str;
+                default = (import ./registry.nix).${name}.owners or [ "dave" ];
+                defaultText = lib.literalMD "./registry.nix's `owners` (default `[ \"dave\" ]`)";
+                description = "pocket-id accounts (preferred_username) that get through the login; the others get 403. Each must be in ./registry.nix's `owners` too: the clan inventory gives those the space's group.";
+              };
             };
             meshInterface = lib.mkOption {
               type = lib.types.str;

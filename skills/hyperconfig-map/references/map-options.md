@@ -94,6 +94,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - space: modules/nixos/spaces/guest-base.nix, modules/nixos/spaces/guest.nix
 - space.defaultForge: modules/nixos/spaces/forges.nix
 - space.forges: modules/nixos/spaces/forges.nix
+- space.publish: modules/nixos/spaces/publish-guest.nix
 - storage: hyperhermes/modules/container-slots-storage/default.nix
 - symlinks: modules/nixos/houses-grmpf.nix
 - teamclaude: hyperhermes/modules/teamclaude.nix

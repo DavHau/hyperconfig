@@ -19,6 +19,10 @@
 #     anywhere in its file system, the TPM bound in, AGE_KEYFILE the
 #     main root key;
 #   - the clones of its org's repositories fail softly without the forges;
+#   - published window: this host's nginx (only its uid) reaches the
+#     guest's 8000-8099 on the veth address, not 8100; space-publish
+#     forwards a 127.0.0.1-only app; the URL scheme in env, motd, skill
+#     (nginx, login, TLS are som's ./publish.nix, checked live there);
 #   - herdr: Dave's user activation saves the spaces as herdr machines
 #     (`herdr machine list`, targets the ssh aliases `space-<name>`); the
 #     bridge herdr runs over ssh at attach starts each guest's herdr
@@ -129,8 +133,12 @@ pkgs.testers.runNixOSTest {
       environment.systemPackages = [
         pkgs.netcat-openbsd
         pkgs.dnsutils
+        pkgs.curl
       ];
       users.users.tenant.isNormalUser = true;
+      # som's nginx, the published windows' front (./publish.nix, there on
+      # hyperhermes' login): here only its uid, for the output gate
+      services.nginx.enable = true;
 
       # amy's infra-space, the plain member (no hermes, no dashboard)
       hyper.infraSpace = {
@@ -368,6 +376,34 @@ pkgs.testers.runNixOSTest {
               # afk links the forge-prs skill
               in_space(name, 'grep -q forge-prs "$(readlink -f "$(command -v afk)")"')
 
+      with subtest("published window: this host's nginx reaches 8000-8099 only"):
+          name = "geninf-space"
+          g = spaces[name]["v4"]
+          as_nginx = "setpriv --reuid=nginx --regid=nginx --clear-groups --"
+          def serve(unit, *argv):
+              space_root(name, f"systemd-run --uid={name} --gid={name} --unit={unit} -p WorkingDirectory=/tmp /run/current-system/sw/bin/" + " ".join(argv))
+          serve("pub-8095", "python3 -m http.server 8095 --bind 0.0.0.0")
+          serve("pub-8100", "python3 -m http.server 8100 --bind 0.0.0.0")
+          host.wait_until_succeeds(f"curl -sf --max-time 5 http://{g}:8095/", timeout=60)
+          host.wait_until_succeeds(f"curl -sf --max-time 5 http://{g}:8100/", timeout=60)
+          host.succeed(f"{as_nginx} curl -sf --max-time 5 http://{g}:8095/")
+          host.fail(f"{as_nginx} curl -sf --max-time 5 http://{g}:8100/")
+          host.fail(f"runuser -u tenant -- curl -sf --max-time 5 http://{g}:8095/")
+          # an app on 127.0.0.1 only, through space-publish
+          serve("pub-8096", "python3 -m http.server 8096 --bind 127.0.0.1")
+          space_root(name, "sh -c 'for i in $(seq 50); do ss -Hltn sport = :8096 | grep -q . && exit 0; sleep 0.2; done; exit 1'")
+          host.fail(f"{as_nginx} curl -sf --max-time 5 http://{g}:8096/")
+          serve("pub-fwd", "space-publish 8096")
+          host.wait_until_succeeds(f"{as_nginx} curl -sf --max-time 5 http://{g}:8096/", timeout=30)
+          out = space_root(name, "journalctl -u pub-fwd -o cat")
+          assert "https://8096.geninf-space.davhau.fyi/" in out, out
+          space_fails(name, "space-publish 8100")
+          # what the agent is told
+          assert in_space(name, "echo $SPACE_PUBLIC_URL_TEMPLATE").strip() == "https://{port}.geninf-space.davhau.fyi"
+          in_space(name, 'grep -q space-publish "$(readlink -f "$(command -v afk)")"')
+          space_root(name, "sh -c 'grep -q https://{port}.geninf-space.davhau.fyi $(grep -o \"motd=[^ ]*\" /etc/pam.d/sshd | cut -d= -f2)'")
+          space_root(name, "systemctl stop pub-8095 pub-8100 pub-8096 pub-fwd")
+
       with subtest("without the forges the org's clones give up softly"):
           name = "geninf-space"
           unit = f"{name}-clone-org-git.geninf.io.service"
@@ -402,7 +438,9 @@ pkgs.testers.runNixOSTest {
           for name in spaces:
               host.execute(f"runuser -u dave -- timeout 20 ssh -o BatchMode=yes space-{name} 'exec herdr remote-client-bridge </dev/null'")
               host.wait_until_succeeds(f"nixos-container run {name} -- pgrep -u {name} -f 'herdr server'", timeout=30)
-          out = host.succeed("runuser -u dave -- herdr machine status 2>&1")
+          # exits 1 for Dave's own placeholder entry (example.org, no DNS
+          # here); the spaces' lines are what counts
+          _, out = host.execute("runuser -u dave -- herdr machine status 2>&1")
           print(out)
           # all reached and their herdr servers found (status: ok)
           for name in spaces:
