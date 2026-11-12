@@ -105,6 +105,12 @@ in
       files = publicSsids [ "wifi_ssid" ];
     };
 
+    # Dave's home (HA on cm-pi): the Home Assistant Voice PE. Wi-Fi is
+    # provisioned over Improv and kept in the device's NVS, so no Wi-Fi
+    # prompts. `key` was imported from the device's HA entry (noise_psk),
+    # so HA keeps its connection; ap_password is unused.
+    esphome-home = generator { prompts = { }; };
+
     esphome-cm-pi = generator {
       prompts = wifi "" "aircon ESPHome devices" // wifi "_tossa" "Mitsubishi ESPHome devices in Tossa";
       files = publicSsids [

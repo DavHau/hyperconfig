@@ -1,0 +1,78 @@
+# Home Assistant Voice PE in Dave's home (HA on cm-pi): the official
+# firmware (esphome/home-assistant-voice-pe, factory config, tag 26.9.0)
+# plus our own wake word "Okay Diggi" (tools/wakeword). HA picks the active
+# words with select.home_assistant_voice_09fcea_wake_word{,_2}: Okay Diggi in
+# slot 1, Okay Nabu in slot 2 as the fallback.
+#
+# Build and flash (x86_64 host on the home LAN, e.g. vit; README in
+# tools/wakeword):
+#   locations/common/esphome/esphome-secrets.sh locations/home/esphome
+#   esphome run locations/home/esphome/voice-pe.yaml --device 192.168.8.248
+# with esphome from this flake's nixpkgs (built with 2026.9.1; the 26.9.0
+# config needs >= 2026.6.0), e.g. `nix shell .#nixosConfigurations.vit.pkgs.esphome`.
+#
+# Kept identical to the factory image so the device and HA's entry stay:
+# the name (home-assistant-voice + MAC suffix = home-assistant-voice-09fcea),
+# Wi-Fi from Improv in NVS (no ssid here: with no station configured the
+# credentials live under a fixed preference key, so they survive), and the
+# API key (esphome-home/key = the noise_psk HA already stores).
+substitutions:
+  # Pin the sounds to the release instead of upstream's moving `dev` branch.
+  jack_connected_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/26.9.0/sounds/jack_connected.flac
+  jack_disconnected_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/26.9.0/sounds/jack_disconnected.flac
+  mute_switch_on_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/26.9.0/sounds/mute_switch_on.flac
+  mute_switch_off_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/26.9.0/sounds/mute_switch_off.flac
+  timer_finished_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/26.9.0/sounds/timer_finished.flac
+  wake_word_triggered_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/26.9.0/sounds/wake_word_triggered.flac
+  center_button_press_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/26.9.0/sounds/center_button_press.flac
+  center_button_double_press_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/26.9.0/sounds/center_button_double_press.flac
+  center_button_triple_press_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/26.9.0/sounds/center_button_triple_press.flac
+  center_button_long_press_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/26.9.0/sounds/center_button_long_press.flac
+  factory_reset_initiated_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/26.9.0/sounds/factory_reset_initiated.mp3
+  factory_reset_cancelled_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/26.9.0/sounds/factory_reset_cancelled.mp3
+  factory_reset_confirmed_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/26.9.0/sounds/factory_reset_confirmed.mp3
+  easter_egg_tick_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/26.9.0/sounds/easter_egg_tick.mp3
+  easter_egg_tada_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/26.9.0/sounds/easter_egg_tada.mp3
+  error_cloud_expired_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/26.9.0/sounds/error_cloud_expired.mp3
+
+packages:
+  voice_pe:
+    url: https://github.com/esphome/home-assistant-voice-pe
+    ref: 2644f4c794271d735d182ca7ebf899ed46164f4e  # tag 26.9.0
+    files: [home-assistant-voice.factory.yaml]
+    refresh: 1000d
+
+esphome:
+  project:
+    name: Nabu Casa.Home Assistant Voice PE
+    version: 26.9.0-diggi.1
+
+# The factory image offers Nabu Casa's builds as an update in HA; installing
+# one would drop Okay Diggi. Updates come from this file instead.
+update: !remove
+switch:
+  - id: !remove beta_firmware  # switches update_http_request's source
+
+api:
+  encryption:
+    key: !secret key
+
+ota:
+  - platform: esphome
+    id: !extend ota_esphome
+    password: !secret ota_password
+
+# Upstream takes voice_kit from its moving `dev` branch; the same component
+# at the release commit is registered later and therefore wins.
+external_components:
+  - source:
+      type: git
+      url: https://github.com/esphome/home-assistant-voice-pe
+      ref: 2644f4c794271d735d182ca7ebf899ed46164f4e
+    components: [voice_kit]
+    refresh: 1000d
+
+micro_wake_word:
+  models:
+    - model: okay_diggi/okay_diggi.json
+      id: okay_diggi
