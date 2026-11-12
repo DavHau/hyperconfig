@@ -88,6 +88,16 @@
   #   the gateway's nginx hands a bearer over as x-api-key, so no `headers`
   #   override is needed.
   #
+  # `compat.supportsEagerToolInputStreaming`: omp only sends Anthropic's
+  # per-tool `eager_input_streaming` flag to api.anthropic.com
+  # (pi-catalog compat/resolve.ts: `supportsEagerToolInputStreaming:
+  # official`). Behind the gateway the flag is dropped, so the API buffers
+  # every tool input and releases it in one burst when the call ends: the
+  # Edit/Write cards sit on `Edit: 🗒 …` for the whole call instead of
+  # streaming path + diff. The gateway forwards the body to Anthropic
+  # unchanged, so opt back in. omp still sends `false` for the tools that
+  # need buffered input (yield).
+  #
   # Only where the key module is imported (dave.nix, the infra-space
   # container): elsewhere the command would not exist and the provider
   # would 401 on the first turn. Detected by its option, which exists with
@@ -97,6 +107,8 @@
     "  anthropic:"
     "    baseUrl: https://teamclaude.davhau.com"
     "    apiKey: \"!teamclaude-api-key\""
+    "    compat:"
+    "      supportsEagerToolInputStreaming: true"
   ];
   baseProviderBlocks = lib.optional llama-swap-enabled llamaSwapProvider ++ [ p0Provider ];
   modelProviderBlocks = baseProviderBlocks ++ lib.optional teamclaude-enabled teamclaudeProvider;
