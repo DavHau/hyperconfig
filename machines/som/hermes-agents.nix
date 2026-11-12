@@ -236,11 +236,12 @@ in
         openrouter = true;
       };
 
-      # daniel: Daniel's agent, read-only vault consumer. No keys of his
-      # known yet, so no ssh login; he signs in to its dashboard.
+      # daniel: Daniel's agent, read-only vault consumer.
       daniel = {
         description = "daniel - hermes agent, read-only vault consumer";
-        sshKeys = [ ];
+        sshKeys = [
+          "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO5mN7psSjBGRYcbYtxEt0UHp+1OuyyqPxtKa2vI8kf3 davhau-hermes"
+        ];
         # Claude through the TeamClaude gateway, as client `daniel`.
         teamclaude.enable = true;
         # The shared OpenRouter key as OPENROUTER_API_KEY (./hermes-inference.nix).
@@ -256,7 +257,9 @@ in
       daniel-meli = {
         uid = 1118;
         description = "daniel-meli - hermes agent, no vault access";
-        sshKeys = [ ];
+        sshKeys = [
+          "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO5mN7psSjBGRYcbYtxEt0UHp+1OuyyqPxtKa2vI8kf3 davhau-hermes"
+        ];
         mail.enable = false;
       };
 
