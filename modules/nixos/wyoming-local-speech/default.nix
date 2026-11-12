@@ -242,9 +242,9 @@ in
           printf '%s' "$stamp" > ${venv}/.stamp
         fi
         ${venv}/bin/python - <<'EOF'
-        import os
+        import json, os
         from huggingface_hub import snapshot_download
-        for repo, rev, d, pat in ${builtins.toJSON hfModels}:
+        for repo, rev, d, pat in json.loads(${builtins.toJSON (builtins.toJSON hfModels)}):
             p = "${models}/" + d
             if os.path.exists(p + "/.rev") and open(p + "/.rev").read() == rev:
                 continue
