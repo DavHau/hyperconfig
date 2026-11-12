@@ -188,6 +188,13 @@ in
       description = "Extra modules of the container's system (its config.imports; specialArgs carry the flake's `inputs`).";
     };
 
+    extraToGuestRules = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "meta skuid 1209 tcp dport 9123 return" ];
+      description = "More nftables rules of the output gate into the guest (another host uid admitted to one guest port, e.g. ../voice-gateway).";
+    };
+
     credentials = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
       default = { };
@@ -384,7 +391,10 @@ in
       };
       # som's nginx to the dashboard port (./dashboard.nix)
       # and to clan-secret-prompt's page (./secret-prompt)
-      toGuestRules = lib.optionalString cfg.dashboard.enable "meta skuid ${toString config.users.users.${config.services.nginx.user}.uid} tcp dport { ${toString cfg.dashboard.port}, ${toString cfg.dashboard.secretPromptPort} } return";
+      toGuestRules = lib.concatStringsSep "\n" (
+        lib.optional cfg.dashboard.enable "meta skuid ${toString config.users.users.${config.services.nginx.user}.uid} tcp dport { ${toString cfg.dashboard.port}, ${toString cfg.dashboard.secretPromptPort} } return"
+        ++ cfg.extraToGuestRules
+      );
     })
   ]);
 }

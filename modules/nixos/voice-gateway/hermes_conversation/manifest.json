@@ -1,0 +1,12 @@
+{
+  "domain": "hermes_conversation",
+  "name": "Hermes conversation",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": ["conversation"],
+  "documentation": "https://github.com/DavHau/hyperconfig",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "version": "1.0.0"
+}

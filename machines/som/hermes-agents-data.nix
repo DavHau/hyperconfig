@@ -35,6 +35,13 @@
     uid = 1114;
     vault = false;
   };
+  # The Voice PE's untrusted voice agent (../../modules/nixos/voice-gateway):
+  # vault-ro and a GPU account on vit, no wallet or REA.
+  voice = {
+    uid = 1119;
+    wallet = false;
+    rea = false;
+  };
   # Daniel's second agent: GPU account on vit only, no vault, wallet or REA.
   daniel-meli = {
     uid = 1118;

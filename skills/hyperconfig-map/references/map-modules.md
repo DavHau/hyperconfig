@@ -206,12 +206,12 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/infra-space/age-recipients.nix — The clan vars' age recipients (vars.settings.recipients.default in ../../flake-parts/nixosConfigurations.nix): <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/default.nix, m/infra-space/guest.nix, m/spaces/default.nix
 - modules/nixos/infra-space/dashboard-account.nix — Who signs in to the infra-space dashboard (./dashboard.nix, on som), as plain data for the two evaluations that need it: <- som, modules/flake-parts/nixosConfigurations.nix, m/infra-space/dashboard.nix, m/infra-space/desktop-app.nix
 - modules/nixos/infra-space/dashboard.nix — The infra-space agent's hermes dashboard, published by this host's nginx (som only: <- m/infra-space/default.nix, m/infra-space/desktop-app.nix, m/infra-space/hermes.nix, m/infra-space/secret-prompt/default.nix
-- modules/nixos/infra-space/default.nix — infra-space: a NixOS container on every member machine (./members.nix), identical on each, from which the fleet is mana… <- amy, som, m/infra-space/afk.nix, m/infra-space/dashboard.nix, m/infra-space/fleet-access.nix, m/infra-space/gcroots.nix, m/infra-space/guest.nix, m/infra-space/hermes.nix, +6
+- modules/nixos/infra-space/default.nix — infra-space: a NixOS container on every member machine (./members.nix), identical on each, from which the fleet is mana… <- amy, som, m/infra-space/afk.nix, m/infra-space/dashboard.nix, m/infra-space/fleet-access.nix, m/infra-space/gcroots.nix, m/infra-space/guest.nix, m/infra-space/hermes.nix, +7
 - modules/nixos/infra-space/desktop-app.nix — "Hermes (infra-space)": the hermes desktop app run in this host's infra-space container (as `infra`, through ../space-g… <- amy
 - modules/nixos/infra-space/fleet-access.nix — infra-space's root access on every clan machine (wired via the `sshd` instance's server extraModules in modules/flake-p… <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/default.nix, m/infra-space/test.nix
 - modules/nixos/infra-space/gcroots.nix — GC roots on this host for systems built from the infra-space guest (a host module, imported by ./default.nix; <- m/infra-space/default.nix
 - modules/nixos/infra-space/guest.nix — The system inside the infra-space container (./default.nix sets the options below from the host side). <- m/infra-space/default.nix, m/infra-space/gcroots.nix, m/infra-space/hermes.nix, m/infra-space/secret-prompt/default.nix, m/spaces/guest-base.nix
-- modules/nixos/infra-space/hermes.nix — The infra-space's hermes agent, inside the container (./default.nix appends this to the guest's modules on every member… <- m/infra-space/dashboard.nix, m/infra-space/default.nix, m/infra-space/nixpkgs-bump.nix
+- modules/nixos/infra-space/hermes.nix — The infra-space's hermes agent, inside the container (./default.nix appends this to the guest's modules on every member… <- m/infra-space/dashboard.nix, m/infra-space/default.nix, m/infra-space/nixpkgs-bump.nix, m/infra-space/voice-api.nix
 - modules/nixos/infra-space/launchers.nix — Dave's way into infra-space, on his desktops (../dave.nix): <- m/dave.nix, m/infra-space/afk.nix, m/spaces/client.nix
 - modules/nixos/infra-space/members.nix — The machines that run an infra-space container (./default.nix), and the port on the machine's yggdrasil address that re… <- m/infra-space/default.nix, m/infra-space/public-members.nix
 - modules/nixos/infra-space/nixpkgs-bump.nix — The nightly nixpkgs-unstable bump, run by the infra-space agent itself (./nixpkgs-bump/SKILL.md says what it does: <- m/infra-space/hermes.nix
@@ -219,6 +219,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/infra-space/test-oidc.py — - <- m/infra-space/test.nix
 - modules/nixos/infra-space/test-toolsets.py — - <- m/infra-space/test.nix
 - modules/nixos/infra-space/test.nix — ./default.nix on two members and ./fleet-access.nix on a third machine: <- flake.nix, m/infra-space/guest.nix
+- modules/nixos/infra-space/voice-api.nix — The infra agent's OpenAI-compatible api_server, for som's voice-gateway only (../voice-gateway: <- m/voice-gateway/default.nix
 - modules/nixos/infra-space/hermes-skill/SKILL.md — Manage Dave's NixOS fleet from infra-space - change hyperconfig, push it, deploy machines with clan, reach the other inf <- m/infra-space/guest.nix, m/infra-space/hermes.nix
 - modules/nixos/infra-space/nixpkgs-bump/SKILL.md — The nightly nixpkgs-unstable bump of hyperconfig - update nixpkgs, build every machine, fix, review, guard, merge to mai <- m/infra-space/hermes.nix, m/infra-space/nixpkgs-bump.nix
 - modules/nixos/infra-space/nixpkgs-bump/guard-test.nix — ./guard.sh against a scratch repository, without network: <- flake.nix
@@ -304,6 +305,16 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/users/hsjobeki-vault.nix — hsjobeki on som: SSH login with read-only access to /vault/parquet mounted at /vault (vault-nfs-client.nix) via the `va… <- som
 - modules/nixos/users/stefan-vault.nix — stefan on the wg-vault client machines (som, vit): <- vit, machines/som/hermes-agents.nix
 - modules/nixos/users/stefan.nix — - <- machines/nas/users.nix, m/users/stefan-vault.nix
+- modules/nixos/voice-gateway/cm-pi.nix — cm-pi's part of ./default.nix: <- cm-pi, m/voice-gateway/default.nix
+- modules/nixos/voice-gateway/default.nix — voice-gateway (som): Home Assistant's Voice PE talks to hermes. <- som, m/infra-space/default.nix, m/infra-space/voice-api.nix
+- modules/nixos/voice-gateway/edi.nix — edi's part of ./default.nix: <- edi, m/voice-gateway/default.nix
+- modules/nixos/voice-gateway/gateway.py — - <- m/voice-gateway/default.nix
+- modules/nixos/voice-gateway/shared-vars.nix — Clan vars shared between som (./default.nix, the router) and its peers: <- m/voice-gateway/cm-pi.nix, m/voice-gateway/default.nix, m/voice-gateway/edi.nix
+- modules/nixos/voice-gateway/test_gateway.py — - <- m/voice-gateway/default.nix
+- modules/nixos/voice-gateway/hermes_conversation/__init__.py — -
+- modules/nixos/voice-gateway/hermes_conversation/config_flow.py — -
+- modules/nixos/voice-gateway/hermes_conversation/const.py — -
+- modules/nixos/voice-gateway/hermes_conversation/conversation.py — -
 - modules/nixos/wyoming-local-speech/default.nix — Local speech for Home Assistant (cm-pi) on vit: <- vit
 - modules/nixos/wyoming-local-speech/stt.py — -
 - modules/nixos/wyoming-local-speech/tts.py — -

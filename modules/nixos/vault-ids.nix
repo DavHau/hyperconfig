@@ -11,7 +11,7 @@
 #              Members: slot-asof, slot-mm (som; the asof and mm container
 #              slots' shares, machines/som/configuration.nix).
 #   `vault-ro` (gid 1103) read-only on /vault/parquet. Members: stefan,
-#              momentum, hsjobeki, dave-hermes, egg, pinpox, adam, j, willi, domi, rti, chris, b3x, joe, daniel - each user's own
+#              momentum, hsjobeki, dave-hermes, egg, pinpox, adam, j, willi, domi, rti, chris, b3x, joe, daniel, voice - each user's own
 #              module adds the group (users/*-vault.nix, *-hermes.nix).
 # The client sends its own gid list, so membership is granted per host: a
 # reader reads from every wg-vault client whose config imports its module.
@@ -55,7 +55,8 @@
 # 1114 thaigersprint (no vault access, denied above), 1115 (was bumper,
 # retired, do not reuse), 1116 roman (som's
 # Home Assistant agent, no vault access, denied above), 1117 daniel,
-# 1118 daniel-meli (no vault access, denied above),
+# 1118 daniel-meli (no vault access, denied above), 1119 voice (the Voice
+# PE's untrusted agent, modules/nixos/voice-gateway),
 # 1200 agent,
 # 1201 slot-asof, 1202 slot-mm, 1203 infra (uid and gid; the infra-space
 # container's user, no host account: infra-space/default.nix; on members
@@ -69,7 +70,9 @@
 # agave and agave-ssh, retired, do not reuse) (the same pair for the
 # named spaces on som: each space's container user, owning its home
 # under /var/lib/spaces, and its sshd forwarder there;
-# spaces/registry.nix; not vault principals). gid 1100 stays unallocated.
+# spaces/registry.nix; not vault principals), 1209 voice-gateway (uid and
+# gid; som's Voice PE router, modules/nixos/voice-gateway; not a vault
+# principal). gid 1100 stays unallocated.
 { lib, ... }:
 {
   options.hyper.vaultIds.deniedUsers = lib.mkOption {

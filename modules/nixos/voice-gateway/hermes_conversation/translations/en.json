@@ -1,0 +1,7 @@
+{
+  "config": {
+    "step": {"user": {"data": {"url": "voice-gateway URL", "secret_file": "Shared secret file"}}},
+    "error": {"unreadable": "The secret file is not readable by Home Assistant."},
+    "abort": {"already_configured": "Already configured"}
+  }
+}

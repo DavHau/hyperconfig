@@ -30,6 +30,8 @@ in
     ../../modules/nixos/vault-nfs-client.nix
     ../../modules/nixos/users/hsjobeki-vault.nix
     ./hermes-agents.nix
+    # Voice PE -> hermes (the voice agent, trusted mode -> infra agent).
+    ../../modules/nixos/voice-gateway
     # roman's MCP into Roman's two Home Assistant instances.
     ./roman-home-assistant.nix
     # roman's ESPHome builds and OTA uploads for those instances' devices.
@@ -139,6 +141,14 @@ in
   # Its deploys build here, on som, and upload the closures to the
   # targets (som offloads nothing: no nix.buildMachines).
   hyper.infraSpace.buildOnHost = true;
+
+  # Home Assistant's Voice PE (cm-pi) answered by hermes
+  # (../../modules/nixos/voice-gateway).
+  hyper.voiceGateway = {
+    enable = true;
+    satelliteDevices = [ "67f6de17d7a7b7a5afcde9177c493418" ];
+    satelliteEntity = "assist_satellite.home_assistant_voice_09fcea_assist_satellite";
+  };
 
   # Its keys are the gi-infra and agave spaces' (renamed, not
   # regenerated: they are registered at the forges and the other clans);
@@ -514,6 +524,7 @@ in
         daniel = 20;
         # not in hermes-agents-data.nix either, added below.
         daniel-meli = 21;
+        voice = 22;
       };
       # Container names are capped at 11 chars (nspawn veth names,
       # hyperhermes container-slots); longer agent names get a short one
@@ -598,6 +609,8 @@ in
         "roman"
         "dave"
       ]
+      # the Voice PE's untrusted agent: only its HA, never the home LANs
+      || a == "voice"
     ) agents;
 
   system.stateVersion = "25.11";

@@ -266,7 +266,7 @@ in {
                     email = "need-more-ram@davhau.com";
                     displayName = "Dave";
                     admin = true;
-                    groups = [ "apps" "hermes" "stats" "voices" ];
+                    groups = [ "apps" "hermes" "stats" "voices" "voice" ];
                   };
                   stefan = { displayName = "Stefan"; groups = [ "hermes" ]; };
                   pinpox = { displayName = "Pinpox"; groups = [ "hermes" ]; };
@@ -319,6 +319,14 @@ in {
                     ++ lib.mapAttrsToList (name: _: "https://*.${name}.${somDashboards.domain}${hermesSso.publishLoginPrefix}/callback") somSpaces;
                   allowedGroups = somHermesClients.${hermesSso.publishClientId}.allowedGroups
                     ++ map spaceGroupOf (lib.attrNames somSpaces);
+                };
+                # The voice unlock app at voice.davhau.com (som's
+                # voice-gateway, modules/nixos/voice-gateway), Dave only.
+                voice = {
+                  name = "Voice unlock";
+                  callbackURLs = [ "https://voice.davhau.com/callback" ];
+                  pkce = true;
+                  allowedGroups = [ "voice" ];
                 };
                 hermes = somHermesClients.hermes // {
                   callbackURLs = somHermesClients.hermes.callbackURLs ++ [

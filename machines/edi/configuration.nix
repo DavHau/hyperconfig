@@ -8,6 +8,8 @@
     ../../modules/nixos/nix-gc-server.nix
     ../../modules/nixos/monitoring-grafana-sso.nix
     ../../modules/nixos/wyoming-local-speech/voices-sso.nix
+    # ntfy and the voice unlock app's front (../../modules/nixos/voice-gateway).
+    ../../modules/nixos/voice-gateway/edi.nix
     ./reverse-proxy.nix
     ./nginx-file-server.nix
     ./reverse-proxy-maker.nix

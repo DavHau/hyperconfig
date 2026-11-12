@@ -38,5 +38,6 @@
     roman = "roman";
     daniel = "daniel";
     daniel-meli = "daniel";
+    voice = "dave";
   };
 }

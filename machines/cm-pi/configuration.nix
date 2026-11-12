@@ -6,6 +6,8 @@
     ../../modules/nixos/sbox.nix
     ../../modules/nixos/riscv64.nix
     ./home-assistant.nix
+    # hermes as HA's conversation agent (../../modules/nixos/voice-gateway).
+    ../../modules/nixos/voice-gateway/cm-pi.nix
     # ./odoo.nix
   ];
 

@@ -261,6 +261,25 @@ in
         mail.enable = false;
       };
 
+      # voice: the Voice PE's untrusted agent (../../modules/nixos/voice-gateway
+      # routes Home Assistant's Assist turns to its api_server). Home
+      # Assistant through HA's MCP server as the non-admin HA user
+      # voice-agent; vault-ro, GPU on vit; no ssh login, wallet, REA, mail
+      # or fleet access. Claude (Sonnet, chosen per request by the gateway)
+      # through TeamClaude, p0's Qwen as its own model and fallback.
+      voice = {
+        description = "voice - Voice PE agent (untrusted), Home Assistant";
+        sshKeys = [ ];
+        mail.enable = false;
+        teamclaude.enable = true;
+        settings.fallback_providers = [
+          {
+            provider = "p0";
+            model = "qwen";
+          }
+        ];
+      };
+
       # momentum: OpenRouter brain, and a Telegram bot in ONE group chat where
       # several allow-listed people prompt it (connected on its dashboard).
       # Identity (uid 1100, vault-ro) in ../../modules/nixos/vault-ids.nix;

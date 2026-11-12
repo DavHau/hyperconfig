@@ -58,6 +58,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.toolchainCacheDirs: modules/nixos/toolchain-cache-dirs/default.nix
 - hyper.unlockTarget: modules/nixos/unlock-target.nix
 - hyper.vaultIds.deniedUsers: modules/nixos/vault-ids.nix
+- hyper.voiceGateway: modules/nixos/voice-gateway/default.nix
 - hyper.wyomingLocalSpeech: modules/nixos/wyoming-local-speech/default.nix
 - hyper.zfsArcMax: modules/nixos/zfs-arc-max.nix
 - hyper.zfsEphemeralTmp.dataset: modules/nixos/zfs-ephemeral-tmp.nix
@@ -66,6 +67,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - infraSpace.hermes.dashboard: modules/nixos/infra-space/hermes.nix
 - infraSpace.hermes.skills: modules/nixos/infra-space/hermes.nix
 - infraSpace.secretPrompt: modules/nixos/infra-space/secret-prompt/default.nix
+- infraSpace.voiceApi: modules/nixos/infra-space/voice-api.nix
 - mail: hyperhermes/modules/mail/default.nix
 - mountpoint: machines/amy/disko.nix, machines/bam/disko-zfs-defaults.nix, machines/bam/disko-zfs-enc-lz4.nix, machines/bam/disko-zfs-enc-zstd.nix, machines/bam/disko-zfs-enc.nix, machines/edi/disko.nix, machines/som/disko.nix
 - networking.publicIPv6: modules/nixos/public-ipv6-token.nix
@@ -139,6 +141,8 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - teamclaude-nmm: machines/som/configuration.nix
 - url: flake.nix
 - vault-key: machines/bam/zfs.nix
+- voice-gateway-ha: modules/nixos/voice-gateway/shared-vars.nix
+- voice-ntfy: modules/nixos/voice-gateway/shared-vars.nix
 - voices-oauth2-proxy: modules/nixos/wyoming-local-speech/voices-sso.nix
 - wifi-parasit: modules/nixos/role-parasit.nix
 - wireguard-network-${instanceName}: modules/clan/wireguard/default.nix
