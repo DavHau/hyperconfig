@@ -1046,10 +1046,10 @@
     "ncps": {
       "flake": false,
       "locked": {
-        "lastModified": 1765509973,
-        "narHash": "sha256-8w1VS2dLzMrtiU6UT3pU2XNCdAci9sYztqQta0B8weA=",
+        "lastModified": 1766485261,
+        "narHash": "sha256-CvA9qeLi9p4cmJ9Rtf5OJu/Ip722xPJBcdDgZG076KU=",
         "ref": "ncps",
-        "rev": "4c5dc1ba94b0649fe44a58d2e4ff0bfc2beabaf7",
+        "rev": "36ab48292cadf20491634d301d1890603ebaacf6",
         "shallow": true,
         "type": "git",
         "url": "https://git.clan.lol/TakodaS/clan-core.git"
