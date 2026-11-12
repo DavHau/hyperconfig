@@ -7,6 +7,7 @@
     ../../modules/nixos/dyndns-porkbun.nix
     ../../modules/nixos/nix-gc-server.nix
     ../../modules/nixos/monitoring-grafana-sso.nix
+    ../../modules/nixos/wyoming-local-speech/voices-sso.nix
     ./reverse-proxy.nix
     ./nginx-file-server.nix
     ./reverse-proxy-maker.nix

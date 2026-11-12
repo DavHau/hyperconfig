@@ -138,6 +138,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - teamclaude-nmm: machines/som/configuration.nix
 - url: flake.nix
 - vault-key: machines/bam/zfs.nix
+- voices-oauth2-proxy: modules/nixos/wyoming-local-speech/voices-sso.nix
 - wifi-parasit: modules/nixos/role-parasit.nix
 - wireguard-network-${instanceName}: modules/clan/wireguard/default.nix
 - x: modules/nixos/infra-space/nixpkgs-bump/guard-test.nix

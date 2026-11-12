@@ -303,6 +303,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/wyoming-local-speech/default.nix — Local speech for Home Assistant (cm-pi) on vit: <- vit
 - modules/nixos/wyoming-local-speech/stt.py — -
 - modules/nixos/wyoming-local-speech/tts.py — -
+- modules/nixos/wyoming-local-speech/voices-sso.nix — vit's TTS voice picker (./tts.py's HTTP API: <- edi
 - modules/nixos/zfs-keylocation-sync/default.nix — Keep a ZFS encryption root's `keylocation` pointing at its current key file. <- machines/bam/zfs.nix, m/zfs-keylocation-sync/test.nix
 - modules/nixos/zfs-keylocation-sync/test.nix — An encrypted pool whose keylocation names a key file that no longer exists (the key moved, as clan's vars did on bam) s… <- flake.nix
 - modules/nixos/zfs-remote-unlock/ask-key.sh — Unlock an encrypted ZFS root in the initrd. <- m/zfs-remote-unlock/default.nix

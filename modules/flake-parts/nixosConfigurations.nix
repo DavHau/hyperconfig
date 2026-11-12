@@ -266,7 +266,7 @@ in {
                     email = "need-more-ram@davhau.com";
                     displayName = "Dave";
                     admin = true;
-                    groups = [ "apps" "hermes" "stats" ];
+                    groups = [ "apps" "hermes" "stats" "voices" ];
                   };
                   stefan = { displayName = "Stefan"; groups = [ "hermes" ]; };
                   pinpox = { displayName = "Pinpox"; groups = [ "hermes" ]; };
@@ -332,6 +332,14 @@ in {
                 callbackURLs = [ "https://stats.davhau.com/login/generic_oauth" ];
                 pkce = true;
                 allowedGroups = [ "stats" ];
+              };
+              # vit's TTS voice picker at voices.davhau.com, Dave only
+              # (modules/nixos/wyoming-local-speech/voices-sso.nix).
+              roles.client.machines.edi.settings.clients.voices = {
+                name = "Voices";
+                callbackURLs = [ "https://voices.davhau.com/oauth2/callback" ];
+                pkce = true;
+                allowedGroups = [ "voices" ];
               };
             };
 

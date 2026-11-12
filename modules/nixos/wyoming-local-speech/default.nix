@@ -9,13 +9,20 @@
 #   thaiThreshold -> Pathumma Thai FastConformer-RNNT (ONNX, OpenVINO CPU);
 #   else the same encoder output is decoded by Whisper (greedy) in en or de.
 #   HA's requested language is ignored.
-# - speech-tts (port 10200): ./tts.py. Supertonic 3 (en/de, built-in
-#   voices M1..M5/F1..F5, 8 steps) and Kokoro-Thai Q8 ONNX (voice thai_som,
-#   FastThaiG2P frontend), 8 CPU threads per engine.
+# - speech-tts (port 10200): ./tts.py, CPU only, 4 threads per engine:
+#   Kokoro-82M int8 (en, kokoro-onnx), Supertonic 3 (de, 8 steps), Wayu
+#   Kokoro-Thai fp32 ONNX (th). Language from the reply text; voice per
+#   language from ${state}/tts-voices.json (re-read on mtime change),
+#   written only by tts.py's HTTP API (apiPort: GET/PUT /voices, POST
+#   /preview, GET / = voice-picker page) on localhost, and for edi's
+#   pocket-id-protected proxy (./voices-sso.nix, voices.davhau.com).
+#   Drop-in voices: ${state}/voices.d/<engine>/ (group speech-voices,
+#   setgid, see ./voices.d-README.md), rescanned live.
 #
-# Python: no nixpkgs set has openvino/supertonic/fastthaig2p, so
+# Python: no nixpkgs set has openvino/supertonic/kokoro-onnx, so
 # speech-setup builds a uv venv over nixpkgs' python312 from the hashed
-# ./requirements.txt (locked from ./requirements.in, command in its header)
+# ./requirements.txt (locked from ./requirements.in, command in its header;
+# tltk --no-deps from ./requirements-nodeps.txt)
 # and downloads the models with snapshot_download(local_dir=...) at pinned
 # revisions into /var/lib/speech/models (onnxruntime >= 1.31 rejects the HF
 # cache's symlinked external data). Pathumma has no ONNX on the hub: its
@@ -50,12 +57,33 @@ let
     file = "address";
   };
 
-  # [repo, revision, dir]
+  # [repo, revision, dir, allow_patterns (null = all)]
   hfModels = [
-    [ "OpenVINO/whisper-large-v3-turbo-int8-ov" "b568445dd5dc8c695bde596f8acbb4694fd6ba64" "whisper-large-v3-turbo-int8-ov" ]
-    [ "Supertone/supertonic-3" "724fb5abbf5502583fb520898d45929e62f02c0b" "supertonic-3" ]
-    [ "Rotem12/kokoro-thai-q8-onnx" "fb9070ec1f4dae354d2b83b1fe23e151ddd2cd5b" "kokoro-thai-q8-onnx" ]
+    [ "OpenVINO/whisper-large-v3-turbo-int8-ov" "b568445dd5dc8c695bde596f8acbb4694fd6ba64" "whisper-large-v3-turbo-int8-ov" null ]
+    [ "Supertone/supertonic-3" "724fb5abbf5502583fb520898d45929e62f02c0b" "supertonic-3" null ]
+    # kokoro_thai package + fp32 ONNX graphs; not the .pth/.pt training files.
+    [ "kunato/wayu-kokoro-thai-v1" "abf63dc118365bea784fa881bdd1dce4b2cc1fd4" "wayu-kokoro-thai-v1" [ "kokoro_thai/*" "onnx/*" "data/seeds/roster.json" "assets/*" "README.md" ] ]
   ];
+
+  # Kokoro-82M from kokoro-onnx's release model-files-v1.0.
+  kokoroRel = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0";
+  kokoroModel = pkgs.fetchurl {
+    url = "${kokoroRel}/kokoro-v1.0.int8.onnx";
+    hash = "sha256-bnQhcNMJAW5YkamU4c4VWccCoszQB15n73FXl09kBss=";
+  };
+  kokoroVoices = pkgs.fetchurl {
+    url = "${kokoroRel}/voices-v1.0.bin";
+    hash = "sha256-vKYQuDCOjZnzLm/kGX5+wBZ5Jk7+0MrJFA/pwp8fv30=";
+  };
+  voicesDir = "${state}/voices.d";
+  selectionFile = "${state}/tts-voices.json";
+  # The voice-picker's SSO proxy (./voices-sso.nix).
+  ediYgg = inputs.clan-core.clanLib.getPublicValue {
+    flake = config.clan.core.settings.directory;
+    machine = "edi";
+    generator = "yggdrasil";
+    file = "address";
+  };
 
   # Wheels' native libs (libstdc++, zlib) and libOpenCL (ocl-icd).
   libPath = "${lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib pkgs.zlib ]}:/run/current-system/sw/lib";
@@ -76,6 +104,12 @@ let
     if [ ! -s ${checkClip} ]; then
       install -o speech -g speech -m 644 ${cfg.checkClipSource} ${checkClip}
     fi
+    # Drop-in voices: group-writable for speech-voices members, setgid.
+    install -d -o speech -g speech-voices -m 2775 ${voicesDir}
+    for e in kokoro82 supertonic wayu_thai; do
+      install -d -o speech -g speech-voices -m 2775 ${voicesDir}/$e
+    done
+    install -o speech -g speech-voices -m 644 ${./voices.d-README.md} ${voicesDir}/README.md
   '';
   checkClip = "${models}/check-de.wav";
 
@@ -146,6 +180,12 @@ in
     };
     sttPort = lib.mkOption { type = lib.types.port; default = 10300; };
     ttsPort = lib.mkOption { type = lib.types.port; default = 10200; };
+    apiPort = lib.mkOption {
+      type = lib.types.port;
+      default = 10201;
+      description = "tts.py's HTTP voice API + picker page: localhost, and edi's SSO proxy over yggdrasil.";
+    };
+    ttsMemoryMax = lib.mkOption { type = lib.types.str; default = "4G"; };
     pathummaOnnxSource = lib.mkOption {
       type = lib.types.str;
       default = "/home/dave-hermes/jobs/speechbench/models/pathumma/onnx";
@@ -169,7 +209,10 @@ in
       home = state;
     };
     users.groups.speech = { };
-    systemd.tmpfiles.rules = [ "d ${state} 0750 speech speech -" ];
+    # May add drop-in voices to voices.d (nothing else of the state dir).
+    users.groups.speech-voices.members = [ "dave-hermes" ];
+    # 0751: speech-voices members traverse to voices.d, list nothing else.
+    systemd.tmpfiles.rules = [ "d ${state} 0751 speech speech -" ];
 
     systemd.services.speech-setup = {
       description = "Speech: python venv and models";
@@ -190,23 +233,25 @@ in
       };
       script = ''
         set -eu
-        stamp="${python} ${./requirements.txt}"
+        stamp="${python} ${./requirements.txt} ${./requirements-nodeps.txt}"
         if [ "$(cat ${venv}/.stamp 2>/dev/null || true)" != "$stamp" ]; then
           rm -rf ${venv}
           ${lib.getExe pkgs.uv} venv -q -p ${python}/bin/python3 ${venv}
           ${lib.getExe pkgs.uv} pip install -q -p ${venv}/bin/python --require-hashes -r ${./requirements.txt}
+          ${lib.getExe pkgs.uv} pip install -q -p ${venv}/bin/python --require-hashes --no-deps -r ${./requirements-nodeps.txt}
           printf '%s' "$stamp" > ${venv}/.stamp
         fi
         ${venv}/bin/python - <<'EOF'
         import os
         from huggingface_hub import snapshot_download
-        for repo, rev, d in ${builtins.toJSON hfModels}:
+        for repo, rev, d, pat in ${builtins.toJSON hfModels}:
             p = "${models}/" + d
             if os.path.exists(p + "/.rev") and open(p + "/.rev").read() == rev:
                 continue
-            snapshot_download(repo, revision=rev, local_dir=p)
+            snapshot_download(repo, revision=rev, local_dir=p, allow_patterns=pat)
             open(p + "/.rev", "w").write(rev)
         EOF
+        rm -rf ${models}/kokoro-thai-q8-onnx
         mkdir -p ${state}/ov-cache/whisper ${state}/ov-cache/pathumma
       '';
     };
@@ -223,16 +268,30 @@ in
       "--th-threshold" cfg.thaiThreshold
     ] "5G";
 
-    systemd.services.speech-tts = server "tts" "Wyoming TTS: Supertonic 3 (en/de) + Kokoro-Thai (th), CPU" [
+    systemd.services.speech-tts = lib.recursiveUpdate (server "tts" "Wyoming TTS: Kokoro-82M (en), Supertonic 3 (de), Wayu Kokoro-Thai (th), CPU" [
       "--uri" "tcp://[::]:${toString cfg.ttsPort}"
+      "--api-host" "127.0.0.1"
+      "--api-host" "::"
+      "--api-port" (toString cfg.apiPort)
       "--supertonic-dir" "${models}/supertonic-3"
-      "--kokoro-dir" "${models}/kokoro-thai-q8-onnx"
-      "--threads" "8"
+      "--kokoro-model" "${kokoroModel}"
+      "--kokoro-voices" "${kokoroVoices}"
+      "--wayu-dir" "${models}/wayu-kokoro-thai-v1"
+      "--voices-dir" voicesDir
+      "--selection-file" selectionFile
+      "--threads" "4"
       "--steps" "8"
-    ] "4G";
+    ] cfg.ttsMemoryMax) {
+      serviceConfig = {
+        SupplementaryGroups = [ "speech-voices" ];
+        IPAddressAllow = [ cmPiYgg "localhost" ediYgg ];
+      };
+      environment.NLTK_DATA = "${state}/nltk-data";
+    };
 
     networking.firewall.extraInputRules = ''
       iifname "ygg" ip6 saddr ${cmPiYgg} tcp dport { ${toString cfg.sttPort}, ${toString cfg.ttsPort} } accept
+      iifname "ygg" ip6 saddr ${ediYgg} tcp dport ${toString cfg.apiPort} accept
     '';
   };
 }

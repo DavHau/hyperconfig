@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Voices (vit)</title>
+<style>
+  /* Dark unless the system explicitly prefers light; data-theme overrides. */
+  :root {
+    color-scheme: dark;
+    --bg: #14161a; --fg: #e4e6eb; --muted: #9aa0aa; --card: #1d2026; --border: #30343c;
+    --accent: #6ea8ff; --accent-fg: #0b1220; --sel: #23324a; --err: #ff7b7b; --ok: #6fd28a;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      color-scheme: light;
+      --bg: #f6f7f9; --fg: #1b1d22; --muted: #5d636e; --card: #ffffff; --border: #d9dce2;
+      --accent: #2f6fdb; --accent-fg: #ffffff; --sel: #e3edff; --err: #c62828; --ok: #1e7d3a;
+    }
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #f6f7f9; --fg: #1b1d22; --muted: #5d636e; --card: #ffffff; --border: #d9dce2;
+    --accent: #2f6fdb; --accent-fg: #ffffff; --sel: #e3edff; --err: #c62828; --ok: #1e7d3a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.4 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+  header { display: flex; align-items: center; gap: 1rem; padding: .8rem 1.2rem; border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 1.1rem; margin: 0; flex: 1; }
+  main { display: grid; gap: 1rem; padding: 1rem 1.2rem; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+  section { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: .8rem; display: flex; flex-direction: column; gap: .6rem; min-width: 0; }
+  h2 { margin: 0; font-size: 1rem; }
+  .cur { color: var(--muted); font-size: .9rem; }
+  .cur b { color: var(--fg); }
+  ul { list-style: none; margin: 0; padding: 0; max-height: 22rem; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
+  li { padding: .35rem .5rem; cursor: pointer; display: flex; gap: .5rem; align-items: baseline; border-bottom: 1px solid var(--border); }
+  li:last-child { border-bottom: 0; }
+  li.picked { background: var(--sel); }
+  li .id { color: var(--muted); font-size: .8rem; margin-left: auto; white-space: nowrap; }
+  li .tag { font-size: .7rem; border: 1px solid var(--accent); color: var(--accent); border-radius: 4px; padding: 0 .3rem; }
+  li .active { font-size: .7rem; background: var(--ok); color: var(--bg); border-radius: 4px; padding: 0 .3rem; }
+  textarea { width: 100%; min-height: 4rem; font: inherit; padding: .4rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); }
+  .row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+  button { font: inherit; padding: .35rem .8rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  audio { width: 100%; }
+  .msg { font-size: .85rem; min-height: 1.2em; }
+  .msg.err { color: var(--err); }
+  .msg.ok { color: var(--ok); }
+  select { font: inherit; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: .2rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Assist voices (vit)</h1>
+  <label>Theme
+    <select id="theme">
+      <option value="system">System</option><option value="dark">Dark</option><option value="light">Light</option>
+    </select>
+  </label>
+</header>
+<main id="langs"><p>Loading…</p></main>
+<script>
+"use strict";
+const NAMES = { en: "English", de: "Deutsch", th: "ไทย (Thai)" };
+const SAMPLE = {
+  en: "The living room lights are now on.",
+  de: "Das Licht im Wohnzimmer ist jetzt eingeschaltet.",
+  th: "เปิดไฟในห้องนั่งเล่นแล้วครับ",
+};
+const picked = {};
+const texts = {};
+
+// theme: localStorage overrides the media query
+const themeSel = document.getElementById("theme");
+function applyTheme(t) {
+  if (t === "dark" || t === "light") document.documentElement.dataset.theme = t;
+  else delete document.documentElement.dataset.theme;
+}
+themeSel.value = localStorage.getItem("theme") || "system";
+applyTheme(themeSel.value);
+themeSel.onchange = () => { localStorage.setItem("theme", themeSel.value); applyTheme(themeSel.value); };
+
+function el(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v; else if (k.startsWith("on")) e[k] = v; else e.setAttribute(k, v);
+  }
+  for (const c of kids) e.append(c);
+  return e;
+}
+
+async function api(method, path, body) {
+  const r = await fetch(path, {
+    method, credentials: "same-origin",
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!r.ok) {
+    let m = r.status + " " + r.statusText;
+    try { m = (await r.json()).error || m; } catch (_) {}
+    throw new Error(m);
+  }
+  return r;
+}
+
+let state = null;
+async function load() {
+  state = await (await api("GET", "voices")).json();
+  render();
+}
+
+function render() {
+  const main = document.getElementById("langs");
+  main.replaceChildren();
+  for (const [lang, info] of Object.entries(state.languages)) {
+    if (!picked[lang]) picked[lang] = info.selected;
+    const cur = info.voices.find(v => v.id === info.selected);
+    const msg = el("div", { class: "msg" });
+    const audio = el("audio", { controls: "" });
+    const ta = el("textarea", { "aria-label": "Preview text" });
+    ta.value = texts[lang] ?? SAMPLE[lang] ?? "";
+    ta.oninput = () => { texts[lang] = ta.value; };
+    const list = el("ul");
+    for (const v of info.voices) {
+      const li = el("li", { title: v.description || v.id },
+        el("span", {}, v.label),
+        ...(v.builtin ? [] : [el("span", { class: "tag" }, "drop-in")]),
+        ...(v.id === info.selected ? [el("span", { class: "active" }, "in use")] : []),
+        el("span", { class: "id" }, v.id));
+      if (v.id === picked[lang]) li.classList.add("picked");
+      li.onclick = () => { picked[lang] = v.id; render(); };
+      list.append(li);
+    }
+    const preview = el("button", {}, "Preview");
+    preview.onclick = async () => {
+      preview.disabled = true; msg.className = "msg"; msg.textContent = "Synthesizing " + picked[lang] + "…";
+      try {
+        const r = await api("POST", "preview", { lang, voice: picked[lang], text: ta.value });
+        const blob = await r.blob();
+        audio.src = URL.createObjectURL(blob);
+        audio.play().catch(() => {});
+        msg.textContent = "";
+      } catch (e) { msg.className = "msg err"; msg.textContent = e.message; }
+      preview.disabled = false;
+    };
+    const use = el("button", { class: "primary" }, "Use for " + (NAMES[lang] || lang));
+    use.disabled = picked[lang] === info.selected;
+    use.onclick = async () => {
+      use.disabled = true;
+      try {
+        state = await (await api("PUT", "voices", { [lang]: picked[lang] })).json();
+        render();
+        const m = document.querySelector(`#lang-${lang} .msg`);
+        if (m) { m.className = "msg ok"; m.textContent = "Saved: Assist now uses " + state.selection[lang]; }
+      } catch (e) { msg.className = "msg err"; msg.textContent = e.message; use.disabled = false; }
+    };
+    main.append(el("section", { id: "lang-" + lang },
+      el("h2", {}, NAMES[lang] || lang),
+      el("div", { class: "cur" }, "In use: ", el("b", {}, cur ? cur.label : info.selected), " (" + info.selected + ")"),
+      list, ta, el("div", { class: "row" }, preview, use), audio, msg));
+  }
+}
+
+load().catch(e => {
+  document.getElementById("langs").replaceChildren(el("p", { class: "msg err" }, "Failed to load voices: " + e.message));
+});
+</script>
+</body>
+</html>

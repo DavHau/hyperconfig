@@ -29,9 +29,9 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 ### edi
 - header: -
 - own files: disko.nix, nginx-file-server.nix, reverse-proxy-maker.nix, reverse-proxy.nix, users.nix
-- imports: m/common-tools.nix, m/sbox.nix, m/common.nix, m/dyndns-porkbun.nix, m/nix-gc-server.nix, m/monitoring-grafana-sso.nix
+- imports: m/common-tools.nix, m/sbox.nix, m/common.nix, m/dyndns-porkbun.nix, m/nix-gc-server.nix, m/monitoring-grafana-sso.nix, m/wyoming-local-speech/voices-sso.nix
 - input modules: srvos.nixosModules.mixins-cloud-init
-- vars generated: grafana-admin hyprspace openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version wireguard-keys-wg-edi wireguard-keys-wireguard wireguard-network-wg-edi wireguard-network-wireguard yggdrasil
+- vars generated: grafana-admin hyprspace openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version voices-oauth2-proxy wireguard-keys-wg-edi wireguard-keys-wireguard wireguard-network-wg-edi wireguard-network-wireguard yggdrasil
 
 ### installer
 - header: -
@@ -78,7 +78,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 inventory (modules/flake-parts/nixosConfigurations.nix) adds; modules it names:
 machines/som/hermes-dashboards.nix, modules/nixos/infra-space/dashboard-account.nix, modules/nixos/spaces/registry.nix, machines/, modules/nixos/nixpkgs-config.nix, modules/nixos/infra-space/age-recipients.nix, modules/clan/nix-cache/default.nix, modules/clan/wireguard/default.nix, modules/clan/cctl/default.nix, modules/clan/remote-building/default.nix, modules/clan/oidc/default.nix, modules/nixos/zt-eu-sites.nix, modules/nixos/common.nix, modules/nixos/networkmanager-restart-late.nix, modules/nixos/clan-vars-restart-units.nix, modules/nixos/clan-secrets-mirror.nix, modules/backup-exclude.nix, modules/nixos/agent-user.nix, modules/nixos/infra-space/fleet-access.nix, modules/admin-ssh-keys.nix, modules/nixos/monitoring-zfs-pools.nix, modules/nixos/monitoring-server.nix, modules/nixos/monitoring-alerts.nix, modules/nixos/monitoring-teamclaude.nix
 
-Shared vars generated (vars/shared): clan-secrets-pull esphome-casa esphome-cm-pi esphome-playa infra-space-github infra-space-secrets-github infra-space-ssh loki-auth mimir-auth ncps ncps-ncps nix-ssh-client openssh-ca wireguard-network-wg-casa-external-peer-dave-handy wireguard-network-wg-casa-external-peer-external1 wireguard-network-wg-casa-external-peer-papa-handy wireguard-network-wg-casa-external-peer-papa-laptop wireguard-network-wg-casa-external-peer-papa-tv-stick wireguard-network-wireguard-external-peer-external1 zerotier-ip-amy-zt-eu zerotier-ip-amy-zt-home zerotier-ip-bam-zt-eu zerotier-ip-bam-zt-home zerotier-ip-cm-pi-zt-eu zerotier-ip-cm-pi-zt-home zerotier-ip-edi-zt-eu zerotier-ip-edi-zt-home zerotier-ip-installer-zt-eu zerotier-ip-installer-zt-home zerotier-ip-joy-zt-eu zerotier-ip-joy-zt-home zerotier-ip-nas-zt-eu zerotier-ip-nas-zt-home zerotier-ip-sgp-zt-eu zerotier-ip-som-zt-eu zerotier-ip-vit-zt-eu zerotier-ip-vit-zt-home zerotier-network-zt-eu zerotier-network-zt-home
+Shared vars generated (vars/shared): clan-secrets-pull esphome-casa esphome-cm-pi esphome-playa infra-space-github infra-space-secrets-github infra-space-ssh loki-auth mimir-auth ncps ncps-ncps nix-ssh-client oidc-client-voices openssh-ca wireguard-network-wg-casa-external-peer-dave-handy wireguard-network-wg-casa-external-peer-external1 wireguard-network-wg-casa-external-peer-papa-handy wireguard-network-wg-casa-external-peer-papa-laptop wireguard-network-wg-casa-external-peer-papa-tv-stick wireguard-network-wireguard-external-peer-external1 zerotier-ip-amy-zt-eu zerotier-ip-amy-zt-home zerotier-ip-bam-zt-eu zerotier-ip-bam-zt-home zerotier-ip-cm-pi-zt-eu zerotier-ip-cm-pi-zt-home zerotier-ip-edi-zt-eu zerotier-ip-edi-zt-home zerotier-ip-installer-zt-eu zerotier-ip-installer-zt-home zerotier-ip-joy-zt-eu zerotier-ip-joy-zt-home zerotier-ip-nas-zt-eu zerotier-ip-nas-zt-home zerotier-ip-sgp-zt-eu zerotier-ip-som-zt-eu zerotier-ip-vit-zt-eu zerotier-ip-vit-zt-home zerotier-network-zt-eu zerotier-network-zt-home
 
 ## Flake checks (checks.x86_64-linux.<name> -> source)
 

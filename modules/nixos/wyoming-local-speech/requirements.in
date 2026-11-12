@@ -2,6 +2,8 @@
 # dave-hermes's ~/jobs/speechbench envs ov + cpu on vit). Lock with:
 #   uv pip compile --python-version 3.12 --python-platform x86_64-manylinux_2_28 \
 #     --generate-hashes requirements.in -o requirements.txt
+# tltk (Wayu's Thai G2P) pins scikit-learn~=1.2 it does not need: it is
+# installed --no-deps from ./requirements-nodeps.txt, its real deps are here.
 openvino==2026.4.1
 tokenizers==0.22.2
 librosa==1.0.0
@@ -9,7 +11,24 @@ numpy==2.4.6
 wyoming==1.11.0
 supertonic==1.3.1
 onnxruntime==1.31.1
-pythainlp==5.4.0
 huggingface-hub==1.21.0
 soundfile==0.14.0
-fastthaig2p @ https://github.com/awslabs/FastThaiG2P/archive/4e82a291b4cf2876326744c6580121e9986ad354.zip
+aiohttp==3.14.5
+# EN: Kokoro-82M
+kokoro-onnx==0.6.1
+# TH: Wayu Kokoro-Thai (kokoro_thai from the HF snapshot): misaki[en]
+# without spacy-curated-transformers (torch + CUDA wheels; only for trf=True),
+# phonemizer instead of phonemizer-fork (same module, kokoro-onnx wants it),
+# spaCy's en_core_web_sm (misaki would download it at runtime).
+misaki==0.9.4
+num2words==0.5.14
+spacy==3.8.18
+espeakng-loader==0.2.4
+phonemizer==3.6.0
+en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+pythainlp==5.4.0
+nltk==3.10.4
+scikit-learn==1.9.1
+sklearn-crfsuite==0.5.0
+pandas==3.1.1
+gensim==4.4.0
