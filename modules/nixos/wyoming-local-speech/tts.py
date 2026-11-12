@@ -3,9 +3,11 @@
 (voice thai_som). Derived from dave-hermes's
 ~/jobs/speechbench/adapters/cpu_tts_mix.py.
 
-Voice selection: the voice name picks the engine (Supertonic M1..M5/F1..F5
-or thai_som); without one, the language decides (voice.language, else Thai
-script in the text -> th, else en).
+Engine selection: Thai script in the text -> Kokoro-Thai, whatever voice
+or language HA asks for (an Assist pipeline pins one voice, but its replies
+can be Thai). Otherwise Supertonic, language = the requested one, else de
+if the text looks German, else en; voice = the requested Supertonic voice,
+else the per-language default.
 """
 import argparse, asyncio, logging, os, re, time
 from functools import partial
@@ -19,6 +21,17 @@ from wyoming.tts import Synthesize
 
 log = logging.getLogger("speech-tts")
 THAI = re.compile("[\u0e00-\u0e7f]")
+DE_WORDS = set("der die das und ist nicht ich ein eine zu im mit auf den dem es sie wir ihr "
+               "habe hat wird werden kann bitte danke ja nein licht".split())
+
+
+def guess_lang(text):
+    if THAI.search(text):
+        return "th"
+    w = re.findall(r"[a-zäöüß]+", text.lower())
+    if re.search("[äöüß]", text.lower()) or sum(x in DE_WORDS for x in w) >= max(1, len(w) // 5):
+        return "de"
+    return "en"
 
 
 class Engine:
@@ -39,7 +52,7 @@ class Engine:
             s.synth("ok" if lang != "th" else "สวัสดี", None, lang)
 
     def synth(s, text, voice, lang):
-        if voice == "thai_som" or (voice is None and lang == "th"):
+        if THAI.search(text) or voice == "thai_som" or lang == "th":
             return "th", "thai_som", s.th.generate(text).astype(np.float32).reshape(-1), s.th.sample_rate
         if lang not in ("en", "de"):
             lang = "en"
@@ -62,7 +75,7 @@ class Handler(AsyncEventHandler):
         syn = Synthesize.from_event(event)
         text = " ".join(syn.text.split())
         name = syn.voice.name if syn.voice else None
-        lang = (syn.voice.language if syn.voice else None) or ("th" if THAI.search(text) else "en")
+        lang = (syn.voice.language if syn.voice else None) or guess_lang(text)
         lang = lang.split("-")[0].split("_")[0].lower()
         t0 = time.perf_counter()
         async with s.lock:

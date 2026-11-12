@@ -221,7 +221,7 @@ in
       "--pathumma-cache" "${state}/ov-cache/pathumma"
       "--pathumma-threads" "8"
       "--th-threshold" cfg.thaiThreshold
-    ] "4G";
+    ] "5G";
 
     systemd.services.speech-tts = server "tts" "Wyoming TTS: Supertonic 3 (en/de) + Kokoro-Thai (th), CPU" [
       "--uri" "tcp://[::]:${toString cfg.ttsPort}"
