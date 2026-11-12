@@ -32,6 +32,10 @@
       # "mobile_app"
 
       "zha"
+
+      # Local STT/TTS on vit (modules/nixos/wyoming-local-speech), added
+      # as two Wyoming config entries (host vit.d, ports 10300/10200).
+      "wyoming"
     ];
     # These are the modules behind "default_config", excluded python-matter-server
     # TODO: fix cross compilation for python-matter-server
