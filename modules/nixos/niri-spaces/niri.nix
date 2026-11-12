@@ -184,7 +184,7 @@ in
     security.pam.services.swaylock = { };
 
     environment.systemPackages = with pkgs; [
-      alacritty # Super+T
+      ghostty # Super+Return
       fuzzel # Super+D
       swaylock # Super+Alt+L
       swayidle

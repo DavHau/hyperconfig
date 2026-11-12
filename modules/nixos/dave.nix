@@ -74,7 +74,8 @@ in
     ./nix-lazy.nix
     ./git.nix
     ./jujutsu.nix
-    ./alacritty.nix
+    ./ghostty.nix
+    ./alacritty.nix # fallback terminal
     ./nautilus.nix
     ./udiskie.nix
     ./bitwarden.nix

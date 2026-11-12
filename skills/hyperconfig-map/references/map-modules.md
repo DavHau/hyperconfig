@@ -49,6 +49,8 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/fish.nix — - <- m/shell-profile.nix
 - modules/nixos/fonts.nix — - <- m/dave.nix
 - modules/nixos/fw-fanctrl.nix — Declarative Framework laptop fan curve via fw-fanctrl, gated on the active power-profiles-daemon profile. <- amy
+- modules/nixos/ghostty-terminfo.nix — Ghostty's terminfo (xterm-ghostty) on every machine and in the spaces' guests, so an ssh session from Dave's ghostty (.… <- m/common.nix, m/spaces/guest-base.nix
+- modules/nixos/ghostty.nix — Ghostty, Dave's default terminal on his desktops (TERMINAL in ./desktop.nix, niri's Mod+Return / Mod+T, nautilus, the s… <- m/dave.nix
 - modules/nixos/git-lfs.nix — Git LFS for every user of the host: <- som
 - modules/nixos/git.nix — - <- m/dave.nix
 - modules/nixos/gnome.nix — -
@@ -83,7 +85,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/monitoring-grafana-sso.nix — Grafana of the clan-core monitoring server, published at stats.davhau.com behind the clan's pocket-id (modules/clan/oid… <- edi
 - modules/nixos/monitoring-server.nix — Local overrides for the clan-core monitoring server (Mimir + Loki). <- modules/flake-parts/nixosConfigurations.nix
 - modules/nixos/monitoring-zfs-pools.nix — Pushes ZFS pool health and capacity to Mimir for ./monitoring-alerts.nix. <- modules/flake-parts/nixosConfigurations.nix
-- modules/nixos/nautilus.nix — Nautilus right-click "Open in Alacritty" (folder background and folder items), via the nautilus-open-any-terminal exten… <- m/dave.nix
+- modules/nixos/nautilus.nix — Nautilus right-click "Open in Ghostty" (folder background and folder items), via the nautilus-open-any-terminal extensi… <- m/dave.nix
 - modules/nixos/nether.nix — -
 - modules/nixos/networking-desktop.nix — - <- m/dave.nix
 - modules/nixos/networkmanager-restart-late.nix — Keep the network up through switch-to-configuration's daemon-reload. <- modules/flake-parts/nixosConfigurations.nix

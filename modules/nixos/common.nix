@@ -7,6 +7,7 @@
     ./all-hardware.nix
     ./timedated-ntp.nix
     ./fast-nix-gc.nix
+    ./ghostty-terminfo.nix
   ];
   users.mutableUsers = false;
 

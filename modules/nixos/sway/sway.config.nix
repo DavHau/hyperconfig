@@ -29,7 +29,7 @@ Output 'BOE NE135A1M-NY1 Unknown' scale 1.5
 font "FiraCode Nerd Font" Medium 11
 
 bindsym Control+Mod1+l exec swaylock
-set $term alacritty
+set $term ghostty
 
 exec dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP=sway
 exec ${pkgs.waybar}/bin/waybar --config ${import ./waybar.jsonc.nix {inherit pkgs;}} 2>&1 >/home/grmpf/sway.log &

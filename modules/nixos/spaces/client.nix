@@ -4,7 +4,7 @@
 
     - the guest's host key pinned for `[address]:port` (so it never stands
       in for the host's own sshd on port 22), from its public clan var;
-    - a launcher "<name> space", alacritty with an ssh login as the space's
+    - a launcher "<name> space", ghostty with an ssh login as the space's
       user, attached to tmux session `main` (as ../infra-space/launchers.nix);
     - with `hyper.spacesClient.herdrUser` set, a saved herdr SSH machine labelled
       <name>, target the ssh alias `space-<name>` (/etc/ssh/ssh_config: address,
@@ -41,7 +41,7 @@ let
       name = "space-${name}";
       desktopName = "${name} space";
       comment = "Shell as ${s.user} in the ${name} space (${s.machine})";
-      exec = "alacritty -e ssh -t ${alias name} tmux new -A -s main";
+      exec = "ghostty -e ssh -t ${alias name} tmux new -A -s main";
       categories = [
         "Network"
         "System"

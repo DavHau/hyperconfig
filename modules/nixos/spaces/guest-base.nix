@@ -40,7 +40,10 @@ let
 in
 {
   # Dave's shell (fish, aliases, zoxide, direnv, tmux) for the login sessions.
-  imports = [ ../shell-profile.nix ];
+  imports = [
+    ../shell-profile.nix
+    ../ghostty-terminfo.nix
+  ];
 
   options.space = {
     name = lib.mkOption {

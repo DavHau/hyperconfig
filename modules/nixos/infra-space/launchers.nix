@@ -1,6 +1,6 @@
 /*
   Dave's way into infra-space, on his desktops (../dave.nix): one launcher
-  entry per member, "infra-space (<member>)", opening alacritty with an ssh
+  entry per member, "infra-space (<member>)", opening ghostty with an ssh
   login as `infra` into that member's container (Dave's admin keys are
   authorized there, ./default.nix), attached to the tmux session `main` so
   a closed window leaves the shell and any afk session running.
@@ -30,7 +30,7 @@ let
       name = "infra-space-${member}";
       desktopName = "infra-space (${member})";
       comment = "Shell as infra in ${member}'s infra-space container";
-      exec = "alacritty -e ssh -t -p ${toString m.sshPort} infra@${m.address} tmux new -A -s main";
+      exec = "ghostty -e ssh -t -p ${toString m.sshPort} infra@${m.address} tmux new -A -s main";
       categories = [
         "Network"
         "System"

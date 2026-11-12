@@ -1,7 +1,7 @@
-# Terminal launcher for niri's Mod+T: open alacritty in the working directory
+# Terminal launcher for niri's Mod+T: open ghostty in the working directory
 # of the focused window's process instead of always $HOME.
 #
-# `niri` and `alacritty` are resolved from the session PATH by bare name (the
+# `niri` and `ghostty` are resolved from the session PATH by bare name (the
 # same convention the spaces command wrappers use), which keeps this script's
 # closure small and lets tests stub both.
 { pkgs }:
@@ -36,6 +36,6 @@ pkgs.writeShellApplication {
       *) cwd=$HOME ;;
     esac
 
-    exec alacritty --working-directory "$cwd"
+    exec ghostty --working-directory="$cwd"
   '';
 }

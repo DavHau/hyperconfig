@@ -1,10 +1,10 @@
 # Behavior test for niri-terminal-cwd: Mod+T opens a terminal in the working
 # directory of the focused window's process.
 #
-# The script resolves `niri` and `alacritty` from the ambient PATH (same
+# The script resolves `niri` and `ghostty` from the ambient PATH (same
 # bare-name convention as the spaces command wrappers), so the test stubs both:
-# the niri stub reports a controlled focused-window pid, the alacritty stub
-# records the --working-directory it was launched with.
+# the niri stub reports a controlled focused-window pid, the ghostty stub
+# records the --working-directory=<dir> it was launched with.
 #
 # Covered behavior:
 #   1. focused window with a descendant process (terminal -> shell) whose cwd
@@ -22,11 +22,14 @@ pkgs.runCommand "niri-terminal-cwd-test" { } ''
   mkdir -p "$TMPDIR/bin" "$TMPDIR/outside"
 
   # --- stubs ------------------------------------------------------------
-  # alacritty: record the working directory it was asked to start in.
-  cat > "$TMPDIR/bin/alacritty" <<'EOF'
+  # ghostty: record the working directory it was asked to start in.
+  cat > "$TMPDIR/bin/ghostty" <<'EOF'
   #!/bin/sh
-  [ "$1" = "--working-directory" ] || { echo "unexpected args: $*" >&2; exit 1; }
-  printf '%s' "$2" > "$RESULT"
+  case $1 in
+    --working-directory=*) [ $# -eq 1 ] || { echo "unexpected args: $*" >&2; exit 1; } ;;
+    *) echo "unexpected args: $*" >&2; exit 1 ;;
+  esac
+  printf '%s' "''${1#--working-directory=}" > "$RESULT"
   EOF
   # niri: pretend the window whose pid is $FOCUSED_PID is focused.
   cat > "$TMPDIR/bin/niri" <<'EOF'
@@ -38,7 +41,7 @@ pkgs.runCommand "niri-terminal-cwd-test" { } ''
     printf 'null\n'
   fi
   EOF
-  chmod +x "$TMPDIR/bin/alacritty" "$TMPDIR/bin/niri"
+  chmod +x "$TMPDIR/bin/ghostty" "$TMPDIR/bin/niri"
   export PATH="$TMPDIR/bin:$PATH"
   export RESULT="$TMPDIR/result"
 

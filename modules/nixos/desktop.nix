@@ -17,7 +17,7 @@
   };
 
   # session variables
-  environment.sessionVariables.TERMINAL = "alacritty";
+  environment.sessionVariables.TERMINAL = "ghostty";
   environment.sessionVariables.TERM = "xterm-256color";
 
   # power management

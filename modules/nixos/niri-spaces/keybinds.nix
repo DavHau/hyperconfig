@@ -42,7 +42,7 @@ let
       };
     };
     "Mod+Return" = {
-      spawn = "alacritty";
+      spawn = "ghostty";
       description = "Terminal";
     };
   };
