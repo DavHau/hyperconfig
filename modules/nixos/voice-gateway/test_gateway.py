@@ -359,3 +359,166 @@ def test_reply_language():
     assert g.reply_language("Schalt die Klimaanlage an.") == "German"
     assert g.reply_language("ปิดแอร์") == "Thai"
     assert g.with_language("What time is it?").endswith("(Dave spoke English. Reply in English only.)")
+
+
+# --------------------------------------------------- follow-up listening
+def scripted(env, replies):
+    """Agent replies from a list (the last one repeats)."""
+    async def agent(name, text):
+        env.calls.append((name, text))
+        return replies.pop(0) if len(replies) > 1 else replies[0]
+    env.gw.agent_call = agent
+
+
+def test_marker_continues_and_is_stripped(env):
+    async def t():
+        scripted(env, ["Which room, living room or bedroom? [listen]", "Done."])
+        assert await env.gw.turn("Turn on the light", DEV) == ("Which room, living room or bedroom?", True)
+        env.clock.t += 5
+        assert await env.gw.turn("The living room.", DEV) == ("Done.", False)
+    run(t())
+
+
+def test_bare_question_mark_does_not_continue(env):
+    async def t():
+        scripted(env, ["It is sunny. Anything else?"])
+        assert await env.gw.turn("Weather?", DEV) == ("It is sunny. Anything else?", False)
+    run(t())
+
+
+def test_http_returns_continue_flag(env):
+    async def t():
+        scripted(env, ["Should I? [listen]"])
+        ha = TestClient(TestServer(g.ha_app(env.gw, lambda: "s")))
+        await ha.start_server()
+        try:
+            r = await ha.post("/v1/converse", json={"text": "do it", "device_id": DEV},
+                              headers={"Authorization": "Bearer s"})
+            assert await r.json() == {"speech": "Should I?", "continue_conversation": True}
+        finally:
+            await ha.close()
+    run(t())
+
+
+def test_conversation_mode_on_off(env):
+    async def t():
+        scripted(env, ["Sure."])
+        assert await env.gw.turn("Let's talk.", DEV) == ("Okay, I'm listening.", True)
+        assert env.calls == []
+        for q in ("How are you?", "Tell me more."):
+            env.clock.t += 8
+            assert await env.gw.turn(q, DEV) == ("Sure.", True)
+        env.clock.t += 8
+        assert await env.gw.turn("That's all.", DEV) == ("Okay.", False)
+        env.clock.t += 8
+        assert await env.gw.turn("Weather?", DEV) == ("Sure.", False)
+        assert await env.gw.turn("Lass uns reden.", DEV) == ("Okay, ich höre zu.", True)
+        env.clock.t += 5
+        assert await env.gw.turn("Das war's.", DEV) == ("Alles klar.", False)
+        assert len(env.calls) == 3
+    run(t())
+
+
+def test_conversation_mode_other_phrases_and_idle(env):
+    async def t():
+        scripted(env, ["Sure."])
+        assert (await env.gw.turn("Lass uns quatschen", DEV))[1]
+        env.clock.t += 5
+        assert (await env.gw.turn("Ende", DEV)) == ("Alles klar.", False)
+        assert (await env.gw.turn("conversation mode", DEV))[1]
+        # 5 min without speech: the reopened mic gave nothing, mode is over
+        env.clock.t += 301
+        assert await env.gw.turn("hello", DEV) == ("Sure.", False)
+        # a stop word outside any follow-up is a normal request
+        assert await env.gw.turn("stop", DEV) == ("Sure.", False)
+        # "conversation mode off" is not "on"
+        assert await env.gw.turn("conversation mode off", DEV) == ("Sure.", False)
+    run(t())
+
+
+def test_filler_or_empty_followup_ends_chain(env):
+    async def t():
+        scripted(env, ["Which one? [listen]"])
+        for chatter in ("you", "Oh.", "All that.", ""):
+            env.calls.clear()
+            assert (await env.gw.turn("Turn on the light", DEV))[1]
+            env.clock.t += 5
+            assert await env.gw.turn(chatter, DEV) == ("", False)
+            assert len(env.calls) == 1  # chatter never reached the agent
+        # a short confirmation is an answer, not filler
+        assert (await env.gw.turn("Turn on the light", DEV))[1]
+        env.clock.t += 5
+        assert (await env.gw.turn("Okay.", DEV))[0] == "Which one?"
+        env.clock.t += 5
+        assert (await env.gw.turn("Ja", DEV))[0] == "Which one?"
+        env.clock.t += 120
+        # in conversation mode too
+        assert (await env.gw.turn("let's talk", DEV))[1]
+        env.clock.t += 5
+        assert await env.gw.turn("you", DEV) == ("", False)
+        env.clock.t += 5
+        assert await env.gw.turn("Hi", DEV) == ("Which one?", True)  # wake-word turn, mode off
+    run(t())
+
+
+def test_silence_after_reopen_ends_chain(env):
+    async def t():
+        scripted(env, ["Sure."])
+        assert (await env.gw.turn("let's talk", DEV))[1]
+        env.clock.t += 60  # no answer on the reopened mic (HA never calls us)
+        assert await env.gw.turn("What time is it", DEV) == ("Sure.", False)
+    run(t())
+
+
+def test_followup_cap(env):
+    async def t():
+        scripted(env, ["Really? [listen]"])
+        conts = []
+        for _ in range(12):
+            conts.append((await env.gw.turn("yes, go on please", DEV))[1])
+            env.clock.t += 5
+        assert conts[:10] == [True] * 10 and conts[10] is False
+        # a fresh wake-word turn starts a new chain
+        env.clock.t += 120
+        assert (await env.gw.turn("one more thing please", DEV))[1]
+    run(t())
+
+
+def test_followups_per_device(env):
+    async def t():
+        scripted(env, ["Sure."])
+        assert (await env.gw.turn("let's talk", DEV))[1]
+        assert await env.gw.turn("hello there", OTHER) == ("Sure.", False)
+        assert await env.gw.turn("hello there", DEV) == ("Sure.", True)
+    run(t())
+
+
+def test_late_reply_strips_marker(env):
+    async def t():
+        async def slow(name, text):
+            await asyncio.sleep(0.05)
+            return "Finished. Shall I deploy? [listen]"
+        env.gw.agent_call = slow
+        env.gw.cfg["replyTimeout"] = 0.01
+        r = await env.gw.turn("build it", DEV)
+        assert r[1] is False and "still working" in r[0]
+        await asyncio.sleep(0.1)
+        await settle()
+        assert env.announces == ["Finished. Shall I deploy?"]
+    run(t())
+
+
+def test_time_injection(env, monkeypatch):
+    monkeypatch.setenv("TZ", "<+07>-7")  # POSIX form: no tzdata in the build sandbox
+    import time as _t
+    _t.tzset()
+    try:
+        env.clock.t = 1794575340.0  # 2026-11-13 13:09 UTC
+        assert g.time_line(env.clock()) == "Current time: Fri 2026-11-13 20:09 (+07)"
+        c = env.gw.user_content("What time is it?")
+        assert c.startswith("What time is it?\n\n(Dave spoke English.")
+        assert c.endswith("(Current time: Fri 2026-11-13 20:09 (+07))")
+        assert "use it, never guess" in " ".join(g.SPOKEN_PREFIX.split())
+    finally:
+        monkeypatch.delenv("TZ")
+        _t.tzset()

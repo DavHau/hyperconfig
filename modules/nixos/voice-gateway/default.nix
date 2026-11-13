@@ -31,6 +31,17 @@
       passkey login and can generate a new one.
   Every trusted request is logged to the journal (timestamp, transcript).
 
+  Follow-up listening (gateway.py `turn`): /v1/converse answers
+  {speech, continue_conversation}; hermes_conversation hands the flag to
+  HA, and the satellite reopens its microphone without the wake word. Set
+  when the agent ends its reply with the marker [listen] (a real question,
+  choice or confirmation; a bare "?" does not count), or in conversation
+  mode ("let's talk" / "lass uns reden" ... "that's all" / "das war's",
+  per device, ends after 5 min or on a silent/filler follow-up). Outside
+  conversation mode at most 10 follow-ups in a row; filler transcripts
+  ("you", "Oh.") on a reopened mic end the chain unanswered. Every user
+  message carries the current local time.
+
   Listeners: haPort and webPort on som's ygg address, admitted from cm-pi's
   and edi's ygg addresses respectively; mcpPort on 127.0.0.1 (the voice
   agent) and the infra-space veth host address (the infra agent). Local

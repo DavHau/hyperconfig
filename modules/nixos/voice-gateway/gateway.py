@@ -47,8 +47,14 @@ your reply is converted to speech. Reply in 1-3 short spoken sentences, no
 markdown, no lists, no code, no URLs. Always answer in the language of
 Dave's latest message (English, German or Thai), even if earlier turns
 were in another language. Plain punctuation only, no typographic
-quotes or dashes. Do not end with follow-up questions such as "anything
-else?": Dave says the wake word when he wants more. Never read out secrets, tokens,
+quotes or dashes. Do not end with filler follow-ups such as "anything
+else?": Dave says the wake word when he wants more. Only when your reply
+really needs an answer from Dave to go on (a question you must ask, a
+choice between options, a confirmation before you act), end it with the
+marker [listen]: the microphone then reopens for his answer without the
+wake word. Never add [listen] otherwise; a question mark alone does not
+reopen the microphone. Each message carries the current local time; use
+it, never guess the time. Never read out secrets, tokens,
 passwords, keys or codes. If a task takes longer than a few seconds, say
 briefly that you are on it, keep working, and report the result later via
 Dave's normal channel (Telegram or the desktop app), not here.
@@ -87,6 +93,70 @@ def reply_language(text: str) -> str:
 def with_language(text: str) -> str:
     lang = reply_language(text)
     return f"{text}\n\n(Dave spoke {lang}. Reply in {lang} only.)"
+
+
+def time_line(t: float) -> str:
+    """'Current time: Fri 2026-11-13 20:09 (+07)' in the host's zone: the
+    agent guessed the time otherwise (said 20:21 at 20:09)."""
+    lt = time.localtime(t)
+    z = time.strftime("%z", lt)
+    z = z[:3] if z.endswith("00") else f"{z[:3]}:{z[3:]}"
+    return f"Current time: {time.strftime('%a %Y-%m-%d %H:%M', lt)} ({z})"
+
+
+# ------------------------------------------------- follow-up listening
+# The agent ends a reply with LISTEN_MARKER when it really needs an answer
+# (question, choice, confirmation); the gateway strips it and answers HA
+# with continue_conversation, so the satellite reopens its microphone
+# without the wake word. A bare "?" does not (HA's default did, and room
+# chatter then became the next turn: a loop).
+LISTEN_MARKER = re.compile(r"\s*\[\s*listen\s*\]\s*", re.I)
+
+
+def split_marker(reply: str) -> tuple[str, bool]:
+    if not LISTEN_MARKER.search(reply or ""):
+        return reply, False
+    return LISTEN_MARKER.sub(" ", reply).strip(), True
+
+
+# STT of room noise or chatter on a reopened microphone ("you", "Oh.",
+# "All that."): such a follow-up ends the chain instead of reaching the
+# agent.
+# Confirmations ("okay", "yeah", "ja", "no") are real answers, so not here.
+FILLER = set("""you oh ah uh um hm hmm mm eh huh all that the a so bye and i it is this
+na äh ähm öh hä""".split())
+
+
+def is_filler(norm: str) -> bool:
+    w = norm.split()
+    return not w or (len(w) <= 3 and all(x in FILLER for x in w))
+
+
+def _phrase_in(norm: str, phrases, slack: int) -> bool:
+    return any(p and (norm == p or (p in f" {norm} " and len(norm) <= len(p) + slack))
+               for p in phrases)
+
+
+CONVO_ON = ["lass uns reden", "lass uns quatschen", "let's talk", "lets talk",
+            "conversation mode", "gesprächsmodus"]
+CONVO_OFF = ["das war's", "das wars", "das war es", "stop", "stopp", "that's all", "thats all",
+             "that is all", "ende", "conversation mode off", "gesprächsmodus aus"]
+
+
+_DE_PHRASE_WORDS = {"ende", "stopp", "wars", "war", "lass", "reden", "quatschen", "gesprächsmodus"}
+
+
+@dataclass
+class Convo:
+    """Follow-up state per satellite (or per HA conversation without one)."""
+    mode: bool = False          # conversation mode: every reply reopens the mic
+    last: float = 0.0           # last turn (conversation mode ends after modeIdle)
+    auto: int = 0               # consecutive follow-ups outside conversation mode
+    expect_until: float = 0.0   # a reopened mic's answer must arrive before this
+
+
+def spoken_seconds(text: str) -> float:
+    return len(text.split()) / 2.3 + 1.0
 
 
 AGENT_NOTE = {
@@ -196,6 +266,7 @@ class Gateway:
     # sessionIdleMinutes of silence, so a wrong conclusion from an old
     # exchange ("the token is expired") doesn't stick for days.
     sessions: dict = field(default_factory=dict)
+    convos: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         c = self.cfg
@@ -211,6 +282,14 @@ class Gateway:
         self.unlock_ttl = float(c.get("unlockTtl", 120))
         self.rate_n, self.rate_window = c.get("unlockRate", [3, 600])
         self.state_path = Path(c["stateDir"]) / "state.json"
+        f = c.get("followUp", {})
+        self.max_auto = int(f.get("maxAuto", 10))
+        self.mode_idle = float(f.get("modeIdleSeconds", 300))
+        # How long after the reply is spoken an answer may still arrive on
+        # the reopened mic (lead-in, the satellite's listening, STT).
+        self.listen_window = float(f.get("listenWindowSeconds", 25))
+        self.convo_on = [normalize(p) for p in f.get("onPhrases", CONVO_ON)]
+        self.convo_off = [normalize(p) for p in f.get("offPhrases", CONVO_OFF)]
         self.agent_call = self.agent_call or self._http_agent
         self.notify = self.notify or self._ntfy
         self.announce = self.announce or self._ha_announce
@@ -289,7 +368,67 @@ class Gateway:
                 del self.views[k]
 
     # ------------------------------------------------------------ the turn
+    async def turn(self, text: str, device: Optional[str], language: str = "en",
+                   conversation_id: Optional[str] = None) -> tuple[str, bool]:
+        """One HA turn -> (speech, continue_conversation)."""
+        now = self.clock()
+        key = device or (f"conv:{conversation_id}" if conversation_id else "anon")
+        cv = self.convos.setdefault(key, Convo())
+        norm = normalize(text)
+        followup = cv.expect_until > 0 and now <= cv.expect_until
+        if cv.expect_until and not followup:
+            # A reopened mic got no turn in time: silence (HA ends the run
+            # with "no text recognized" and never calls us). Chain over.
+            log.info("follow-up missed on %s: chain ended", key)
+            cv.mode, cv.auto = False, 0
+        if cv.mode and now - cv.last > self.mode_idle:
+            cv.mode = False
+        cv.expect_until = 0.0
+        cv.last = now
+        if not followup:
+            cv.auto = 0
+
+        # Short phrases carry few function words: their own German words decide.
+        de = reply_language(text) == "German" or bool(_DE_PHRASE_WORDS & set(norm.split()))
+        is_off = _phrase_in(norm, self.convo_off, 4)
+        if (cv.mode or followup) and is_off:
+            was = cv.mode
+            cv.mode, cv.auto = False, 0
+            log.info("conversation ended by phrase on %s (mode was %s)", key, was)
+            return ("Alles klar." if de else "Okay."), False
+        if not is_off and _phrase_in(norm, self.convo_on, 12):
+            cv.mode, cv.auto = True, 0
+            log.info("conversation mode ON for %s", key)
+            return self._reply(cv, "Okay, ich höre zu." if de else "Okay, I'm listening.", True)
+        pending_challenge = self.challenge is not None and self.challenge.device == device
+        if followup and is_filler(norm) and not pending_challenge:
+            # Empty or chatter on a reopened mic ends the chain, conversation
+            # mode included: the agent is not asked, nothing is spoken.
+            log.info("follow-up on %s was filler (%r): chain ended", key, text[:40])
+            cv.mode, cv.auto = False, 0
+            return "", False
+
+        speech, wants = await self._handle(text, device, language)
+        if cv.mode:
+            return self._reply(cv, speech, True)
+        if wants and cv.auto < self.max_auto:
+            cv.auto += 1
+            return self._reply(cv, speech, True)
+        if wants:
+            log.info("follow-up cap (%d) reached on %s", self.max_auto, key)
+        cv.auto = 0
+        return speech, False
+
+    def _reply(self, cv: Convo, speech: str, cont: bool) -> tuple[str, bool]:
+        if cont and speech.strip():
+            cv.expect_until = self.clock() + spoken_seconds(speech) + self.listen_window
+            return speech, True
+        return speech, False
+
     async def handle(self, text: str, device: Optional[str], language: str = "en") -> str:
+        return (await self.turn(text, device, language))[0]
+
+    async def _handle(self, text: str, device: Optional[str], language: str = "en") -> tuple[str, bool]:
         self.tick()
         now = self.clock()
         norm = normalize(text)
@@ -297,12 +436,12 @@ class Gateway:
 
         ch = self.challenge
         if ch is not None and device == ch.device:
-            return self._answer(ch, norm)
+            return self._answer(ch, norm), False
 
         if known and self._is_start_phrase(norm):
-            return self._start_challenge(device, language)
+            return self._start_challenge(device, language), False
         if known and norm in self.unlock_phrases:
-            return await self._request_unlock(device)
+            return await self._request_unlock(device), False
 
         if self.trusted and device == self.trusted_device:
             self.last_activity = now
@@ -313,31 +452,32 @@ class Gateway:
                 log.warning("infra agent unreachable: %s", e)
                 if norm in self.off_phrases:
                     self.relock("phrase")
-                    return "Trusted mode off."
-                return "The admin agent is not reachable right now."
+                    return "Trusted mode off.", False
+                return "The admin agent is not reachable right now.", False
         try:
             return await self._ask("voice", text)
         except AgentUnreachable as e:
             log.warning("voice agent unreachable: %s", e)
-            return "Sorry, I can't reach the assistant right now."
+            return "Sorry, I can't reach the assistant right now.", False
 
     def _is_start_phrase(self, norm: str) -> bool:
         return any(p and p in norm and len(norm) <= len(p) + 12 for p in self.start_phrases)
 
-    async def _ask(self, agent: str, text: str) -> str:
+    async def _ask(self, agent: str, text: str) -> tuple[str, bool]:
         task = asyncio.ensure_future(self.agent_call(agent, text))
         timeout = float(self.cfg.get("replyTimeout", 40))
         done, _ = await asyncio.wait({task}, timeout=timeout)
         if task in done:
-            return strip_markdown(task.result())
+            reply, wants = split_marker(task.result())
+            return strip_markdown(reply), wants
 
         def late(t: asyncio.Task) -> None:
             if not t.cancelled() and t.exception() is None and t.result():
-                self.announce_bg(strip_markdown(t.result())[:600])
+                self.announce_bg(strip_markdown(split_marker(t.result())[0])[:600])
         task.add_done_callback(late)
         self.background.add(task)
         task.add_done_callback(self.background.discard)
-        return "I'm still working on that and will tell you when it's done."
+        return "I'm still working on that and will tell you when it's done.", False
 
     # --------------------------------------------------- passkey unlock path
     async def _request_unlock(self, device: str) -> str:
@@ -453,13 +593,16 @@ class Gateway:
         self.sessions[agent] = (sid, now)
         return sid
 
+    def user_content(self, text: str) -> str:
+        return f"{with_language(text)}\n({time_line(self.clock())})"
+
     # ------------------------------------------------------- real backends
     async def _http_agent(self, agent: str, text: str) -> str:
         a = self.cfg["agents"][agent]
         body: dict[str, Any] = {
             "messages": [
                 {"role": "system", "content": SPOKEN_PREFIX + "\n" + AGENT_NOTE.get(agent, "")},
-                {"role": "user", "content": with_language(text)},
+                {"role": "user", "content": self.user_content(text)},
             ],
         }
         if a.get("model"):
@@ -681,8 +824,9 @@ def ha_app(gw: Gateway, secret: Callable[[], str]) -> web.Application:
             return web.json_response({"error": "unauthorized"}, status=401)
         body = await req.json()
         text = str(body.get("text") or "")[:2000]
-        speech = await gw.handle(text, body.get("device_id"), str(body.get("language") or "en"))
-        return web.json_response({"speech": speech})
+        speech, cont = await gw.turn(text, body.get("device_id"), str(body.get("language") or "en"),
+                                     body.get("conversation_id"))
+        return web.json_response({"speech": speech, "continue_conversation": cont})
 
     app.router.add_post("/v1/converse", converse)
     return app

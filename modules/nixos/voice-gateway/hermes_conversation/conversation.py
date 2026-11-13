@@ -72,17 +72,19 @@ class HermesConversationEntity(conversation.ConversationEntity, conversation.Abs
                 timeout=aiohttp.ClientTimeout(total=90),
             ) as r:
                 r.raise_for_status()
-                speech = (await r.json()).get("speech") or ""
+                data = await r.json()
+                speech = data.get("speech") or ""
+                listen = bool(data.get("continue_conversation"))
         except Exception as e:  # noqa: BLE001 - spoken, not raised
             _LOGGER.warning("voice-gateway failed: %s", e)
-            speech = "Sorry, the assistant is not reachable."
+            speech, listen = "Sorry, the assistant is not reachable.", False
         chat_log.async_add_assistant_content_without_tools(
             conversation.AssistantContent(agent_id=user_input.agent_id, content=speech)
         )
         result = conversation.async_get_result_from_chat_log(user_input, chat_log)
-        # HA reopens the satellite's microphone after any reply ending in "?"
-        # (ChatLog.continue_conversation). In a room with people talking that
-        # turns into a loop: background speech becomes the next turn, whose
-        # reply ends in "?" again. Every turn starts with the wake word.
-        result.continue_conversation = False
+        # The gateway decides whether the satellite reopens its microphone
+        # (the agent asked a real question, or conversation mode is on), not
+        # HA's default "reply ends in ?": in a room with people talking that
+        # default turned background speech into the next turn, a loop.
+        result.continue_conversation = listen and bool(speech.strip())
         return result
