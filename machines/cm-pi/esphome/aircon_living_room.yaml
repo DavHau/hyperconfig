@@ -2,4 +2,66 @@ substitutions:
   name: aircon_living_room
   friendly_name: Aircon Living Room
 
-<<: !include aircon_common.yaml
+# Athom IR blaster (ESP8285, IR LED on GPIO4, IR receiver on GPIO5), sitting
+# next to the living-room TV. Besides the Haier AC (aircon_common.yaml) it
+# sends the TCL C755's IR codes, learned from its RC833 remote with
+# remote_receiver (GPIO5, dump: all): RCA protocol, 38 kHz, address 0xF,
+# 4 ms/4 ms header, 0.5 ms marks, 2 ms space = 1, 1 ms space = 0, 24 bits =
+# addr, cmd, ~addr, ~cmd. Power is a toggle (the remote has no discrete
+# on/off). ESPHome has no RCA encoder, so the frames are sent raw, twice.
+#
+# Build with ESPHome 2025.8.x: the haier_acyrw02 component does not load on
+# 2026.x (climate.CLIMATE_SCHEMA is gone), e.g.
+#   uv tool run --python 3.12 esphome@2025.8.4 run \
+#     machines/cm-pi/esphome/aircon_living_room.yaml --device 192.168.8.213
+packages:
+  common: !include aircon_common.yaml
+
+remote_transmitter:
+  id: tv_ir
+  # Same LED as the Haier climate component, which takes `pin: 4` as a plain
+  # number (not a pin schema), so ESPHome sees no conflict to allow.
+  pin: GPIO4
+  carrier_duty_percent: 50%
+
+button:
+  - platform: template
+    id: tv_power
+    name: "TV Power"
+    icon: "mdi:power"
+    on_press:
+      - remote_transmitter.transmit_raw:
+          transmitter_id: tv_ir
+          carrier_frequency: 38kHz
+          # RCA addr 0xF cmd 0x2A
+          code: [4000, -4000, 500, -2000, 500, -2000, 500, -2000, 500, -2000, 500, -1000, 500, -1000, 500, -2000, 500, -1000, 500, -2000, 500, -1000, 500, -2000, 500, -1000, 500, -1000, 500, -1000, 500, -1000, 500, -1000, 500, -2000, 500, -2000, 500, -1000, 500, -2000, 500, -1000, 500, -2000, 500, -1000, 500, -2000, 500, -8000, 4000, -4000, 500, -2000, 500, -2000, 500, -2000, 500, -2000, 500, -1000, 500, -1000, 500, -2000, 500, -1000, 500, -2000, 500, -1000, 500, -2000, 500, -1000, 500, -1000, 500, -1000, 500, -1000, 500, -1000, 500, -2000, 500, -2000, 500, -1000, 500, -2000, 500, -1000, 500, -2000, 500, -1000, 500, -2000, 500, -8000]
+  - platform: template
+    id: tv_volume_up
+    name: "TV Volume Up"
+    icon: "mdi:volume-plus"
+    on_press:
+      - remote_transmitter.transmit_raw:
+          transmitter_id: tv_ir
+          carrier_frequency: 38kHz
+          # RCA addr 0xF cmd 0x2F
+          code: [4000, -4000, 500, -2000, 500, -2000, 500, -2000, 500, -2000, 500, -1000, 500, -1000, 500, -2000, 500, -1000, 500, -2000, 500, -2000, 500, -2000, 500, -2000, 500, -1000, 500, -1000, 500, -1000, 500, -1000, 500, -2000, 500, -2000, 500, -1000, 500, -2000, 500, -1000, 500, -1000, 500, -1000, 500, -1000, 500, -8000, 4000, -4000, 500, -2000, 500, -2000, 500, -2000, 500, -2000, 500, -1000, 500, -1000, 500, -2000, 500, -1000, 500, -2000, 500, -2000, 500, -2000, 500, -2000, 500, -1000, 500, -1000, 500, -1000, 500, -1000, 500, -2000, 500, -2000, 500, -1000, 500, -2000, 500, -1000, 500, -1000, 500, -1000, 500, -1000, 500, -8000]
+  - platform: template
+    id: tv_volume_down
+    name: "TV Volume Down"
+    icon: "mdi:volume-minus"
+    on_press:
+      - remote_transmitter.transmit_raw:
+          transmitter_id: tv_ir
+          carrier_frequency: 38kHz
+          # RCA addr 0xF cmd 0x2E
+          code: [4000, -4000, 500, -2000, 500, -2000, 500, -2000, 500, -2000, 500, -1000, 500, -1000, 500, -2000, 500, -1000, 500, -2000, 500, -2000, 500, -2000, 500, -1000, 500, -1000, 500, -1000, 500, -1000, 500, -1000, 500, -2000, 500, -2000, 500, -1000, 500, -2000, 500, -1000, 500, -1000, 500, -1000, 500, -2000, 500, -8000, 4000, -4000, 500, -2000, 500, -2000, 500, -2000, 500, -2000, 500, -1000, 500, -1000, 500, -2000, 500, -1000, 500, -2000, 500, -2000, 500, -2000, 500, -1000, 500, -1000, 500, -1000, 500, -1000, 500, -1000, 500, -2000, 500, -2000, 500, -1000, 500, -2000, 500, -1000, 500, -1000, 500, -1000, 500, -2000, 500, -8000]
+  - platform: template
+    id: tv_input
+    name: "TV Input"
+    icon: "mdi:import"
+    on_press:
+      - remote_transmitter.transmit_raw:
+          transmitter_id: tv_ir
+          carrier_frequency: 38kHz
+          # RCA addr 0xF cmd 0xA3
+          code: [4000, -4000, 500, -2000, 500, -2000, 500, -2000, 500, -2000, 500, -2000, 500, -1000, 500, -2000, 500, -1000, 500, -1000, 500, -1000, 500, -2000, 500, -2000, 500, -1000, 500, -1000, 500, -1000, 500, -1000, 500, -1000, 500, -2000, 500, -1000, 500, -2000, 500, -2000, 500, -2000, 500, -1000, 500, -1000, 500, -8000, 4000, -4000, 500, -2000, 500, -2000, 500, -2000, 500, -2000, 500, -2000, 500, -1000, 500, -2000, 500, -1000, 500, -1000, 500, -1000, 500, -2000, 500, -2000, 500, -1000, 500, -1000, 500, -1000, 500, -1000, 500, -1000, 500, -2000, 500, -1000, 500, -2000, 500, -2000, 500, -2000, 500, -1000, 500, -1000, 500, -8000]
