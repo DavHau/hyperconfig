@@ -31,6 +31,8 @@
       dave-hermes = "dave-hermes";
       joe = "joe";
       thaigersprint = "thaigersprint";
+      # The Voice PE's untrusted agent (../../machines/som/hermes-agents.nix).
+      voice = "voice";
     };
     primary = "dave-hermes";
     # spaces-hermes runs `hermes-desktop` and turns a failure into a
