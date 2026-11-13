@@ -79,4 +79,10 @@ class HermesConversationEntity(conversation.ConversationEntity, conversation.Abs
         chat_log.async_add_assistant_content_without_tools(
             conversation.AssistantContent(agent_id=user_input.agent_id, content=speech)
         )
-        return conversation.async_get_result_from_chat_log(user_input, chat_log)
+        result = conversation.async_get_result_from_chat_log(user_input, chat_log)
+        # HA reopens the satellite's microphone after any reply ending in "?"
+        # (ChatLog.continue_conversation). In a room with people talking that
+        # turns into a loop: background speech becomes the next turn, whose
+        # reply ends in "?" again. Every turn starts with the wake word.
+        result.continue_conversation = False
+        return result
