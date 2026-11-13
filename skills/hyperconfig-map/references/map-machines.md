@@ -100,6 +100,7 @@ Shared vars generated (vars/shared): clan-secrets-pull esphome-casa esphome-cm-p
 - storagebox: modules/nixos/storagebox-test.nix
 - ipv4-forward-slots: modules/nixos/ipv4-forward-slots-test
 - hermes-vision: ${inputs.hyperhermes}/checks/vision
+- hermes-managed-unit: ${inputs.hyperhermes}/checks/managed-unit
 - infra-space: modules/nixos/infra-space/test.nix
 - spaces: modules/nixos/spaces/test.nix
 - nixpkgs-bump-guard: modules/nixos/infra-space/nixpkgs-bump/guard-test.nix

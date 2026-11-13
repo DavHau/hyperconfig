@@ -59,6 +59,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/herdr-jj.nix — jj workspace support for herdr via the community herdr-jj plugin (OliverGilan/herdr-jj, MIT): <- m/dave.nix, m/spaces/guest.nix, m/spaces/test.nix
 - modules/nixos/herdr-pin-config.py — - <- m/herdr-jj.nix
 - modules/nixos/hermes-agents-gpu-host.nix — GPU host for som's hermes agents: <- vit
+- modules/nixos/hermes-desktop-agents.nix — som agents in dave's Hermes desktop app and TUI launchers: <- machines/som/hermes-agents.nix, m/hermes-desktop.nix
 - modules/nixos/hermes-desktop.nix — Hermes launchers on the dave desktops for som's agents (machines/som/hermes-agents.nix), through hyperhermes' desktop m… <- m/dave.nix, m/infra-space/desktop-app.nix
 - modules/nixos/home-manager.nix — - <- m/dave.nix
 - modules/nixos/houses-grmpf.nix — grmpf's nix-housing houses (see houses.nix): <- amy
@@ -397,6 +398,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyperhermes/modules/core/locked-pins.py — - <- hyperhermes/modules/core/locked-config.nix
 - hyperhermes/modules/core/options.nix — The agent registry `services.hyperhermes.agents` and the host-wide collection points every agent's config.yaml, .env an… <- hyperhermes/modules/core/default.nix
 - hyperhermes/modules/core/package.nix — The hermes package the agents run: <- hyperhermes/modules/core/options.nix
+- hyperhermes/modules/core/reap-stray-gateway.py — Run as the agent's user before its gateway unit starts (./agents.nix, preStart): <- hyperhermes/modules/core/agents.nix
 - hyperhermes/modules/dashboards/default.nix — Every agent's hermes web dashboard at its own host name, <agent>.<domain> (exposure), with hermes' own OIDC login (sso)…
 - hyperhermes/modules/desktop/connections.py — - <- hyperhermes/modules/desktop/default.nix, m/infra-space/desktop-app.nix
 - hyperhermes/modules/desktop/default.nix — Hermes launchers on a workstation for the agents of a hyperhermes host (`services.hyperhermes.desktop`):

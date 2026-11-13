@@ -1,0 +1,323 @@
+hermes v0.23.0: nothing but the agent's systemd unit starts the agent's
+gateway on a hyperhermes host.
+
+Symptom (som, stefan, 2026-11-10 to 11-13): hermes-agent-stefan.service
+exited 75 (TEMPFAIL) 1900+ times, "The host gateway already serves
+profile 'default' - nothing to start ... PID 2937893". That PID was a
+second `gateway run --quiet --idle-exit` in stefan's user manager, in the
+transient scope of a cron job's external worker
+(hermes-worker-cron-<job>-exec-<id>.scope), running for three days.
+
+Cause: a deploy SIGTERMed the unit at 16:04:52 while a cron job
+(`4-59/15 * * * *`) fired. Under a systemd-managed gateway, cron runs each
+job in an external worker in a user scope (cron/scheduler.py,
+_launch_external_cron_worker). The worker reaches the gateway through
+run_canonical_job -> connect_gateway (hermes_cli/gateway_client.py) ->
+ensure_gateway_runtime(idle_exit=True) (hermes_cli/gateway_runtime.py).
+It found no owner, asked discover_existing_gateway_service, which only
+knows units named hermes-gateway[-<profile>].service
+(gateway_runtime_service._systemd), got None and spawned a detached
+`gateway run --idle-exit` (gateway_runtime_start.spawn_unmanaged_gateway).
+That gateway connected Telegram, so its idle exit (no adapters, no
+clients) never fired. The unit's next start attached to it
+(gateway/host_attach.decide -> ATTACH, transient) and exited 75 under a
+supervisor, every 5 s, until someone killed the stray. The worker had the
+right HERMES_HOME (the payload pins it); the `hermes_home` of
+/var/lib/hermes/.hermes in gateway_state.json is a stale field that the
+status writer never refreshes (gateway/status.py,
+_prepare_runtime_status_update), the gateway.lock record was right.
+
+Fix: hyperhermes exports HERMES_GATEWAY_MANAGED_UNIT=hermes-agent-<user>.service
+and HERMES_GATEWAY_MANAGED_HOME=<the unit's HERMES_HOME> to every process of
+the agent. For that home, and the named profiles under it that its gateway
+multiplexes (hermes_cli/gateway_managed_unit.py):
+  - ensure_gateway_runtime never starts a gateway: while the unit
+    (re)starts, the client waits for it until its deadline (connect_gateway
+    then fails with "starting: deadline", a cron run is marked failed and
+    retried at its next slot) - the same wait a client already does for a
+    unit that is starting. A unit that stays inactive or failed (nothing
+    queued, for 10 s: a deploy's stop-then-start is not a stop) is reported
+    at once, with the systemctl start / reset-failed hint;
+  - spawn_unmanaged_gateway refuses (RuntimeStartError service_managed);
+    `gateway restart --detach` prints the refusal and its hint instead;
+  - run_gateway (every `gateway run`, `hermes gateway`; --force and
+    --replace included) refuses first thing, before the respawn-storm log
+    and its backoff, unless it is the unit's main process: SYSTEMD_EXEC_PID
+    is its own PID and its cgroup is /system.slice/<unit> (a user unit of
+    that name is not it). A child of the unit (a tool command, a cron
+    worker) inherits SYSTEMD_EXEC_PID with a different value. start_gateway
+    (also cli.py's gateway mode) keeps the same check as a backstop.
+A standalone profile and every other home keep upstream's behaviour. To
+bypass on purpose, unset the variables.
+
+Checked by ../../../checks/managed-unit (offline, on the patched package).
+Applied with fuzz 0 (../package.nix): a moved anchor fails the build.
+
+diff -ruN a/gateway/run_bootstrap.py b/gateway/run_bootstrap.py
+--- a/gateway/run_bootstrap.py
++++ b/gateway/run_bootstrap.py
+@@ -723,6 +723,13 @@
+         os,
+         threading,
+     )
++    # hyperhermes: a home whose agent unit owns the gateway runs it only in that unit's main process
++    # (hermes_cli/gateway_managed_unit.py). Backstop for every launcher that skips run_gateway's
++    # check (cli.py's gateway mode, a direct start_gateway call).
++    from hermes_cli.gateway_managed_unit import refuse_gateway_run
++    if (_managed_unit := refuse_gateway_run()) is not None:
++        logger.warning("Refusing to start a gateway outside %s (it owns this home's gateway)", _managed_unit)
++        return False
+     # Set here (not at import) so incidental gateway.run imports from CLI code don't poison it.
+     os.environ["HERMES_EXEC_ASK"] = "1"
+     from hermes_cli.update_proxy_env import restore_user_proxy_env
+diff -ruN a/hermes_cli/gateway_managed_unit.py b/hermes_cli/gateway_managed_unit.py
+--- a/hermes_cli/gateway_managed_unit.py
++++ b/hermes_cli/gateway_managed_unit.py
+@@ -0,0 +1,170 @@
++"""A gateway that a host service manager owns under a unit name hermes does not know.
++
++hyperhermes runs each agent's gateway as ``hermes-agent-<user>.service`` (a system unit, the agent's
++account as ``User=``) and exports ``HERMES_GATEWAY_MANAGED_UNIT=<that unit>`` to every process of the
++agent: the gateway, the dashboard, cron workers, the ``hermes`` CLI shim. Hermes' own service probe
++(``gateway_runtime_service._systemd``) only knows ``hermes-gateway*`` units, so while that unit was
++restarting a client (a cron worker's ``connect_gateway``, the TUI, Desktop's ``gateway ensure``) found
++no owner and started its own ``gateway run --idle-exit``. With a messaging adapter connected it never
++idles out, and the unit then attaches to it and exits 75 on every restart, forever.
++
++The unit runs the gateway of the managed root, ``HERMES_GATEWAY_MANAGED_HOME`` (the unit's
++HERMES_HOME; without it, the install root ``get_default_hermes_root()``), and serves the named
++profiles under it that it multiplexes, so a ``-p <name>`` client waits for the unit too. For those
++homes only the unit's own main process may run a gateway: clients wait for the unit to bring it back
++(or hear at once that it stays stopped), and nothing else starts one. A standalone profile and every
++other home keep upstream's behaviour.
++"""
++from __future__ import annotations
++
++import os
++import shutil
++import subprocess
++import sys
++from pathlib import Path
++
++MANAGED_UNIT_ENV = "HERMES_GATEWAY_MANAGED_UNIT"
++MANAGED_HOME_ENV = "HERMES_GATEWAY_MANAGED_HOME"
++# hyperhermes' agent units are system units in the default slice: a user unit of the same name
++# (systemd-run --user --unit=...) sits under user.slice and is not it.
++UNIT_SLICE = "/system.slice/"
++
++
++def managed_unit() -> str | None:
++    unit = os.environ.get(MANAGED_UNIT_ENV, "").strip()
++    return unit or None
++
++
++def _same_path(left: str | Path, right: str | Path) -> bool:
++    try:
++        return Path(left).expanduser().resolve() == Path(right).expanduser().resolve()
++    except (OSError, RuntimeError):
++        return False
++
++
++def managed_root() -> Path | None:
++    """The home whose gateway the unit runs: HERMES_GATEWAY_MANAGED_HOME (exported beside the unit
++    name, so a process that moved HERMES_HOME elsewhere does not carry the claim along), else the
++    install root of the process's HERMES_HOME."""
++    pinned = os.environ.get(MANAGED_HOME_ENV, "").strip()
++    if pinned:
++        return Path(pinned)
++    if not os.environ.get("HERMES_HOME", "").strip():
++        return None
++    from hermes_constants import get_default_hermes_root
++    return get_default_hermes_root()
++
++
++def unit_managing_home(home: str | Path) -> str | None:
++    """The unit whose gateway is *home*'s own (*home* is the managed root), or None."""
++    unit = managed_unit()
++    root = managed_root() if unit is not None else None
++    return unit if root is not None and _same_path(home, root) else None
++
++
++def unit_serving_home(home: str | Path) -> str | None:
++    """The unit whose gateway serves *home*: its own (the managed root), or the root's multiplexer
++    for a named profile under it that is not standalone. None for every other home."""
++    unit = unit_managing_home(home)
++    if unit is not None:
++        return unit
++    from hermes_cli.gateway_runtime_multiplex import implied_host_root, multiplexer_serves_home
++    path = Path(home)
++    try:
++        target = multiplexer_serves_home(path) or implied_host_root(path)
++    except Exception:
++        return None
++    return unit_managing_home(target) if target is not None else None
++
++
++def _own_cgroup() -> str | None:
++    try:
++        for line in Path("/proc/self/cgroup").read_text(encoding="utf-8").splitlines():
++            if line.startswith("0::"):
++                return line[3:].rstrip("/")
++    except OSError:
++        return None
++    return None
++
++
++def is_managed_unit_main_process() -> bool:
++    """True for the unit's main process itself: systemd stamps its PID into SYSTEMD_EXEC_PID, which
++    the children (tool commands, cron workers) inherit with a different PID of their own, and it
++    runs in the system unit's own cgroup."""
++    unit = managed_unit()
++    if unit is None:
++        return False
++    return os.environ.get("SYSTEMD_EXEC_PID") == str(os.getpid()) and _own_cgroup() == UNIT_SLICE + unit
++
++
++def unit_state(unit: str) -> tuple[str, bool] | None:
++    """(ActiveState, a job is queued) of the system unit, or None when systemd cannot be asked."""
++    systemctl = shutil.which("systemctl") or "/run/current-system/sw/bin/systemctl"
++    try:
++        out = subprocess.run([systemctl, "show", "--property=ActiveState,Job", "--", unit],
++                             capture_output=True, text=True, timeout=5, check=True).stdout
++    except (OSError, subprocess.SubprocessError):
++        return None
++    props = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
++    state = props.get("ActiveState", "").strip()
++    if not state:
++        return None
++    return state, props.get("Job", "").strip() not in ("", "0")
++
++
++def unit_stopped(unit: str) -> str | None:
++    """"inactive" or "failed" when the unit is down and nothing is queued to bring it back (a client
++    would wait for nothing), else None: running, (auto-)restarting, or systemd unreachable."""
++    st = unit_state(unit)
++    if st is None:
++        return None
++    state, queued = st
++    return state if state in ("inactive", "failed") and not queued else None
++
++
++def refusal_message(unit: str, stopped: str | None = None) -> str:
++    lines = [f"✗ This agent's gateway is managed by the systemd unit {unit}; nothing else may start one."]
++    if stopped == "failed":
++        lines.append(f"  The unit has failed. As root: systemctl reset-failed {unit} && systemctl start {unit}")
++    elif stopped == "inactive":
++        lines.append(f"  The unit is stopped. As root: systemctl start {unit}")
++    lines += [f"  Status: systemctl status {unit}",
++              "  Restart it from the chat (/restart) or the dashboard, or ask the host admin."]
++    return "\n".join(lines)
++
++
++def refuse_gateway_run() -> str | None:
++    """For every gateway launcher: the unit, after printing the refusal, when this process may not
++    run the process home's gateway; None when it may."""
++    from hermes_constants import get_process_hermes_home
++    unit = unit_serving_home(get_process_hermes_home())
++    if unit is None or is_managed_unit_main_process():
++        return None
++    print(refusal_message(unit, unit_stopped(unit)), file=sys.stderr)
++    return unit
++
++
++class StoppedUnitWatch:
++    """For a client waiting on the unit: reports the unit as stopped once it has been down, with
++    nothing queued, for ``grace`` seconds (a deploy's stop-then-start gap is not a stop), asking
++    systemd at most every ``interval`` seconds."""
++
++    def __init__(self, grace: float = 10.0, interval: float = 1.0):
++        self.grace, self.interval = grace, interval
++        self._since: float | None = None
++        self._next = 0.0
++        self._state: str | None = None
++
++    def stopped(self, unit: str) -> str | None:
++        import time
++        now = time.monotonic()
++        if now >= self._next:
++            self._next = now + self.interval
++            self._state = unit_stopped(unit)
++            if self._state is None:
++                self._since = None
++            elif self._since is None:
++                self._since = now
++        if self._state is not None and self._since is not None and now - self._since >= self.grace:
++            return self._state
++        return None
+diff -ruN a/hermes_cli/gateway.py b/hermes_cli/gateway.py
+--- a/hermes_cli/gateway.py
++++ b/hermes_cli/gateway.py
+@@ -4553,6 +4553,11 @@
+     kill an existing instance first (avoids systemd restart loops); force: skip the supervised guard;
+     idle_exit: a client auto-started this unsupervised gateway, so it exits once idle
+     (``gateway.unmanaged_idle_exit_seconds``)."""
++    # hyperhermes: only the agent's systemd unit runs this home's gateway; refuse before anything
++    # (the respawn-storm log and its backoff included) runs (hermes_cli/gateway_managed_unit.py).
++    from hermes_cli.gateway_managed_unit import refuse_gateway_run
++    if refuse_gateway_run() is not None:
++        sys.exit(1)
+     _guard_official_docker_root_gateway()
+     _attach_to_host_gateway_or_guard(force=force, replace=replace)
+     _guard_supervised_gateway_conflict(force=force)
+diff -ruN a/hermes_cli/gateway_runtime.py b/hermes_cli/gateway_runtime.py
+--- a/hermes_cli/gateway_runtime.py
++++ b/hermes_cli/gateway_runtime.py
+@@ -409,6 +409,7 @@
+         start_existing_gateway_service,
+     )
+     from hermes_constants import get_default_hermes_root, get_process_hermes_home
++    from hermes_cli.gateway_managed_unit import StoppedUnitWatch, refusal_message, unit_serving_home
+ 
+     if not math.isfinite(timeout) or timeout <= 0:
+         raise ValueError("timeout must be finite and positive")
+@@ -423,6 +424,7 @@
+     retiring = False
+     replaced: set[Path] = set()
+     delay = 0.025
++    serving_unit, unit_watch = unit_serving_home(home), StoppedUnitWatch()
+     try:
+         while True:
+             # The install-root marker also covers profiles.
+@@ -458,6 +460,16 @@
+             # spawn a competing per-profile daemon while its reservation is pending.
+             if reserved is not None:
+                 requested = True
++            if observed.state == "absent" and not requested and serving_unit is not None:
++                # hyperhermes: the agent's systemd unit owns the gateway serving this home. Wait for
++                # it while it (re)starts; starting our own would outlive the unit's restart and block
++                # it. A unit that stays down is reported instead (hermes_cli/gateway_managed_unit.py).
++                if (stopped := unit_watch.stopped(serving_unit)) is not None:
++                    return GatewayDiscovery("inaccessible", reason_code=f"service_{stopped}",
++                                            detail=refusal_message(serving_unit, stopped))
++                time.sleep(min(delay, remaining(deadline)))
++                delay = min(delay * 1.5, 0.05)
++                continue
+             if observed.state == "absent" and not requested:
+                 # A named profile the default multiplexer serves has no daemon of its own: start
+                 # (or await) the MULTIPLEXER. A per-profile spawn here would become a second owner
+diff -ruN a/hermes_cli/gateway_runtime_start.py b/hermes_cli/gateway_runtime_start.py
+--- a/hermes_cli/gateway_runtime_start.py
++++ b/hermes_cli/gateway_runtime_start.py
+@@ -52,6 +52,10 @@
+     needed (a named profile under a multiplexer), or it exits on the run-side guard.
+     """
+     home = profile_home.resolve()
++    from hermes_cli.gateway_managed_unit import unit_serving_home
++    if unit_serving_home(home) is not None:
++        # hyperhermes: only the agent's systemd unit runs the gateway serving this home.
++        raise RuntimeStartError("service_managed", "starting")
+     root = Path(__file__).resolve().parent.parent
+     # A root home is only pinned by an explicit selector: without one the child's
+     # _apply_profile_override follows the sticky active_profile and boots the wrong
+@@ -103,6 +107,11 @@
+     ``gateway ensure`` starts an absent one. In the foreground, the restarting client (Desktop's
+     bounded, piped call) would itself become the long-lived gateway it only meant to restart."""
+     import time
++    from hermes_cli.gateway_managed_unit import refusal_message, unit_serving_home, unit_stopped
++    if (unit := unit_serving_home(profile_home.resolve())) is not None:
++        # hyperhermes: the unit restarts its own gateway; say how instead of "service_managed".
++        print(refusal_message(unit, unit_stopped(unit)), file=sys.stderr)
++        return 1
+     try:
+         spawn_unmanaged_gateway(profile_home, deadline=time.monotonic() + 30, force=force)
+     except RuntimeStartError as exc:

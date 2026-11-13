@@ -148,7 +148,22 @@ let
       '';
       unitEnv = rt.env // {
         HERMES_MANAGED_DIR = "${managedDirFor user ucfg}";
+        # Only this unit runs the agent's gateway; cron workers, the CLI,
+        # the TUI and Desktop wait for it instead of starting their own
+        # (patches/hermes-gateway-managed-unit-only.patch). The shim and
+        # the dashboard carry it too, and hermes passes it on to every
+        # child (cron workers, tool commands).
+        HERMES_GATEWAY_MANAGED_UNIT = "hermes-agent-${user}.service";
+        # The home that unit's gateway serves (and the profiles it
+        # multiplexes), also for a process that moved HERMES_HOME.
+        HERMES_GATEWAY_MANAGED_HOME = hermesHome;
       };
+      # Before every start: end a gateway of this home that runs outside
+      # the unit (./reap-stray-gateway.py). Never fails the start.
+      reapStrayGateway = ''
+        ${pkgs.python3}/bin/python3 ${./reap-stray-gateway.py} ${hermesHome} hermes-agent-${user}.service 30 \
+          || echo "hermes: stray-gateway check failed; starting anyway" >&2
+      '';
       # Opt-in hardening of both units (options.nix, hardening).
       hardening = lib.optionalAttrs cfg.hardening.enable cfg.hardening.serviceConfig;
       mounts = [
@@ -166,6 +181,7 @@ let
       # Upstream's activation for one state dir, run as the owner before
       # every start. The state dir is owner-owned, so no root is needed.
       agentPreStart = ''
+        ${reapStrayGateway}
         umask 0077
         mkdir -p ${hermesHome}/cron ${hermesHome}/sessions ${hermesHome}/logs \
           ${hermesHome}/memories ${hermesHome}/plugins ${workspace}
@@ -207,6 +223,7 @@ let
       # .env and the rest of what hermes reads are in place, and the unit
       # has no credentials; the owner only makes its own state directories.
       lockedPreStart = ''
+        ${reapStrayGateway}
         umask 0077
         mkdir -p ${hermesHome}/cron ${hermesHome}/sessions ${hermesHome}/logs \
           ${hermesHome}/memories ${workspace}
@@ -317,7 +334,23 @@ let
             "network-online.target"
             "${venv.unitName}.service"
           ];
-          unitConfig.RequiresMountsFor = mounts;
+          unitConfig = {
+            RequiresMountsFor = mounts;
+            # What this catches is the attach loop: a gateway that exits
+            # 75 right after every start because another gateway holds the
+            # home, before hermes' own backoff runs (som, stefan, 2026-11:
+            # every ~6 s for three days). After
+            # 50 starts in 10 min the unit stays failed, which the fleet's
+            # failed-unit alert reports; systemd's default (5 in 10 s)
+            # never trips with RestartSec=5. A real crash loop stays under
+            # it: hermes' own respawn-storm backoff (gateway-starts.log)
+            # sleeps before the 6th start in 2 min. A /restart (SIGUSR1,
+            # exit 75) does not come near it either. Once tripped, after
+            # fixing the cause:
+            #   systemctl reset-failed hermes-agent-<user> && systemctl start hermes-agent-<user>
+            StartLimitIntervalSec = 600;
+            StartLimitBurst = 50;
+          };
           environment = unitEnv;
           path = rt.path;
           preStart = if locked then lockedPreStart else agentPreStart;

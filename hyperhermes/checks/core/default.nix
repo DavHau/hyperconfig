@@ -6,7 +6,9 @@
 # restarts, while the others stay; the
 # root-held dashboard forward of each agent answers its owner and root,
 # while the other agent gets a reset, at the forward and at the backend
-# behind it; the hermes-native chain is in place and hooked into OUTPUT.
+# behind it; the hermes-native chain is in place and hooked into OUTPUT;
+# a `gateway run` beside alice's unit is refused, and the unit takes
+# over from a stray gateway of her home instead of exiting 75 forever.
 { pkgs, self }:
 let
   hlib = self.lib;
@@ -94,5 +96,56 @@ pkgs.testers.runNixOSTest {
         machine.fail(dial("bob", "${backendOf 1001}"))
         machine.fail(dial("alice", "${portOf "bob"}"))
         machine.fail(dial("alice", "${backendOf 1002}"))
+
+    # Only the unit runs alice's gateway (modules/core/reap-stray-gateway.py,
+    # patches/hermes-gateway-managed-unit-only.patch).
+    def gateway_pids():
+        return machine.succeed("pgrep -u alice -f 'bin/hermes gateway' || true").split()
+
+    with subtest("a gateway started beside the unit is refused"):
+        out = machine.fail("runuser -u alice -- hermes gateway run --force 2>&1")
+        assert "managed by the systemd unit hermes-agent-alice.service" in out, out
+
+    with subtest("the unit takes over from a stray gateway of its home"):
+        import re
+        exec_start = machine.succeed("systemctl show -p ExecStart --value hermes-agent-alice.service")
+        m = re.search(r"(/nix/store/\S+/bin/hermes) gateway", exec_start)
+        assert m is not None, exec_start
+        hermes = m.group(1)
+        lock = "${hlib.stateDir "alice"}/.hermes/gateway.lock"
+        machine.succeed("systemctl stop hermes-agent-alice.service")
+        # A stopped unit is named as such, with the command that starts it
+        # (the package's hermes: the shim refuses a stopped unit itself).
+        out = machine.fail(
+            "runuser -u alice -- env HOME=/home/alice HERMES_HOME=${hlib.stateDir "alice"}/.hermes "
+            "HERMES_GATEWAY_MANAGED_UNIT=hermes-agent-alice.service "
+            "HERMES_GATEWAY_MANAGED_HOME=${hlib.stateDir "alice"}/.hermes "
+            f"{hermes} gateway run 2>&1")
+        # The gateway's SIGTERM exit can leave the unit "failed" rather
+        # than "inactive"; either way the hint names the start command.
+        assert "As root: systemctl " in out and "systemctl start hermes-agent-alice.service" in out, out
+        # What a cron worker spawned while the unit restarted, before the
+        # patch: a gateway of alice's home outside the unit, here without
+        # HERMES_GATEWAY_MANAGED_UNIT (an older hermes, or the var unset).
+        machine.succeed(
+            "systemd-run --unit=stray-gateway --uid=alice --gid=users "
+            "-p WorkingDirectory=${hlib.workspace "alice"} "
+            "-E HOME=/home/alice -E HERMES_HOME=${hlib.stateDir "alice"}/.hermes "
+            f"{hermes} gateway run --idle-exit"
+        )
+        # It holds the home's gateway lock: what made the unit exit 75.
+        machine.wait_until_succeeds(
+            f"p=$(grep -o '\"pid\": [0-9]*' {lock} | grep -o '[0-9]*$') && grep -q stray-gateway.service /proc/$p/cgroup",
+            timeout=180)
+        restarts = machine.succeed("systemctl show -p NRestarts --value hermes-agent-alice.service").strip()
+        machine.succeed("systemctl start hermes-agent-alice.service")
+        machine.wait_until_fails("systemctl is-active stray-gateway.service", timeout=60)
+        machine.wait_for_unit("hermes-agent-alice.service")
+        machine.sleep(20)
+        after = machine.succeed("systemctl show -p NRestarts --value hermes-agent-alice.service").strip()
+        assert int(after) <= int(restarts), (restarts, after)
+        main = machine.succeed("systemctl show -p MainPID --value hermes-agent-alice.service").strip()
+        assert gateway_pids() == [main], (gateway_pids(), main)
+        machine.succeed("journalctl -u hermes-agent-alice.service | grep -q 'taking over from a stray gateway'")
   '';
 }

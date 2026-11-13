@@ -297,6 +297,13 @@
             hermesPackage = hyperhermes.package;
             settings = { inherit (hyperhermes.settings) providers auxiliary; };
           };
+        # Only the agent's unit runs its gateway: hyperhermes' managed-unit
+        # check on som's hermes package, so a hermes bump that moves the
+        # patch's code paths fails here.
+        hermes-managed-unit = import "${inputs.hyperhermes}/checks/managed-unit" {
+          pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          hermesPackage = self.nixosConfigurations.som.config.services.hyperhermes.package;
+        };
         # infra-space's containers on two members, root on a third machine.
         infra-space =
           import ./modules/nixos/infra-space/test.nix {

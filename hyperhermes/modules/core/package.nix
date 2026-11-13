@@ -12,7 +12,8 @@
 # nix/packages.nix from it would be import-from-derivation. Instead the
 # uv2nix input that packages.nix receives gets one more overlay that
 # patches the hermes-agent wheel. The wheel source drops tests/, so
-# filterdiff drops the test hunks.
+# filterdiff drops the test hunks. Fuzz 0: a hunk whose context moved in
+# a hermes bump fails the build instead of landing somewhere else.
 #
 # Bundled plugins (plugins/, e.g. the dashboard's OIDC login) do not load
 # from the wheel: the wrapper points HERMES_BUNDLED_PLUGINS at
@@ -40,6 +41,7 @@ let
     ./patches/hermes-subagents-resume-after-restart.patch
     ./patches/hermes-openrouter-all-models.patch
     ./patches/hermes-busy-message-yields-command.patch
+    ./patches/hermes-gateway-managed-unit-only.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {
@@ -47,7 +49,7 @@ let
       postPatch =
         (old.postPatch or "")
         + lib.concatMapStrings (p: ''
-          filterdiff -p1 -x 'tests/*' ${p} | patch -p1
+          filterdiff -p1 -x 'tests/*' ${p} | patch -p1 -F0
         '') hermesWheelPatches;
     });
   };
@@ -91,7 +93,7 @@ let
           cd $out
         ''
         + lib.concatMapStrings (p: ''
-          filterdiff -p1 -i 'plugins/*' ${p} | patch -p2
+          filterdiff -p1 -i 'plugins/*' ${p} | patch -p2 -F0
         '') hermesWheelPatches
       );
 in
