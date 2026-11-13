@@ -218,15 +218,13 @@ in
     };
     voiceModel = lib.mkOption {
       type = lib.types.nullOr (lib.types.attrsOf lib.types.str);
-      default = {
+      # null: the voice agent's own model, p0's Qwen (thinking off there).
+      default = null;
+      example = {
         provider = "anthropic";
         model = "claude-sonnet-5-5";
       };
-      example = {
-        provider = "p0";
-        model = "qwen";
-      };
-      description = "Model the voice agent answers with, per request (null: the agent's own model; p0/qwen is its fallback).";
+      description = "Model the voice agent answers with, per request (null: the agent's own model, p0's Qwen).";
     };
     haPort = lib.mkOption {
       type = lib.types.port;

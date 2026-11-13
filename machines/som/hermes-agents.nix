@@ -265,22 +265,20 @@ in
       # routes Home Assistant's Assist turns to its api_server). Home
       # Assistant through HA's MCP server as the non-admin HA user
       # voice-agent; vault-ro, GPU on vit; no ssh login, wallet, REA, mail
-      # or fleet access. Claude (Sonnet 5.5, chosen per request by the gateway, thinking off)
-      # through TeamClaude, p0's Qwen as its own model and fallback.
+      # or fleet access. p0's Qwen as its model (seeded by
+      # ./hermes-inference.nix), thinking off; Claude through TeamClaude
+      # selectable.
       voice = {
         description = "voice - Voice PE agent (untrusted), Home Assistant";
-        # Spoken replies: thinking off by default (the gateway also sends
-        # reasoning_effort none per request).
+        # Spoken replies, so no thinking: reasoning_effort none (the gateway
+        # also sends it per request) and Qwen's chat template told not to
+        # reason (p0 enables it for every other agent: ./hermes-inference.nix).
         settings.agent.reasoning_effort = "none";
+        settings.providers.p0.extra_body.chat_template_kwargs.enable_thinking = false;
         sshKeys = [ ];
         mail.enable = false;
+        # Claude through TeamClaude stays selectable (/model).
         teamclaude.enable = true;
-        settings.fallback_providers = [
-          {
-            provider = "p0";
-            model = "qwen";
-          }
-        ];
       };
 
       # momentum: OpenRouter brain, and a Telegram bot in ONE group chat where
