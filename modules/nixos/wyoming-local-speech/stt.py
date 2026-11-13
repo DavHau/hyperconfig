@@ -179,6 +179,7 @@ class Pathumma:
 class Engine:
     def __init__(s, args):
         s.th_threshold = args.th_threshold
+        s.last_lang_file = args.last_lang_file
         s.whisper = Whisper(args.whisper_dir, args.whisper_device, args.whisper_cache, args.check_clip)
         s.pathumma = Pathumma(args.pathumma_dir, "CPU", args.pathumma_cache, args.pathumma_threads)
         s.run(np.zeros(SR, np.float32))  # warm-up: first inference compiles kernels
@@ -196,6 +197,16 @@ class Engine:
         log.info("audio %.2fs p=%s -> %s | encode+lid %.3fs, %s %.3fs, total %.3fs (1 encode): %s",
                  len(a) / SR, {k: round(v, 4) for k, v in p.items()}, lang, t1 - t0,
                  "pathumma" if lang == "th" else "whisper-decode", t2 - t1, t2 - t0, text)
+        if s.last_lang_file:
+            # The language Dave just spoke: speech-tts' tie-breaker when the
+            # reply text alone doesn't say en or de (same host, same user).
+            try:
+                tmp = s.last_lang_file + ".tmp"
+                with open(tmp, "w") as f:
+                    f.write(lang)
+                os.replace(tmp, s.last_lang_file)
+            except OSError as e:
+                log.warning("last-lang file: %s", e)
         return lang, text
 
 
@@ -241,6 +252,7 @@ def main():
     ap.add_argument("--pathumma-dir", required=True)
     ap.add_argument("--pathumma-cache", required=True)
     ap.add_argument("--pathumma-threads", type=int, default=8)
+    ap.add_argument("--last-lang-file", default=None, help="write the last utterance's language here (for speech-tts)")
     ap.add_argument("--th-threshold", type=float, required=True)
     ap.add_argument("--debug", action="store_true")
     args = ap.parse_args()

@@ -39,19 +39,42 @@ log = logging.getLogger("speech-tts")
 LANGS = ("en", "de", "th")
 DEFAULTS = {"en": "kokoro82/af_heart", "de": "supertonic/M3", "th": "wayu_thai/m_elderly_deep"}
 THAI = re.compile("[\u0e00-\u0e7f]")
-DE_WORDS = set("der die das und ist nicht ich ein eine zu im mit auf den dem es sie wir ihr "
-               "habe hat wird werden kann bitte danke ja nein licht".split())
+# Common function words: guess_lang compares hits (German vs English).
+DE_WORDS = set("""
+der die das den dem des ein eine einen einem einer eines und oder aber doch denn weil wenn dass ob als wie
+ist sind war waren bin bist sein hat habe hast haben hatte wird werden wurde kann kannst können muss musst
+soll sollst will willst möchte mag darf ich du er sie es wir ihr mich dich mir dir uns euch ihn ihm ihnen
+mein dein sein unser euer kein keine nicht nichts noch schon auch nur sehr mal jetzt hier dort heute morgen
+gestern immer wieder gerade bitte danke ja nein gern gerne alles klar okay sag sagt mach macht gib gibt
+zu zum zur im in am an auf aus bei mit nach von vor über unter um durch für gegen ohne bis seit
+was wer wo wann warum wieso welche welcher welches viel mehr etwas einfach eben genau leider natürlich
+bescheid stimmt fehler licht wohnzimmer schlafzimmer küche grad uhr minuten stunden tag
+""".split())
+EN_WORDS = set("""
+the a an and or but because if that whether as how is are was were be been am has have had will would
+can could must should shall may might do does did i you he she it we they me him her us them my your his
+its our their no not nothing still already also only very now here there today tomorrow yesterday always
+again just please thanks yes sure okay ok let lets tell give make to of in on at from by with for about
+into over under through without until since what who where when why which much more something simply
+exactly unfortunately of course right sorry light living room bedroom kitchen time minutes hours day
+""".split())
 NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 MAX_TEXT = 2000
 
 
-def guess_lang(text):
+def guess_lang(text, spoken=None):
+    """Reply language: Thai script -> th; else German vs English function
+    words (umlauts count triple); a tie goes to the language Dave just
+    spoke (speech-stt's last utterance), then en."""
     if THAI.search(text):
         return "th"
-    w = re.findall(r"[a-zäöüß]+", text.lower())
-    if re.search("[äöüß]", text.lower()) or sum(x in DE_WORDS for x in w) >= max(1, len(w) // 5):
-        return "de"
-    return "en"
+    low = text.lower()
+    w = re.findall(r"[a-zäöüß]+", low)
+    de = sum(x in DE_WORDS for x in w) + 3 * len(re.findall("[äöüß]", low))
+    en = sum(x in EN_WORDS for x in w)
+    if de != en:
+        return "de" if de > en else "en"
+    return spoken if spoken in ("de", "en") else "en"
 
 
 class Voice:
@@ -183,7 +206,8 @@ class WayuThai:
 # ---- voices, drop-ins, selection --------------------------------------------
 
 class Catalog:
-    def __init__(s, engines, voices_dir, selection_file):
+    def __init__(s, engines, voices_dir, selection_file, last_lang_file=None):
+        s.last_lang_file = last_lang_file
         s.engines = {e.name: e for e in engines}
         s.locks = {e.name: threading.Lock() for e in engines}
         s.dir, s.file = Path(voices_dir), Path(selection_file)
@@ -309,6 +333,17 @@ class Catalog:
         log.info("selection set via API: %s", new)
         return s.state()
 
+    def last_spoken(s):
+        """speech-stt's language of the latest utterance, if recent (5 min)."""
+        if not s.last_lang_file:
+            return None
+        try:
+            if time.time() - os.path.getmtime(s.last_lang_file) > 300:
+                return None
+            return Path(s.last_lang_file).read_text().strip()
+        except OSError:
+            return None
+
     def synth(s, text, v, lang):
         with s.locks[v.engine]:
             return s.engines[v.engine].synth(text, v, lang)
@@ -342,7 +377,7 @@ class Handler(AsyncEventHandler):
             return True
         syn = Synthesize.from_event(event)
         text = " ".join(syn.text.split())
-        lang = guess_lang(text)
+        lang = guess_lang(text, s.cat.last_spoken())
         v = await loop.run_in_executor(None, s.cat.voice_for, lang)
         t0 = time.perf_counter()
         try:
@@ -469,11 +504,12 @@ def main():
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--steps", type=int, default=8)
     ap.add_argument("--translate-url", default=None, help="speech-translate base URL for POST /translate")
+    ap.add_argument("--last-lang-file", default=None, help="speech-stt's last utterance language (tie-breaker)")
     a = ap.parse_args()
     a.api_host = a.api_host or ["127.0.0.1"]
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     engines = [Kokoro82(a), Supertonic(a), WayuThai(a)]
-    cat = Catalog(engines, a.voices_dir, a.selection_file)
+    cat = Catalog(engines, a.voices_dir, a.selection_file, a.last_lang_file)
     for lang, text in (("en", "ok"), ("de", "ok"), ("th", "สวัสดี")):  # warm-up
         cat.synth(text, cat.voice_for(lang), lang)
     log.info("ready on %s, %d threads per engine, %d voices", a.uri, a.threads, len(cat.all()))

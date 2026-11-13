@@ -46,6 +46,9 @@
 let
   cfg = config.hyper.wyomingLocalSpeech;
   state = "/var/lib/speech";
+  # speech-stt writes the language of the latest utterance; speech-tts uses
+  # it to break en/de ties in the reply text (tts.py guess_lang).
+  lastLangFile = "${state}/last-utterance-lang";
   models = "${state}/models";
   venv = "${state}/venv";
   python = pkgs.python312;
@@ -271,6 +274,7 @@ in
       "--pathumma-cache" "${state}/ov-cache/pathumma"
       "--pathumma-threads" "8"
       "--th-threshold" cfg.thaiThreshold
+      "--last-lang-file" lastLangFile
     ] "5G";
 
     systemd.services.speech-tts = lib.recursiveUpdate (server "tts" "Wyoming TTS: Kokoro-82M (en), Supertonic 3 (de), Wayu Kokoro-Thai (th), CPU" [
@@ -287,6 +291,7 @@ in
       "--threads" "4"
       "--steps" "8"
       "--translate-url" "http://127.0.0.1:${toString cfg.translatePort}"
+      "--last-lang-file" lastLangFile
     ] cfg.ttsMemoryMax) {
       serviceConfig = {
         SupplementaryGroups = [ "speech-voices" ];
