@@ -45,11 +45,17 @@ packages:
 esphome:
   project:
     name: Nabu Casa.Home Assistant Voice PE
-    version: 26.9.0-diggi.1
+    version: 26.9.0-diggi.3
 
 # The factory image offers Nabu Casa's builds as an update in HA; installing
 # one would drop Okay Diggi. Updates come from this file instead.
 update: !remove
+
+# Louder replies: upstream caps the speaker at 85% (volume_max 0.85), so HA's
+# 100% only reached 85%. Lift the cap to full scale.
+media_player:
+  - id: !extend external_media_player
+    volume_max: 1.0
 switch:
   - id: !remove beta_firmware  # switches update_http_request's source
 
@@ -76,3 +82,7 @@ micro_wake_word:
   models:
     - model: okay_diggi/okay_diggi.json
       id: okay_diggi
+      # The model's json says 0.8; with people talking the score rarely
+      # reaches that. 0.6: same held-out recall on clean clips (47/48), about
+      # 2 false accepts/h on the AudioSet noise set (0.7/h at 0.8).
+      probability_cutoff: 0.6
