@@ -1,5 +1,9 @@
 {pkgs, ...}:
 let
+  # Patched Firefox: new tabs open as windows, tab bar collapsed
+  # (pkgs/firefox-no-tabs, after friedow). Replaces the "No Tabs" extension.
+  firefoxNoTabs = pkgs.wrapFirefox (pkgs.callPackage ../../pkgs/firefox-no-tabs { }) { };
+
   # Chrome + prefs shared by every profile below. Profile *state*
   # (cookies, logins, history, containers) stays separate — that is the
   # whole point of having more than one profile.
@@ -72,6 +76,8 @@ let
       "browser.search.region" = "DE";
       "browser.search.suggest.enabled" = false;
 
+      # firefox-no-tabs: no tab bar, so drop the empty titlebar row.
+      "browser.tabs.inTitlebar" = 0;
       "browser.sessionstore.resume_from_crash" = false;
       # New windows open the Firefox Home page (focused search box) and new
       # tabs open about:newtab (focused address bar) — never a saved homepage
@@ -111,7 +117,11 @@ in
   programs.firefox = {
     enable = true;
 
-    /* package = pkgs.firefox-esr; */
+    package = firefoxNoTabs;
+
+    # The hand-installed "No Tabs" extension is obsolete with the patched
+    # build: Firefox uninstalls a blocked extension on its next start.
+    policies.ExtensionSettings."{c9f848fb-3fb6-4390-9fc1-e4dd4d1c5122}".installation_mode = "blocked";
 
     profiles.dave = commonProfile // {
       id = 0;

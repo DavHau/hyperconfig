@@ -72,7 +72,7 @@
     # file manager
     filezilla nautilus eog
     # browser
-    firefox chromium
+    (wrapFirefox (callPackage ../../pkgs/firefox-no-tabs { }) { }) chromium
     # media viewer
     vlc freetube
     # graphical tools
