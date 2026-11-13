@@ -8,6 +8,8 @@
 #     ../ sibling paths resolve to nothing here);
 #   - the `hermes://session/<id>` deep link
 #     (./patches/desktop-session-deeplink.patch);
+#   - picking a never-signed-in OAuth gateway runs the interactive sign-in
+#     (./patches/desktop-oauth-first-login.patch);
 #   - the wrapper symlinks the renderer instead of copying it (below);
 #   - no extraEnv/extraRun: nothing here sets them.
 #
@@ -81,10 +83,15 @@ let
     doCheck = true;
 
     # `hermes-desktop hermes://session/<id>` opens that chat, and a second
-    # launch switches the running window to it. The patch header names what
-    # upstream lacks; building packages.hermes-desktop proves it applies to
-    # the pinned input.
-    patches = [ ./patches/desktop-session-deeplink.patch ];
+    # launch switches the running window to it. Picking an OAuth gateway
+    # without a session (a newly added agent) signs in interactively
+    # instead of failing behind a hidden silent-login window. The patch
+    # headers name what upstream lacks; building packages.hermes-desktop
+    # proves they apply to the pinned input (and typechecks them).
+    patches = [
+      ./patches/desktop-session-deeplink.patch
+      ./patches/desktop-oauth-first-login.patch
+    ];
 
     buildPhase = ''
       runHook preBuild
@@ -122,6 +129,11 @@ let
       pushd apps/desktop
 
         node scripts/assert-dist-built.mjs
+
+        # ./patches/desktop-oauth-first-login.patch's behaviour, with
+        # upstream's own vitest setup.
+        node ../../node_modules/vitest/vitest.mjs run --project ui \
+          src/store/connections-oauth-first-login.test.ts
 
         # validate staged node-pty native binary is present.
         STAGED_PTY_NODE="./dist/node_modules/node-pty/build/Release/pty.node"

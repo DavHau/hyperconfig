@@ -1,0 +1,305 @@
+What upstream lacks (hermes-agent v0.23.0, apps/desktop/src/store/connections.ts):
+a first sign-in when the user picks an OAuth gateway that has no session yet.
+
+selectConnection() dials the target and proves it with GET /api/profiles.
+Without a session that read gets a 401, and the main process answers it
+with its *silent* re-login (fetchJsonViaOauthSession -> retryCookie401WithLogin
+-> openOauthLoginWindow({ silent: true, background: true })): a hidden
+window that loads /, follows the redirect to the identity provider and
+gives up after 12 s. An IdP that needs the user (pocket-id with
+prompt=login, a passkey) is never shown, so the pick ends in the toast
+"Could not connect to <label>: ... not signed in. Open Settings ->
+Gateway and click Sign in". Only Settings' Sign in button runs the
+interactive login (system browser for gateways advertising native_pkce,
+a visible window otherwise), so every newly added OAuth remote, e.g. one
+seeded into connections.json by the Nix launcher, stays unreachable from
+the sidebar until the user finds that button.
+
+This hunk: when a user pick (not a boot restore) of an OAuth remote/cloud
+entry fails with a sign-in error (isRemoteReauthError, the boot overlay's
+test), run that same interactive login for the entry's url and
+connection id (the id keeps the session in the entry's own cookie jar),
+then dial once more. A cancelled or failed login rethrows the original
+error, as before.
+
+--- /dev/null
++++ b/apps/desktop/src/store/connections-oauth-first-login.test.ts
+@@ -0,0 +1,174 @@
++import { atom } from 'nanostores'
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
++
++import type { DesktopConnectionsRegistry } from '@/global'
++
++// hyperhermes: picking an OAuth gateway that has no session yet runs the
++// interactive sign-in (the one Settings' "Sign in" runs) and dials again,
++// instead of ending at the main process's hidden silent re-login.
++
++const NOT_SIGNED_IN =
++  'Remote Hermes gateway uses OAuth, but you are not signed in. Open Settings → Gateway and click "Sign in", or switch back to Local.'
++
++const $activeGatewayProfile = atom('default')
++
++const $connection = atom<null | {
++  connectionId?: string
++  mode?: 'local' | 'remote'
++  profile?: string
++  registryScoped?: boolean
++}>(null)
++
++const ensureGatewayAgent = vi.fn(
++  async (connectionId: null | string, profile: string, options?: { beforeActivate?: () => boolean }) => {
++    if (options?.beforeActivate && !options.beforeActivate()) {
++      return
++    }
++
++    $connection.set({ connectionId: connectionId ?? undefined, mode: 'remote', profile, registryScoped: true })
++  }
++)
++
++const openGatewayAgent = vi.fn(async (_connectionId: string, _profile: string): Promise<void> => undefined)
++const getProfiles = vi.fn(async (_scope?: unknown): Promise<unknown> => ({ profiles: [] }))
++
++vi.mock('@/api/profiles', () => ({
++  getConnectionServedProfiles: vi.fn(async () => ({})),
++  getProfiles
++}))
++vi.mock('@/store/session', () => ({
++  $connection,
++  $activeSessionId: atom(null),
++  $selectedStoredSessionId: atom(null),
++  setActiveSessionId: vi.fn(),
++  setSelectedStoredSessionId: vi.fn()
++}))
++vi.mock('@/store/project-scope', () => ({ exitProjectScope: vi.fn() }))
++vi.mock('@/store/gateway-switch', () => ({ supersedeGatewaySwitch: vi.fn() }))
++vi.mock('@/store/profile', () => ({
++  $activeGatewayProfile,
++  $freshSessionRequest: atom(0),
++  $newChatConnectionId: atom(null),
++  $newChatProfile: atom(null),
++  $newChatRoute: atom(null),
++  $showAllProfiles: atom(false),
++  captureNewChatSource: vi.fn(),
++  currentNewChatIntent: () => 0,
++  ensureGatewayAgent,
++  isLegacyNewChatProfile: () => false,
++  normalizeProfileKey: (name: null | string | undefined) => (name ?? '').trim() || 'default',
++  openGatewayAgent,
++  pinLegacyNewChatProfile: vi.fn(),
++  refreshActiveProfile: vi.fn(async () => undefined),
++  requestFreshSession: vi.fn()
++}))
++
++const { _resetConnectionsForTests, selectConnection, setConnectionsRegistry } = await import('./connections')
++
++const registry: DesktopConnectionsRegistry = {
++  connections: [
++    { id: 'local', kind: 'local', label: 'This device', tokenPreview: null, tokenSet: false },
++    {
++      authMode: 'oauth',
++      id: 'nix-voice',
++      kind: 'remote',
++      label: 'voice',
++      tokenPreview: null,
++      tokenSet: false,
++      url: 'https://voice.example.org'
++    },
++    {
++      authMode: 'token',
++      id: 'tok',
++      kind: 'remote',
++      label: 'Token box',
++      tokenPreview: '...abc',
++      tokenSet: true,
++      url: 'https://tok.example.org'
++    }
++  ],
++  primary: 'local',
++  secureTokenStorage: true,
++  version: 2
++}
++
++const oauthLoginConnectionConfig = vi.fn(async (url: string, _options?: unknown) => ({
++  baseUrl: url,
++  connected: true,
++  ok: true
++}))
++
++beforeEach(() => {
++  localStorage.clear()
++  _resetConnectionsForTests()
++  $connection.set({ connectionId: 'local', mode: 'local', registryScoped: true })
++  $activeGatewayProfile.set('default')
++  ensureGatewayAgent.mockClear()
++  openGatewayAgent.mockReset()
++  getProfiles.mockReset()
++  oauthLoginConnectionConfig.mockClear()
++  vi.stubGlobal('window', {
++    hermesDesktop: {
++      connections: { setLastUsed: vi.fn(async () => ({ ok: true, registry })) },
++      oauthLoginConnectionConfig
++    },
++    localStorage,
++    location: window.location
++  })
++  setConnectionsRegistry(registry)
++})
++
++afterEach(() => vi.unstubAllGlobals())
++
++describe('picking an OAuth gateway without a session', () => {
++  it('signs in interactively for that entry, then lands on it', async () => {
++    getProfiles.mockRejectedValueOnce(new Error(NOT_SIGNED_IN)).mockResolvedValue({ profiles: [] })
++
++    await selectConnection('nix-voice')
++
++    expect(oauthLoginConnectionConfig).toHaveBeenCalledTimes(1)
++    expect(oauthLoginConnectionConfig).toHaveBeenCalledWith('https://voice.example.org', {
++      authMode: 'oauth',
++      connectionId: 'nix-voice',
++      kind: 'remote',
++      label: 'voice'
++    })
++    expect(getProfiles).toHaveBeenCalledTimes(2)
++    expect($connection.get()?.connectionId).toBe('nix-voice')
++  })
++
++  it('a cancelled sign-in keeps the original error and the window where it was', async () => {
++    getProfiles.mockRejectedValue(new Error(NOT_SIGNED_IN))
++    oauthLoginConnectionConfig.mockResolvedValueOnce({ baseUrl: 'https://voice.example.org', connected: false, ok: true })
++
++    await expect(selectConnection('nix-voice')).rejects.toThrow('not signed in')
++
++    expect(oauthLoginConnectionConfig).toHaveBeenCalledTimes(1)
++    expect(getProfiles).toHaveBeenCalledTimes(1)
++    expect($connection.get()?.connectionId).toBe('local')
++  })
++
++  it('a network failure is not a sign-in prompt', async () => {
++    getProfiles.mockRejectedValue(new Error('Could not reach the remote Hermes gateway'))
++
++    await expect(selectConnection('nix-voice')).rejects.toThrow('Could not reach')
++
++    expect(oauthLoginConnectionConfig).not.toHaveBeenCalled()
++  })
++
++  it('a boot restore never opens a sign-in', async () => {
++    getProfiles.mockRejectedValue(new Error(NOT_SIGNED_IN))
++
++    await expect(selectConnection('nix-voice', { restore: true })).rejects.toThrow('not signed in')
++
++    expect(oauthLoginConnectionConfig).not.toHaveBeenCalled()
++  })
++
++  it('a token gateway is left alone', async () => {
++    openGatewayAgent.mockRejectedValue(new Error(NOT_SIGNED_IN))
++
++    await expect(selectConnection('tok')).rejects.toThrow('not signed in')
++
++    expect(oauthLoginConnectionConfig).not.toHaveBeenCalled()
++  })
++})
+--- a/apps/desktop/src/store/connections.ts
++++ b/apps/desktop/src/store/connections.ts
+@@ -11,6 +11,7 @@
+   SOURCE_SWITCH_DIAL_TIMEOUT_MS,
+   withTimeout
+ } from '@/lib/with-timeout'
++import { isRemoteReauthError } from '@/components/boot-failure-reauth'
+ import { $connectionsRegistry } from '@/store/connection-registry-state'
+ import { $defaultProfileRoute, refreshDefaultProfile } from '@/store/default-profile'
+ import { $fleetRoster, refreshFleetRoster } from '@/store/fleet-roster'
+@@ -790,31 +791,75 @@
+ 
+   try {
+     const timeoutMessage = `Timed out connecting to "${targetConnection.label}".`
+-    // Open the target WITHOUT activating it, so a dead gateway fails here and
+-    // the one in front loses nothing — not even the draft. Every registered
+-    // gateway is normally connected already, so this resolves at once.
+-    await withTimeout(openGatewayAgent(connectionId, targetProfile), SOURCE_SWITCH_DIAL_TIMEOUT_MS, timeoutMessage)
++    const oauthRemote =
++      targetConnection.authMode === 'oauth' &&
++      (targetConnection.kind === 'remote' || targetConnection.kind === 'cloud')
+ 
+-    if (revision !== switchRevision) {
+-      return
++    const dialTarget = async () => {
++      // Open the target WITHOUT activating it, so a dead gateway fails here and
++      // the one in front loses nothing — not even the draft. Every registered
++      // gateway is normally connected already, so this resolves at once.
++      await withTimeout(openGatewayAgent(connectionId, targetProfile), SOURCE_SWITCH_DIAL_TIMEOUT_MS, timeoutMessage)
++
++      if (revision !== switchRevision) {
++        return
++      }
++
++      // A kept socket can outlive cookie/native OAuth REST auth. Prove the
++      // cheapest protected read before the draft is replaced; the exact failure
++      // reaches the caller (network failures are not sign-in errors).
++      if (oauthRemote) {
++        await withTimeout(
++          getProfiles({ connectionId, profile: targetProfile }),
++          SOURCE_SWITCH_DIAL_TIMEOUT_MS,
++          timeoutMessage
++        )
++      }
+     }
+ 
+-    // A kept socket can outlive cookie/native OAuth REST auth. Prove the
+-    // cheapest protected read before the draft is replaced; the exact failure
+-    // reaches the caller (network failures are not sign-in errors).
+-    if (
+-      targetConnection.authMode === 'oauth' &&
+-      (targetConnection.kind === 'remote' || targetConnection.kind === 'cloud')
+-    ) {
+-      await withTimeout(
+-        getProfiles({ connectionId, profile: targetProfile }),
+-        SOURCE_SWITCH_DIAL_TIMEOUT_MS,
+-        timeoutMessage
+-      )
++    try {
++      await dialTarget()
++    } catch (error) {
++      // hyperhermes: a user's pick of an OAuth gateway that was never signed in
++      // (or whose session lapsed) used to end in the hidden, 12 s "silent"
++      // re-login window and a "not signed in" toast; the login page in that
++      // window is never shown, so the first sign-in could only happen from
++      // Settings. Run the interactive sign-in Settings runs (system browser
++      // for native_pkce gateways, a visible window otherwise), then dial once
++      // more. Never on a boot restore: no browser pops up unasked.
++      // Remote entries only: cloud entries have their own recovery
++      // (selectSavedCloudWithReauth), which would stack a second sign-in UI.
++      if (
++        !oauthRemote ||
++        targetConnection.kind !== 'remote' ||
++        restoreOnBoot ||
++        revision !== switchRevision ||
++        !targetConnection.url ||
++        !isRemoteReauthError(error instanceof Error ? error.message : String(error))
++      ) {
++        throw error
++      }
++
++      const login = await window.hermesDesktop?.oauthLoginConnectionConfig?.(targetConnection.url, {
++        authMode: 'oauth',
++        connectionId,
++        kind: targetConnection.kind,
++        label: targetConnection.label
++      })
++
++      if (!login?.connected) {
++        throw error
++      }
+ 
+       if (revision !== switchRevision) {
+         return
+       }
++
++      await dialTarget()
++    }
++
++    if (revision !== switchRevision) {
++      return
+     }
+ 
+     try {
