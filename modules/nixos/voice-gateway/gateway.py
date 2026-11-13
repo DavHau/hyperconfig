@@ -502,7 +502,11 @@ class Gateway:
                 "grant_type": "authorization_code", "code": code,
                 "redirect_uri": f"{self.cfg['publicUrl']}/callback",
                 "code_verifier": flow.verifier,
-            }, auth=BasicAuth(o["clientId"], secret)) as r:
+            # client_secret_basic: RFC 6749 2.3.1 wants id and secret
+            # form-urlencoded before base64, and pocket-id (fosite) decodes
+            # them, so a raw "+" in the secret would arrive as a space.
+            }, auth=BasicAuth(urllib.parse.quote_plus(o["clientId"]),
+                              urllib.parse.quote_plus(secret))) as r:
                 if r.status != 200:
                     raise PermissionError(f"token endpoint HTTP {r.status}")
                 tok = await r.json()
