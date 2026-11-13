@@ -265,10 +265,13 @@ in
       # routes Home Assistant's Assist turns to its api_server). Home
       # Assistant through HA's MCP server as the non-admin HA user
       # voice-agent; vault-ro, GPU on vit; no ssh login, wallet, REA, mail
-      # or fleet access. Claude (Sonnet, chosen per request by the gateway)
+      # or fleet access. Claude (Sonnet 5.5, chosen per request by the gateway, thinking off)
       # through TeamClaude, p0's Qwen as its own model and fallback.
       voice = {
         description = "voice - Voice PE agent (untrusted), Home Assistant";
+        # Spoken replies: thinking off by default (the gateway also sends
+        # reasoning_effort none per request).
+        settings.agent.reasoning_effort = "none";
         sshKeys = [ ];
         mail.enable = false;
         teamclaude.enable = true;

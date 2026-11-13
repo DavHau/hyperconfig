@@ -220,7 +220,7 @@ in
       type = lib.types.nullOr (lib.types.attrsOf lib.types.str);
       default = {
         provider = "anthropic";
-        model = "claude-sonnet-5";
+        model = "claude-sonnet-5-5";
       };
       example = {
         provider = "p0";

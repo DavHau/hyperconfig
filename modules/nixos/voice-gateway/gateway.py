@@ -415,6 +415,10 @@ class Gateway:
         }
         if a.get("model"):
             body["model"] = a["model"]
+        # Spoken replies: thinking off ("none" = the lowest the api_server
+        # accepts; it disables extended thinking), unless the agent entry
+        # says otherwise.
+        body["model_options"] = {"reasoning_effort": a.get("reasoningEffort", "none")}
         if a.get("provider"):
             body["provider"] = a["provider"]
         headers = {"Authorization": f"Bearer {read_secret(a['keyFile'])}",
