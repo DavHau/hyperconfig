@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Offline check of the exported streaming int8 model, as the device runs it.
 
-  eval_tflite.py <model.tflite> <cutoff> <window> <positives_dir> [<negative wavs dir>...]
+  eval_tflite.py <model.tflite> <cutoff[,cutoff...]> <window> <positives_dir> [<negative wavs dir>...]
 
 Streams each wav through pymicro-features (the same frontend as ESPHome),
 feeds the int8 model stride-by-stride, averages the last <window> outputs,
@@ -60,18 +60,19 @@ def detections(p, cutoff, win, cooldown):
     return n
 
 
-m = Stream(sys.argv[1]); cutoff = float(sys.argv[2]); win = int(sys.argv[3])
+m = Stream(sys.argv[1]); cutoffs = [float(c) for c in sys.argv[2].split(",")]; win = int(sys.argv[3])
 step_s = m.stride * 0.01
 pos = sorted(glob.glob(os.path.join(sys.argv[4], "**/*.wav"), recursive=True))
-hits = 0
-for f in pos:
-    x = np.concatenate([np.zeros(8000, np.float32), load(f), np.zeros(8000, np.float32)])
-    hits += detections(m.probs(features(x)), cutoff, win, 10**9) > 0
-print(f"recall {hits}/{len(pos)} = {hits/max(1,len(pos)):.3f} (cutoff {cutoff}, window {win})")
-fa, dur = 0, 0.0
+pp = [m.probs(features(np.concatenate([np.zeros(8000, np.float32), load(f), np.zeros(8000, np.float32)])))
+      for f in pos]
+nn, dur = [], 0.0
 for d in sys.argv[5:]:
     for f in sorted(glob.glob(os.path.join(d, "**/*.wav"), recursive=True)):
         x = load(f); dur += len(x) / 16000
-        fa += detections(m.probs(features(x)), cutoff, win, int(1.0 / step_s))
-if dur:
-    print(f"false accepts {fa} in {dur/3600:.2f} h = {fa/(dur/3600):.2f}/h")
+        nn.append(m.probs(features(x)))
+for cutoff in cutoffs:
+    hits = sum(detections(p, cutoff, win, 10**9) > 0 for p in pp)
+    print(f"recall {hits}/{len(pos)} = {hits/max(1,len(pos)):.3f} (cutoff {cutoff}, window {win})")
+    if dur:
+        fa = sum(detections(p, cutoff, win, int(1.0 / step_s)) for p in nn)
+        print(f"false accepts {fa} in {dur/3600:.2f} h = {fa/(dur/3600):.2f}/h")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extra 'Okay Diggi' speakers from vit's local TTS API (Kokoro EN, Supertonic DE/EN).
+"""Extra 'Okay Diggi' (or, with arg `hey`, 'Hey Diggi') speakers from vit's local TTS API (Kokoro EN, Supertonic DE/EN).
 
 Writes 16 kHz mono wavs to <out>/<voice>__<n>.wav. Sequential requests with a
 short pause: the same service answers Home Assistant.
@@ -11,6 +11,8 @@ from math import gcd
 
 API = "http://127.0.0.1:10201"
 TEXTS = ["Okay Diggi", "Okay, Diggi", "Okeh Diggi", "Okay Diggi!", "Okay Diggi?", "Okay, Diggi."]
+if sys.argv[2:] == ["hey"]:
+    TEXTS = ["Hey Diggi", "Hey, Diggi", "Hei Diggi", "Hey Diggi!", "Hey Diggy?", "Hey, Diggi."]
 out = pathlib.Path(sys.argv[1]); out.mkdir(parents=True, exist_ok=True)
 voices = json.load(urllib.request.urlopen(API + "/voices"))["languages"]
 jobs = []

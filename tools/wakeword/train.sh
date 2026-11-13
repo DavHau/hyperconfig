@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 # Augment clips into features, then train + export the streaming int8 model.
 #   train.sh            all steps (each skipped when its output exists)
-# Positive set: data/positives (EN LibriTTS-R generator, DE Piper voices,
-# vit's Kokoro/Supertonic API voices). Adversarial near-misses: data/adversarial.
+#   MODEL=<name>        trained_models/<name>, config <name>.yaml (default okay_diggi)
+#   POS="<sets>"        positive sets (default "positives"; "Hey Diggi":
+#                       MODEL=hey_diggi POS=positives_hey; both in one model:
+#                       POS="positives positives_hey", worse, see README)
+# Positive sets: data/positives ("Okay Diggi"), data/positives_hey ("Hey
+# Diggi"); each: EN LibriTTS-R generator, DE Piper voices, vit's
+# Kokoro/Supertonic API voices. Adversarial near-misses: data/adversarial.
 set -euo pipefail
 WW=${WW:-/var/lib/wakeword}
 . "$WW/env.sh"
@@ -10,14 +15,20 @@ cd "$WW"
 PY=$WW/venv-tfn/bin/python
 F=$WW/features
 mkdir -p $F
-[ -f $F/positives/.done ] || { $PY features.py data/positives $F/positives --train-repeat 2 && touch $F/positives/.done; }
+MODEL=${MODEL:-okay_diggi}
+POS=${POS:-positives}
+for p in $POS; do
+  [ -f $F/$p/.done ] || { $PY features.py data/$p $F/$p --train-repeat 2 && touch $F/$p/.done; }
+done
 [ -f $F/adversarial/.done ] || { $PY features.py data/adversarial $F/adversarial --train-repeat 1 && touch $F/adversarial/.done; }
 
-cat > training_parameters.yaml <<EOF
-window_step_ms: 10
-train_dir: $WW/trained_models/okay_diggi
-features:
-  - {features_dir: $F/positives, sampling_weight: 2.0, penalty_weight: 1.0, truth: true, truncation_strategy: truncate_start, type: mmap}
+# Positive sets share a sampling weight of 3 (2 for a single set).
+w=$(awk -v n="$(echo $POS | wc -w)" 'BEGIN { print (n > 1 ? 3.0 / n : 2.0) }')
+{ printf 'window_step_ms: 10\ntrain_dir: %s\nfeatures:\n' "$WW/trained_models/$MODEL"
+for p in $POS; do
+  echo "  - {features_dir: $F/$p, sampling_weight: $w, penalty_weight: 1.0, truth: true, truncation_strategy: truncate_start, type: mmap}"
+done
+cat <<EOF
   - {features_dir: $F/adversarial, sampling_weight: 3.0, penalty_weight: 1.0, truth: false, truncation_strategy: truncate_start, type: mmap}
   - {features_dir: $WW/data/negative_datasets/speech, sampling_weight: 10.0, penalty_weight: 1.0, truth: false, truncation_strategy: random, type: mmap}
   - {features_dir: $WW/data/negative_datasets/dinner_party, sampling_weight: 10.0, penalty_weight: 1.0, truth: false, truncation_strategy: random, type: mmap}
@@ -38,6 +49,7 @@ target_minimization: 0.9
 minimization_metric: null
 maximization_metric: average_viable_recall
 EOF
+} > $MODEL.yaml
 
 # The model of the official v2 models (okay_nabu): mixednet, 4 blocks.
 # Wrapper: fixed seeds (microWakeWord sets none) and a hard GPU memory cap
@@ -52,7 +64,7 @@ if g:
 sys.argv = ["model_train_eval"] + sys.argv[1:]
 runpy.run_module("microwakeword.model_train_eval", run_name="__main__")
 ' \
-  --training_config=training_parameters.yaml \
+  --training_config=$MODEL.yaml \
   --train ${TRAIN:-1} --restore_checkpoint 1 \
   --test_tf_nonstreaming 0 --test_tflite_nonstreaming 0 --test_tflite_nonstreaming_quantized 0 \
   --test_tflite_streaming 0 --test_tflite_streaming_quantized 1 \

@@ -1,8 +1,10 @@
 # Home Assistant Voice PE in Dave's home (HA on cm-pi): the official
 # firmware (esphome/home-assistant-voice-pe, factory config, tag 26.9.0)
-# plus our own wake word "Okay Diggi" (tools/wakeword). HA picks the active
-# words with select.home_assistant_voice_09fcea_wake_word{,_2}: Okay Diggi in
-# slot 1, Okay Nabu in slot 2 as the fallback.
+# plus our own wake words "Okay Diggi" and "Hey Diggi" (tools/wakeword; two
+# models: one combined model missed a third of held-out "Hey Diggi" clips).
+# HA picks the active words with select.home_assistant_voice_09fcea_wake_word
+# {,_2}: Okay Diggi in slot 1, Hey Diggi in slot 2 (Okay Nabu stays available;
+# disabled models are unloaded, so only the two active ones use RAM).
 #
 # Build and flash (x86_64 host on the home LAN, e.g. vit; README in
 # tools/wakeword):
@@ -45,10 +47,10 @@ packages:
 esphome:
   project:
     name: Nabu Casa.Home Assistant Voice PE
-    version: 26.9.0-diggi.3
+    version: 26.9.0-diggi.4
 
 # The factory image offers Nabu Casa's builds as an update in HA; installing
-# one would drop Okay Diggi. Updates come from this file instead.
+# one would drop the Diggi wake words. Updates come from this file instead.
 update: !remove
 
 # Louder replies: upstream caps the speaker at 85% (volume_max 0.85), so HA's
@@ -86,3 +88,8 @@ micro_wake_word:
       # reaches that. 0.6: same held-out recall on clean clips (47/48), about
       # 2 false accepts/h on the AudioSet noise set (0.7/h at 0.8).
       probability_cutoff: 0.6
+    - model: hey_diggi/hey_diggi.json
+      id: hey_diggi
+      # Held-out (48 clips of unseen voices, 1.37 h AudioSet): 0.9 -> recall
+      # 48/48, 0 false accepts/h; 0.85 -> 48/48, 1.5/h; 0.8 -> 48/48, 2.2/h.
+      probability_cutoff: 0.9
