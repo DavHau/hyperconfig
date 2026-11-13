@@ -18,9 +18,9 @@
     }
 
     // Overview (Mod+O / noctalia's workspace button) zoomed further out:
-    // 0.2: about 4.5 workspace rows (incl. gaps) instead of the default 0.5;
+    // 0.25: a bit over 3 workspace rows (incl. gaps) instead of the default 0.5;
     overview {
-        zoom 0.2
+        zoom 0.25
     }
   '';
 }
