@@ -349,3 +349,13 @@ def test_session_rotates_after_idle(env):
     env.clock.t += 11 * 60
     b = gw.session_id("voice")
     assert b != a and b.startswith("voice-")    # new conversation after 10 min silence
+
+
+
+def test_reply_language():
+    assert g.reply_language("What time is it?") == "English"
+    assert g.reply_language("Turn on the aircon in the living room.") == "English"
+    assert g.reply_language("Wie spät ist es?") == "German"
+    assert g.reply_language("Schalt die Klimaanlage an.") == "German"
+    assert g.reply_language("ปิดแอร์") == "Thai"
+    assert g.with_language("What time is it?").endswith("(Dave spoke English. Reply in English only.)")

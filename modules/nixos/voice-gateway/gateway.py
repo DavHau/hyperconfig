@@ -58,6 +58,37 @@ voice_trusted_mode_off and confirm in a few words. There is no tool to turn
 trusted mode on: if he asks for that, tell him to say "unlock".
 """
 
+# Reply language per turn, from the transcript itself (speech-stt picked
+# the language when it transcribed it). Same rule as speech-tts's
+# guess_lang: Thai script -> Thai; else German vs English function words,
+# umlauts count triple; a tie stays English.
+_THAI = re.compile("[\u0e00-\u0e7f]")
+_DE = set("""der die das den dem des ein eine einen einem einer und oder aber doch denn weil wenn dass ob
+als wie ist sind war bin bist hat habe hast haben wird werden kann kannst muss soll will willst möchte ich
+du er sie es wir ihr mich dich mir dir uns kein keine nicht nichts noch schon auch nur sehr mal jetzt hier
+heute bitte danke ja nein alles mach macht gib zu zum zur im am auf aus bei mit nach von vor über für
+was wer wo wann warum welche viel mehr etwas einfach genau schalt schalte stell an aus""".split())
+_EN = set("""the a an and or but because if that is are was were be am has have had will would can could
+must should do does did i you he she it we they me him her us them my your no not still already also only
+very now here today please thanks yes sure let tell give make to of in on at from by with for about what
+who where when why which much more something turn set put off""".split())
+
+
+def reply_language(text: str) -> str:
+    if _THAI.search(text):
+        return "Thai"
+    low = text.lower()
+    w = re.findall(r"[a-zäöüß]+", low)
+    de = sum(x in _DE for x in w) + 3 * len(re.findall("[äöüß]", low))
+    en = sum(x in _EN for x in w)
+    return "German" if de > en else "English"
+
+
+def with_language(text: str) -> str:
+    lang = reply_language(text)
+    return f"{text}\n\n(Dave spoke {lang}. Reply in {lang} only.)"
+
+
 AGENT_NOTE = {
     "voice": "You are the untrusted household voice agent; the session is "
     "not authenticated, anyone in the room may be speaking.",
@@ -428,7 +459,7 @@ class Gateway:
         body: dict[str, Any] = {
             "messages": [
                 {"role": "system", "content": SPOKEN_PREFIX + "\n" + AGENT_NOTE.get(agent, "")},
-                {"role": "user", "content": text},
+                {"role": "user", "content": with_language(text)},
             ],
         }
         if a.get("model"):
