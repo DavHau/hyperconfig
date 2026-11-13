@@ -18,6 +18,7 @@ HTTP (--api-port; the unit admits localhost and the dashboard proxy only):
   GET  /         voice-picker page (voices.html)
   GET  /voices   {languages: {<lang>: {selected, voices: [...]}}, selection}
   PUT  /voices   {"de": "supertonic/F2", ...} -> validated, written atomically
+  POST /translate {text} -> {source, en, de, th} (via speech-translate)
   POST /preview  {lang, voice, text} -> audio/wav
 PUT/POST need Content-Type: application/json, which a cross-origin page
 cannot send without a CORS preflight this server never answers.
@@ -356,7 +357,7 @@ def wav_bytes(w, sr):
     return b.getvalue()
 
 
-def api(cat, page):
+def api(cat, page, translate_url=None):
     async def body(req):
         if req.content_type != "application/json":
             raise web.HTTPUnsupportedMediaType(text="Content-Type must be application/json")
@@ -405,15 +406,26 @@ def api(cat, page):
                  time.perf_counter() - t0, text)
         return web.Response(body=wav_bytes(w, sr), content_type="audio/wav", headers={"Cache-Control": "no-store"})
 
+    async def translate(req):
+        # The picker's sample sentence -> en/de/th, by speech-translate
+        # (translate.py, loopback; this unit may not reach the internet).
+        b = await body(req)
+        if not translate_url:
+            return web.json_response({"error": "translation not configured"}, status=501)
+        from aiohttp import ClientSession, ClientTimeout
+        async with ClientSession(timeout=ClientTimeout(total=90)) as s:
+            async with s.post(translate_url + "/translate", json=b) as r:
+                return web.json_response(await r.json(), status=r.status)
+
     app = web.Application(client_max_size=64 * 1024)
     app.add_routes([web.get("/", index), web.get("/voices", get_voices), web.put("/voices", put_voices),
-                    web.post("/preview", preview)])
+                    web.post("/preview", preview), web.post("/translate", translate)])
     return app
 
 
 async def serve(a, cat):
     page = (Path(__file__).parent / "voices.html").read_text()
-    runner = web.AppRunner(api(cat, page), access_log=None)
+    runner = web.AppRunner(api(cat, page, a.translate_url), access_log=None)
     await runner.setup()
     for host in a.api_host:
         await web.TCPSite(runner, host, a.api_port).start()
@@ -434,6 +446,7 @@ def main():
     ap.add_argument("--selection-file", required=True)
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--steps", type=int, default=8)
+    ap.add_argument("--translate-url", default=None, help="speech-translate base URL for POST /translate")
     a = ap.parse_args()
     a.api_host = a.api_host or ["127.0.0.1"]
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")

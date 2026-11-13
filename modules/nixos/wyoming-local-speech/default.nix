@@ -186,6 +186,11 @@ in
       description = "tts.py's HTTP voice API + picker page: localhost, and edi's SSO proxy over yggdrasil.";
     };
     ttsMemoryMax = lib.mkOption { type = lib.types.str; default = "4G"; };
+    translatePort = lib.mkOption {
+      type = lib.types.port;
+      default = 10202;
+      description = "translate.py (loopback): the picker's sample sentence into en/de/th via p0's Qwen.";
+    };
     pathummaOnnxSource = lib.mkOption {
       type = lib.types.str;
       default = "/home/dave-hermes/jobs/speechbench/models/pathumma/onnx";
@@ -281,12 +286,43 @@ in
       "--selection-file" selectionFile
       "--threads" "4"
       "--steps" "8"
+      "--translate-url" "http://127.0.0.1:${toString cfg.translatePort}"
     ] cfg.ttsMemoryMax) {
       serviceConfig = {
         SupplementaryGroups = [ "speech-voices" ];
         IPAddressAllow = [ cmPiYgg "localhost" ediYgg ];
       };
       environment.NLTK_DATA = "${state}/nltk-data";
+    };
+
+    # The picker's translator: p0's Qwen over the internet with the fleet
+    # inference key, so outside speech-tts' IP sandbox. Loopback only.
+    hyper.inferenceApiKey.users = [ "speech" ];
+    systemd.services.speech-translate = {
+      description = "Voice picker: sample sentence -> en/de/th (p0 Qwen)";
+      wantedBy = [ "multi-user.target" ];
+      requires = [ "speech-setup.service" ];
+      after = [ "speech-setup.service" "network-online.target" "inference-api-key-speech.service" ];
+      wants = [ "network-online.target" "inference-api-key-speech.service" ];
+      serviceConfig = {
+        User = "speech";
+        Group = "speech";
+        ExecStart = "${venv}/bin/python ${./.}/translate.py ${lib.escapeShellArgs [
+          "--port" (toString cfg.translatePort)
+          "--base-url" "https://inference.p0.contact/v1"
+          "--model" "qwen"
+          "--key-file" (config.hyper.inferenceApiKey.userTokenPath "speech")
+        ]}";
+        Restart = "on-failure";
+        RestartSec = 10;
+        MemoryMax = "256M";
+        NoNewPrivileges = true;
+        PrivateTmp = true;
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        PrivateDevices = true;
+        RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" ];
+      };
     };
 
     networking.firewall.extraInputRules = ''

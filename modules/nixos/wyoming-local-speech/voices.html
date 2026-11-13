@@ -39,6 +39,10 @@
   li.picked { background: var(--sel); }
   li .id { color: var(--muted); font-size: .8rem; margin-left: auto; white-space: nowrap; }
   li .tag { font-size: .7rem; border: 1px solid var(--accent); color: var(--accent); border-radius: 4px; padding: 0 .3rem; }
+  li .play { padding: 0 .45rem; font-size: .8rem; }
+  #sample { padding: .8rem 1.2rem 0; display: flex; flex-direction: column; gap: .4rem; }
+  #sample .hint, .tr-label { font-size: .85rem; color: var(--muted); }
+  .tr-label b { color: var(--fg); }
   li .active { font-size: .7rem; background: var(--ok); color: var(--bg); border-radius: 4px; padding: 0 .3rem; }
   textarea { width: 100%; min-height: 4rem; font: inherit; padding: .4rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); }
   .row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
@@ -61,6 +65,11 @@
     </select>
   </label>
 </header>
+<section id="sample">
+  <label for="src" class="hint">Sample sentence: type in English, German or Thai; it's translated into the other two for the previews.</label>
+  <textarea id="src" placeholder="e.g. Das Licht im Wohnzimmer ist jetzt eingeschaltet."></textarea>
+  <div class="row"><button id="translate" type="button">Translate</button><span id="trmsg" class="msg"></span></div>
+</section>
 <main id="langs"><p>Loading…</p></main>
 <script>
 "use strict";
@@ -71,7 +80,44 @@ const SAMPLE = {
   th: "เปิดไฟในห้องนั่งเล่นแล้วครับ",
 };
 const picked = {};
-const texts = {};
+// Per-language sample text (translations, editable), kept across reloads.
+const texts = JSON.parse(localStorage.getItem("sampleTexts") || "{}");
+function saveTexts() { localStorage.setItem("sampleTexts", JSON.stringify(texts)); }
+const sampleOf = lang => (texts[lang] ?? "").trim() || SAMPLE[lang] || "";
+let sourceLang = localStorage.getItem("sampleSource") || "";
+
+const src = document.getElementById("src");
+const trBtn = document.getElementById("translate");
+const trMsg = document.getElementById("trmsg");
+src.value = localStorage.getItem("sampleSrc") || "";
+let lastTranslated = src.value.trim();
+async function translateNow() {
+  const text = src.value.trim();
+  localStorage.setItem("sampleSrc", src.value);
+  if (!text || text === lastTranslated) return;
+  trBtn.disabled = true; trMsg.className = "msg"; trMsg.textContent = "Detecting language and translating…";
+  try {
+    const r = await (await api("POST", "translate", { text })).json();
+    for (const l of ["en", "de", "th"]) texts[l] = r[l];
+    sourceLang = r.source; lastTranslated = text;
+    saveTexts(); localStorage.setItem("sampleSource", sourceLang);
+    trMsg.className = "msg ok"; trMsg.textContent = "Detected: " + (NAMES[r.source] || r.source);
+    for (const l of ["en", "de", "th"]) {
+      const ta = document.querySelector(`#lang-${l} textarea`);
+      if (ta) ta.value = texts[l];
+      const lab = document.querySelector(`#lang-${l} .tr-label`);
+      if (lab) lab.replaceWith(trLabel(l));
+    }
+  } catch (e) { trMsg.className = "msg err"; trMsg.textContent = e.message; }
+  trBtn.disabled = false;
+}
+trBtn.onclick = translateNow;
+src.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); translateNow(); } });
+src.addEventListener("blur", translateNow);
+function trLabel(lang) {
+  return el("div", { class: "tr-label" }, sourceLang === lang ? el("b", {}, "Your sentence") :
+    (texts[lang] ? "Translation (editable)" : "Default sample (type a sentence above)"));
+}
 
 // theme: localStorage overrides the media query
 const themeSel = document.getElementById("theme");
@@ -120,32 +166,39 @@ function render() {
     const cur = info.voices.find(v => v.id === info.selected);
     const msg = el("div", { class: "msg" });
     const audio = el("audio", { controls: "" });
-    const ta = el("textarea", { "aria-label": "Preview text" });
-    ta.value = texts[lang] ?? SAMPLE[lang] ?? "";
-    ta.oninput = () => { texts[lang] = ta.value; };
+    const ta = el("textarea", { "aria-label": (NAMES[lang] || lang) + " sample", placeholder: SAMPLE[lang] || "" });
+    ta.value = texts[lang] ?? "";
+    ta.oninput = () => { texts[lang] = ta.value; saveTexts(); };
+    async function speak(voice, btn) {
+      if (btn) btn.disabled = true;
+      msg.className = "msg"; msg.textContent = "Synthesizing " + voice + "…";
+      try {
+        const r = await api("POST", "preview", { lang, voice, text: sampleOf(lang) });
+        audio.src = URL.createObjectURL(await r.blob());
+        audio.play().catch(() => {});
+        msg.textContent = "";
+      } catch (e) { msg.className = "msg err"; msg.textContent = e.message; }
+      if (btn) btn.disabled = false;
+    }
     const list = el("ul");
     for (const v of info.voices) {
-      const li = el("li", { title: v.description || v.id },
+      const play = el("button", { class: "play", type: "button", title: "Play this language's sample with " + v.label }, "▶");
+      play.onclick = ev => { ev.stopPropagation(); picked[lang] = v.id; markPicked(); speak(v.id, play); };
+      const li = el("li", { title: v.description || v.id, "data-voice": v.id }, play,
         el("span", {}, v.label),
         ...(v.builtin ? [] : [el("span", { class: "tag" }, "drop-in")]),
         ...(v.id === info.selected ? [el("span", { class: "active" }, "in use")] : []),
         el("span", { class: "id" }, v.id));
       if (v.id === picked[lang]) li.classList.add("picked");
-      li.onclick = () => { picked[lang] = v.id; render(); };
+      li.onclick = () => { picked[lang] = v.id; markPicked(); };
       list.append(li);
     }
+    function markPicked() {
+      for (const li of list.children) li.classList.toggle("picked", li.dataset.voice === picked[lang]);
+      use.disabled = picked[lang] === info.selected;
+    }
     const preview = el("button", {}, "Preview");
-    preview.onclick = async () => {
-      preview.disabled = true; msg.className = "msg"; msg.textContent = "Synthesizing " + picked[lang] + "…";
-      try {
-        const r = await api("POST", "preview", { lang, voice: picked[lang], text: ta.value });
-        const blob = await r.blob();
-        audio.src = URL.createObjectURL(blob);
-        audio.play().catch(() => {});
-        msg.textContent = "";
-      } catch (e) { msg.className = "msg err"; msg.textContent = e.message; }
-      preview.disabled = false;
-    };
+    preview.onclick = () => speak(picked[lang], preview);
     const use = el("button", { class: "primary" }, "Use for " + (NAMES[lang] || lang));
     use.disabled = picked[lang] === info.selected;
     use.onclick = async () => {
@@ -160,7 +213,7 @@ function render() {
     main.append(el("section", { id: "lang-" + lang },
       el("h2", {}, NAMES[lang] || lang),
       el("div", { class: "cur" }, "In use: ", el("b", {}, cur ? cur.label : info.selected), " (" + info.selected + ")"),
-      list, ta, el("div", { class: "row" }, preview, use), audio, msg));
+      trLabel(lang), ta, list, el("div", { class: "row" }, preview, use), audio, msg));
   }
 }
 
