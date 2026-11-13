@@ -34,6 +34,9 @@
 
   # Local STT/TTS for Home Assistant on cm-pi (iGPU + CPU, never the NVIDIA card).
   hyper.wyomingLocalSpeech.enable = true;
+  # Spoken replies on Dave's Samsung soundbar ("[AV] Ultra Slim Soundbar",
+  # paired+trusted on vit) instead of the Voice PE's speaker.
+  hyper.wyomingLocalSpeech.btSpeaker.mac = "B8:B4:09:E3:AE:19";
 
   # Recovery while vit waits for its passphrase: `clan-unlock vit` (ssh into
   # the initrd at its fixed link-local address, through som).

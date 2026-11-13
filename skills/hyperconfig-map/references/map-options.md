@@ -60,6 +60,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.vaultIds.deniedUsers: modules/nixos/vault-ids.nix
 - hyper.voiceGateway: modules/nixos/voice-gateway/default.nix
 - hyper.wyomingLocalSpeech: modules/nixos/wyoming-local-speech/default.nix
+- hyper.wyomingLocalSpeech.btSpeaker: modules/nixos/wyoming-local-speech/bt-speaker.nix
 - hyper.zfsArcMax: modules/nixos/zfs-arc-max.nix
 - hyper.zfsEphemeralTmp.dataset: modules/nixos/zfs-ephemeral-tmp.nix
 - hyper.ztEuLanGuard.refusedUsers: modules/nixos/zt-eu-lan-guard/default.nix

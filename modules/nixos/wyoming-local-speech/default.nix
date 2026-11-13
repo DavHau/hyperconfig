@@ -17,7 +17,8 @@
 #   /preview, GET / = voice-picker page) on localhost, and for edi's
 #   pocket-id-protected proxy (./voices-sso.nix, voices.davhau.com).
 #   Drop-in voices: ${state}/voices.d/<engine>/ (group speech-voices,
-#   setgid, see ./voices.d-README.md), rescanned live.
+#   setgid, see ./voices.d-README.md), rescanned live. Optionally the
+#   replies play on a Bluetooth speaker instead (./bt-speaker.nix).
 #
 # Python: no nixpkgs set has openvino/supertonic/kokoro-onnx, so
 # speech-setup builds a uv venv over nixpkgs' python312 from the hashed
@@ -170,6 +171,8 @@ let
     };
 in
 {
+  imports = [ ./bt-speaker.nix ];
+
   options.hyper.wyomingLocalSpeech = {
     enable = lib.mkEnableOption "local Wyoming STT/TTS for Home Assistant";
     thaiThreshold = lib.mkOption {
@@ -180,6 +183,12 @@ in
         language softmax over en/de/th only. Not argmax: Whisper labels
         short Thai clips as English (Dave's value).
       '';
+    };
+    ttsExtraArgs = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      internal = true;
+      description = "More tts.py arguments (./bt-speaker.nix).";
     };
     sttPort = lib.mkOption { type = lib.types.port; default = 10300; };
     ttsPort = lib.mkOption { type = lib.types.port; default = 10200; };
@@ -277,7 +286,7 @@ in
       "--last-lang-file" lastLangFile
     ] "5G";
 
-    systemd.services.speech-tts = lib.recursiveUpdate (server "tts" "Wyoming TTS: Kokoro-82M (en), Supertonic 3 (de), Wayu Kokoro-Thai (th), CPU" [
+    systemd.services.speech-tts = lib.recursiveUpdate (server "tts" "Wyoming TTS: Kokoro-82M (en), Supertonic 3 (de), Wayu Kokoro-Thai (th), CPU" ([
       "--uri" "tcp://[::]:${toString cfg.ttsPort}"
       "--api-host" "127.0.0.1"
       "--api-host" "::"
@@ -292,7 +301,7 @@ in
       "--steps" "8"
       "--translate-url" "http://127.0.0.1:${toString cfg.translatePort}"
       "--last-lang-file" lastLangFile
-    ] cfg.ttsMemoryMax) {
+    ] ++ cfg.ttsExtraArgs) cfg.ttsMemoryMax) {
       serviceConfig = {
         SupplementaryGroups = [ "speech-voices" ];
         IPAddressAllow = [ cmPiYgg "localhost" ediYgg ];

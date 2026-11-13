@@ -20,10 +20,20 @@ HTTP (--api-port; the unit admits localhost and the dashboard proxy only):
   PUT  /voices   {"de": "supertonic/F2", ...} -> validated, written atomically
   POST /translate {text} -> {source, en, de, th} (via speech-translate)
   POST /preview  {lang, voice, text} -> audio/wav
+  GET  /output   {output, effective, sink: {...}|null}: where replies play
+  PUT  /output   {"output": "soundbar"|"voice-pe"} (also: the --output-file)
+
+Bluetooth speaker (--bt-mac, see bt-speaker.nix): with output "soundbar"
+and the A2DP sink connected in bluealsa, each reply plays locally (aplay on
+the bluealsa PCM, fed sentence by sentence as soon as each is synthesized)
+and the Wyoming client gets silence of the same length, so the satellite
+stays "responding" and doesn't reopen its mic over the soundbar. Sink not
+connected or the first write failing -> the real audio goes to the client.
 PUT/POST need Content-Type: application/json, which a cross-origin page
 cannot send without a CORS preflight this server never answers.
 """
-import argparse, asyncio, io, json, logging, os, re, sys, threading, time, wave
+import argparse, asyncio, concurrent.futures, fcntl, io, json, logging, os, queue, re, subprocess, sys
+import threading, time, wave
 from functools import partial
 from pathlib import Path
 
@@ -349,6 +359,184 @@ class Catalog:
             return s.engines[v.engine].synth(text, v, lang)
 
 
+# ---- Bluetooth speaker -----------------------------------------------------
+
+OUTPUTS = ("soundbar", "voice-pe")
+SENTENCE = re.compile(r"(?<=[.!?…;:])\s+")
+
+
+def pieces(text, first_min=12, min_len=40):
+    """Sentences, short ones merged into the next, so the first audio is
+    ready early; the first piece may be shorter than the rest."""
+    out, cur = [], ""
+    for p in SENTENCE.split(text):
+        cur = f"{cur} {p}".strip()
+        if len(cur) >= (min_len if out else first_min):
+            out.append(cur); cur = ""
+    if cur:
+        if out and len(cur) < 12:
+            out[-1] += " " + cur
+        else:
+            out.append(cur)
+    return out or [text]
+
+
+class BtSink:
+    """One writer thread owns a long-lived aplay on the bluealsa PCM. Between
+    replies it pads the stream with paced silence for `hold` seconds (no
+    AVDTP restart, no lead-in for follow-ups), then closes it."""
+    F_SETPIPE_SZ = 1031
+
+    def __init__(s, a):
+        s.mac = a.bt_mac.upper()
+        s.dev = "dev_" + s.mac.replace(":", "_")
+        s.aplay, s.busctl, s.file = a.bt_aplay, a.bt_busctl, Path(a.output_file)
+        s.hold, s.lead = a.bt_hold, a.bt_lead
+        s.buffer_us, s.period_us = a.bt_buffer_us, a.bt_period_us
+        s.q = queue.Queue()
+        s.proc = s.fmt = None
+        s.t_start = s.frames = s.reply_end = 0.0
+        threading.Thread(target=s.run, name="bt-sink", daemon=True).start()
+
+    def output(s):
+        try:
+            v = s.file.read_text().strip()
+        except OSError:
+            return "soundbar"
+        return v if v in OUTPUTS else "soundbar"
+
+    def set_output(s, v):
+        if v not in OUTPUTS:
+            raise ValueError(f"output must be one of {list(OUTPUTS)}")
+        tmp = s.file.with_name(f".{s.file.name}.tmp")
+        tmp.write_text(v + "\n"); os.chmod(tmp, 0o644); os.replace(tmp, s.file)
+        log.info("output set to %s", v)
+
+    def pcm(s):
+        """bluealsa's A2DP playback PCM for the speaker, or None."""
+        try:
+            r = subprocess.run([s.busctl, "--system", "--json=short", "call", "org.bluealsa", "/org/bluealsa",
+                                "org.freedesktop.DBus.ObjectManager", "GetManagedObjects"],
+                               capture_output=True, text=True, timeout=2)
+            if r.returncode:
+                return None
+            for path, ifaces in json.loads(r.stdout)["data"][0].items():
+                p = ifaces.get("org.bluealsa.PCM1")
+                if p and s.dev in path and "a2dp" in path and p.get("Mode", {}).get("data") == "sink":
+                    return {"path": path, **{k: v["data"] for k, v in p.items()}}
+        except Exception as e:
+            log.warning("bluealsa query failed: %s", e)
+        return None
+
+    def state(s):
+        pcm = s.pcm()
+        out = s.output()
+        return {"output": out, "effective": "soundbar" if out == "soundbar" and pcm else "voice-pe",
+                "mac": s.mac, "file": str(s.file), "stream_open": s.proc is not None,
+                "sink": pcm and {k: pcm.get(k) for k in ("path", "Running", "Rate", "Channels", "Codec",
+                                                         "Format", "Delay", "Volume") if k in pcm}}
+
+    def use(s):
+        return s.output() == "soundbar" and s.pcm() is not None
+
+    def play(s, w, sr, t0=None):
+        """Queue audio; the future resolves once its first frames are written."""
+        f = concurrent.futures.Future()
+        s.q.put((w, sr, t0, f))
+        return f
+
+    # -- writer thread --
+    def _open(s):
+        pcm = s.pcm()
+        if not pcm:
+            raise RuntimeError("speaker not connected")
+        rate, ch = int(pcm.get("Rate") or pcm.get("Sampling") or 44100), int(pcm.get("Channels") or 2)
+        t = time.perf_counter()
+        s.proc = subprocess.Popen([s.aplay, "-q", "-D", f"bluealsa:DEV={s.mac},PROFILE=a2dp", "-t", "raw",
+                                   "-f", "S16_LE", "-c", str(ch), "-r", str(rate),
+                                   f"--buffer-time={s.buffer_us}", f"--period-time={s.period_us}"],
+                                  stdin=subprocess.PIPE)
+        try:
+            fcntl.fcntl(s.proc.stdin.fileno(), s.F_SETPIPE_SZ, 4096)
+        except OSError:
+            pass
+        s.fmt = (rate, ch)
+        s.t_start, s.frames = time.perf_counter(), 0
+        log.info("bt stream opened: %d Hz, %d ch, codec %s (%.0f ms)", rate, ch, pcm.get("Codec"),
+                 (time.perf_counter() - t) * 1000)
+
+    def _close(s):
+        if s.proc:
+            try:
+                s.proc.stdin.close(); s.proc.wait(timeout=3)
+            except Exception:
+                s.proc.kill()
+        s.proc = s.fmt = None
+
+    def _write(s, pcm16):
+        s.proc.stdin.write(pcm16); s.proc.stdin.flush()
+        s.frames += len(pcm16) // (2 * s.fmt[1])
+
+    def _silence(s, sec):
+        return bytes(2 * s.fmt[1] * int(sec * s.fmt[0]))
+
+    def _convert(s, w, sr):
+        rate, ch = s.fmt
+        if sr != rate:
+            import soxr
+            w = soxr.resample(w, sr, rate)
+        x = (np.clip(w, -1, 1) * 32767).astype(np.int16)
+        return np.repeat(x[:, None], ch, axis=1).tobytes() if ch > 1 else x.tobytes()
+
+    def _idle(s):
+        if s.proc is None:
+            return
+        if s.proc.poll() is not None:
+            log.warning("bt aplay exited (%s)", s.proc.returncode); s.proc = s.fmt = None
+            return
+        rate = s.fmt[0]
+        now = time.perf_counter()
+        if now > s.reply_end + s.hold:
+            log.info("bt stream idle %ds, closing", s.hold); s._close()
+            return
+        pos = (now - s.t_start) * rate
+        if s.frames - pos < 0.04 * rate:  # keep ~60 ms of silence queued
+            if s.frames < pos:
+                s.frames = pos
+            s._write(bytes(2 * s.fmt[1] * int(pos + 0.06 * rate - s.frames)))
+
+    def run(s):
+        while True:
+            try:
+                w, sr, t0, fut = s.q.get(timeout=0.01)
+            except queue.Empty:
+                try:
+                    s._idle()
+                except Exception as e:
+                    log.warning("bt idle write failed: %s", e); s._close()
+                continue
+            try:
+                fresh = s.proc is None or s.proc.poll() is not None
+                if fresh:
+                    s._close(); s._open()
+                    s._write(s._silence(s.lead))  # BT sinks clip the first syllable
+                data = s._convert(w, sr)
+                first = data[: 2 * s.fmt[1] * int(0.02 * s.fmt[0])]
+                s._write(first)
+                if t0 is not None:
+                    log.info("bt first frame written %.0f ms after the request (%s stream, +%d ms lead-in)",
+                             (time.perf_counter() - t0) * 1000, "new" if fresh else "open",
+                             s.lead * 1000 if fresh else 0)
+                fut.set_result(True)
+                s._write(data[len(first):])
+                s.reply_end = s.t_start + s.frames / s.fmt[0]
+            except Exception as e:
+                log.warning("bt playback failed: %s", e)
+                if not fut.done():
+                    fut.set_exception(e)
+                s._close()
+
+
 # ---- Wyoming -------------------------------------------------------------
 
 ATT = Attribution(name="local", url="https://github.com/DavHau")
@@ -363,9 +551,9 @@ def info(cat):
 
 
 class Handler(AsyncEventHandler):
-    def __init__(s, cat, *a, **kw):
+    def __init__(s, cat, bt, *a, **kw):
         super().__init__(*a, **kw)
-        s.cat = cat
+        s.cat, s.bt = cat, bt
 
     async def handle_event(s, event: Event) -> bool:
         loop = asyncio.get_running_loop()
@@ -375,31 +563,64 @@ class Handler(AsyncEventHandler):
             return True
         if not Synthesize.is_type(event.type):
             return True
+        t_req = time.perf_counter()
         syn = Synthesize.from_event(event)
         text = " ".join(syn.text.split())
         lang = guess_lang(text, s.cat.last_spoken())
         v = await loop.run_in_executor(None, s.cat.voice_for, lang)
-        t0 = time.perf_counter()
-        try:
-            w, sr = await loop.run_in_executor(None, s.cat.synth, text, v, lang)
-        except Exception:
-            # Never leave the satellite silent: say that speaking failed
-            # (the reply itself is in the agent's history and this log).
-            log.exception("wyoming %s voice=%s synthesis failed: %s", lang, v.id, text)
-            fb = {"de": "Entschuldige, die Antwort konnte ich nicht vorlesen.",
-                  "th": "ขอโทษ อ่านคำตอบไม่ได้"}.get(lang, "Sorry, I couldn't read that answer out.")
+        bt = s.bt is not None and await loop.run_in_executor(None, s.bt.use)
+        sr, total, sent = None, 0, False
+        # Sentence by sentence only for the soundbar (its first audio starts
+        # after the first sentence); the satellite gets one synthesis as before.
+        for i, piece in enumerate(pieces(text) if bt else [text]):
             try:
-                w, sr = await loop.run_in_executor(None, s.cat.synth, fb, v, lang)
+                w, psr = await loop.run_in_executor(None, s.cat.synth, piece, v, lang)
             except Exception:
-                fv = await loop.run_in_executor(None, s.cat.voice_for, "en")
-                w, sr = await loop.run_in_executor(None, s.cat.synth, "Sorry, I couldn't read that answer out.", fv, "en")
-        log.info("wyoming %s voice=%s %.2fs audio in %.3fs (HA voice %s): %s", lang, v.id, len(w) / sr,
-                 time.perf_counter() - t0, syn.voice.name if syn.voice else None, text)
-        pcm = (np.clip(w, -1, 1) * 32767).astype(np.int16).tobytes()
-        await s.write_event(AudioStart(rate=sr, width=2, channels=1).event())
-        step = sr * 2  # 1 s chunks
-        for i in range(0, len(pcm), step):
-            await s.write_event(AudioChunk(audio=pcm[i:i + step], rate=sr, width=2, channels=1).event())
+                log.exception("wyoming %s voice=%s synthesis failed: %s", lang, v.id, piece)
+                if i:
+                    continue  # the rest of the reply still plays
+                # Never leave the satellite silent: say that speaking failed
+                # (the reply itself is in the agent's history and this log).
+                fb = {"de": "Entschuldige, die Antwort konnte ich nicht vorlesen.",
+                      "th": "ขอโทษ อ่านคำตอบไม่ได้"}.get(lang, "Sorry, I couldn't read that answer out.")
+                try:
+                    w, psr = await loop.run_in_executor(None, s.cat.synth, fb, v, lang)
+                except Exception:
+                    fv = await loop.run_in_executor(None, s.cat.voice_for, "en")
+                    w, psr = await loop.run_in_executor(None, s.cat.synth, "Sorry, I couldn't read that answer out.", fv, "en")
+            if sr is None:
+                sr = psr
+            elif psr != sr:
+                import soxr
+                w = soxr.resample(w, psr, sr)
+            if i:
+                w = np.concatenate([np.zeros(int(0.12 * sr), np.float32), w])  # sentence gap
+            out = w
+            if bt and i == 0:
+                # Wait for the first frames to reach the sink; later pieces
+                # queue behind the playing audio.
+                try:
+                    await asyncio.wait_for(asyncio.wrap_future(s.bt.play(w, sr, t_req)), 3)
+                    out = np.zeros(len(w) + int(s.bt.lead * sr), np.float32)
+                except Exception as e:
+                    log.warning("soundbar unavailable (%r): reply goes to the satellite", e)
+                    bt = False
+            elif bt:
+                s.bt.play(w, sr)
+                out = np.zeros(len(w), np.float32)
+            if not sent:
+                await s.write_event(AudioStart(rate=sr, width=2, channels=1).event())
+                sent = True
+            pcm = (np.clip(out, -1, 1) * 32767).astype(np.int16).tobytes()
+            step = sr * 2  # 1 s chunks
+            for j in range(0, len(pcm), step):
+                await s.write_event(AudioChunk(audio=pcm[j:j + step], rate=sr, width=2, channels=1).event())
+            total += len(w)
+        log.info("wyoming %s voice=%s %.2fs audio in %.3fs -> %s (HA voice %s): %s", lang, v.id,
+                 total / (sr or 1), time.perf_counter() - t_req, "soundbar" if bt else "satellite",
+                 syn.voice.name if syn.voice else None, text)
+        if not sent:
+            await s.write_event(AudioStart(rate=24000, width=2, channels=1).event())
         await s.write_event(AudioStop().event())
         return True
 
@@ -414,7 +635,7 @@ def wav_bytes(w, sr):
     return b.getvalue()
 
 
-def api(cat, page, translate_url=None):
+def api(cat, page, translate_url=None, bt=None):
     async def body(req):
         if req.content_type != "application/json":
             raise web.HTTPUnsupportedMediaType(text="Content-Type must be application/json")
@@ -433,7 +654,25 @@ def api(cat, page, translate_url=None):
                                        "media-src blob: 'self'; frame-ancestors 'none'"})
 
     async def get_voices(req):
-        return web.json_response(await run(cat.state), headers={"Cache-Control": "no-store"})
+        st = await run(cat.state)
+        if bt is not None:
+            st["output"] = await run(bt.state)
+        return web.json_response(st, headers={"Cache-Control": "no-store"})
+
+    async def get_output(req):
+        if bt is None:
+            return web.json_response({"output": "voice-pe", "effective": "voice-pe", "sink": None})
+        return web.json_response(await run(bt.state), headers={"Cache-Control": "no-store"})
+
+    async def put_output(req):
+        b = await body(req)
+        if bt is None:
+            return web.json_response({"error": "no Bluetooth speaker configured"}, status=501)
+        try:
+            await run(bt.set_output, b.get("output") if isinstance(b, dict) else None)
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        return web.json_response(await run(bt.state))
 
     async def put_voices(req):
         b = await body(req)
@@ -476,18 +715,19 @@ def api(cat, page, translate_url=None):
 
     app = web.Application(client_max_size=64 * 1024)
     app.add_routes([web.get("/", index), web.get("/voices", get_voices), web.put("/voices", put_voices),
-                    web.post("/preview", preview), web.post("/translate", translate)])
+                    web.post("/preview", preview), web.post("/translate", translate),
+                    web.get("/output", get_output), web.put("/output", put_output)])
     return app
 
 
-async def serve(a, cat):
+async def serve(a, cat, bt):
     page = (Path(__file__).parent / "voices.html").read_text()
-    runner = web.AppRunner(api(cat, page, a.translate_url), access_log=None)
+    runner = web.AppRunner(api(cat, page, a.translate_url, bt), access_log=None)
     await runner.setup()
     for host in a.api_host:
         await web.TCPSite(runner, host, a.api_port).start()
         log.info("HTTP voice API on [%s]:%d", host, a.api_port)
-    await AsyncServer.from_uri(a.uri).run(partial(Handler, cat))
+    await AsyncServer.from_uri(a.uri).run(partial(Handler, cat, bt))
 
 
 def main():
@@ -505,6 +745,14 @@ def main():
     ap.add_argument("--steps", type=int, default=8)
     ap.add_argument("--translate-url", default=None, help="speech-translate base URL for POST /translate")
     ap.add_argument("--last-lang-file", default=None, help="speech-stt's last utterance language (tie-breaker)")
+    ap.add_argument("--bt-mac", default=None, help="A2DP speaker (bluealsa) for the replies")
+    ap.add_argument("--bt-aplay", default="aplay")
+    ap.add_argument("--bt-busctl", default="busctl")
+    ap.add_argument("--bt-hold", type=float, default=30, help="s of silence keeping the stream open after a reply")
+    ap.add_argument("--bt-lead", type=float, default=0.3, help="s of silence before audio on a fresh stream")
+    ap.add_argument("--bt-buffer-us", type=int, default=100000)
+    ap.add_argument("--bt-period-us", type=int, default=20000)
+    ap.add_argument("--output-file", default=None, help='"soundbar" (default) or "voice-pe"')
     a = ap.parse_args()
     a.api_host = a.api_host or ["127.0.0.1"]
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -513,7 +761,10 @@ def main():
     for lang, text in (("en", "ok"), ("de", "ok"), ("th", "สวัสดี")):  # warm-up
         cat.synth(text, cat.voice_for(lang), lang)
     log.info("ready on %s, %d threads per engine, %d voices", a.uri, a.threads, len(cat.all()))
-    asyncio.run(serve(a, cat))
+    bt = BtSink(a) if a.bt_mac and a.output_file else None
+    if bt:
+        log.info("bluetooth speaker %s, output %s", bt.mac, bt.state())
+    asyncio.run(serve(a, cat, bt))
 
 
 if __name__ == "__main__":

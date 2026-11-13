@@ -315,8 +315,10 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/voice-gateway/hermes_conversation/config_flow.py — -
 - modules/nixos/voice-gateway/hermes_conversation/const.py — -
 - modules/nixos/voice-gateway/hermes_conversation/conversation.py — -
+- modules/nixos/wyoming-local-speech/bt-speaker.nix — Bluetooth speaker output for speech-tts (./tts.py --bt-*): <- m/wyoming-local-speech/default.nix
 - modules/nixos/wyoming-local-speech/default.nix — Local speech for Home Assistant (cm-pi) on vit: <- vit
 - modules/nixos/wyoming-local-speech/stt.py — -
+- modules/nixos/wyoming-local-speech/translate.py — -
 - modules/nixos/wyoming-local-speech/tts.py — -
 - modules/nixos/wyoming-local-speech/voices-sso.nix — vit's TTS voice picker (./tts.py's HTTP API: <- edi
 - modules/nixos/zfs-keylocation-sync/default.nix — Keep a ZFS encryption root's `keylocation` pointing at its current key file. <- machines/bam/zfs.nix, m/zfs-keylocation-sync/test.nix
@@ -438,5 +440,11 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 ### tools/slot-onboard
 - tools/slot-onboard/default.nix — - <- modules/flake-parts/slot-onboard.nix
 - tools/slot-onboard/slot-onboard.sh — slot-onboard <machine> <slot> <- tools/slot-onboard/default.nix
+### tools/wakeword
+- tools/wakeword/download.sh — !/usr/bin/env bash Download the negative feature sets (pre-computed microWakeWord spectrograms) and the raw augmentatio…
+- tools/wakeword/env.sh — Source me after any nix call (this LD_LIBRARY_PATH breaks nix itself):
+- tools/wakeword/generate.sh — !/usr/bin/env bash Generate positive ("Okay Diggi") and adversarial negative clips.
+- tools/wakeword/setup.sh — !/usr/bin/env bash Set up the microWakeWord training environment on vit (x86_64, NVIDIA GPU).
+- tools/wakeword/train.sh — !/usr/bin/env bash Augment clips into features, then train + export the streaming int8 model.
 ### tools/web-bench
 - tools/web-bench/default.nix — - <- modules/flake-parts/web-bench.nix
