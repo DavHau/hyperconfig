@@ -161,6 +161,10 @@ class Gateway:
     views: dict[str, CodeView] = field(default_factory=dict)
     state: dict = field(default_factory=dict)
     background: set = field(default_factory=set)
+    # Conversation sessions per agent: a new Hermes session after
+    # sessionIdleMinutes of silence, so a wrong conclusion from an old
+    # exchange ("the token is expired") doesn't stick for days.
+    sessions: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         c = self.cfg
@@ -408,6 +412,16 @@ class Gateway:
             return "Trusted mode is off now."
         return "Trusted mode was already off."
 
+    def session_id(self, agent: str) -> str:
+        base = self.cfg["agents"][agent].get("session", agent)
+        idle = float(self.cfg.get("sessionIdleMinutes", 10)) * 60
+        now = self.clock()
+        sid, last = self.sessions.get(agent, (None, 0.0))
+        if sid is None or now - last > idle:
+            sid = f"{base}-{time.strftime('%Y%m%d-%H%M%S', time.localtime(now))}"
+        self.sessions[agent] = (sid, now)
+        return sid
+
     # ------------------------------------------------------- real backends
     async def _http_agent(self, agent: str, text: str) -> str:
         a = self.cfg["agents"][agent]
@@ -426,7 +440,7 @@ class Gateway:
         if a.get("provider"):
             body["provider"] = a["provider"]
         headers = {"Authorization": f"Bearer {read_secret(a['keyFile'])}",
-                   "X-Hermes-Session-Id": a.get("session", "voice")}
+                   "X-Hermes-Session-Id": self.session_id(agent)}
         try:
             async with ClientSession(timeout=ClientTimeout(total=1800, connect=5)) as s:
                 async with s.post(a["url"] + "/v1/chat/completions", json=body, headers=headers) as r:

@@ -337,3 +337,15 @@ def test_http_surfaces(env, tmp_path):
             for c in (ha, web_, mcp):
                 await c.close()
     run(t())
+
+
+
+def test_session_rotates_after_idle(env):
+    gw = env.gw
+    gw.cfg["agents"] = {"voice": {"session": "voice"}}
+    a = gw.session_id("voice")
+    env.clock.t += 60
+    assert gw.session_id("voice") == a          # follow-up keeps context
+    env.clock.t += 11 * 60
+    b = gw.session_id("voice")
+    assert b != a and b.startswith("voice-")    # new conversation after 10 min silence
