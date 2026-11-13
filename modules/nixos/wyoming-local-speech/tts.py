@@ -477,8 +477,11 @@ class BtSink:
         s.proc.stdin.write(pcm16); s.proc.stdin.flush()
         s.frames += len(pcm16) // (2 * s.fmt[1])
 
-    def _silence(s, sec):
-        return bytes(2 * s.fmt[1] * int(sec * s.fmt[0]))
+    def _silence(s, sec=None, frames=None):
+        """Near-silence: +-1 LSB dither (-90 dBFS). Digital zero lets some
+        soundbars power down their amp, which then clips the first word."""
+        n = int(frames if frames is not None else sec * s.fmt[0]) * s.fmt[1]
+        return np.random.randint(-1, 2, n, dtype=np.int16).tobytes()
 
     def _convert(s, w, sr):
         rate, ch = s.fmt
@@ -503,7 +506,7 @@ class BtSink:
         if s.frames - pos < 0.04 * rate:  # keep ~60 ms of silence queued
             if s.frames < pos:
                 s.frames = pos
-            s._write(bytes(2 * s.fmt[1] * int(pos + 0.06 * rate - s.frames)))
+            s._write(s._silence(frames=pos + 0.06 * rate - s.frames))
 
     def run(s):
         while True:
@@ -749,7 +752,8 @@ def main():
     ap.add_argument("--bt-aplay", default="aplay")
     ap.add_argument("--bt-busctl", default="busctl")
     ap.add_argument("--bt-hold", type=float, default=30, help="s of silence keeping the stream open after a reply")
-    ap.add_argument("--bt-lead", type=float, default=0.3, help="s of silence before audio on a fresh stream")
+    ap.add_argument("--bt-lead", type=float, default=0.7,
+                    help="s of near-silence before audio on a fresh stream (the soundbar wakes its amp)")
     ap.add_argument("--bt-buffer-us", type=int, default=100000)
     ap.add_argument("--bt-period-us", type=int, default=20000)
     ap.add_argument("--output-file", default=None, help='"soundbar" (default) or "voice-pe"')

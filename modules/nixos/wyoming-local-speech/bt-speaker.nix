@@ -6,9 +6,10 @@
 # Audio stack: bluez-alsa (system bluealsa daemon, A2DP source, SBC only;
 # no PipeWire on this headless box). tts.py pipes PCM into aplay on the
 # bluealsa ALSA plugin, small buffer, at the transport's own rate (soxr in
-# python, no ALSA resampling). speech-bt-link keeps the ACL link up: it
-# reconnects the trusted sink whenever it's gone (soundbar off, out of
-# range), every `linkInterval` s. bluealsa --keep-alive holds the A2DP
+# python, no ALSA resampling), with `leadIn` s of near-silence (dither)
+# first; between replies the stream stays open with dither for `hold` s.
+# speech-bt-link keeps the ACL link up: it reconnects the trusted sink
+# whenever it's gone (soundbar off, out of range), every `linkInterval` s. bluealsa --keep-alive holds the A2DP
 # transport for `keepAlive` s after a reply so back-to-back replies skip
 # the AVDTP start.
 #
@@ -39,6 +40,20 @@ in
       description = "bluealsa --keep-alive: seconds the A2DP transport stays acquired after a reply.";
     };
     linkInterval = lib.mkOption { type = lib.types.int; default = 10; };
+    leadIn = lib.mkOption {
+      type = lib.types.str;
+      default = "0.7";
+      description = ''
+        Seconds of near-silence before a reply on a fresh stream: the
+        soundbar needs it to wake its amp (0.3 cut the first word). The
+        satellite's silent placeholder covers lead-in + speech.
+      '';
+    };
+    hold = lib.mkOption {
+      type = lib.types.str;
+      default = "30";
+      description = "Seconds the stream stays open (near-silence) after a reply; follow-ups skip the lead-in.";
+    };
   };
 
   config = lib.mkIf (cfg.enable && bt.mac != null) {
@@ -109,6 +124,8 @@ in
       "--bt-aplay" "${pkgs.alsa-utils}/bin/aplay"
       "--bt-busctl" "${pkgs.systemd}/bin/busctl"
       "--output-file" "/var/lib/speech/tts-output"
+      "--bt-lead" bt.leadIn
+      "--bt-hold" bt.hold
     ];
   };
 }
