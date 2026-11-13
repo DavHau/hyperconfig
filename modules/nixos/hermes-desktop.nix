@@ -26,14 +26,10 @@
     domain = (import ../../machines/som/hermes-dashboards.nix).domain;
     hostLabel = "som";
     hostKeyAlias = "som.d";
-    # Agent account on som -> label; the first window opens on `primary`.
-    agents = {
-      dave-hermes = "dave-hermes";
-      joe = "joe";
-      thaigersprint = "thaigersprint";
-      # The Voice PE's untrusted agent (../../machines/som/hermes-agents.nix).
-      voice = "voice";
-    };
+    # Agent account on som -> label (also read by som's assertions, which
+    # require ssh keys for each: the TUI entries log in as the agent).
+    agents = import ./hermes-desktop-agents.nix;
+    # The first window opens on `primary`.
     primary = "dave-hermes";
     # spaces-hermes runs `hermes-desktop` and turns a failure into a
     # desktop notification, as the keybind and the bar button do.

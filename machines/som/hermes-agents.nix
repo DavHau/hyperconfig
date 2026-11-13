@@ -275,7 +275,9 @@ in
         # reason (p0 enables it for every other agent: ./hermes-inference.nix).
         settings.agent.reasoning_effort = "none";
         settings.providers.p0.extra_body.chat_template_kwargs.enable_thinking = false;
-        sshKeys = [ ];
+        # dave's admin keys, for the "Hermes TUI (voice)" launcher on his
+        # desktops (only he logs in; the agent itself gains nothing).
+        sshKeys = adminKeys;
         mail.enable = false;
         # Claude through TeamClaude stays selectable (/model).
         teamclaude.enable = true;
@@ -341,8 +343,18 @@ in
       );
       deniedReaders = lib.filter (name: denied ? ${name}) (lib.attrNames vaultReaders);
       slotless = lib.filter (name: !agents.${name}.slot.enable) (lib.attrNames agents);
+      # Agents in dave's desktop launchers (../../modules/nixos/hermes-desktop.nix)
+      # get a "Hermes TUI (<agent>)" entry that ssh-es in as the agent: an
+      # account without keys makes that entry fail with "Permission denied".
+      tuiKeyless = lib.filter (name: (agents.${name}.sshKeys or [ ]) == [ ]) (
+        lib.attrNames (import ../../modules/nixos/hermes-desktop-agents.nix)
+      );
     in
     [
+      {
+        assertion = tuiKeyless == [ ];
+        message = "machines/som: agents in dave's Hermes desktop/TUI launchers need sshKeys (else the TUI entry is refused): ${toString tuiKeyless}";
+      }
       {
         assertion = undenied == [ ];
         message = ''
