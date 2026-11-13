@@ -16,5 +16,11 @@
         // second column appears.
         always-center-single-column
     }
+
+    // Overview (Mod+O / noctalia's workspace button) zoomed further out:
+    // 0.3 shows about 5 workspace rows instead of the default 0.5's ~3.
+    overview {
+        zoom 0.3
+    }
   '';
 }
