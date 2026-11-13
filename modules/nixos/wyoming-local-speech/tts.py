@@ -123,7 +123,17 @@ class Supertonic:
                 raise ValueError(f"style shape {x.shape}, want {want} (finite)")
         return st
 
+    # German low quotes are outside Supertonic's character set and make
+    # synthesize() raise (a whole reply went silent); its own normalizer
+    # handles the other typographic marks.
+    QUOTES = str.maketrans({"\u201e": '"', "\u201a": "'"})
+
     def synth(s, text, v, lang):
+        text = text.translate(s.QUOTES)
+        ok, bad = s.t.model.text_processor.validate_text(text)
+        if not ok:
+            log.warning("supertonic: dropping unsupported characters %s", bad)
+            text = "".join(c for c in text if c not in set(bad))
         w, _ = s.t.synthesize(text, voice_style=v.style, lang=lang if lang in s.langs else "en",
                               total_steps=s.steps, speed=v.speed)
         return np.asarray(w, np.float32).reshape(-1), s.t.sample_rate
@@ -335,7 +345,19 @@ class Handler(AsyncEventHandler):
         lang = guess_lang(text)
         v = await loop.run_in_executor(None, s.cat.voice_for, lang)
         t0 = time.perf_counter()
-        w, sr = await loop.run_in_executor(None, s.cat.synth, text, v, lang)
+        try:
+            w, sr = await loop.run_in_executor(None, s.cat.synth, text, v, lang)
+        except Exception:
+            # Never leave the satellite silent: say that speaking failed
+            # (the reply itself is in the agent's history and this log).
+            log.exception("wyoming %s voice=%s synthesis failed: %s", lang, v.id, text)
+            fb = {"de": "Entschuldige, die Antwort konnte ich nicht vorlesen.",
+                  "th": "ขอโทษ อ่านคำตอบไม่ได้"}.get(lang, "Sorry, I couldn't read that answer out.")
+            try:
+                w, sr = await loop.run_in_executor(None, s.cat.synth, fb, v, lang)
+            except Exception:
+                fv = await loop.run_in_executor(None, s.cat.voice_for, "en")
+                w, sr = await loop.run_in_executor(None, s.cat.synth, "Sorry, I couldn't read that answer out.", fv, "en")
         log.info("wyoming %s voice=%s %.2fs audio in %.3fs (HA voice %s): %s", lang, v.id, len(w) / sr,
                  time.perf_counter() - t0, syn.voice.name if syn.voice else None, text)
         pcm = (np.clip(w, -1, 1) * 32767).astype(np.int16).tobytes()
