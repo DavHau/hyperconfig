@@ -10,7 +10,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 ### amy
 - header: -
 - own files: disko.nix
-- imports: m/dave.nix, m/laptop.nix, m/user-grmpf.nix, m/printer-canon-mf272dw.nix, m/amdgpu.nix, m/llama-swap.nix, m/llama-swap-maple.nix, m/llama-swap-qwen36-amy.nix, m/llama-swap-nanbeige42-amy.nix, m/llama-swap-ling30-tiny-amy.nix, m/llama-swap-k2-horizon-amy.nix, m/bluetooth-resume-fix.nix, m/noctalia-anthropic-usage/default.nix, m/fw-fanctrl.nix, m/amd-powersave-limits.nix, m/powersave-panel-refresh.nix, m/chores-on-ac.nix, m/vault-nfs-client.nix, m/router-ais.nix, m/router-cm-beryl.nix, m/router-playa-isp.nix, m/esphome-secrets.nix, m/disk-hygiene/default.nix, m/rust-build-cache.nix, m/cloudflare-warp/default.nix, m/houses-grmpf.nix, m/kernel-latest-zfs.nix, m/oomd.nix, m/infra-space/default.nix, m/infra-space/desktop-app.nix, m/hermes-desktop-spaces.nix, m/spaces/client.nix, m/user-dave.nix
+- imports: m/dave.nix, m/laptop.nix, m/user-grmpf.nix, m/printer-canon-mf272dw.nix, m/amdgpu.nix, m/llama-swap.nix, m/llama-swap-maple.nix, m/llama-swap-qwen36-amy.nix, m/llama-swap-nanbeige42-amy.nix, m/llama-swap-ling30-tiny-amy.nix, m/llama-swap-k2-horizon-amy.nix, m/bluetooth-resume-fix.nix, m/noctalia-anthropic-usage/default.nix, m/fw-fanctrl.nix, m/amd-powersave-limits.nix, m/powersave-panel-refresh.nix, m/chores-on-ac.nix, m/vault-nfs-client.nix, m/router-ais.nix, m/router-cm-beryl.nix, m/router-cm-beryl-iot.nix, m/router-playa-isp.nix, m/esphome-secrets.nix, m/disk-hygiene/default.nix, m/rust-build-cache.nix, m/cloudflare-warp/default.nix, m/houses-grmpf.nix, m/kernel-latest-zfs.nix, m/oomd.nix, m/infra-space/default.nix, m/infra-space/desktop-app.nix, m/hermes-desktop-spaces.nix, m/spaces/client.nix, m/user-dave.nix
 - input modules: home-manager.nixosModules.home-manager, nixos-hardware.nixosModules.framework-13-7040-amd, nixos-hardware.nixosModules.framework-amd-ai-300-series, nixos-hardware.nixosModules.lenovo-yoga-7-14ARH7-amdgpu, nixos-hardware.nixosModules.tuxedo-pulse-14-gen3
 - vars generated: borgbackup hyprspace infra-space-hostkey nix-cache-nix-cache openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh remote-building-remote-building state-version wireguard-keys-wg-edi wireguard-keys-wg-vault wireguard-network-wg-edi wireguard-network-wg-vault yggdrasil
 
@@ -106,5 +106,6 @@ Shared vars generated (vars/shared): clan-secrets-pull esphome-casa esphome-cm-p
 - spaces: modules/nixos/spaces/test.nix
 - nixpkgs-bump-guard: modules/nixos/infra-space/nixpkgs-bump/guard-test.nix
 - nixpkgs-bump-workspace: modules/nixos/infra-space/nixpkgs-bump/workspace-test.nix
+- site-routers-apply-tests: modules/flake-parts/apps.site-routers-apply.nix
 - remote-building (clan test): modules/flake-parts/clan-tests.nix
 - repo-map: modules/flake-parts/repo-map.nix

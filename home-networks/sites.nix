@@ -53,6 +53,58 @@
       routeLan = false;
       masqueradeFromLan = true;
       masqueradeToLan = false;
+
+      # Offline devices (the Canon MF272dw printer): the GL firmware's IoT
+      # network, converged by ./apply.py. No internet of any kind and no
+      # IPv6: the zone `iot` has no forwarding out, and its input allows
+      # only DHCP to the router (no DNS, no web UI, no ssh). LAN hosts
+      # reach it (forwarding lan -> iot: print, eSCL scans are pulled from
+      # the LAN side); it reaches nothing (no iot -> lan, zteu, zerotier,
+      # guest, wan, VPN). No DNS: the lease names no DNS server (option 6
+      # empty) and the router drops port 53 from it, which closes DNS as a
+      # phone-home or tunnel channel. LAN clients still resolve printer.lan.
+      # GL drift: the GL web UI (and its vlan_subnet.lua) re-adds what this
+      # removes (Allow-DNS, iot -> wan, iot in
+      # route_policy.global.append_source_if, which makes the VPN client
+      # forward iot -> <vpn> and GL's /etc/firewall.dns_order redirect
+      # br-iot's DNS to dnsmasq past the zone's REJECT, so its removal is
+      # what keeps "no DNS" true): re-run `nix run .#site-routers-apply -- home`
+      # after touching the GL web UI.
+      # GL's default 192.168.10.0/24 is renumbered: it is playa's LAN,
+      # routed over zt-eu to every LAN host here (bam, som).
+      iot = {
+        prefix = "192.168.18.0/24";
+        # Also not to overlap (besides zt-eu and the sites' LANs, added by
+        # ./default.nix): what the router has on its other interfaces, as
+        # read with `ip -4 route` on 2026-11-14: GL's guest network, the
+        # two WAN uplinks, and the old zerotier management net.
+        reservedPrefixes = [
+          "192.168.9.0/24" # guest (br-guest, disabled)
+          "192.168.1.0/24" # WAN eth0
+          "192.168.0.0/24" # WAN eth2
+          "192.168.194.0/24" # zerotier af415e486f4514ce (management)
+        ];
+        address = "192.168.18.1";
+        netmask = "255.255.255.0";
+        # GL's prepared wifi-iface sections: 2.4 GHz on, 5 GHz stays off.
+        wifiIface = "iot2g";
+        offIfaces = [ "iot5g" ];
+        ssid = "BearHouse-Devices";
+        # WPA2-PSK AES only, no PMF: the MF272dw has no WPA3.
+        encryption = "psk2+ccmp";
+        pskVar = "router-cm-beryl-iot/psk";
+        # Fixed addresses below the DHCP pool (.100-.249), each also a DNS
+        # name for everyone on the router (printer -> printer.lan). The
+        # DHCP reservation needs the MAC: null = DNS name only, until the
+        # device has joined once (its lease shows the MAC:
+        # `ssh root@192.168.194.4 cat /tmp/dhcp.leases`).
+        hosts = {
+          printer = {
+            ip = "192.168.18.20";
+            mac = null;
+          };
+        };
+      };
     };
 
     # Roman's playa: router-tossa is not the LAN's gateway (the ISP router

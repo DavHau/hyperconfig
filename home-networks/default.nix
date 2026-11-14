@@ -113,5 +113,18 @@ in
       inherit (site) masqueradeFromLan;
       # Sources to masquerade into the LAN, or none.
       masqueradeToLan = if site.masqueradeToLan then remotePrefixes site else [ ];
+      # The offline-devices network (./sites.nix `iot`), or null. With the
+      # prefixes it must not overlap: every LAN zt-eu can route here.
+      iot =
+        if site ? iot then
+          site.iot
+          // {
+            reservedPrefixes =
+              (site.iot.reservedPrefixes or [ ])
+              ++ [ ipv4.subnet ]
+              ++ map (s: s.lan.ipv4) (lib.attrValues sites);
+          }
+        else
+          null;
     };
 }
