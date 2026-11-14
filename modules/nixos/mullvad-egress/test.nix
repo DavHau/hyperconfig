@@ -189,6 +189,31 @@ pkgs.testers.runNixOSTest {
         };
       };
 
+      # Another loopback resolver on :53, like som's dnscrypt-proxy at
+      # 127.0.5.3; it answers as the uplink would.
+      systemd.services.other-resolver = {
+        wantedBy = [ "multi-user.target" ];
+        serviceConfig.ExecStart =
+          let
+            conf = pkgs.writeText "other-resolver.conf" ''
+              server:
+                interface: 127.0.5.3
+                port: 53
+                access-control: 127.0.0.0/8 allow
+                do-daemonize: no
+                username: ""
+                chroot: ""
+                directory: "/"
+                pidfile: ""
+                use-syslog: no
+                logfile: ""
+                local-zone: "${marker}." static
+                local-data: "${marker}. A 198.51.100.53"
+            '';
+          in
+          "${pkgs.unbound}/bin/unbound -d -p -c ${conf}";
+      };
+
       # The test triggers failover itself; the timer would race it.
       systemd.timers.mullvad-egress-failover.enable = false;
 
@@ -284,6 +309,40 @@ pkgs.testers.runNixOSTest {
             assert resolves(unit, "internal.example") == "192.168.1.77"
         assert client.succeed("getent ahostsv4 ${marker}").split()[0] == "198.51.100.53"
         assert client.succeed("runuser -u direct -- getent ahostsv4 ${marker}").split()[0] == "198.51.100.53"
+        # A restarted nscd must stay hidden from the running tunneled units.
+        client.succeed("systemctl restart nscd.service")
+        client.wait_for_unit("nscd.service")
+        for unit in ["dns-probe.service", "user@1210.service"]:
+            assert resolves(unit, "${marker}") == "203.0.113.53"
+
+    with subtest("tunneled users may not ask resolved's stub directly"):
+        dig = "runuser -u tunneled -- dig +short +time=3 +tries=1"
+        assert client.succeed(f"{dig} @127.0.0.153 ${marker}").strip() == "203.0.113.53"
+        assert client.succeed("dig +short +time=3 +tries=1 @127.0.0.53 ${marker}").strip() == "198.51.100.53"
+        for stub in ["127.0.0.53", "127.0.0.54"]:
+            for tcp in ["", "+tcp"]:
+                rc, out = client.execute(f"{dig} {tcp} @{stub} ${marker} 2>&1")
+                assert rc != 0 and "198.51.100.53" not in out, f"tunneled reached {stub} {tcp}: {rc} {out}"
+
+    with subtest("tunneled users may not ask another loopback resolver"):
+        client.wait_until_succeeds("ss -lnu | grep -q '127.0.5.3:53 '", timeout=60)
+        assert client.succeed("dig +short +time=3 +tries=1 @127.0.5.3 ${marker}").strip() == "198.51.100.53"
+        for tcp in ["", "+tcp"]:
+            rc, out = client.execute(f"{dig} {tcp} @127.0.5.3 ${marker} 2>&1")
+            assert rc != 0 and "198.51.100.53" not in out, f"tunneled reached 127.0.5.3 {tcp}: {rc} {out}"
+        # Nor the LAN's resolver.
+        rc, out = client.execute(f"{dig} @192.168.1.2 ${marker} 2>&1")
+        assert rc != 0 and "198.51.100.53" not in out, f"tunneled reached 192.168.1.2: {rc} {out}"
+
+    with subtest("mullvad-egress-restart-tunneled restarts the tunneled units"):
+        before = client.succeed("systemctl show -p MainPID --value dns-probe.service user@1210.service")
+        client.succeed("mullvad-egress-restart-tunneled")
+        client.wait_for_unit("dns-probe.service")
+        client.wait_for_unit("user@1210.service")
+        after = client.succeed("systemctl show -p MainPID --value dns-probe.service user@1210.service")
+        assert set(before.split()).isdisjoint(after.split()), f"{before} -> {after}"
+        for unit in ["dns-probe.service", "user@1210.service"]:
+            assert resolves(unit, "${marker}") == "203.0.113.53"
 
     with subtest("tunneled users may not ask resolved over D-Bus"):
         call = "busctl call org.freedesktop.resolve1 /org/freedesktop/resolve1 org.freedesktop.resolve1.Manager ResolveHostname isit 0 ${marker} 0 0"

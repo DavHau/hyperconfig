@@ -10,7 +10,10 @@
 # networkd removes these rules with the tunnel's link, and the listed users
 # then fall through to the main table. The nftables output chain below is
 # the kill switch: a listed user's packet to a public address leaves through
-# wg-mullvad or is refused.
+# wg-mullvad or is refused, and its DNS (port 53/853) off the tunnel may
+# only go to ./dns.nix's 127.0.0.153. Residual: loopback resolvers on other
+# ports (hyprspace's 127.43.104.80:11355) stay reachable, which only
+# software pointed at them explicitly would use.
 {
   config,
   lib,
@@ -49,6 +52,9 @@ let
     "42::/16"
   ]
   ++ ipv6Prefixes;
+
+  # The only DNS a tunneled uid may ask off the tunnel: ./dns.nix's unbound.
+  tunnelResolver = "127.0.0.153";
 
   # WireGuard's encrypted packets still carry the sending socket's uid, so
   # the kill switch must let them reach the relays over the uplink.
@@ -128,6 +134,14 @@ in
             }
 
             chain tunneled {
+              # DNS (53, DoT 853) off the tunnel only to ./dns.nix's resolver:
+              # resolved's stub (127.0.0.53/54, DNSStubListenerExtra),
+              # dnscrypt-proxy (127.0.5.3), the LAN router or tailscale's
+              # 100.100.100.100 would answer over the host's path. Before
+              # the loopback accept; through wg-mullvad (unbound's own
+              # forwards, a tunneled dig @1.1.1.1) is the tunnel, untouched.
+              meta l4proto { tcp, udp } th dport { 53, 853 } oifname != "${iface}" ip daddr != ${tunnelResolver} reject with icmpx port-unreachable
+              meta l4proto { tcp, udp } th dport { 53, 853 } oifname != "${iface}" meta nfproto ipv6 reject with icmpx port-unreachable
               oifname { "lo", "${iface}" } accept
               ip daddr . udp dport { ${lib.concatStringsSep ", " relayEndpoints} } accept
               ip daddr { ${lib.concatStringsSep ", " direct4} } accept

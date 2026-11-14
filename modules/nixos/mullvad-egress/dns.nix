@@ -7,7 +7,9 @@
 #     (user@<uid>.service, so every user unit too) see a resolv.conf naming
 #     it, an nsswitch.conf without `resolve`, and neither nscd nor resolved's
 #     varlink socket: both resolve as themselves, on the host's path.
-#   - D-Bus calls of the tunneled users to resolved are refused.
+#   - D-Bus calls of the tunneled users to resolved are refused, and their
+#     DNS packets off the tunnel may only go to 127.0.0.153 (./egress.nix):
+#     not to resolved's stub, dnscrypt-proxy or the LAN.
 #
 # Tunnel down: unbound's queries are refused (below), so these units get no
 # DNS at all. /etc/hosts still answers first. Not covered: what a tunneled
@@ -79,15 +81,49 @@ let
   );
 
   # glibc asks nscd first, and nscd resolves with the host's nsswitch.conf.
+  # The mount hides /run/nscd only if it exists when the unit starts and is
+  # never replaced: tmpfiles creates it before any service, and nscd keeps
+  # it across restarts (else a unit started before nscd, or any unit after
+  # an nscd restart, sees the new directory and its socket).
+  # The FIRST switch to this stops the old nscd still without Preserve, so
+  # systemd deletes /run/nscd and the hide in every running tunneled unit
+  # detaches from the new directory. After that deploy run
+  # `mullvad-egress-restart-tunneled` (below) once.
   confine = {
     BindReadOnlyPaths = [
       "${resolveDir}:/run/systemd/resolve"
+      # Defence in depth only: this lands on a store file that GC may
+      # delete once the system using it is gone; resolv.conf and the hidden
+      # nscd are what keep these lookups on the tunnel.
       "${nsswitch}:/etc/nsswitch.conf"
     ];
     InaccessiblePaths = [ "-/run/nscd" ];
   };
 
   uids = map (name: config.users.users.${name}.uid) cfg.users;
+
+  # Re-applies the confinement to running units, e.g. after the first
+  # deploy of the nscd hide (above). try-restart: only units that run.
+  # The user managers go last; restarting one restarts all of that user's
+  # user units. One unit per call, so an unknown or failing one does not
+  # skip the rest; exits non-zero at the end if any failed.
+  restartTunneled = pkgs.writeShellApplication {
+    name = "mullvad-egress-restart-tunneled";
+    text = ''
+      failed=()
+      for unit in ${
+        lib.escapeShellArgs (
+          map (s: "${s}.service") cfg.dns.services ++ map (uid: "user@${toString uid}.service") uids
+        )
+      }; do
+        systemctl try-restart "$unit" || failed+=("$unit")
+      done
+      if (( ''${#failed[@]} )); then
+        echo "mullvad-egress-restart-tunneled: failed: ''${failed[*]}" >&2
+        exit 1
+      fi
+    '';
+  };
 in
 {
   options.hyper.mullvadEgress.dns.services = lib.mkOption {
@@ -116,10 +152,17 @@ in
     };
     users.groups.${user}.gid = 1211;
 
+    systemd.tmpfiles.rules = lib.optional config.services.nscd.enable "d /run/nscd 0755 ${config.services.nscd.user} ${config.services.nscd.group} -";
+
+    environment.systemPackages = [ restartTunneled ];
+
     systemd.services =
       lib.genAttrs cfg.dns.services (_: {
         serviceConfig = confine;
       })
+      // lib.optionalAttrs config.services.nscd.enable {
+        nscd.serviceConfig.RuntimeDirectoryPreserve = "yes";
+      }
       // {
         mullvad-egress-dns = {
           description = "DNS resolver of the Mullvad-tunneled users";
