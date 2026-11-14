@@ -40,6 +40,12 @@
 
   Wayland app id and launcher `space-gui-hermes-<account>`.
 
+  Each container also runs "Hermes One (<label>)" (launcher
+  `space-gui-hermes-one-<account>`, ./hermes-one-app.nix): the third-party
+  app, same dashboard, same sign-in path, same confinement; its state is
+  ~/.local/share/hermes-one and ~/.config/hermes-one in the same guest
+  home, apart from the official app's ~/.config/Hermes.
+
   Forwarding: the NAT out (../spaces/host.nix) turns on IPv4 and IPv6
   forwarding for the whole host. On a desktop that forwards nothing else
   (vit) that would let a LAN neighbour route through it into the mesh and
@@ -66,15 +72,28 @@ let
   containerName = account: a: a.isolated.name or "hermes-${account}";
   url = account: "https://${account}.${desktop.domain}";
 
+  remotes = account: a: {
+    ${account} = {
+      inherit (a) label;
+      url = url account;
+    };
+  };
   app =
     account: a:
     import ../space-gui/hermes-app.nix { inherit lib pkgs desktop; } {
       appId = "hermes-${account}";
       primary = account;
-      remotes.${account} = {
-        inherit (a) label;
-        url = url account;
-      };
+      remotes = remotes account a;
+    };
+  # The same container's second app, Hermes One (./hermes-one.nix).
+  hermesOne = config.hyper.daveDesktop.hermesOne.package;
+  oneApp =
+    account: a:
+    import ./hermes-one-app.nix { inherit lib pkgs; package = hermesOne; } {
+      appId = "hermes-one-${account}";
+      primary = account;
+      remotes = remotes account a;
+      container = true;
     };
 
   spaceConfig =
@@ -106,6 +125,12 @@ let
             command = [ "${app account a}" ];
             desktopName = "Hermes (${a.label})";
             icon = "${desktop.package}/share/hermes-desktop/dist/hermes.png";
+          };
+          apps."hermes-one-${account}" = {
+            container = name;
+            command = [ "${oneApp account a}" ];
+            desktopName = "Hermes One (${a.label})";
+            icon = "${hermesOne}/share/icons/hicolor/512x512/apps/hermes-one.png";
           };
         };
       }

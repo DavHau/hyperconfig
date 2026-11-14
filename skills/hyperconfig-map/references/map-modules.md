@@ -181,10 +181,13 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/cooler-lcd/default.nix — Show the NixOS snowflake on the LCD of a Thermalright AIO pump head (USB 0416:5302 "USBDISPLAY", firmware 4.07, PM=51 F… <- som
 - modules/nixos/cooler-lcd/render.py — - <- m/cooler-lcd/default.nix
 - modules/nixos/cooler-lcd/stream.py — - <- m/cooler-lcd/default.nix
-- modules/nixos/dave-desktop/apps.nix — THE list of Hermes apps on Dave's desktops (./default.nix): <- machines/som/hermes-agents.nix, m/dave-desktop/isolated-apps.nix, m/dave-desktop/shared-app.nix
-- modules/nixos/dave-desktop/default.nix — Dave's desktop apps, the same set on every desktop that imports ../dave.nix (amy, vit, som): <- m/dave.nix, m/space-gui/default.nix, m/spaces/client.nix
-- modules/nixos/dave-desktop/isolated-apps.nix — "Hermes (<label>)": for each app marked `isolated` in ./apps.nix (voice, infra-space), the hermes desktop app run in a… <- m/dave-desktop/default.nix, m/spaces/host.nix
-- modules/nixos/dave-desktop/shared-app.nix — The shared "Hermes Desktop" app on Dave's desktops (./default.nix) for som's agents (machines/som/hermes-agents.nix), t… <- m/dave-desktop/default.nix, m/space-gui/hermes-app.nix
+- modules/nixos/dave-desktop/apps.nix — THE list of Hermes apps on Dave's desktops (./default.nix): <- machines/som/hermes-agents.nix, m/dave-desktop/hermes-one.nix, m/dave-desktop/isolated-apps.nix, m/dave-desktop/shared-app.nix
+- modules/nixos/dave-desktop/default.nix — Dave's desktop apps, the same set on every desktop that imports ../dave.nix (amy, vit, som): <- m/dave-desktop/hermes-one.nix, m/dave.nix, m/space-gui/default.nix, m/spaces/client.nix
+- modules/nixos/dave-desktop/hermes-one-app.nix — Hermes One (../../../pkgs/hermes-one) as a launcher script: <- m/dave-desktop/hermes-one.nix, m/dave-desktop/isolated-apps.nix
+- modules/nixos/dave-desktop/hermes-one-connections.py — - <- m/dave-desktop/hermes-one-app.nix
+- modules/nixos/dave-desktop/hermes-one.nix — "Hermes One" on Dave's desktops (./default.nix): <- m/dave-desktop/default.nix, m/dave-desktop/hermes-one-app.nix
+- modules/nixos/dave-desktop/isolated-apps.nix — "Hermes (<label>)": for each app marked `isolated` in ./apps.nix (voice, infra-space), the hermes desktop app run in a… <- m/dave-desktop/default.nix, m/dave-desktop/hermes-one-app.nix, m/dave-desktop/hermes-one.nix, m/spaces/host.nix
+- modules/nixos/dave-desktop/shared-app.nix — The shared "Hermes Desktop" app on Dave's desktops (./default.nix) for som's agents (machines/som/hermes-agents.nix), t… <- m/dave-desktop/default.nix, m/dave-desktop/hermes-one.nix, m/space-gui/hermes-app.nix
 - modules/nixos/disk-hygiene/cargo-build-gc.sh — Delete cargo build dirs (see ../rust-build-cache.nix) that are dead: <- m/disk-hygiene/default.nix
 - modules/nixos/disk-hygiene/default.nix — Keep the disk from filling up (store GC itself: <- amy, som, m/rust-build-cache.nix
 - modules/nixos/entity-storage/common.sh — Shared by entity-storage-reconcile and entity-storage-migrate. <- m/entity-storage/default.nix
@@ -299,7 +302,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/skills/external-scripts/SKILL.md — >
 - modules/nixos/skills/project-init/SKILL.md — >
 - modules/nixos/space-gui/color-scheme.py — - <- m/space-gui/default.nix, m/space-gui/test.nix
-- modules/nixos/space-gui/default.nix — space-gui: GUI apps of a space container (infra-space, a hyper.spaces container, ...) on the host user's Wayland sessio… <- m/dave-desktop/default.nix, m/dave-desktop/isolated-apps.nix, m/space-gui/hermes-app.nix, m/space-gui/test.nix
+- modules/nixos/space-gui/default.nix — space-gui: GUI apps of a space container (infra-space, a hyper.spaces container, ...) on the host user's Wayland sessio… <- m/dave-desktop/default.nix, m/dave-desktop/hermes-one-app.nix, m/dave-desktop/isolated-apps.nix, m/space-gui/hermes-app.nix, m/space-gui/test.nix
 - modules/nixos/space-gui/helper.py — - <- m/space-gui/default.nix
 - modules/nixos/space-gui/hermes-app.nix — The hermes desktop app as a space-gui command (./default.nix): <- m/dave-desktop/isolated-apps.nix
 - modules/nixos/space-gui/test.nix — space-gui (./default.nix) on one machine: <- flake.nix, m/space-gui/default.nix
@@ -381,6 +384,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/flake-parts/apps.site-routers-apply.nix — `nix run .#site-routers-apply -- [--dry-run] [home/playa/casa/<router> ...]`:
 - modules/flake-parts/clan-tests.nix — Clan service tests, exposed as checks.<system>.<name> via clan-core's test harness (container tests;
 - modules/flake-parts/hermes-onboard.nix — -
+- modules/flake-parts/hermes-one.nix — -
 - modules/flake-parts/hygiene.nix — Repo hygiene lint (../../tools/hygiene, rules in ../../CONVENTIONS.md):
 - modules/flake-parts/nixosConfigurations.nix — -
 - modules/flake-parts/porkbun-dns.nix — -

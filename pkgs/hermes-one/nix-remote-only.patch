@@ -1,0 +1,575 @@
+diff --git a/src/main/app/updater.ts b/src/main/app/updater.ts
+index 27198a2..b74466a 100644
+--- a/src/main/app/updater.ts
++++ b/src/main/app/updater.ts
+@@ -48,8 +48,10 @@ export function setupUpdater({ getMainWindow }: UpdaterDeps): void {
+     return true;
+   });
+ 
++  // hyperconfig: Nix owns updates; electron-updater never runs here.
+   const isPortableBuild = !!process.env.PORTABLE_EXECUTABLE_DIR;
+-  if (!app.isPackaged || isPortableBuild) {
++  // eslint-disable-next-line no-constant-condition
++  if (true || !app.isPackaged || isPortableBuild) {
+     autoUpdaterInstance = null;
+     ipcMain.handle("check-for-updates", async () => null);
+     ipcMain.handle("download-update", () => true);
+diff --git a/src/main/claw3d.ts b/src/main/claw3d.ts
+index 73f9696..0b61838 100644
+--- a/src/main/claw3d.ts
++++ b/src/main/claw3d.ts
+@@ -681,6 +681,9 @@ function findNpm(envPath = getEnhancedPath()): ResolvedCommand {
+ export async function setupClaw3d(
+   onProgress: (progress: Claw3dSetupProgress) => void,
+ ): Promise<void> {
++  // hyperconfig: no git clone + npm install of hermes-office from here.
++  void onProgress;
++  throw new Error("Hermes Office setup is disabled in this Hermes One build.");
+   const totalSteps = 2;
+   let log = "";
+ 
+diff --git a/src/main/index.ts b/src/main/index.ts
+index 3c0a5ce..5548869 100644
+--- a/src/main/index.ts
++++ b/src/main/index.ts
+@@ -7,7 +7,9 @@ import { loadDotEnvForDev } from "./load-env";
+ // Dev only: make process.env reflect the project `.env` so runtime env reads
+ // (e.g. the Hermes One API endpoint) pick up edits on relaunch without a
+ // rebuild. Packaged builds carry their config baked in and ship no `.env`.
+-if (!app.isPackaged) loadDotEnvForDev();
++// hyperconfig: never read a .env from the working directory.
++void app;
++void loadDotEnvForDev;
+ 
+ applyGpuPreferences();
+ installGpuCrashGuard();
+diff --git a/src/main/installer.ts b/src/main/installer.ts
+index a43785f..87d348c 100644
+--- a/src/main/installer.ts
++++ b/src/main/installer.ts
+@@ -940,6 +940,12 @@ export async function runInstall(
+   onProgress: (progress: InstallProgress) => void,
+   parentWindow?: BrowserWindow | null,
+ ): Promise<void> {
++  // hyperconfig: remote mode only; this build never installs Hermes Agent.
++  void onProgress;
++  void parentWindow;
++  throw new Error(
++    "This Hermes One build connects to remote Hermes only; installing Hermes locally is disabled.",
++  );
+   const totalSteps = 7;
+   let log = "";
+   let currentStep = 1;
+diff --git a/src/main/remote-oauth-native.ts b/src/main/remote-oauth-native.ts
+new file mode 100644
+index 0000000..5591fcc
+--- /dev/null
++++ b/src/main/remote-oauth-native.ts
+@@ -0,0 +1,271 @@
++// hyperconfig: RFC 8252 native sign-in for remote dashboards that advertise
++// `native_pkce` in /api/status `auth_flows`.
++//
++// Upstream signs in inside an embedded Electron window that loads the
++// dashboard's /login. Behind an identity provider that wants a passkey
++// (pocket-id) that window is a dead end: Electron on Linux has no WebAuthn
++// UI for roaming/hybrid authenticators, and a confined container has no
++// hidraw either. Hermes' dashboards broker a native-app login instead:
++// /auth/native/authorize -> the IdP in the user's own browser -> a one-time
++// code on this app's loopback -> /auth/native/token (PKCE-bound) -> tokens.
++// The tokens are then written into the same OAuth cookie partition, under
++// the names the dashboard itself would set, so every other code path
++// (REST through Electron net, WebSocket tickets, refresh via the RT cookie)
++// is upstream's unchanged.
++import http from "http";
++import { createHash, randomBytes } from "crypto";
++import type { CookiesSetDetails } from "electron";
++
++export const NATIVE_LOGIN_TIMEOUT_MS = 5 * 60_000;
++const RT_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
++
++export interface NativeLoginTokens {
++  access_token: string;
++  refresh_token?: string;
++  expires_at?: number;
++  provider?: string;
++}
++
++export interface NativeLoginDeps {
++  openExternal: (url: string) => Promise<void>;
++  fetchImpl: typeof fetch;
++  setCookie: (details: CookiesSetDetails) => Promise<void>;
++  timeoutMs?: number;
++  now?: () => number;
++}
++
++export class NativeLoginError extends Error {
++  constructor(
++    message: string,
++    readonly code: "oauth_cancelled" | "oauth_request_failed",
++  ) {
++    super(message);
++    this.name = "NativeLoginError";
++  }
++}
++
++function b64url(buf: Buffer): string {
++  return buf
++    .toString("base64")
++    .replace(/\+/g, "-")
++    .replace(/\//g, "_")
++    .replace(/=+$/, "");
++}
++
++export function pkcePair(): { verifier: string; challenge: string } {
++  const verifier = b64url(randomBytes(32));
++  const challenge = b64url(createHash("sha256").update(verifier).digest());
++  return { verifier, challenge };
++}
++
++function gatewayOrigin(baseUrl: string): URL {
++  const url = new URL(baseUrl);
++  if (url.protocol !== "http:" && url.protocol !== "https:") {
++    throw new Error("Remote gateway URL must use HTTP(S).");
++  }
++  if (url.username || url.password) {
++    throw new Error("Native sign-in does not support URL credentials.");
++  }
++  return new URL(url.origin);
++}
++
++/** Whether the gateway offers the native PKCE sign-in. Never throws. */
++export async function remoteSupportsNativeLogin(
++  baseUrl: string,
++  fetchImpl: typeof fetch = fetch,
++): Promise<boolean> {
++  try {
++    const origin = gatewayOrigin(baseUrl);
++    const response = await fetchImpl(new URL("/api/status", origin), {
++      method: "GET",
++      signal: AbortSignal.timeout(8_000),
++    });
++    if (!response.ok) return false;
++    const status = (await response.json()) as { auth_flows?: unknown };
++    return (
++      Array.isArray(status.auth_flows) &&
++      status.auth_flows.includes("native_pkce")
++    );
++  } catch {
++    return false;
++  }
++}
++
++/**
++ * The session cookies the dashboard sets after a cookie login
++ * (hermes_cli/dashboard_auth/cookies.py): `__Host-` names over HTTPS (Path=/,
++ * Secure, host-only), bare names over plain HTTP; HttpOnly, SameSite=Lax.
++ */
++export function sessionCookiesForTokens(
++  baseUrl: string,
++  tokens: NativeLoginTokens,
++  nowSeconds: number,
++): CookiesSetDetails[] {
++  const origin = gatewayOrigin(baseUrl);
++  const https = origin.protocol === "https:";
++  const name = (bare: string): string => (https ? `__Host-${bare}` : bare);
++  const base = {
++    url: `${origin.origin}/`,
++    path: "/",
++    secure: https,
++    httpOnly: true,
++    sameSite: "lax" as const,
++  };
++  const atExpiry =
++    typeof tokens.expires_at === "number" && tokens.expires_at > nowSeconds
++      ? Math.max(nowSeconds + 60, tokens.expires_at)
++      : nowSeconds + 60;
++  const cookies: CookiesSetDetails[] = [
++    {
++      ...base,
++      name: name("hermes_session_at"),
++      value: tokens.access_token,
++      expirationDate: atExpiry,
++    },
++  ];
++  if (tokens.refresh_token) {
++    cookies.push({
++      ...base,
++      name: name("hermes_session_rt"),
++      value: tokens.refresh_token,
++      expirationDate: nowSeconds + RT_MAX_AGE_SECONDS,
++    });
++  }
++  if (tokens.provider) {
++    cookies.push({
++      ...base,
++      name: name("hermes_session_provider"),
++      value: tokens.provider,
++      expirationDate: nowSeconds + RT_MAX_AGE_SECONDS,
++    });
++  }
++  return cookies;
++}
++
++const DONE_PAGE = (host: string): string =>
++  `<!doctype html><meta charset="utf-8"><meta name="color-scheme" content="dark light"><title>Signed in</title>` +
++  `<body style="font-family:sans-serif;padding:2rem">Signed in to ${host.replace(/[^A-Za-z0-9.:-]/g, "")}. You can close this tab and return to Hermes One.</body>`;
++
++/**
++ * Run the native sign-in for `baseUrl`: open the authorize URL in the
++ * user's browser, wait for the loopback redirect, redeem the code, store
++ * the session cookies. Resolves once signed in; rejects on IdP error,
++ * redemption failure or timeout.
++ */
++export function runNativeRemoteLogin(
++  baseUrl: string,
++  deps: NativeLoginDeps,
++): Promise<{ signedIn: true }> {
++  const origin = gatewayOrigin(baseUrl);
++  const { verifier, challenge } = pkcePair();
++  const state = b64url(randomBytes(16));
++  const timeoutMs = deps.timeoutMs ?? NATIVE_LOGIN_TIMEOUT_MS;
++  const now = deps.now ?? (() => Math.floor(Date.now() / 1000));
++
++  return new Promise((resolve, reject) => {
++    let settled = false;
++    const server = http.createServer();
++    const finish = (error?: Error): void => {
++      if (settled) return;
++      settled = true;
++      clearTimeout(timer);
++      server.close();
++      server.closeAllConnections?.();
++      if (error) reject(error);
++      else resolve({ signedIn: true });
++    };
++    const timer = setTimeout(
++      () =>
++        finish(
++          new NativeLoginError(
++            "Remote gateway sign-in timed out.",
++            "oauth_cancelled",
++          ),
++        ),
++      timeoutMs,
++    );
++    timer.unref?.();
++
++    server.on("request", (req, res) => {
++      const url = new URL(req.url ?? "/", "http://127.0.0.1");
++      if (req.method !== "GET" || url.pathname !== "/callback") {
++        res.writeHead(404).end();
++        return;
++      }
++      if (url.searchParams.get("state") !== state) {
++        // Not this sign-in's redirect: ignore it and keep waiting.
++        res.writeHead(400, { "Content-Type": "text/plain" }).end("Unknown sign-in.\n");
++        return;
++      }
++      const error = url.searchParams.get("error");
++      const code = url.searchParams.get("code");
++      if (error || !code) {
++        res.writeHead(400, { "Content-Type": "text/plain" }).end("Sign-in failed.\n");
++        finish(
++          new NativeLoginError(
++            `Remote gateway sign-in failed${error ? `: ${error.slice(0, 80)}` : "."}`,
++            "oauth_request_failed",
++          ),
++        );
++        return;
++      }
++      void (async () => {
++        try {
++          const response = await deps.fetchImpl(
++            new URL("/auth/native/token", origin),
++            {
++              method: "POST",
++              headers: { "Content-Type": "application/json" },
++              body: JSON.stringify({ code, code_verifier: verifier }),
++              signal: AbortSignal.timeout(15_000),
++            },
++          );
++          if (!response.ok) {
++            throw new Error(`token exchange failed (${response.status})`);
++          }
++          const tokens = (await response.json()) as NativeLoginTokens;
++          if (!tokens || typeof tokens.access_token !== "string" || !tokens.access_token) {
++            throw new Error("token exchange returned no access token");
++          }
++          for (const cookie of sessionCookiesForTokens(origin.toString(), tokens, now())) {
++            await deps.setCookie(cookie);
++          }
++          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(DONE_PAGE(origin.host));
++          finish();
++        } catch (err) {
++          res.writeHead(400, { "Content-Type": "text/plain" }).end("Sign-in failed.\n");
++          finish(
++            new NativeLoginError(
++              `Remote gateway sign-in failed: ${err instanceof Error ? err.message : String(err)}`,
++              "oauth_request_failed",
++            ),
++          );
++        }
++      })();
++    });
++
++    server.on("error", (err) =>
++      finish(new NativeLoginError(`Sign-in listener failed: ${err.message}`, "oauth_request_failed")),
++    );
++    server.listen(0, "127.0.0.1", () => {
++      const address = server.address();
++      if (!address || typeof address === "string") {
++        finish(new NativeLoginError("Sign-in listener has no port.", "oauth_request_failed"));
++        return;
++      }
++      const authorize = new URL("/auth/native/authorize", origin);
++      authorize.searchParams.set("code_challenge", challenge);
++      authorize.searchParams.set("code_challenge_method", "S256");
++      authorize.searchParams.set("redirect_uri", `http://127.0.0.1:${address.port}/callback`);
++      authorize.searchParams.set("state", state);
++      deps.openExternal(authorize.toString()).catch((err: unknown) =>
++        finish(
++          new NativeLoginError(
++            `Could not open the browser for sign-in: ${err instanceof Error ? err.message : String(err)}`,
++            "oauth_request_failed",
++          ),
++        ),
++      );
++    });
++  });
++}
+diff --git a/src/main/remote-oauth.ts b/src/main/remote-oauth.ts
+index d995f8a..769a880 100644
+--- a/src/main/remote-oauth.ts
++++ b/src/main/remote-oauth.ts
+@@ -3,10 +3,15 @@ import {
+   BrowserWindow,
+   net,
+   session,
++  shell,
+   type Cookie,
+   type Session,
+ } from "electron";
+ import type { ConnectionConfig } from "./config";
++import {
++  remoteSupportsNativeLogin,
++  runNativeRemoteLogin,
++} from "./remote-oauth-native";
+ 
+ export const REMOTE_OAUTH_PARTITION = "persist:hermes-remote-oauth";
+ 
+@@ -380,7 +385,37 @@ export async function mintRemoteOAuthWsTicket(
+   return response.ticket;
+ }
+ 
+-export function openRemoteOAuthLogin(
++// hyperconfig: gateways offering `native_pkce` sign in through the user's
++// own browser (./remote-oauth-native.ts); the embedded window stays for the
++// others.
++export async function openRemoteOAuthLogin(
++  baseUrl: string,
++  parent?: BrowserWindow | null,
++): Promise<{ signedIn: true }> {
++  const normalized = normalizeRemoteOAuthBaseUrl(baseUrl);
++  if (await remoteSupportsNativeLogin(normalized.toString())) {
++    const oauthSession = getRemoteOAuthSession();
++    try {
++      return await runNativeRemoteLogin(normalized.toString(), {
++        openExternal: (url) => shell.openExternal(url),
++        fetchImpl: fetch,
++        setCookie: (details) => oauthSession.cookies.set(details),
++      });
++    } catch (error) {
++      throw new RemoteOAuthError(
++        error instanceof Error ? error.message : String(error),
++        (error as { code?: string }).code === "oauth_cancelled"
++          ? "oauth_cancelled"
++          : "oauth_request_failed",
++        undefined,
++        { cause: error },
++      );
++    }
++  }
++  return openEmbeddedRemoteOAuthLogin(baseUrl, parent);
++}
++
++function openEmbeddedRemoteOAuthLogin(
+   baseUrl: string,
+   parent?: BrowserWindow | null,
+ ): Promise<{ signedIn: true }> {
+diff --git a/tests/remote-oauth-native.test.ts b/tests/remote-oauth-native.test.ts
+new file mode 100644
+index 0000000..cbfbc44
+--- /dev/null
++++ b/tests/remote-oauth-native.test.ts
+@@ -0,0 +1,137 @@
++// @vitest-environment node
++// hyperconfig: the native PKCE sign-in (src/main/remote-oauth-native.ts)
++// against a fake dashboard: the authorize URL it opens, the loopback
++// redirect, the code redemption and the cookies it stores.
++import { describe, expect, it, vi } from "vitest";
++import { createHash } from "crypto";
++import http from "http";
++import {
++  remoteSupportsNativeLogin,
++  runNativeRemoteLogin,
++  sessionCookiesForTokens,
++} from "../src/main/remote-oauth-native";
++
++function get(url: string): Promise<{ status: number; body: string }> {
++  return new Promise((resolve, reject) => {
++    http
++      .get(url, (res) => {
++        let body = "";
++        res.on("data", (c) => (body += c));
++        res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
++      })
++      .on("error", reject);
++  });
++}
++
++function b64urlSha256(value: string): string {
++  return createHash("sha256")
++    .update(value)
++    .digest("base64")
++    .replace(/\+/g, "-")
++    .replace(/\//g, "_")
++    .replace(/=+$/, "");
++}
++
++describe("native remote sign-in", () => {
++  it("detects native_pkce in /api/status", async () => {
++    const yes = vi.fn(async () =>
++      new Response(JSON.stringify({ auth_required: true, auth_flows: ["cookie", "native_pkce"] })),
++    );
++    const no = vi.fn(async () => new Response(JSON.stringify({ auth_required: true, auth_flows: ["cookie"] })));
++    const down = vi.fn(async () => {
++      throw new Error("offline");
++    });
++    expect(await remoteSupportsNativeLogin("https://a.example/v1", yes as unknown as typeof fetch)).toBe(true);
++    expect(String((yes.mock.calls[0] as unknown[])[0])).toBe("https://a.example/api/status");
++    expect(await remoteSupportsNativeLogin("https://a.example", no as unknown as typeof fetch)).toBe(false);
++    expect(await remoteSupportsNativeLogin("https://a.example", down as unknown as typeof fetch)).toBe(false);
++  });
++
++  it("writes the dashboard's own __Host- session cookies over https", () => {
++    const cookies = sessionCookiesForTokens(
++      "https://a.example/",
++      { access_token: "AT", refresh_token: "RT", expires_at: 2000, provider: "self-hosted" },
++      1000,
++    );
++    expect(cookies.map((c) => c.name)).toEqual([
++      "__Host-hermes_session_at",
++      "__Host-hermes_session_rt",
++      "__Host-hermes_session_provider",
++    ]);
++    for (const c of cookies) {
++      expect(c).toMatchObject({ url: "https://a.example/", path: "/", secure: true, httpOnly: true, sameSite: "lax" });
++      expect(c).not.toHaveProperty("domain");
++    }
++    expect(cookies[0].expirationDate).toBe(2000);
++  });
++
++  it("runs authorize -> loopback -> token and stores the session", async () => {
++    let verifierSeen = "";
++    const fetchImpl = vi.fn(async (url: URL | string, init?: RequestInit) => {
++      expect(String(url)).toBe("https://a.example/auth/native/token");
++      const body = JSON.parse(String(init?.body));
++      expect(body.code).toBe("GWCODE");
++      verifierSeen = body.code_verifier;
++      return new Response(
++        JSON.stringify({ access_token: "AT", refresh_token: "RT", expires_at: 5000, provider: "self-hosted" }),
++      );
++    });
++    const setCookie = vi.fn(async () => {});
++    let challenge = "";
++    const openExternal = vi.fn(async (raw: string) => {
++      const u = new URL(raw);
++      expect(u.origin + u.pathname).toBe("https://a.example/auth/native/authorize");
++      expect(u.searchParams.get("code_challenge_method")).toBe("S256");
++      challenge = u.searchParams.get("code_challenge") ?? "";
++      const redirect = new URL(u.searchParams.get("redirect_uri") ?? "");
++      expect(redirect.hostname).toBe("127.0.0.1");
++      expect(redirect.pathname).toBe("/callback");
++      // A redirect with someone else's state is ignored.
++      redirect.searchParams.set("code", "OTHER");
++      redirect.searchParams.set("state", "forged");
++      expect((await get(redirect.toString())).status).toBe(400);
++      redirect.searchParams.set("code", "GWCODE");
++      redirect.searchParams.set("state", u.searchParams.get("state") ?? "");
++      queueMicrotask(() => void get(redirect.toString()));
++    });
++
++    await expect(
++      runNativeRemoteLogin("https://a.example/", { openExternal, fetchImpl: fetchImpl as unknown as typeof fetch, setCookie, now: () => 1000 }),
++    ).resolves.toEqual({ signedIn: true });
++    expect(fetchImpl).toHaveBeenCalledTimes(1);
++    expect(b64urlSha256(verifierSeen)).toBe(challenge);
++    expect(setCookie.mock.calls.map((c) => (c as unknown as [{ name: string; value: string }])[0].name)).toEqual([
++      "__Host-hermes_session_at",
++      "__Host-hermes_session_rt",
++      "__Host-hermes_session_provider",
++    ]);
++  });
++
++  it("fails on an IdP error and stores nothing", async () => {
++    const setCookie = vi.fn(async () => {});
++    const fetchImpl = vi.fn();
++    const openExternal = vi.fn(async (raw: string) => {
++      const u = new URL(raw);
++      const redirect = new URL(u.searchParams.get("redirect_uri") ?? "");
++      redirect.searchParams.set("error", "access_denied");
++      redirect.searchParams.set("state", u.searchParams.get("state") ?? "");
++      queueMicrotask(() => void get(redirect.toString()));
++    });
++    await expect(
++      runNativeRemoteLogin("https://a.example/", { openExternal, fetchImpl: fetchImpl as unknown as typeof fetch, setCookie }),
++    ).rejects.toThrow(/access_denied/);
++    expect(fetchImpl).not.toHaveBeenCalled();
++    expect(setCookie).not.toHaveBeenCalled();
++  });
++
++  it("times out when the browser never comes back", async () => {
++    await expect(
++      runNativeRemoteLogin("https://a.example/", {
++        openExternal: async () => {},
++        fetchImpl: vi.fn() as unknown as typeof fetch,
++        setCookie: vi.fn(),
++        timeoutMs: 50,
++      }),
++    ).rejects.toThrow(/timed out/);
++  });
++});
+diff --git a/tests/remote-oauth.test.ts b/tests/remote-oauth.test.ts
+index adcfb69..b017c20 100644
+--- a/tests/remote-oauth.test.ts
++++ b/tests/remote-oauth.test.ts
+@@ -44,6 +44,13 @@ const mocks = vi.hoisted(() => {
+   };
+ });
+ 
++// hyperconfig: these cover the embedded window, i.e. a gateway without
++// native_pkce; the native sign-in has tests/remote-oauth-native.test.ts.
++vi.mock("../src/main/remote-oauth-native", () => ({
++  remoteSupportsNativeLogin: vi.fn(async () => false),
++  runNativeRemoteLogin: vi.fn(),
++}));
++
+ vi.mock("electron", () => ({
+   app: { isReady: () => true },
+   BrowserWindow: mocks.BrowserWindow,
+@@ -137,6 +144,7 @@ describe("remote OAuth session boundary", () => {
+     mocks.cookieGet.mockResolvedValue([{ name: "hermes_session_at" }]);
+ 
+     const login = openRemoteOAuthLogin("https://hermes.example");
++    await vi.waitFor(() => expect(mocks.BrowserWindow.instances).toHaveLength(1));
+     const window = mocks.BrowserWindow.instances[0];
+ 
+     expect(window.options).toMatchObject({
+@@ -158,6 +166,7 @@ describe("remote OAuth session boundary", () => {
+     mocks.cookieGet.mockResolvedValue([]);
+ 
+     const login = openRemoteOAuthLogin("https://hermes.example");
++    await vi.waitFor(() => expect(mocks.BrowserWindow.instances).toHaveLength(1));
+     mocks.BrowserWindow.instances[0].emit("closed");
+ 
+     await expect(login).rejects.toMatchObject({ code: "oauth_cancelled" });

@@ -8,6 +8,8 @@
     - ./isolated-apps.nix: "Hermes (voice)" and "Hermes (infra-space)",
       each the hermes app in a confined container of its own here
       (../space-gui on the desktop user's session);
+    - ./hermes-one.nix: "Hermes One" and "Hermes One (<isolated label>)",
+      the third-party Hermes One app on the same agents, the same way;
     - the shells: "infra-space (<member>)" (../infra-space/launchers.nix)
       and "<space> space" plus herdr machines for the named spaces
       (../spaces/client.nix).
@@ -26,6 +28,7 @@ in
   imports = [
     ./shared-app.nix
     ./isolated-apps.nix
+    ./hermes-one.nix
     ../infra-space/launchers.nix
     ../spaces/client.nix
     ../voxtype-archive.nix
