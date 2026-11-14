@@ -55,6 +55,8 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/git.nix — - <- m/dave.nix
 - modules/nixos/gnome.nix — -
 - modules/nixos/gocr.nix — - <- m/dave.nix
+- modules/nixos/greetd-idle-restart-test.nix — greetd-idle-restart.sh (greetd.nix) against fake inputs: <- flake.nix
+- modules/nixos/greetd-idle-restart.sh — shellcheck shell=bash Restart greetd when the running greetd is definitely an old one and seat0 is idle: <- m/greetd-idle-restart-test.nix, m/greetd.nix
 - modules/nixos/greetd.nix — - <- m/dave.nix
 - modules/nixos/herdr-jj.nix — jj workspace support for herdr via the community herdr-jj plugin (OliverGilan/herdr-jj, MIT): <- m/dave.nix, m/spaces/guest.nix, m/spaces/test.nix
 - modules/nixos/herdr-pin-config.py — - <- m/herdr-jj.nix

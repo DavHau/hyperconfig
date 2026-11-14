@@ -85,6 +85,7 @@ Shared vars generated (vars/shared): clan-secrets-pull esphome-casa esphome-cm-p
 - toplevel builds: amy bam cm-pi nas (system.build.toplevel)
 - ssh-tpm-confirm-cache: modules/nixos/ssh-tpm-agent-confirm-test.nix
 - ssh-tpm-confirm-dialog: modules/nixos/ssh-tpm-confirm-dialog-test.nix
+- greetd-idle-restart: modules/nixos/greetd-idle-restart-test.nix
 - niri-terminal-cwd: modules/nixos/niri-terminal-cwd-test.nix
 - mullvad-egress: modules/nixos/mullvad-egress/test.nix
 - zt-eu-lan-guard: modules/nixos/zt-eu-lan-guard/test.nix

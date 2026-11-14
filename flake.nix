@@ -222,6 +222,12 @@
           import ./modules/nixos/ssh-tpm-confirm-dialog-test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
+        # greetd's idle restart decision against mocked systemctl/loginctl.
+        greetd-idle-restart =
+          import ./modules/nixos/greetd-idle-restart-test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+            inherit (self.nixosConfigurations.amy.config.systemd) units;
+          };
         niri-terminal-cwd =
           import ./modules/nixos/niri-terminal-cwd-test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
