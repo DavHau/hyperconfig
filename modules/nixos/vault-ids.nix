@@ -37,6 +37,11 @@
 # When adding readers to an existing tree, set the ACL before closing the
 # modes, or the readers lose access in between.
 #
+# Exception: /vault/misc/scans (bam's scan page, modules/nixos/scan-trigger)
+# is Dave's alone: dave 0700/0600 and no ACLs. Leave it out of a recursive
+# setfacl over /vault/misc; if one runs anyway, scan-deliver strips the ACLs
+# again on its hourly sweep.
+#
 # /vault/parquet's "other" r-x lets any uid read most of it. Agents kept
 # off the vault (`vault = false`, machines/som/hermes-agents-data.nix, and
 # the agents of machines/som/hermes-agents.nix that are not in that file)

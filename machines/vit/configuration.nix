@@ -8,6 +8,7 @@
     ./disko.nix
     ../../modules/nixos/nvidia.nix
     ../../modules/nixos/vault-nfs-client.nix
+    ../../modules/nixos/printer-canon-mf272dw.nix
     ../../modules/nixos/hermes-agents-gpu-host.nix
     ../../modules/nixos/captchakraken-server.nix
     ../../modules/nixos/ocr-server

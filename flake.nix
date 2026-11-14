@@ -243,6 +243,12 @@
           import ./modules/nixos/per-user-tmp/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
+        # LAN scan page (eSCL pull, OCR deu+eng+tha, vault delivery) and
+        # the driverless print queue, against a fake MF272dw.
+        scan-trigger =
+          import ./modules/nixos/scan-trigger/test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          };
         entity-storage =
           import ./modules/nixos/entity-storage/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;

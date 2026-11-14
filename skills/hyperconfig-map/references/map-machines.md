@@ -10,13 +10,13 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 ### amy
 - header: -
 - own files: disko.nix
-- imports: m/dave.nix, m/laptop.nix, m/user-grmpf.nix, m/amdgpu.nix, m/llama-swap.nix, m/llama-swap-maple.nix, m/llama-swap-qwen36-amy.nix, m/llama-swap-nanbeige42-amy.nix, m/llama-swap-ling30-tiny-amy.nix, m/llama-swap-k2-horizon-amy.nix, m/bluetooth-resume-fix.nix, m/noctalia-anthropic-usage/default.nix, m/fw-fanctrl.nix, m/amd-powersave-limits.nix, m/powersave-panel-refresh.nix, m/chores-on-ac.nix, m/vault-nfs-client.nix, m/router-ais.nix, m/router-cm-beryl.nix, m/router-playa-isp.nix, m/esphome-secrets.nix, m/disk-hygiene/default.nix, m/rust-build-cache.nix, m/cloudflare-warp/default.nix, m/houses-grmpf.nix, m/kernel-latest-zfs.nix, m/oomd.nix, m/infra-space/default.nix, m/infra-space/desktop-app.nix, m/hermes-desktop-spaces.nix, m/spaces/client.nix, m/user-dave.nix
+- imports: m/dave.nix, m/laptop.nix, m/user-grmpf.nix, m/printer-canon-mf272dw.nix, m/amdgpu.nix, m/llama-swap.nix, m/llama-swap-maple.nix, m/llama-swap-qwen36-amy.nix, m/llama-swap-nanbeige42-amy.nix, m/llama-swap-ling30-tiny-amy.nix, m/llama-swap-k2-horizon-amy.nix, m/bluetooth-resume-fix.nix, m/noctalia-anthropic-usage/default.nix, m/fw-fanctrl.nix, m/amd-powersave-limits.nix, m/powersave-panel-refresh.nix, m/chores-on-ac.nix, m/vault-nfs-client.nix, m/router-ais.nix, m/router-cm-beryl.nix, m/router-playa-isp.nix, m/esphome-secrets.nix, m/disk-hygiene/default.nix, m/rust-build-cache.nix, m/cloudflare-warp/default.nix, m/houses-grmpf.nix, m/kernel-latest-zfs.nix, m/oomd.nix, m/infra-space/default.nix, m/infra-space/desktop-app.nix, m/hermes-desktop-spaces.nix, m/spaces/client.nix, m/user-dave.nix
 - input modules: home-manager.nixosModules.home-manager, nixos-hardware.nixosModules.framework-13-7040-amd, nixos-hardware.nixosModules.framework-amd-ai-300-series, nixos-hardware.nixosModules.lenovo-yoga-7-14ARH7-amdgpu, nixos-hardware.nixosModules.tuxedo-pulse-14-gen3
 - vars generated: borgbackup hyprspace infra-space-hostkey nix-cache-nix-cache openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh remote-building-remote-building state-version wireguard-keys-wg-edi wireguard-keys-wg-vault wireguard-network-wg-edi wireguard-network-wg-vault yggdrasil
 
 ### bam
 - header: -
-- own files: benchmark-filesystems.txt, disko-ext4.nix, disko-xfs.nix, disko-zfs-defaults.nix, disko-zfs-enc-lz4.nix, disko-zfs-enc-zstd.nix, disko-zfs-enc.nix, inference-handoff.md, inference-host.nix, inference-net.nix, inference-vm.nix, kv-offload-research-2026-07-27.md, nextcloud.nix, oc.txt, vikunja.nix, zfs.nix
+- own files: benchmark-filesystems.txt, disko-ext4.nix, disko-xfs.nix, disko-zfs-defaults.nix, disko-zfs-enc-lz4.nix, disko-zfs-enc-zstd.nix, disko-zfs-enc.nix, inference-handoff.md, inference-host.nix, inference-net.nix, inference-vm.nix, kv-offload-research-2026-07-27.md, nextcloud.nix, oc.txt, scan-trigger.nix, vikunja.nix, zfs.nix
 - imports: m/common.nix, m/common-tools.nix, m/sbox.nix, m/storagebox-sync.nix, m/vault-nfs-server.nix, m/rgb-off.nix
 - vars generated: hyprspace nix-cache-nix-cache openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version wireguard-keys-wg-edi wireguard-keys-wg-vault wireguard-keys-wireguard wireguard-network-wg-edi wireguard-network-wg-vault wireguard-network-wireguard yggdrasil
 
@@ -43,7 +43,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 ### joy
 - header: -
 - own files: disko.nix, output-formats.nix, resize-luks.nix
-- imports: m/common.nix, m/common-tools.nix, m/sbox.nix, m/omp-joy.nix
+- imports: m/common.nix, m/common-tools.nix, m/sbox.nix, m/omp-joy.nix, m/printer-canon-mf272dw.nix
 - input modules: nixos-hardware.nixosModules.framework-12-13th-gen-intel
 - vars generated: hyprspace openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version wireguard-keys-wg-edi wireguard-network-wg-edi yggdrasil
 
@@ -70,7 +70,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 ### vit
 - header: -
 - own files: disko.nix
-- imports: m/dave.nix, m/laptop.nix, m/user-dave.nix, m/nvidia.nix, m/vault-nfs-client.nix, m/hermes-agents-gpu-host.nix, m/captchakraken-server.nix, m/ocr-server/default.nix, m/wyoming-local-speech/default.nix, m/users/stefan-vault.nix, m/tang-server.nix, m/luks-unlock/default.nix, m/initrd-wifi.nix, m/initrd-ssh.nix
+- imports: m/dave.nix, m/laptop.nix, m/user-dave.nix, m/nvidia.nix, m/vault-nfs-client.nix, m/printer-canon-mf272dw.nix, m/hermes-agents-gpu-host.nix, m/captchakraken-server.nix, m/ocr-server/default.nix, m/wyoming-local-speech/default.nix, m/users/stefan-vault.nix, m/tang-server.nix, m/luks-unlock/default.nix, m/initrd-wifi.nix, m/initrd-ssh.nix
 - input modules: nixos-hardware.nixosModules.asus-zephyrus-gu605cw
 - vars generated: hyprspace initrd-ssh luks-tang nix-cache-nix-cache openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version tang wireguard-keys-wg-edi wireguard-keys-wg-vault wireguard-network-wg-edi wireguard-network-wg-vault yggdrasil
 
@@ -90,6 +90,7 @@ Shared vars generated (vars/shared): clan-secrets-pull esphome-casa esphome-cm-p
 - zt-eu-lan-guard: modules/nixos/zt-eu-lan-guard/test.nix
 - porkbun-records: modules/nixos/porkbun-records/test.nix
 - per-user-tmp: modules/nixos/per-user-tmp/test.nix
+- scan-trigger: modules/nixos/scan-trigger/test.nix
 - entity-storage: modules/nixos/entity-storage/test.nix
 - space-gui: modules/nixos/space-gui/test.nix
 - user-manager-restart: modules/nixos/user-manager-restart/test.nix

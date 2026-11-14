@@ -14,6 +14,7 @@
     # var and the host-key pin), so it is the only line needed here.
     ../../modules/nixos/storagebox-sync.nix
     ../../modules/nixos/vault-nfs-server.nix
+    ./scan-trigger.nix
     # RAM LEDs off (dramMode defaults to off).
     ../../modules/nixos/rgb-off.nix
   ];

@@ -12,6 +12,7 @@
     ../../modules/nixos/dave.nix
     ../../modules/nixos/laptop.nix
     ../../modules/nixos/user-grmpf.nix
+    ../../modules/nixos/printer-canon-mf272dw.nix
     ../../modules/nixos/amdgpu.nix
     ../../modules/nixos/llama-swap.nix
     ../../modules/nixos/llama-swap-maple.nix

@@ -38,6 +38,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.initrdSsh.enable: modules/nixos/initrd-ssh.nix
 - hyper.initrdWifi: modules/nixos/initrd-wifi.nix
 - hyper.ipv4Forward: modules/nixos/ipv4-forward.nix
+- hyper.lanPrinter: modules/nixos/lan-printer.nix
 - hyper.luksUnlock.name: modules/nixos/luks-unlock/default.nix
 - hyper.monitoringAlerts: modules/nixos/monitoring-alerts.nix
 - hyper.mullvadEgress: modules/nixos/mullvad-egress/egress.nix
@@ -48,6 +49,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.porkbunRecords: modules/nixos/porkbun-records/default.nix
 - hyper.rgbOff.colorfulArgb: modules/nixos/rgb-off.nix
 - hyper.rgbOff.dramMode: modules/nixos/rgb-off.nix
+- hyper.scanTrigger: modules/nixos/scan-trigger/default.nix
 - hyper.spaceGui: modules/nixos/space-gui/default.nix
 - hyper.spaces: modules/nixos/spaces/default.nix
 - hyper.spacesClient: modules/nixos/spaces/client.nix

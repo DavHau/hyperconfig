@@ -73,6 +73,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/ipv4-forward.nix — Lend sgp's public IPv4 to som. <- sgp, som, m/ipv4-forward-slots-test/default.nix
 - modules/nixos/jujutsu.nix — - <- m/dave.nix
 - modules/nixos/kernel-latest-zfs.nix — Use the newest kernel series that the configured ZFS package supports. <- amy
+- modules/nixos/lan-printer.nix — lan-printer: one driverless (IPP Everywhere / AirPrint) CUPS queue for a network printer, created by our own oneshot in… <- m/printer-canon-mf272dw.nix
 - modules/nixos/laptop.nix — Battery-only behaviour. Compose next to ./dave.nix on laptops. <- amy, vit
 - modules/nixos/linger-normal-users.nix — Lingering for every normal user: <- som
 - modules/nixos/llama-swap-k2-horizon-amy.nix — K2-Horizon-3.7B (MBZUAI IFM, 2026-09; <- amy
@@ -130,6 +131,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/pinentry.nix — - <- m/bitwarden.nix
 - modules/nixos/powerprofilectl.nix — -
 - modules/nixos/powersave-panel-refresh.nix — Drop the built-in laptop panel (eDP-*) to its lowest refresh rate at the current resolution while power-profiles-daemon… <- amy
+- modules/nixos/printer-canon-mf272dw.nix — The home Canon i-SENSYS MF272dw (IoT Wi-Fi, fixed 192.168.18.20) as the default printer, driverless over IPP (AirPrint/… <- amy, joy, vit, m/scan-trigger/test.nix
 - modules/nixos/printing.nix — - <- m/dave.nix
 - modules/nixos/proton-vpn.nix — - <- m/dave.nix
 - modules/nixos/prune-gcroots.nix — CLI to prune stale auto GC roots (nix-direnv devshells and old result links). <- m/common-tools.nix
@@ -273,6 +275,13 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/porkbun-records/test.nix — ./default.nix against ./stub.py (porkbun's API on 127.0.0.1:8053): <- flake.nix
 - modules/nixos/role-iodine/default.nix — - <- nas
 - modules/nixos/role-sshuttle-server/default.nix — - <- nas
+- modules/nixos/scan-trigger/default.nix — scan-trigger: a LAN web page that pulls flatbed scans from a network MFP over eSCL (AirScan), builds one searchable PDF… <- machines/bam/scan-trigger.nix, m/scan-trigger/test.nix
+- modules/nixos/scan-trigger/fake_escl.py — - <- m/scan-trigger/test.nix
+- modules/nixos/scan-trigger/ocr_probe.py — - <- m/scan-trigger/test.nix
+- modules/nixos/scan-trigger/scan_deliver.py — - <- m/scan-trigger/default.nix
+- modules/nixos/scan-trigger/scan_ocr.py — - <- m/scan-trigger/default.nix
+- modules/nixos/scan-trigger/scan_trigger.py — - <- m/scan-trigger/default.nix
+- modules/nixos/scan-trigger/test.nix — scan-trigger (./default.nix) and the driverless queue (../lan-printer.nix) against a fake MF272dw: <- flake.nix
 - modules/nixos/short-videos/default.nix — - <- m/dave.nix
 - modules/nixos/short-videos/short-videos.sh — !/usr/bin/env bash List video files in DIR (default: <- m/short-videos/default.nix
 - modules/nixos/skills/external-scripts/SKILL.md — >
