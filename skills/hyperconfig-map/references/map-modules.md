@@ -166,6 +166,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/vault-nfs-client.nix — Mount bam's vault pool at /vault over NFSv4.2, via the wg-vault kernel WireGuard star (bam.wg-vault comes from the inst… <- amy, som, vit
 - modules/nixos/vault-nfs-server.nix — NFSv4.2 export of bam's `vault` pool to amy/vit/som over the wg-vault WireGuard star (instance in modules/flake-parts/n… <- bam
 - modules/nixos/virtualisation.nix — Containers and VMs on Dave's desktops: <- m/dave.nix
+- modules/nixos/voxtype-archive.nix — Keeps every dictation take on Dave's desktops for replay: <- m/dave-desktop/default.nix
 - modules/nixos/vpn.nix — VPN clients on Dave's desktops: <- m/dave.nix
 - modules/nixos/wdisplays.nix — wdisplays + niri-display persistence. <- m/dave.nix
 - modules/nixos/web-bench-mullvad.nix — The fixed identity of `web-bench launch --egress mullvad` (tools/web-bench): <- som

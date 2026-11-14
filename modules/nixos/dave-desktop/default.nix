@@ -28,6 +28,7 @@ in
     ./isolated-apps.nix
     ../infra-space/launchers.nix
     ../spaces/client.nix
+    ../voxtype-archive.nix
   ];
 
   options.hyper.daveDesktop.user = lib.mkOption {
@@ -40,5 +41,7 @@ in
   config = {
     hyper.spaceGui.hostUser = cfg.user;
     hyper.spacesClient.herdrUser = cfg.user;
+    # Every dictation take kept for replay (../voxtype-archive.nix).
+    hyper.voxtypeArchive.enable = lib.mkDefault true;
   };
 }

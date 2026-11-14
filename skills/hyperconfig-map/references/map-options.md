@@ -64,6 +64,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.unlockTarget: modules/nixos/unlock-target.nix
 - hyper.vaultIds.deniedUsers: modules/nixos/vault-ids.nix
 - hyper.voiceGateway: modules/nixos/voice-gateway/default.nix
+- hyper.voxtypeArchive: modules/nixos/voxtype-archive.nix
 - hyper.webcamSnap: modules/nixos/webcam-snap/default.nix
 - hyper.wyomingLocalSpeech: modules/nixos/wyoming-local-speech/default.nix
 - hyper.wyomingLocalSpeech.btSpeaker: modules/nixos/wyoming-local-speech/bt-speaker.nix

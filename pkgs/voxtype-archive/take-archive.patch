@@ -1,0 +1,723 @@
+diff --git a/src/app/dispatch.rs b/src/app/dispatch.rs
+index 32f3e74..582273e 100644
+--- a/src/app/dispatch.rs
++++ b/src/app/dispatch.rs
+@@ -119,7 +119,7 @@ pub(crate) async fn dispatch(
+             menubar::run(state_file);
+         }
+ 
+-        Commands::Transcribe { file, engine } => {
++        Commands::Transcribe { file, engine, json } => {
+             if let Some(engine_name) = engine {
+                 match engine_name.parse::<config::TranscriptionEngine>() {
+                     Ok(e) => config.engine = e,
+@@ -133,7 +133,7 @@ pub(crate) async fn dispatch(
+                     }
+                 }
+             }
+-            transcribe_file(&config, &file)?;
++            transcribe_file(&config, &file, json)?;
+         }
+ 
+         Commands::TranscribeWorker {
+diff --git a/src/app/transcribe_file.rs b/src/app/transcribe_file.rs
+index 987aa63..04a3d4c 100644
+--- a/src/app/transcribe_file.rs
++++ b/src/app/transcribe_file.rs
+@@ -8,8 +8,22 @@ use std::path::PathBuf;
+ use voxtype::{config, transcribe, vad};
+ 
+ /// Transcribe an audio file
+-pub(crate) fn transcribe_file(config: &config::Config, path: &PathBuf) -> anyhow::Result<()> {
++///
++/// With `json`, progress goes to stderr and stdout carries one JSON object:
++/// `{"status": "ok"|"empty"|"vad_rejected", "text", "detected_language",
++/// "vad"}` (the take archive's replay reads it).
++pub(crate) fn transcribe_file(
++    config: &config::Config,
++    path: &PathBuf,
++    json: bool,
++) -> anyhow::Result<()> {
+     use hound::WavReader;
++    macro_rules! println {
++        ($($arg:tt)*) => {
++            if json { eprintln!($($arg)*) } else { std::println!($($arg)*) }
++        };
++    }
++    let mut vad_json = serde_json::Value::Null;
+ 
+     println!("Loading audio file: {:?}", path);
+ 
+@@ -65,6 +79,12 @@ pub(crate) fn transcribe_file(config: &config::Config, path: &PathBuf) -> anyhow
+     if let Ok(Some(vad)) = vad::create_vad(config) {
+         match vad.detect(&final_samples) {
+             Ok(result) => {
++                vad_json = serde_json::json!({
++                    "has_speech": result.has_speech,
++                    "speech_duration_secs": result.speech_duration_secs,
++                    "speech_ratio": result.speech_ratio,
++                    "rms_energy": result.rms_energy,
++                });
+                 println!(
+                     "VAD: {:.2}s speech ({:.1}% of audio)",
+                     result.speech_duration_secs,
+@@ -72,6 +92,13 @@ pub(crate) fn transcribe_file(config: &config::Config, path: &PathBuf) -> anyhow
+                 );
+                 if !result.has_speech {
+                     println!("No speech detected, skipping transcription.");
++                    if json {
++                        std::println!(
++                            "{}",
++                            serde_json::json!({"status": "vad_rejected", "text": null,
++                                "detected_language": null, "vad": vad_json})
++                        );
++                    }
+                     return Ok(());
+                 }
+             }
+@@ -86,7 +113,19 @@ pub(crate) fn transcribe_file(config: &config::Config, path: &PathBuf) -> anyhow
+     let transcriber = transcribe::create_transcriber(config)?;
+     let text = transcriber.transcribe(&final_samples)?;
+ 
+-    println!("\n{}", text);
++    if json {
++        std::println!(
++            "{}",
++            serde_json::json!({
++                "status": if text.is_empty() { "empty" } else { "ok" },
++                "text": text,
++                "detected_language": transcriber.last_detected_language(),
++                "vad": vad_json,
++            })
++        );
++    } else {
++        std::println!("\n{}", text);
++    }
+     Ok(())
+ }
+ 
+diff --git a/src/cli/commands.rs b/src/cli/commands.rs
+index 7959878..4717baa 100644
+--- a/src/cli/commands.rs
++++ b/src/cli/commands.rs
+@@ -30,6 +30,11 @@ pub enum Commands {
+             long_help = format!("Override transcription engine: {}", super::ENGINE_NAMES_CSV),
+         )]
+         engine: Option<String>,
++
++        /// Print one JSON object on stdout ({"status", "text",
++        /// "detected_language", "vad"}); progress goes to stderr
++        #[arg(long)]
++        json: bool,
+     },
+ 
+     /// Internal: Worker process for GPU-isolated transcription
+diff --git a/src/cli/root.rs b/src/cli/root.rs
+index 2793782..b3f2943 100644
+--- a/src/cli/root.rs
++++ b/src/cli/root.rs
+@@ -618,7 +618,7 @@ mod tests {
+     fn test_transcribe_engine_flag() {
+         let cli = Cli::parse_from(["voxtype", "transcribe", "test.wav", "--engine", "moonshine"]);
+         match cli.command {
+-            Some(Commands::Transcribe { file, engine }) => {
++            Some(Commands::Transcribe { file, engine, .. }) => {
+                 assert_eq!(file, std::path::PathBuf::from("test.wav"));
+                 assert_eq!(engine, Some("moonshine".to_string()));
+             }
+diff --git a/src/daemon.rs b/src/daemon.rs
+index 1c3e7a4..20c5c4b 100644
+--- a/src/daemon.rs
++++ b/src/daemon.rs
+@@ -637,6 +637,10 @@ pub struct Daemon {
+     // keyboard-layout hints to eitype/dotool, see issue #180) after the task
+     // completes. Cleared when transcription_task is taken.
+     active_transcriber: Option<Arc<dyn Transcriber>>,
++    // Take archive (VOXTYPE_ARCHIVE_DIR) and the in-flight take (audio, VAD
++    // result, hotkey model override), consumed by handle_transcription_result.
++    take_archive: Option<crate::take_archive::TakeArchive>,
++    archive_pending: Option<crate::take_archive::PendingTake>,
+     // Background tasks for eager chunk transcriptions (chunk_index, task)
+     eager_chunk_tasks: Vec<(
+         usize,
+@@ -752,6 +756,8 @@ impl Daemon {
+             whisper_prepare_task: None,
+             transcription_task: None,
+             active_transcriber: None,
++            take_archive: crate::take_archive::TakeArchive::from_env(),
++            archive_pending: None,
+             eager_chunk_tasks: Vec::new(),
+             vad,
+             meeting_daemon: None,
+@@ -766,6 +772,33 @@ impl Daemon {
+         }
+     }
+ 
++    /// Archive the in-flight take (if the take archive is on) with its
++    /// outcome. Consumes the pending audio, so a take is archived once.
++    fn archive_take(&mut self, outcome: crate::take_archive::TakeOutcome) {
++        let pending = self.archive_pending.take();
++        self.save_take(pending, outcome);
++    }
++
++    /// Archive a take whose pending audio the caller already took.
++    fn save_take(
++        &self,
++        pending: Option<crate::take_archive::PendingTake>,
++        outcome: crate::take_archive::TakeOutcome,
++    ) {
++        if let (Some(archive), Some(p)) = (&self.take_archive, pending) {
++            archive.save(
++                p.samples,
++                &self.config,
++                self.config_path.as_deref(),
++                crate::take_archive::TakeOutcome {
++                    vad: p.vad,
++                    model_override: p.model_override,
++                    ..outcome
++                },
++            );
++        }
++    }
++
+     /// Play audio feedback sound if enabled
+     fn play_feedback(&self, event: SoundEvent) {
+         if let Some(ref feedback) = self.audio_feedback {
+@@ -1830,6 +1863,11 @@ impl Daemon {
+     ) -> bool {
+         let duration = state.recording_duration().unwrap_or_default();
+         tracing::info!("Recording stopped ({:.1}s)", duration.as_secs_f32());
++        // Hotkey model override of this take, for the take archive.
++        let archive_model_override = match &*state {
++            State::Recording { model_override, .. } => model_override.clone(),
++            _ => None,
++        };
+ 
+         // Play audio feedback
+         self.play_feedback(SoundEvent::RecordingStop);
+@@ -1863,6 +1901,8 @@ impl Daemon {
+                     }
+ 
+                     // Voice Activity Detection: skip if no speech detected
++                    self.archive_pending = None;
++                    let mut vad_result = None;
+                     if let Some(ref vad) = self.vad {
+                         match vad.detect(&samples) {
+                             Ok(result) if !result.has_speech => {
+@@ -1871,6 +1911,19 @@ impl Daemon {
+                                     result.speech_ratio * 100.0,
+                                     result.rms_energy
+                                 );
++                                if let Some(ref archive) = self.take_archive {
++                                    archive.save(
++                                        samples,
++                                        &self.config,
++                                        self.config_path.as_deref(),
++                                        crate::take_archive::TakeOutcome {
++                                            status: "vad_rejected",
++                                            vad: Some(result),
++                                            model_override: archive_model_override,
++                                            ..Default::default()
++                                        },
++                                    );
++                                }
+                                 self.play_feedback(SoundEvent::Cancelled);
+                                 self.reset_to_idle(state).await;
+                                 return false;
+@@ -1881,6 +1934,7 @@ impl Daemon {
+                                     result.speech_duration_secs,
+                                     result.speech_ratio * 100.0
+                                 );
++                                vad_result = Some(result);
+                             }
+                             Err(e) => {
+                                 // VAD failed, proceed with transcription anyway
+@@ -1902,6 +1956,16 @@ impl Daemon {
+                         // for layout hints, issue #180) without re-fetching
+                         // the transcriber.
+                         self.active_transcriber = Some(t.clone());
++                        // Only takes transcribed here are archived: eager
++                        // processing (EagerRecording, transcribed in chunks
++                        // while recording) never reaches this path.
++                        if self.take_archive.is_some() {
++                            self.archive_pending = Some(crate::take_archive::PendingTake {
++                                samples: samples.clone(),
++                                vad: vad_result,
++                                model_override: archive_model_override,
++                            });
++                        }
+                         self.transcription_task =
+                             Some(tokio::task::spawn_blocking(move || t.transcribe(&samples)));
+                         true
+@@ -1935,10 +1999,23 @@ impl Daemon {
+         // task error). The Ok(Ok(_)) branch consults it for the language
+         // layout hint before letting it drop.
+         let active_transcriber = self.active_transcriber.take();
++        let detected_language = active_transcriber
++            .as_ref()
++            .and_then(|t| t.last_detected_language());
++        let mut archive_pending = self.archive_pending.take();
+         match result {
+             Ok(Ok(text)) => {
+                 if text.is_empty() {
+                     tracing::debug!("Transcription was empty");
++                    self.save_take(
++                    archive_pending.take(),
++                        crate::take_archive::TakeOutcome {
++                            detected_language: detected_language.clone(),
++                            status: "empty",
++                            raw_text: Some(String::new()),
++                            ..Default::default()
++                        },
++                    );
+                     self.reset_to_idle(state).await;
+                 } else {
+                     tracing::info!("Transcribed: {:?}", text);
+@@ -2059,6 +2136,18 @@ impl Daemon {
+                     // Track last dictation for context in subsequent post-processing
+                     self.last_dictation = Some((final_text.clone(), Instant::now()));
+ 
++                    self.save_take(
++                    archive_pending.take(),
++                        crate::take_archive::TakeOutcome {
++                            detected_language: detected_language.clone(),
++                            status: "ok",
++                            raw_text: Some(text.clone()),
++                            final_text: Some(final_text.clone()),
++                            profile: profile_override.clone(),
++                            ..Default::default()
++                        },
++                    );
++
+                     if smart_submit {
+                         tracing::debug!(
+                             "Smart auto-submit: final text after post-processing: {:?}",
+@@ -2260,9 +2349,27 @@ impl Daemon {
+             }
+             Ok(Err(e)) => {
+                 tracing::error!("Transcription failed: {}", e);
++                self.save_take(
++                    archive_pending.take(),
++                    crate::take_archive::TakeOutcome {
++                        detected_language: detected_language.clone(),
++                        status: "error",
++                        error: Some(e.to_string()),
++                        ..Default::default()
++                    },
++                );
+                 self.reset_to_idle(state).await;
+             }
+             Err(e) => {
++                self.save_take(
++                    archive_pending.take(),
++                    crate::take_archive::TakeOutcome {
++                        detected_language: detected_language.clone(),
++                        status: if e.is_cancelled() { "cancelled" } else { "error" },
++                        error: Some(e.to_string()),
++                        ..Default::default()
++                    },
++                );
+                 // JoinError - task was cancelled or panicked
+                 if e.is_cancelled() {
+                     tracing::debug!("Transcription task was cancelled");
+@@ -3122,6 +3229,10 @@ impl Daemon {
+                                 // Drop the cloned transcriber Arc so it isn't
+                                 // held until the next transcription.
+                                 self.active_transcriber = None;
++                                self.archive_take(crate::take_archive::TakeOutcome {
++                                    status: "cancelled",
++                                    ..Default::default()
++                                });
+ 
+                                 cleanup_output_mode_override();
+                                 cleanup_model_override();
+@@ -3670,6 +3781,10 @@ impl Daemon {
+                         // Drop the cloned transcriber Arc so it isn't held
+                         // until the next transcription.
+                         self.active_transcriber = None;
++                        self.archive_take(crate::take_archive::TakeOutcome {
++                            status: "cancelled",
++                            ..Default::default()
++                        });
+ 
+                         cleanup_output_mode_override();
+                         cleanup_model_override();
+diff --git a/src/lib.rs b/src/lib.rs
+index b071ede..3493556 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -93,6 +93,7 @@ pub mod state;
+ pub mod status_json;
+ pub mod text;
+ pub mod transcribe;
++pub mod take_archive;
+ pub mod tui;
+ pub mod vad;
+ 
+diff --git a/src/take_archive.rs b/src/take_archive.rs
+new file mode 100644
+index 0000000..80457bd
+--- /dev/null
++++ b/src/take_archive.rs
+@@ -0,0 +1,361 @@
++//! Take archive: keep every push-to-talk take for later replay.
++//!
++//! Enabled by the `VOXTYPE_ARCHIVE_DIR` environment variable (not by
++//! config.toml, so a user override file can't switch it off by accident).
++//! For each take the daemon writes the 16 kHz mono audio it handed
++//! to the transcriber as a 24-bit PCM WAV plus a JSON sidecar (time,
++//! host, duration, engine settings, initial prompt, VAD result, raw and
++//! output text) into `<dir>/.partial/<id>/`, then renames that directory
++//! to `<dir>/incoming/<id>` in one step. An external job (hyperconfig's
++//! voxtype-archive ingest) compresses the WAV to FLAC and files it away.
++//! Writing happens on a plain thread, off the dictation path.
++//!
++//! Only takes the daemon transcribes in one piece are archived; eager
++//! processing (`eager_processing`, chunks transcribed while recording) is
++//! not. Secrets are kept out of the sidecar: whisper's API key, userinfo in
++//! the remote endpoint URL, and post-processing commands beyond their
++//! program name.
++
++use crate::config::Config;
++use crate::vad::VadResult;
++use serde_json::{json, Value};
++use std::fs;
++use std::io::{self, Write};
++use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
++use std::path::{Path, PathBuf};
++
++/// Sample rate of everything voxtype feeds its transcribers.
++pub const SAMPLE_RATE: u32 = 16_000;
++/// Bits per sample of the archived PCM. The daemon's samples are f32 after
++/// mixing/resampling; 24 bits keep each within 2^-24 of the float sample
++/// (clipped to ±1), far below any microphone's noise floor (-144 dBFS),
++/// and FLAC stores the 24-bit stream losslessly.
++pub const BITS: u16 = 24;
++const SCALE: f32 = 8_388_608.0; // 2^23, the divisor `voxtype transcribe` uses
++
++/// Where archived takes go; `None` when archiving is off.
++#[derive(Debug, Clone)]
++pub struct TakeArchive {
++    dir: PathBuf,
++    hostname: String,
++}
++
++/// What happened to a take.
++#[derive(Debug, Default)]
++pub struct TakeOutcome {
++    /// "ok", "empty", "vad_rejected", "error"
++    pub status: &'static str,
++    /// Transcriber output before replacements/post-processing
++    pub raw_text: Option<String>,
++    /// Text voxtype output (typed/pasted) after text processing
++    pub final_text: Option<String>,
++    pub error: Option<String>,
++    pub detected_language: Option<String>,
++    pub vad: Option<VadResult>,
++    /// Model chosen by the hotkey (`--model`/modifier) for this take
++    pub model_override: Option<String>,
++    /// Profile (`--profile`/modifier) used for post-processing
++    pub profile: Option<String>,
++}
++
++/// A take between recording stop and transcription result.
++#[derive(Debug)]
++pub struct PendingTake {
++    pub samples: Vec<f32>,
++    pub vad: Option<VadResult>,
++    pub model_override: Option<String>,
++}
++
++impl TakeArchive {
++    /// Archive from `VOXTYPE_ARCHIVE_DIR`, if set and non-empty.
++    pub fn from_env() -> Option<Self> {
++        let dir = std::env::var_os("VOXTYPE_ARCHIVE_DIR")?;
++        if dir.is_empty() {
++            return None;
++        }
++        let archive = Self::new(PathBuf::from(dir));
++        tracing::info!("Take archive enabled: {:?}", archive.dir);
++        Some(archive)
++    }
++
++    pub fn new(dir: PathBuf) -> Self {
++        let hostname = fs::read_to_string("/proc/sys/kernel/hostname")
++            .map(|s| s.trim().to_string())
++            .unwrap_or_default();
++        Self { dir, hostname }
++    }
++
++    /// Archive one take in the background. Never blocks or fails dictation.
++    pub fn save(
++        &self,
++        samples: Vec<f32>,
++        config: &Config,
++        config_path: Option<&Path>,
++        outcome: TakeOutcome,
++    ) {
++        if samples.is_empty() {
++            return;
++        }
++        let now = chrono::Local::now();
++        let id = now.format("%Y%m%dT%H%M%S%.3f").to_string().replace('.', "-");
++        let sidecar = sidecar(&self.hostname, &now, &samples, config, config_path, &outcome);
++        let dir = self.dir.clone();
++        let thread_id = id.clone();
++        let spawned = std::thread::Builder::new()
++            .name("take-archive".into())
++            .spawn(move || match write_take(&dir, &thread_id, &samples, &sidecar) {
++                Ok(path) => tracing::debug!("Archived take to {:?}", path),
++                Err(e) => tracing::warn!("Failed to archive take {}: {}", thread_id, e),
++            });
++        if let Err(e) = spawned {
++            tracing::warn!("Failed to archive take {}: no thread: {}", id, e);
++        }
++    }
++}
++
++/// Program name of a shell command line (its first word, no arguments).
++fn program_only(cmd: &str) -> String {
++    let first = cmd.split_whitespace().next().unwrap_or("");
++    if first.len() == cmd.trim().len() {
++        first.to_string()
++    } else {
++        format!("{first} <args redacted>")
++    }
++}
++
++/// `scheme://user:pass@host/...` -> `scheme://host/...`
++fn strip_userinfo(url: &str) -> String {
++    let (scheme, rest) = match url.find("://") {
++        Some(i) => (&url[..i + 3], &url[i + 3..]),
++        None => ("", url),
++    };
++    let auth_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
++    match rest[..auth_end].rfind('@') {
++        Some(at) => format!("{scheme}{}", &rest[at + 1..]),
++        None => url.to_string(),
++    }
++}
++
++/// Apply `f` to the string at `obj[key]`, if there is one.
++fn map_str(v: &mut Value, key: &str, f: impl Fn(&str) -> String) {
++    if let Some(x) = v.get_mut(key) {
++        if let Some(s) = x.as_str() {
++            *x = Value::String(f(s));
++        }
++    }
++}
++
++fn redact(mut v: Value, keys: &[&str]) -> Value {
++    if let Some(obj) = v.as_object_mut() {
++        for k in keys {
++            if obj.get(*k).is_some_and(|x| !x.is_null()) {
++                obj.insert((*k).to_string(), json!("<redacted>"));
++            }
++        }
++    }
++    v
++}
++
++/// The JSON sidecar for one take.
++pub fn sidecar(
++    hostname: &str,
++    now: &chrono::DateTime<chrono::Local>,
++    samples: &[f32],
++    config: &Config,
++    config_path: Option<&Path>,
++    outcome: &TakeOutcome,
++) -> Value {
++    let to = |v: Result<Value, serde_json::Error>| v.unwrap_or(Value::Null);
++    let mut whisper = redact(to(serde_json::to_value(&config.whisper)), &["remote_api_key"]);
++    map_str(&mut whisper, "remote_endpoint", strip_userinfo);
++    let mut post_process = to(serde_json::to_value(&config.output.post_process));
++    map_str(&mut post_process, "command", program_only);
++    json!({
++        "format": 1,
++        "time": now.to_rfc3339(),
++        "time_utc": now.with_timezone(&chrono::Utc).to_rfc3339(),
++        "host": hostname,
++        "voxtype_version": env!("CARGO_PKG_VERSION"),
++        "audio": {
++            "sample_rate": SAMPLE_RATE,
++            "channels": 1,
++            "bits": BITS,
++            "samples": samples.len(),
++            "duration_secs": samples.len() as f64 / SAMPLE_RATE as f64,
++        },
++        "status": outcome.status,
++        "raw_text": outcome.raw_text,
++        "text": outcome.final_text,
++        "error": outcome.error,
++        "detected_language": outcome.detected_language,
++        "vad_result": outcome.vad.as_ref().map(|r| json!({
++            "has_speech": r.has_speech,
++            "speech_duration_secs": r.speech_duration_secs,
++            "speech_ratio": r.speech_ratio,
++            "rms_energy": r.rms_energy,
++        })),
++        "config_file": config_path.map(|p| p.display().to_string()),
++        "engine": config.engine.to_string(),
++        "model_override": outcome.model_override,
++        "profile": outcome.profile,
++        "whisper": whisper,
++        "parakeet": to(serde_json::to_value(&config.parakeet)),
++        "nemotron": to(serde_json::to_value(&config.nemotron)),
++        "vad": to(serde_json::to_value(&config.vad)),
++        "text_processing": to(serde_json::to_value(&config.text)),
++        "post_process": post_process,
++        "profiles": profile_commands(config),
++    })
++}
++
++/// Profiles' post-processing commands, redacted to their program names.
++fn profile_commands(config: &Config) -> Value {
++    let mut v = to_value_or_null(&config.profiles);
++    if let Some(obj) = v.as_object_mut() {
++        for p in obj.values_mut() {
++            map_str(p, "post_process_command", program_only);
++        }
++    }
++    v
++}
++
++fn to_value_or_null<T: serde::Serialize>(t: &T) -> Value {
++    serde_json::to_value(t).unwrap_or(Value::Null)
++}
++
++fn create_dir_private(path: &Path) -> io::Result<()> {
++    fs::DirBuilder::new().recursive(true).mode(0o700).create(path)
++}
++
++fn create_private(path: &Path) -> io::Result<fs::File> {
++    fs::OpenOptions::new()
++        .write(true)
++        .create_new(true)
++        .mode(0o600)
++        .open(path)
++}
++
++/// Quantise one sample the way the archive stores it.
++pub fn to_pcm24(s: f32) -> i32 {
++    (s * SCALE).round().clamp(-SCALE, SCALE - 1.0) as i32
++}
++
++/// Write `<dir>/.partial/<id>/{take.wav,take.json}`, then move the
++/// directory to `<dir>/incoming/<id>`. Returns the final directory.
++pub fn write_take(dir: &Path, id: &str, samples: &[f32], sidecar: &Value) -> io::Result<PathBuf> {
++    let partial = dir.join(".partial").join(id);
++    let incoming = dir.join("incoming");
++    create_dir_private(dir)?;
++    create_dir_private(&partial)?;
++    create_dir_private(&incoming)?;
++
++    let spec = hound::WavSpec {
++        channels: 1,
++        sample_rate: SAMPLE_RATE,
++        bits_per_sample: BITS,
++        sample_format: hound::SampleFormat::Int,
++    };
++    let wav = io::BufWriter::new(create_private(&partial.join("take.wav"))?);
++    let mut writer = hound::WavWriter::new(wav, spec).map_err(io::Error::other)?;
++    for &s in samples {
++        writer.write_sample(to_pcm24(s)).map_err(io::Error::other)?;
++    }
++    writer.finalize().map_err(io::Error::other)?;
++    fs::File::open(partial.join("take.wav"))?.sync_all()?;
++
++    let mut js = create_private(&partial.join("take.json"))?;
++    js.write_all(serde_json::to_string_pretty(sidecar)?.as_bytes())?;
++    js.write_all(b"\n")?;
++    js.sync_all()?;
++
++    let dest = incoming.join(id);
++    fs::rename(&partial, &dest)?;
++    Ok(dest)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use std::os::unix::fs::PermissionsExt;
++
++    #[test]
++    fn writes_take_with_private_modes() {
++        let tmp = tempfile::tempdir().unwrap();
++        let dir = tmp.path().join("archive");
++        let samples: Vec<f32> = (0..16_000)
++            .map(|i| (i as f32 * 0.05).sin() * 0.5)
++            .collect();
++        let config = Config::default();
++        let outcome = TakeOutcome {
++            status: "ok",
++            raw_text: Some("hello world".into()),
++            final_text: Some("Hello world.".into()),
++            ..Default::default()
++        };
++        let now = chrono::Local::now();
++        let sc = sidecar("testhost", &now, &samples, &config, None, &outcome);
++        let dest = write_take(&dir, "20261115T000000-000", &samples, &sc).unwrap();
++
++        assert_eq!(dest, dir.join("incoming/20261115T000000-000"));
++        assert!(!dir.join(".partial/20261115T000000-000").exists());
++        for d in [&dir, &dir.join("incoming"), &dest] {
++            assert_eq!(fs::metadata(d).unwrap().permissions().mode() & 0o777, 0o700);
++        }
++        for f in ["take.wav", "take.json"] {
++            let m = fs::metadata(dest.join(f)).unwrap().permissions().mode();
++            assert_eq!(m & 0o777, 0o600);
++        }
++
++        let mut r = hound::WavReader::open(dest.join("take.wav")).unwrap();
++        let spec = r.spec();
++        assert_eq!((spec.channels, spec.sample_rate, spec.bits_per_sample), (1, 16_000, 24));
++        let read: Vec<i32> = r.samples::<i32>().map(|s| s.unwrap()).collect();
++        let want: Vec<i32> = samples.iter().map(|&s| to_pcm24(s)).collect();
++        assert_eq!(read, want);
++
++        let js: Value =
++            serde_json::from_str(&fs::read_to_string(dest.join("take.json")).unwrap()).unwrap();
++        assert_eq!(js["status"], "ok");
++        assert_eq!(js["text"], "Hello world.");
++        assert_eq!(js["raw_text"], "hello world");
++        assert_eq!(js["host"], "testhost");
++        assert_eq!(js["audio"]["samples"], 16_000);
++        assert_eq!(js["engine"], "whisper");
++        assert!(js["whisper"]["model"].is_string());
++    }
++
++    #[test]
++    fn quantisation_clamps_and_inverts() {
++        assert_eq!(to_pcm24(1.0), 8_388_607);
++        assert_eq!(to_pcm24(-1.0), -8_388_608);
++        assert_eq!(to_pcm24(2.0), 8_388_607);
++        let s = 0.123_456_78_f32;
++        assert!((to_pcm24(s) as f32 / SCALE - s).abs() <= 1.0 / SCALE);
++    }
++
++    #[test]
++    fn redacts_commands_and_userinfo() {
++        assert_eq!(program_only("ollama-fix --key sk-x"), "ollama-fix <args redacted>");
++        assert_eq!(program_only("fix"), "fix");
++        assert_eq!(
++            strip_userinfo("https://u:p@host:8080/v1?x=a@b"),
++            "https://host:8080/v1?x=a@b"
++        );
++        assert_eq!(strip_userinfo("http://host/a@b"), "http://host/a@b");
++        let mut config = Config::default();
++        config.whisper.remote_endpoint = Some("https://me:secret@stt.example/v1".into());
++        config.whisper.remote_api_key = Some("sk-x".into());
++        let js = sidecar("h", &chrono::Local::now(), &[0.0], &config, None, &TakeOutcome::default());
++        let s = js.to_string();
++        assert!(!s.contains("secret") && !s.contains("sk-x"), "{s}");
++        assert_eq!(js["whisper"]["remote_endpoint"], "https://stt.example/v1");
++    }
++
++    #[test]
++    fn redacts_api_key() {
++        let v = redact(json!({"remote_api_key": "sk-x", "model": "m"}), &["remote_api_key"]);
++        assert_eq!(v["remote_api_key"], "<redacted>");
++        let v = redact(json!({"remote_api_key": null}), &["remote_api_key"]);
++        assert!(v["remote_api_key"].is_null());
++    }
++}
