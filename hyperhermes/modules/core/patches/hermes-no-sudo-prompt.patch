@@ -1,0 +1,116 @@
+hermes v0.23.0: HERMES_SUDO_PROMPT=0 turns off every sudo password
+prompt.
+
+Symptom: the desktop app and the dashboard sometimes show a masked
+"sudo password" card. hyperhermes agents run as unprivileged accounts without a sudo
+password (NOPASSWD rules still work), so the card is a dead end, and
+Dave never wants it.
+
+Mechanism: tools/terminal_tool_sudo.py _transform_sudo_command asks for a
+password when a command has a real `sudo`, no SUDO_PASSWORD is set,
+nothing is cached, and HERMES_INTERACTIVE=1 or a sudo callback is
+registered (tui_gateway/agent_callbacks.py, gateway/session_sudo_prompt.py
+-> a `sudo` server request, hermes_cli/gateway_agent.py; else /dev/tty).
+Bot Desktop's install button has a second card
+(tools/bot_desktop/install.py _run -> display.install.sudo).
+
+Why not SUDO_PASSWORD="" (config_defaults.py: "explicit empty string to
+try empty without prompting"): any SUDO_PASSWORD in os.environ also
+switches off the hardline guard against the model piping guessed
+passwords into sudo's stdin mode (tools/approval_detection.py
+_check_sudo_stdin_guard), and every sudo would become a real failed PAM
+authentication.
+
+With HERMES_SUDO_PROMPT=0 (hyperhermes sets it for every agent, see
+../options.nix): no prompt on any surface, the command runs unchanged
+(no stdin password) and fails with "sudo: a password is required"; the
+failure tip (gateway and no-user contexts) says sudo is not available
+instead of pointing at SUDO_PASSWORD; no "you will be prompted again" note; Bot Desktop's
+install and `hermes computer-use` install print the command to run as
+root, as on a host without sudo (a human at a terminal loses the getpass
+prompt too). A configured SUDO_PASSWORD still applies.
+
+diff --git a/tools/bot_desktop/install.py b/tools/bot_desktop/install.py
+index db603183..0fcbc98b 100644
+--- a/tools/bot_desktop/install.py
++++ b/tools/bot_desktop/install.py
+@@ -132,6 +132,11 @@ def _run(cmd: str, *, ask_password: Callable[[], str], on_line: Callable[[str],
+             on_line(f"install needs root and this host has no sudo; run on the host as root: {cmd[len('sudo '):]}")
+             return NO_SUDO
+         if not _sudo_nopasswd():
++            from tools.terminal_tool_sudo import _sudo_prompt_disabled
++            if _sudo_prompt_disabled():
++                # HERMES_SUDO_PROMPT=0: no password card; hand over the command as for a sudo-less host.
++                on_line(f"install needs root and sudo prompts are off here; run on the host as root: {cmd[len('sudo '):]}")
++                return NO_SUDO
+             password = ask_password() or ""
+             if not password:
+                 on_line("install cancelled: no sudo password provided")
+diff --git a/tools/terminal_tool_result.py b/tools/terminal_tool_result.py
+index 47c9e7ac..c1752f3b 100644
+--- a/tools/terminal_tool_result.py
++++ b/tools/terminal_tool_result.py
+@@ -118,7 +118,7 @@ def _sudo_annotations(command: str, output: str, env_type: str) -> tuple[str, bo
+     import tools.terminal_tool as tt
+     from tools.terminal_tool_sudo import (
+         _handle_sudo_failure, _invalidate_cached_sudo_on_auth_failure, _no_sudo_user,
+-        _sudo_wrong_password_failure,
++        _sudo_prompt_disabled, _sudo_wrong_password_failure,
+     )
+     from utils import env_var_enabled
+     output = _handle_sudo_failure(output, env_type)
+@@ -126,7 +126,7 @@ def _sudo_annotations(command: str, output: str, env_type: str) -> tuple[str, bo
+     cache_cleared = _invalidate_cached_sudo_on_auth_failure(command, output)
+     can_reprompt = cache_cleared and (
+         tt._get_sudo_password_callback() is not None or env_var_enabled("HERMES_INTERACTIVE")
+-    ) and not _no_sudo_user()
++    ) and not _no_sudo_user() and not _sudo_prompt_disabled()
+     if can_reprompt:
+         output += ("\n\n⚠️ Sudo authentication failed — cached password "
+                    "cleared. You will be prompted again on the next sudo command.")
+diff --git a/tools/terminal_tool_sudo.py b/tools/terminal_tool_sudo.py
+index 643e1e28..1dc89a78 100644
+--- a/tools/terminal_tool_sudo.py
++++ b/tools/terminal_tool_sudo.py
+@@ -31,6 +31,14 @@ _sudo_password_cache_lock = threading.Lock()
+ _sudo_prompt_command: ContextVar[str] = ContextVar("sudo_prompt_command", default="")
+ 
+ 
++def _sudo_prompt_disabled() -> bool:
++    """HERMES_SUDO_PROMPT=0 (hyperhermes): never ask a human for a sudo password, on any surface
++    (TUI/desktop/dashboard card, CLI panel, /dev/tty). sudo then runs unchanged, without -S or
++    any password attempt, and fails with "sudo: a password is required"."""
++    value = os.environ.get("HERMES_SUDO_PROMPT")
++    return value is not None and value.strip().lower() in ("0", "false", "no", "off")
++
++
+ def get_sudo_prompt_command() -> str:
+     """Original command for the current sudo password prompt, or '' outside its callback."""
+     return _sudo_prompt_command.get()
+@@ -99,6 +107,8 @@ def _handle_sudo_failure(output: str, env_type: str) -> str:
+     if not (is_gateway or no_user) or not any(f in output for f in _SUDO_HEADLESS_FAILURES):
+         return output
+     from hermes_constants import display_hermes_home as _dhh
++    if _sudo_prompt_disabled():
++        return output + "\n\n💡 sudo is not available to this agent (no password, no prompt): run the command without sudo."
+     if no_user:
+         return output + (
+             "\n\n💡 Tip: This session cannot prompt for a sudo password. "
+@@ -186,6 +196,8 @@ def _prompt_for_sudo_password(timeout_seconds: int = 45, *, command: str = "") -
+     """Prompt for a sudo password; "" on skip (empty Enter), timeout, or error. Prefers the
+     CLI-registered callback (prompt_toolkit-integrated); otherwise reads /dev/tty (msvcrt on
+     Windows) with echo disabled. Human wait time is excluded from tool deadlines (``human_wait_window``)."""
++    if _sudo_prompt_disabled():
++        return ""
+     from tools.human_input_hooks import human_input_request
+     # The password never reaches the hook; only how the prompt ended.
+     with human_input_request("sudo", prompt=command) as human:
+@@ -483,7 +495,7 @@ def _transform_sudo_command(
+     # session cache still apply.
+     should_prompt_for_sudo = (
+         env_var_enabled("HERMES_INTERACTIVE") or _get_sudo_password_callback() is not None
+-    ) and not _no_sudo_user()
++    ) and not _no_sudo_user() and not _sudo_prompt_disabled()
+     if not has_configured_password and not sudo_password and should_prompt_for_sudo:
+         # sudoers NOPASSWD must not be forced through the prompt or the -S pipe. The probe is
+         # a round trip on the selected backend (an ssh exec for SSH), so it only runs when a

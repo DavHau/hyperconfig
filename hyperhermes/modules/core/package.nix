@@ -43,6 +43,7 @@ let
     ./patches/hermes-busy-message-yields-command.patch
     ./patches/hermes-gateway-managed-unit-only.patch
     ./patches/hermes-subagent-process-notice-stays-in-child.patch
+    ./patches/hermes-no-sudo-prompt.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {

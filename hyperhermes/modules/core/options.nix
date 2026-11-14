@@ -420,6 +420,14 @@ in
         };
       };
 
+      # No sudo password card in the desktop app, dashboard or TUI: no
+      # agent here can use sudo, so the prompt is a dead end. sudo then
+      # fails at once with "a password is required", without a password
+      # attempt (patches/hermes-no-sudo-prompt.patch). Not
+      # SUDO_PASSWORD="": any SUDO_PASSWORD also lifts hermes' guard
+      # against the model piping guessed passwords into sudo.
+      environment.HERMES_SUDO_PROMPT = lib.mkDefault "0";
+
       forwards.dashboard = {
         label = "Dashboard";
         portFor = hlib.dashboardPortFor;
