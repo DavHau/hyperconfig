@@ -1,6 +1,5 @@
-# lan-printer: one driverless (IPP Everywhere / AirPrint) CUPS queue for a
-# network printer, created by our own oneshot instead of
-# hardware.printers.ensurePrinters.
+# lan-printer: one driverless (IPP Everywhere / AirPrint) CUPS queue,
+# created by our own oneshot instead of hardware.printers.ensurePrinters.
 #
 # Why not ensurePrinters: it runs `lpadmin -m everywhere` in cups.service's
 # postStart under `set -e`, and `-m everywhere` must query the printer
@@ -8,8 +7,10 @@
 # fails to start and with it the whole deploy. Here the queue is made by
 # lan-printer-<name>.service, started only by lan-printer-<name>.timer
 # (20 s after boot or a changed definition, then every 15 min): if the
-# printer is unreachable it logs and exits 0, and the next run retries. Once it exists, later runs only re-apply
-# URI and defaults (no printer query needed). Instance: ./printer-canon-mf272dw.nix.
+# printer is unreachable it logs and exits 0, and the next run retries.
+# Once it exists, later runs only re-apply URI, sharing and defaults (no
+# printer query needed). Instances: ./home-printer.nix (desktops -> the
+# print server), ./home-printer-host.nix (the server -> the USB device).
 {
   config,
   lib,
@@ -26,20 +27,16 @@ let
 in
 {
   options.hyper.lanPrinter = {
-    enable = lib.mkEnableOption "a driverless CUPS queue for a LAN printer";
+    enable = lib.mkEnableOption "a driverless CUPS queue for an IPP printer";
     name = mkOption {
       type = types.strMatching "[A-Za-z0-9_-]+";
-      example = "canon";
+      example = "home";
       description = "CUPS queue name.";
-    };
-    address = mkOption {
-      type = types.str;
-      example = "192.168.18.20";
     };
     uri = mkOption {
       type = types.str;
-      default = "ipp://${cfg.address}/ipp/print";
-      defaultText = lib.literalExpression ''"ipp://''${address}/ipp/print"'';
+      example = "ipp://192.168.8.250:631/printers/home";
+      description = "IPP URI of the printer (or of a shared CUPS queue).";
     };
     description = mkOption {
       type = types.str;
@@ -63,6 +60,17 @@ in
       default = true;
       description = "Make it the system default printer.";
     };
+    shared = mkOption {
+      type = types.bool;
+      default = false;
+      description = "Share the queue (printer-is-shared); who may reach it is cupsd's Listen/Location config.";
+    };
+    removeQueues = mkOption {
+      type = types.listOf (types.strMatching "[A-Za-z0-9_-]+");
+      default = [ ];
+      example = [ "canon" ];
+      description = "Old queues to delete if they still exist (CUPS keeps queues across deploys).";
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -84,6 +92,11 @@ in
       ];
       serviceConfig.Type = "oneshot";
       script = ''
+        ${lib.concatMapStrings (old: ''
+          if lpstat -p ${q old} >/dev/null 2>&1; then
+            lpadmin -x ${q old} && echo "removed old queue ${old}"
+          fi
+        '') cfg.removeQueues}
         if ! lpstat -p ${q cfg.name} >/dev/null 2>&1; then
           # -m everywhere queries the printer for its attributes; that is
           # the step that fails while it is off.
@@ -93,8 +106,11 @@ in
           fi
           echo "created queue ${cfg.name}"
         fi
-        # Re-applied on every run (no printer query): URI, texts, defaults.
-        lpadmin -p ${q cfg.name} -E -v ${q cfg.uri} -D ${q cfg.description} -L ${q cfg.location} ${defaults}
+        # Re-applied on every run (no printer query): URI, texts, sharing, defaults.
+        # printer-is-shared only when sharing: CUPS refuses to set it at all
+        # (even to false) on a queue pointing at another CUPS server.
+        lpadmin -p ${q cfg.name} -E -v ${q cfg.uri} -D ${q cfg.description} -L ${q cfg.location} \
+          ${lib.optionalString cfg.shared "-o printer-is-shared=true"} ${defaults}
         ${lib.optionalString cfg.makeDefault "lpadmin -d ${q cfg.name}"}
         cupsenable ${q cfg.name}
         cupsaccept ${q cfg.name}

@@ -57,6 +57,9 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/herdr-pin-config.py — - <- m/herdr-jj.nix
 - modules/nixos/hermes-agents-gpu-host.nix — GPU host for som's hermes agents: <- vit
 - modules/nixos/home-manager.nix — home-manager as a NixOS module on Dave's desktops (shared settings for every home-manager user; <- m/dave.nix
+- modules/nixos/home-printer-host.nix — home-printer-host: serves the home printer/scanner that is plugged into this host by USB (model-agnostic: any IPP-over-… <- machines/bam/printer.nix, m/scan-trigger/test.nix
+- modules/nixos/home-printer-server.nix — Where the home printer is served (plain data, not a module): <- machines/bam/printer.nix, m/home-printer.nix
+- modules/nixos/home-printer.nix — The home printer as the default printer of a desktop (amy, vit, joy): <- amy, joy, vit, m/scan-trigger/test.nix
 - modules/nixos/houses-grmpf.nix — grmpf's nix-housing houses (see houses.nix): <- amy
 - modules/nixos/houses.nix — nix-housing (codeberg.org/decentstates/nix-housing): <- m/houses-grmpf.nix
 - modules/nixos/initrd-ssh.nix — sshd in the initrd on port 2222: <- vit
@@ -65,7 +68,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/ipv4-forward.nix — Lend sgp's public IPv4 to som. <- sgp, som, m/ipv4-forward-slots-test/default.nix
 - modules/nixos/jujutsu.nix — jj (jujutsu) on Dave's desktops, with its config. <- m/dave.nix
 - modules/nixos/kernel-latest-zfs.nix — Use the newest kernel series that the configured ZFS package supports. <- amy
-- modules/nixos/lan-printer.nix — lan-printer: one driverless (IPP Everywhere / AirPrint) CUPS queue for a network printer, created by our own oneshot in… <- m/printer-canon-mf272dw.nix
+- modules/nixos/lan-printer.nix — lan-printer: one driverless (IPP Everywhere / AirPrint) CUPS queue, created by our own oneshot instead of hardware.prin… <- m/home-printer-host.nix, m/home-printer.nix
 - modules/nixos/laptop.nix — Battery-only behaviour. Compose next to ./dave.nix on laptops. <- amy, vit
 - modules/nixos/linger-normal-users.nix — Lingering for every normal user: <- som
 - modules/nixos/llama-swap-k2-horizon-amy.nix — K2-Horizon-3.7B (MBZUAI IFM, 2026-09; <- amy
@@ -119,7 +122,6 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/pi-chat-openrouter.nix — The shared OpenRouter key (spaces.openrouter; <- m/dave.nix
 - modules/nixos/pinentry.nix — - <- m/bitwarden.nix
 - modules/nixos/powersave-panel-refresh.nix — Drop the built-in laptop panel (eDP-*) to its lowest refresh rate at the current resolution while power-profiles-daemon… <- amy
-- modules/nixos/printer-canon-mf272dw.nix — The home Canon i-SENSYS MF272dw (IoT Wi-Fi, fixed 192.168.18.20) as the default printer, driverless over IPP (AirPrint/… <- amy, joy, vit, m/scan-trigger/test.nix
 - modules/nixos/printing.nix — - <- m/dave.nix
 - modules/nixos/proton-vpn.nix — - <- m/dave.nix
 - modules/nixos/provider-keys.nix — Provider keys for Dave's harnesses (afk, omp, pi): <- m/dave.nix, m/infra-space/hermes.nix, m/noctalia-anthropic-usage/default.nix, m/spaces/afk.nix, m/teamclaude-gateway/default.nix
@@ -293,13 +295,15 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/recurring-tasks/test_recurring_tasks.py — - <- m/recurring-tasks/default.nix
 - modules/nixos/role-iodine/default.nix — - <- nas
 - modules/nixos/role-sshuttle-server/default.nix — - <- nas
-- modules/nixos/scan-trigger/default.nix — scan-trigger: a LAN web page that pulls flatbed scans from a network MFP over eSCL (AirScan), builds one searchable PDF… <- machines/bam/scan-trigger.nix, m/scan-trigger/test.nix
+- modules/nixos/scan-trigger/default.nix — scan-trigger: a LAN web page that pulls flatbed scans from an eSCL (AirScan) scanner, builds one searchable PDF per doc… <- m/home-printer-host.nix
 - modules/nixos/scan-trigger/fake_escl.py — - <- m/scan-trigger/test.nix
+- modules/nixos/scan-trigger/fake_usb_front.py — - <- m/scan-trigger/test.nix
+- modules/nixos/scan-trigger/ipp_req.py — - <- m/scan-trigger/test.nix
 - modules/nixos/scan-trigger/ocr_probe.py — - <- m/scan-trigger/test.nix
 - modules/nixos/scan-trigger/scan_deliver.py — - <- m/scan-trigger/default.nix
 - modules/nixos/scan-trigger/scan_ocr.py — - <- m/scan-trigger/default.nix
 - modules/nixos/scan-trigger/scan_trigger.py — - <- m/scan-trigger/default.nix
-- modules/nixos/scan-trigger/test.nix — scan-trigger (./default.nix) and the driverless queue (../lan-printer.nix) against a fake MF272dw: <- flake.nix
+- modules/nixos/scan-trigger/test.nix — The home printer/scanner stack against a fake USB MFP: <- flake.nix
 - modules/nixos/searxng-canary/canary.py — - <- m/searxng-canary/package.nix
 - modules/nixos/searxng-canary/candidate.nix — searxng-candidate: the nightly bump's scratch SearXNG, run on this host in a sandbox instead of in the infra-space gues… <- m/searxng-canary/default.nix
 - modules/nixos/searxng-canary/default.nix — searxng-canary: is web_search's SearXNG (../../../hyperhermes/modules/ browser/searxng.nix, 127.0.0.1:8890) still answe… <- machines/som/hermes-agents.nix

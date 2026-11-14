@@ -61,9 +61,8 @@ NS = {
 # A4 in 1/300 inch.
 A4_W, A4_H = 2480, 3508
 ASLEEP_HINT = (
-    "On the printer press Scan, then Remote Scanner (or turn on "
-    "Function Settings > Common > Scan Settings > Auto Online), "
-    "then try again."
+    "Wake the printer (some models need Scan, then a \"remote scan\" / "
+    "\"online\" mode on the panel), then try again."
 )
 
 port = CFG["port"]
@@ -87,9 +86,22 @@ class ScanError(Exception):
 # ---------------------------------------------------------------- eSCL ---
 
 _tls = ssl.create_default_context()
-# The printer sits alone on an isolated IoT net with a self-signed cert.
+# Devices serve https with self-signed certs; the scanner is on loopback
+# (ipp-usb) or the LAN.
 _tls.check_hostname = False
 _tls.verify_mode = ssl.CERT_NONE
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    # A device reply's redirect must not send us anywhere else (another
+    # host, the LAN): a 3xx surfaces as HTTPError with its status instead.
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_opener = urllib.request.build_opener(
+    _NoRedirect(), urllib.request.HTTPSHandler(context=_tls)
+)
 
 
 XML_MAX = 1 << 20
@@ -116,7 +128,7 @@ def escl(method, path, body=None, timeout=20, cap=XML_MAX, deadline=None):
     if body is not None:
         req.add_header("Content-Type", "text/xml")
     try:
-        with urllib.request.urlopen(req, timeout=timeout, context=_tls) as r:
+        with _opener.open(req, timeout=timeout) as r:
             return r.status, r.headers, read_capped(r, cap, deadline)
     except urllib.error.HTTPError as e:
         try:
@@ -127,7 +139,7 @@ def escl(method, path, body=None, timeout=20, cap=XML_MAX, deadline=None):
         reason = getattr(e, "reason", e)
         raise ScanError(
             f"Printer not reachable at {ESCL} ({reason}). Is it switched "
-            "on and on the network? " + ASLEEP_HINT
+            "on and plugged in? " + ASLEEP_HINT
         )
 
 
@@ -208,7 +220,7 @@ def scan_jpeg(dpi, grey):
                         "in a minute.")
     body = settings_xml(caps, dpi, mode)
     st, hdr = None, {}
-    # A sleeping MF27x answers 503 (or refuses) until it is back online.
+    # A sleeping MFP may answer 503 (or refuse) until it is back online.
     for attempt in range(4):
         st, hdr, _ = escl("POST", "ScanJobs", body)
         if st == 201:

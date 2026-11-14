@@ -34,6 +34,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.execUsage: modules/nixos/exec-usage/default.nix
 - hyper.firmwareOnly: modules/nixos/firmware-only.nix
 - hyper.geninfSpace.ciToken: modules/nixos/spaces/geninf-space.nix
+- hyper.homePrinterHost: modules/nixos/home-printer-host.nix
 - hyper.infraSpace: modules/nixos/infra-space/default.nix
 - hyper.infraSpace.agentTools.browser: modules/nixos/infra-space/agent-tools.nix
 - hyper.infraSpace.dashboard: modules/nixos/infra-space/dashboard.nix

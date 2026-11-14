@@ -1,9 +1,9 @@
-# scan-trigger: a LAN web page that pulls flatbed scans from a network
-# MFP over eSCL (AirScan), builds one searchable PDF per document
-# (img2pdf -> ocrmypdf, Tesseract languages incl. Thai) and files it into
-# the owner's directory, e.g. bam's /vault/misc/scans/YYYY/ (Canon MF272dw:
-# it has no ADF, no scan-to-folder; the PC has to pull, see
-# docs/printer-mf272dw.md).
+# scan-trigger: a LAN web page that pulls flatbed scans from an eSCL
+# (AirScan) scanner, builds one searchable PDF per document (img2pdf ->
+# ocrmypdf, Tesseract languages incl. Thai) and files it into the owner's
+# directory, e.g. bam's /vault/misc/scans/YYYY/. On bam the scanner is the
+# USB home MFP behind ipp-usb on loopback (../home-printer-host.nix sets
+# printerAddress/printerPort, docs/home-printer.md).
 #
 # Three units, three users:
 #   scan-trigger.service  user scan-trigger (system, unprivileged, no
@@ -36,11 +36,14 @@
 # Exposure: listens on cfg.listenAddress only (bam: the static LAN alias
 # 192.168.8.250), the firewall opens the port only for
 # cfg.allowedNetworks (on cfg.interface), the unit's IPAddressAllow
-# repeats that plus the printer, and the app checks peer, Host header, Sec-Fetch-Site/Origin and
-# a per-start form token. Nothing goes through a proxy or the tailnet.
-# Local processes on the host reach the page via lo with a LAN source
-# address and so have a LAN client's rights.
-# Test: ./test.nix (fake eSCL scanner with German/English/Thai text).
+# repeats that plus loopback (the scanner: ipp-usb on localhost; a network
+# scanner's IP is added when printerAddress is one), and the app checks
+# peer, Host header, Sec-Fetch-Site/Origin and a per-start form token.
+# Nothing goes through a proxy or the tailnet. Local processes on the host
+# reach the page via lo with a LAN source address and so have a LAN
+# client's rights (and reach the scanner on loopback directly anyway).
+# Test: ./test.nix (fake eSCL scanner with German/English/Thai text on the
+# loopback port ipp-usb would use).
 {
   config,
   lib,
@@ -152,14 +155,19 @@ in
 
     printerAddress = mkOption {
       type = types.str;
-      example = "192.168.18.20";
-      description = "IP address (or name) of the scanner/MFP.";
+      default = "localhost";
+      description = "Address (or name) of the scanner: localhost for a USB device behind ipp-usb.";
+    };
+    printerPort = mkOption {
+      type = types.port;
+      default = 60000;
+      description = "Port of the scanner's eSCL (ipp-usb's loopback port; 80 for a network MFP).";
     };
     esclUrl = mkOption {
       type = types.str;
-      default = "http://${cfg.printerAddress}/eSCL";
-      defaultText = lib.literalExpression ''"http://''${printerAddress}/eSCL"'';
-      description = "eSCL base URL (Canon MF27x: http://<ip>/eSCL; https:// also works, the self-signed cert is not checked).";
+      default = "http://${cfg.printerAddress}:${toString cfg.printerPort}/eSCL";
+      defaultText = lib.literalExpression ''"http://''${printerAddress}:''${toString printerPort}/eSCL"'';
+      description = "eSCL base URL (https:// also works, the cert is not checked).";
     };
 
     listenAddress = mkOption {

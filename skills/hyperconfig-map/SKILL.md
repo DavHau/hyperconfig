@@ -111,10 +111,11 @@ the named owner and leave the copies to their unification.
   + sysinit-reactivation.target, before systemd-tmpfiles-setup/-resetup
   and user sessions: at boot and on every switch that changes it). som's
   users are derived from `services.hyperhermes.agents`.
-- printer/scanner (Canon MF272dw, IoT 192.168.18.20): print queue
-  `modules/nixos/printer-canon-mf272dw.nix` (amy vit joy), scan page on
-  bam `modules/nixos/scan-trigger/` -> `/vault/misc/scans/`; device
-  setup `docs/printer-mf272dw.md`.
+- printer/scanner (USB on bam, ipp-usb on localhost:60000): host
+  `machines/bam/printer.nix` -> `modules/nixos/home-printer-host.nix`
+  (CUPS queue `home` shared to the LAN, scan page
+  `modules/nixos/scan-trigger/` -> `/vault/misc/scans/`); desktops' queue
+  `modules/nixos/home-printer.nix` (amy vit joy); `docs/home-printer.md`.
 - substituters, ncro, nix-cache keys: `modules/clan/nix-cache/default.nix`.
 - nightly bump: `modules/nixos/infra-space/nixpkgs-bump{.nix,/}` (guard.sh
   denylists `denied_paths`/`denied_opts`; check `nixpkgs-bump-guard`).

@@ -1,18 +1,31 @@
-# scan-trigger (./default.nix) and the driverless queue (../lan-printer.nix)
-# against a fake MF272dw: `printer` serves eSCL (./fake_escl.py, a page with
-# German, English and Thai text) and IPP (ippeveprinter) at 192.168.18.20 on
-# an isolated net. `server` (bam's role) has the LAN alias 192.168.8.250 and
-# a vault mount that comes up late; `desktop` is a LAN client with the
-# print module; `printer` doubles as the non-LAN client.
+# The home printer/scanner stack against a fake USB MFP: `server` (bam's
+# role, ../home-printer-host.nix) has the LAN alias 192.168.8.250, a vault
+# mount that comes up late, and in place of ipp-usb a fake device on
+# 127.0.0.1:60000 (./fake_usb_front.py splitting /ipp to ippeveprinter and
+# the rest to ./fake_escl.py, a page with German, English and Thai text);
+# no USB is emulated. `desktop` is a LAN client with ../home-printer.nix,
+# `outsider` a non-LAN client routed in through the server.
 #
-# Checks: two pages + finish -> one searchable 2-page PDF (deu/eng/tha text
-# found) in /vault/misc/scans/<year>/, owned by dave, 0600 without ACLs,
-# delivered only once the mount appears; scan+finish; a 600 dpi colour page
-# OCRs within the worker's MemoryMax (production ocrArgs); the POST a
+# Printing: with no device present nothing failed (no queue, ipp-usb
+# config OK); once the device is there the server's shared queue `home`
+# appears, the desktop's `home` queue is built from it
+# (ipp://192.168.8.250:631/printers/home) and a job printed on the desktop
+# ends up in the fake printer; the outsider can't reach CUPS, the LAN can't
+# reach the CUPS web UI/admin or the device's port. The unauthenticated LAN
+# (posing as root) gets 403, never a 401 password prompt, for
+# CUPS-Get-Document of its finished job (whose file is gone anyway),
+# Cancel-Job, Pause-Printer, CUPS-Add-Modify-Printer, CUPS-Get-Devices,
+# CUPS-Get-PPDs and subscriptions; rss/mailto notifiers are absent; local
+# admin and printing on the server still work.
+# Scanning: two pages + finish -> one searchable 2-page PDF (deu/eng/tha
+# text found) in /vault/misc/scans/<year>/, owned by dave, 0600 without
+# ACLs, delivered only once the mount appears; scan+finish; a 600 dpi colour
+# page OCRs within the worker's MemoryMax (production ocrArgs); the POST a
 # browser sends to a plain-http LAN page (real Origin, no Sec-Fetch-*)
 # accepted, cross-site / foreign or null Origin / foreign Host / missing
-# token / non-LAN peer refused; a sleeping printer gives a clear error; an
-# endless eSCL body is cut off; page limit and full outbox refuse to scan;
+# token / non-LAN peer refused; a sleeping scanner gives a clear error; a
+# device redirect is not followed; an endless eSCL body is cut off; page
+# limit and full outbox refuse to scan;
 # parallel clicks add one page; leftover pages after a crash are shown and
 # can be discarded; the delivery survives hostile outbox entries (FIFO,
 # non-PDF, oversized, re-delivered name) and the scan user can't lock it
@@ -21,9 +34,6 @@
 # the daily budget (the scan waits, the page says so); a worker that
 # refuses early has its error shown; the OCR worker's sandbox reaches no
 # host socket and no /vault (./ocr_probe.py), scan-trigger no /vault.
-# Printing: no queue and no
-# failed unit while the printer is off, queue with A4 + long-edge duplex
-# once it is on.
 { pkgs }:
 let
   inherit (pkgs) lib;
@@ -35,42 +45,10 @@ pkgs.testers.runNixOSTest {
   name = "scan-trigger";
 
   nodes = {
-    printer = {
-      virtualisation.vlans = [ 2 ];
-      networking.interfaces.eth1.ipv4.addresses = lib.mkForce [
-        {
-          address = "192.168.18.20";
-          prefixLength = 24;
-        }
-      ];
-      networking.firewall.enable = false;
-      # Also the test's non-LAN client: reaches the LAN address via server.
-      networking.interfaces.eth1.ipv4.routes = [
-        {
-          address = "192.168.8.0";
-          prefixLength = 24;
-          via = "192.168.18.1";
-        }
-      ];
-      environment.systemPackages = [ pkgs.curl ];
-      systemd.services.fake-escl = {
-        wantedBy = [ "multi-user.target" ];
-        serviceConfig = {
-          ExecStart = "${fakePy.interpreter} ${./fake_escl.py} 80 ${latinFont} ${thaiFont}";
-          WorkingDirectory = "/var/lib/fake-escl";
-          StateDirectory = "fake-escl";
-        };
-      };
-      # Not started at boot: the printer is "off" for the first print check.
-      systemd.services.fake-ipp = {
-        serviceConfig.ExecStart = "${pkgs.cups}/bin/ippeveprinter -2 -M Canon -p 631 -r off -f application/pdf,image/pwg-raster,image/urf,image/jpeg -m 'MF270 Series' -d /tmp 'Canon MF272dw'";
-      };
-    };
-
     server =
       { config, ... }:
       {
-        imports = [ ./default.nix ];
+        imports = [ ../home-printer-host.nix ];
         virtualisation.vlans = [
           1
           2
@@ -82,28 +60,35 @@ pkgs.testers.runNixOSTest {
             prefixLength = 24;
           }
         ];
+        # The outsider's net.
         networking.interfaces.eth2.ipv4.addresses = lib.mkForce [
           {
-            address = "192.168.18.1";
+            address = "10.0.5.1";
             prefixLength = 24;
           }
         ];
-        boot.kernel.sysctl."net.ipv4.ip_forward" = 1;
         users.groups.vault.gid = 1101;
         users.users.dave = {
           isNormalUser = true;
           uid = 1000;
-          extraGroups = [ "vault" ];
+          extraGroups = [
+            "vault"
+            "wheel"
+          ];
+          # Known, so the test can show the LAN can't verify it via CUPS.
+          password = "right";
         };
         environment.systemPackages = [
           pkgs.poppler-utils
           pkgs.acl
+          pkgs.curl
         ];
-        hyper.scanTrigger = {
+        hyper.homePrinterHost = {
           enable = true;
-          printerAddress = "192.168.18.20";
-          listenAddress = "192.168.8.250";
-          allowedNetworks = [ "192.168.8.0/24" ];
+          lanAddress = "192.168.8.250";
+          lanNetworks = [ "192.168.8.0/24" ];
+        };
+        hyper.scanTrigger = {
           owner = "dave";
           outputDir = "/vault/misc/scans";
           requireMount = "/vault/misc";
@@ -120,30 +105,65 @@ pkgs.testers.runNixOSTest {
           StandardInput = "null";
           StandardOutput = "journal";
         };
+        # The "plugged in" device: not started at boot (no device yet).
+        systemd.services.fake-escl = {
+          serviceConfig = {
+            ExecStart = "${fakePy.interpreter} ${./fake_escl.py} 60101 ${latinFont} ${thaiFont}";
+            WorkingDirectory = "/var/lib/fake-escl";
+            StateDirectory = "fake-escl";
+          };
+        };
+        systemd.services.fake-ipp = {
+          serviceConfig = {
+            ExecStart = "${pkgs.cups}/bin/ippeveprinter -2 -k -n localhost -M Fake -p 60100 -r off -f application/pdf,image/pwg-raster,image/urf,image/jpeg -m 'USB MFP' -d /var/lib/fake-ipp 'Fake USB MFP'";
+            StateDirectory = "fake-ipp";
+          };
+        };
+        systemd.services.fake-usb-device = {
+          requires = [
+            "fake-escl.service"
+            "fake-ipp.service"
+          ];
+          after = [
+            "fake-escl.service"
+            "fake-ipp.service"
+          ];
+          serviceConfig.ExecStart = "${pkgs.python3.interpreter} ${./fake_usb_front.py} 60000 60100 60101";
+        };
       };
 
     desktop =
       { ... }:
       {
-        imports = [ ../printer-canon-mf272dw.nix ];
-        virtualisation.vlans = [
-          1
-          2
-        ];
+        imports = [ ../home-printer.nix ];
+        virtualisation.vlans = [ 1 ];
         networking.interfaces.eth1.ipv4.addresses = lib.mkForce [
           {
             address = "192.168.8.10";
             prefixLength = 24;
           }
         ];
-        networking.interfaces.eth2.ipv4.addresses = lib.mkForce [
-          {
-            address = "192.168.18.30";
-            prefixLength = 24;
-          }
-        ];
         environment.systemPackages = [ pkgs.curl ];
       };
+
+    outsider = {
+      virtualisation.vlans = [ 2 ];
+      networking.interfaces.eth1.ipv4.addresses = lib.mkForce [
+        {
+          address = "10.0.5.2";
+          prefixLength = 24;
+        }
+      ];
+      networking.interfaces.eth1.ipv4.routes = [
+        {
+          address = "192.168.8.0";
+          prefixLength = 24;
+          via = "10.0.5.1";
+        }
+      ];
+      networking.firewall.enable = false;
+      environment.systemPackages = [ pkgs.curl ];
+    };
   };
 
   testScript = ''
@@ -191,37 +211,148 @@ pkgs.testers.runNixOSTest {
         return grab(r'<div class="msg err">([^<]*)</div>', p)
 
     start_all()
-    printer.wait_for_unit("fake-escl.service")
     server.wait_for_unit("scan-trigger.service")
     server.wait_for_unit("scan-deliver.service")
     server.wait_for_open_port(8088, "192.168.8.250")
     desktop.wait_for_unit("multi-user.target")
+    outsider.wait_for_unit("multi-user.target")
 
-    with subtest("printing: printer off -> no queue, nothing failed"):
-        # cups is socket-activated; the oneshot's Requires= starts it.
+    with subtest("no device plugged in: no queue, nothing failed"):
+        # cups is socket-activated; the oneshots' Requires= start it.
+        server.wait_for_unit("cups.socket")
         desktop.wait_for_unit("cups.socket")
-        desktop.systemctl("start lan-printer-canon.service")
-        desktop.fail("systemctl is-failed lan-printer-canon.service")
-        desktop.fail("lpstat -p canon")
-        desktop.succeed("journalctl -u lan-printer-canon.service | grep -q 'not reachable'")
+        print(server.succeed("ipp-usb check"))
+        server.succeed("grep -q 'interface = loopback' /etc/ipp-usb/ipp-usb.conf")
+        # What udev would start on a plug: with no device it just ends.
+        server.systemctl("start ipp-usb.service")
+        server.wait_until_fails("systemctl is-active ipp-usb.service", timeout=30)
+        server.fail("systemctl is-failed ipp-usb.service")
+        for node in (server, desktop):
+            node.systemctl("start lan-printer-home.service")
+            node.fail("systemctl is-failed lan-printer-home.service")
+            node.fail("lpstat -p home")
+            node.succeed("journalctl -u lan-printer-home.service | grep -q 'not reachable'")
+        assert post("scan") == "303"
+        assert "not reachable" in err(idle())
+        for node in (server, desktop):
+            failed = node.succeed("systemctl list-units --failed --plain --no-legend").strip()
+            assert failed == "", failed
 
-    with subtest("printing: printer on -> driverless queue, A4, long-edge duplex"):
-        printer.systemctl("start fake-ipp.service")
-        printer.wait_for_open_port(631)
-        desktop.systemctl("start lan-printer-canon.service")
-        desktop.succeed("lpstat -p canon")
-        desktop.succeed("lpstat -v canon | grep -q 'ipp://192.168.18.20/ipp/print'")
-        desktop.succeed("lpstat -d | grep -q canon")
-        opts = desktop.succeed("lpoptions -p canon -l; lpoptions -p canon")
+    with subtest("device plugged in: shared queue on the server, desktop prints through it"):
+        server.systemctl("start fake-usb-device.service")
+        server.wait_for_open_port(60000)
+        server.systemctl("start lan-printer-home.service")
+        server.succeed("lpstat -p home")
+        server.succeed("lpstat -v home | grep -q 'ipp://localhost:60000/ipp/print'")
+        server.succeed("lpoptions -p home | grep -q printer-is-shared=true")
+        desktop.systemctl("start lan-printer-home.service")
+        desktop.succeed("lpstat -p home")
+        desktop.fail("systemctl is-failed lan-printer-home.service")
+        server.fail("systemctl is-failed lan-printer-home.service")
+        desktop.succeed("lpstat -v home | grep -q 'ipp://192.168.8.250:631/printers/home'")
+        desktop.succeed("lpstat -d | grep -q home")
+        opts = desktop.succeed("lpoptions -p home -l; lpoptions -p home")
         print(opts)
         assert re.search(r"PageSize/[^:]*:.*\*A4\b", opts), "A4 not default"
-        assert "sides=two-sided-long-edge" in opts or re.search(r"Duplex/[^:]*:.*\*DuplexNoTumble", opts), "duplex not default"
-        desktop.succeed("echo hello | lp -d canon")
+        desktop.succeed("echo hello from the desktop | lp -d home")
+        # desktop -> server's CUPS -> "USB" device (ippeveprinter keeps it).
+        server.wait_until_succeeds("find /var/lib/fake-ipp -type f -size +0 | grep .", timeout=120)
+        desktop.wait_until_succeeds("test -z \"$(lpstat -o home)\"", timeout=60)
+        server.wait_until_succeeds("test -z \"$(lpstat -o home)\"", timeout=60)
+        # Device "unplugged" again: the queue stays, nothing fails.
+        server.systemctl("stop fake-usb-device.service fake-ipp.service")
+        server.systemctl("start lan-printer-home.service")
+        server.fail("systemctl is-failed lan-printer-home.service")
+        server.systemctl("start fake-usb-device.service")
+        server.wait_for_open_port(60000)
+
+    with subtest("CUPS share: LAN only, queue only"):
+        outsider.fail("curl -s --max-time 5 http://192.168.8.250:631/printers/home")
+        outsider.fail("curl -s --max-time 5 http://10.0.5.1:631/")
+        # The LAN gets the queue, not the rest of cupsd.
+        desktop.succeed("ipptool -t ipp://192.168.8.250:631/printers/home ${pkgs.cups}/share/cups/ipptool/get-printer-attributes.test")
+        for path in ("/", "/admin", "/printers/", "/jobs/"):
+            code = desktop.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' http://192.168.8.250:631{path}").strip()
+            assert code in ("403", "404"), (path, code)
+        # The device's own port (ipp-usb) is loopback only.
+        desktop.fail("curl -s --max-time 5 http://192.168.8.250:60000/")
+        server.fail("curl -s --max-time 5 http://192.168.8.250:60000/")
+        server.succeed("curl -sf -o /dev/null http://localhost:60000/eSCL/ScannerCapabilities")
+
+    with subtest("CUPS share: unauthenticated LAN gets print + status only"):
+        Q = "ipp://192.168.8.250:631/printers/home"
+        def lan_ipp(op, job="", notify=None):
+            n = f" '{notify}'" if notify else ""
+            out = desktop.succeed(
+                f"${pkgs.python3.interpreter} ${./ipp_req.py} {op} {Q} '{job}'{n}"
+                " | curl -s -o /dev/null -D - -w '%{http_code}' -H 'Content-Type: application/ipp'"
+                " --data-binary @- http://192.168.8.250:631/printers/home"
+            )
+            # Never a password challenge towards the LAN.
+            assert "basic" not in out.lower(), out
+            return out.strip().splitlines()[-1]
+        # The desktop's job from above, finished on the server.
+        done = server.succeed("lpstat -W completed -o home")
+        print(done)
+        jobid = grab(r"home-(\d+)", done)
+        # Its document is gone from the spool (PreserveJobFiles No).
+        server.wait_until_succeeds("test -z \"$(ls /var/spool/cups | grep '^d')\"", timeout=60)
+        server.wait_until_succeeds("grep -q 'OpPolicy lan' /etc/cups/printers.conf", timeout=90)
+        # Every op cupsd would fill in from a template is named in `lan`.
+        server.fail("journalctl -u cups | grep 'defined in policy lan'")
+        # 403 straight away (no password prompt, no PAM).
+        for name, op, job in (
+            ("CUPS-Get-Document", "4027", jobid),
+            ("Pause-Printer", "0010", ""),
+            ("CUPS-Add-Modify-Printer", "4003", ""),
+            ("CUPS-Get-Devices", "400B", ""),
+            ("CUPS-Get-PPDs", "400C", ""),
+            ("Create-Printer-Subscriptions", "0016", ""),
+        ):
+            code = lan_ipp(op, job)
+            assert code == "403", (name, code)
+        # Cancel-Job's owner check answers an anonymous peer with a bare
+        # 401 (cupsd's validate_user; turned into 426 "upgrade to TLS"
+        # for non-localhost), but offers no auth scheme (checked in
+        # lan_ipp) and Basic is off, so nothing could satisfy it.
+        assert lan_ipp("0008", jobid) in ("401", "403", "426")
+        # Allowed ops still answer (HTTP 200, IPP status inside).
+        assert lan_ipp("000B") == "200"  # Get-Printer-Attributes
+        assert lan_ipp("000A") == "200"  # Get-Jobs
+        # Basic credentials from the LAN never reach PAM (DefaultAuthType
+        # None), not even on an allowed op: cupsd drops them unchecked.
+        desktop.succeed(
+            f"${pkgs.python3.interpreter} ${./ipp_req.py} 000B {Q}"
+            " | curl -s -o /dev/null -u dave:guess -H 'Content-Type: application/ipp'"
+            " --data-binary @- http://192.168.8.250:631/printers/home"
+        )
+        server.wait_until_succeeds("journalctl -u cups --since -2min | grep -q 'Basic authentication is not enabled'", timeout=20)
+        # /admin/conf keeps nixpkgs' AuthType Basic: there PAM refuses a
+        # non-localhost peer even with dave's right password.
+        code = desktop.succeed(
+            "curl -s -o /dev/null -w '%{http_code}' -u dave:right http://192.168.8.250:631/admin/conf/cupsd.conf"
+        ).strip()
+        assert code in ("401", "403"), code
+        server.wait_until_succeeds("journalctl -u cups --since -2min | grep -q 'pam_authenticate() returned'", timeout=20)
+        server.fail("journalctl -u cups | grep -q 'Authorized as \"dave\" using Basic'")
+        # No notifier that reaches out (a Print-Job may carry its own
+        # subscription, which no policy limit covers).
+        server.fail("test -e /var/lib/cups/path/lib/cups/notifier/rss")
+        server.fail("test -e /var/lib/cups/path/lib/cups/notifier/mailto")
+        # Admin and printing from bam itself still work.
+        server.succeed("cupsdisable home && cupsenable home")
+        server.succeed("touch /tmp/before-local-job")
+        server.succeed("echo local job | lp -d home")
+        # (ippeveprinter restarted above reuses job numbers/file names.)
+        server.wait_until_succeeds("find /var/lib/fake-ipp -type f -size +0 -newer /tmp/before-local-job | grep .", timeout=120)
+        server.wait_until_succeeds("test -z \"$(lpstat -o home)\"", timeout=60)
+        # ipp-usb's sandbox: USB device nodes only.
+        server.succeed("systemctl show -p DevicePolicy ipp-usb | grep -q closed")
 
     with subtest("web: LAN only, same-origin only"):
-        # Non-LAN peer (the IoT net), routed in through the server: dropped.
-        printer.fail(f"curl -s --max-time 5 {URL}/")
-        printer.fail("curl -s --max-time 5 http://192.168.18.1:8088/")
+        # Non-LAN peer, routed in through the server: dropped.
+        outsider.fail(f"curl -s --max-time 5 {URL}/")
+        outsider.fail("curl -s --max-time 5 http://10.0.5.1:8088/")
         p = page()
         assert "Scan page" in p and "color-scheme" in p
         t = token()
@@ -243,20 +374,28 @@ pkgs.testers.runNixOSTest {
         idle()
         assert npages() == 0
 
-    with subtest("printer asleep: clear error"):
-        printer.succeed("touch /var/lib/fake-escl/asleep")
+    with subtest("scanner asleep: clear error"):
+        server.succeed("touch /var/lib/fake-escl/asleep")
         assert post("scan") == "303"
         p = idle()
-        assert "Remote Scanner" in p and "msg err" in p, p
+        assert "Wake the printer" in p and "msg err" in p, p
         assert npages() == 0
-        printer.succeed("rm /var/lib/fake-escl/asleep")
+        server.succeed("rm /var/lib/fake-escl/asleep")
+
+    with subtest("device redirect is not followed"):
+        server.succeed("touch /var/lib/fake-escl/redirect")
+        assert post("scan") == "303"
+        assert "HTTP 302" in err(idle())
+        assert npages() == 0
+        server.fail("grep -q redirected /var/lib/fake-escl/requests.log")
+        server.succeed("rm /var/lib/fake-escl/redirect")
 
     with subtest("endless eSCL body is cut off"):
-        printer.succeed("touch /var/lib/fake-escl/huge")
+        server.succeed("touch /var/lib/fake-escl/huge")
         assert post("scan") == "303"
         assert "64 MiB" in err(idle())
         assert npages() == 0
-        printer.succeed("rm /var/lib/fake-escl/huge")
+        server.succeed("rm /var/lib/fake-escl/huge")
 
     with subtest("two pages + finish, delivered once the vault is mounted"):
         assert post("scan") == "303"
@@ -265,8 +404,8 @@ pkgs.testers.runNixOSTest {
         idle()
         assert npages() == 2
         # The job's Location names another host; only the path is used.
-        printer.succeed("grep -q 'GET /eSCL/ScanJobs/job.*/NextDocument' /var/lib/fake-escl/requests.log")
-        printer.succeed("grep -q '<scan:XResolution>300</scan:XResolution>' /var/lib/fake-escl/last-settings.xml")
+        server.succeed("grep -q 'GET /eSCL/ScanJobs/job.*/NextDocument' /var/lib/fake-escl/requests.log")
+        server.succeed("grep -q '<scan:XResolution>300</scan:XResolution>' /var/lib/fake-escl/last-settings.xml")
         assert post("finish") == "303"
         p = idle()
         assert "Saved" in p, p
@@ -309,7 +448,7 @@ pkgs.testers.runNixOSTest {
         assert post("scanfinish", data=f"token={t}&do=scanfinish&dpi=600&mode=color") == "303"
         p = idle()
         assert "Saved" in p, p
-        printer.succeed("grep -q '<scan:XResolution>600</scan:XResolution>' /var/lib/fake-escl/last-settings.xml")
+        server.succeed("grep -q '<scan:XResolution>600</scan:XResolution>' /var/lib/fake-escl/last-settings.xml")
         server.wait_until_succeeds("test $(ls /vault/misc/scans/*/*.pdf | wc -l) -eq 3", timeout=30)
         j = server.succeed("journalctl -o cat -u 'scan-ocr@*' | grep -E 'memory.peak|oom|Killed' || true")
         print(j)

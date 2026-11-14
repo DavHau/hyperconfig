@@ -261,7 +261,7 @@
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
         # LAN scan page (eSCL pull, OCR deu+eng+tha, vault delivery) and
-        # the driverless print queue, against a fake MF272dw.
+        # the shared USB print queue, against a fake ipp-usb device.
         scan-trigger =
           import ./modules/nixos/scan-trigger/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;

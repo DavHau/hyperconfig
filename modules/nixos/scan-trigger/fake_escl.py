@@ -1,7 +1,7 @@
 """Fake eSCL scanner for the scan-trigger VM test (and local checks).
 
 Serves ScannerCapabilities/ScannerStatus/ScanJobs/NextDocument like a
-flatbed MF27x; the page is a JPEG rendered with German, English and Thai
+flatbed MFP behind ipp-usb (loopback only); the page is a JPEG rendered with German, English and Thai
 text. `asleep` file in the cwd: answer 503 to ScanJobs (printer offline).
 Logs every request to requests.log in the cwd.
 """
@@ -22,7 +22,7 @@ dpi = [300]
 
 CAPS = b"""<?xml version="1.0" encoding="UTF-8"?>
 <scan:ScannerCapabilities xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03" xmlns:pwg="http://www.pwg.org/schemas/2010/12/sm">
-<pwg:Version>2.63</pwg:Version><pwg:MakeAndModel>MF270 Series</pwg:MakeAndModel>
+<pwg:Version>2.63</pwg:Version><pwg:MakeAndModel>Fake USB MFP</pwg:MakeAndModel>
 <scan:Platen><scan:PlatenInputCaps>
 <scan:MinWidth>16</scan:MinWidth><scan:MaxWidth>2550</scan:MaxWidth>
 <scan:MinHeight>16</scan:MinHeight><scan:MaxHeight>3508</scan:MaxHeight>
@@ -93,6 +93,11 @@ class H(http.server.BaseHTTPRequestHandler):
             # A real flatbed takes a while; also keeps parallel clicks
             # overlapping in the test.
             time.sleep(1)
+            if os.path.exists("redirect"):
+                # A hostile device: send the client somewhere else.
+                return self.reply(302, extra=[
+                    ("Location", "http://127.0.0.1:60101/eSCL/redirected")
+                ])
             if os.path.exists("huge"):
                 # A misbehaving device: endless body, no Content-Length.
                 self.send_response(200)
@@ -130,4 +135,4 @@ class H(http.server.BaseHTTPRequestHandler):
         self.reply(200)
 
 
-http.server.ThreadingHTTPServer(("0.0.0.0", PORT), H).serve_forever()
+http.server.ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()

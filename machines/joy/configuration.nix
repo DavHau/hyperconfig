@@ -8,7 +8,7 @@
     ../../modules/nixos/common-tools.nix
     ../../modules/nixos/sbox.nix
     ../../modules/nixos/omp-joy.nix
-    ../../modules/nixos/printer-canon-mf272dw.nix
+    ../../modules/nixos/home-printer.nix
     ./output-formats.nix
   ];
 
