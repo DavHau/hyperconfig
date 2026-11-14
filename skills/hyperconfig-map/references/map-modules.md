@@ -143,7 +143,6 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/role-flixbus.nix — -
 - modules/nixos/role-parasit.nix — Wi-Fi client for the Parasit / Parasit_5G networks. <- nas
 - modules/nixos/router-ais.nix — Admin credentials of the AIS-issued ZTE F6107A router (http://192.168.1.1), the IPv6 firewall in front of the whole hom… <- amy
-- modules/nixos/router-cm-beryl-iot.nix — WPA2 passphrase of the home router's IoT Wi-Fi (cm-beryl, the offline printer's network; <- amy
 - modules/nixos/router-cm-beryl.nix — Admin credentials of the GL.iNet Beryl (cm-beryl, OpenWrt) at http://192.168.8.1 — the LAN's IPv6 relay and the second… <- amy
 - modules/nixos/router-playa-isp.nix — Admin password of the ISP router at playa (http://192.168.10.1, user `admin`): <- amy
 - modules/nixos/rust-build-cache.nix — Shared Rust compile cache (sccache) and out-of-tree cargo build dirs. <- amy, som, m/disk-hygiene/default.nix

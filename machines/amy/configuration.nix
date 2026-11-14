@@ -29,7 +29,6 @@
     ../../modules/nixos/vault-nfs-client.nix
     ../../modules/nixos/router-ais.nix
     ../../modules/nixos/router-cm-beryl.nix
-    ../../modules/nixos/router-cm-beryl-iot.nix
     ../../modules/nixos/router-playa-isp.nix
     ../../modules/nixos/esphome-secrets.nix
     ../../modules/nixos/disk-hygiene

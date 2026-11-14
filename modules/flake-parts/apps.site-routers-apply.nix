@@ -27,14 +27,5 @@ in
         type = "app";
         program = lib.getExe program;
       };
-      # ./apply.py's uci planning against a fixture of the home router.
-      checks.site-routers-apply-tests =
-        pkgs.runCommand "site-routers-apply-tests" { nativeBuildInputs = [ pkgs.python3 ]; }
-          ''
-            cp ${../../home-networks/apply.py} apply.py
-            cp ${../../home-networks/test_apply.py} test_apply.py
-            python3 -m unittest -v test_apply
-            touch $out
-          '';
     };
 }

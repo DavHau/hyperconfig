@@ -136,7 +136,6 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - remote-building-${instanceName}: modules/clan/remote-building/default.nix
 - router-ais: modules/nixos/router-ais.nix
 - router-cm-beryl: modules/nixos/router-cm-beryl.nix
-- router-cm-beryl-iot: modules/nixos/router-cm-beryl-iot.nix
 - router-playa-isp: modules/nixos/router-playa-isp.nix
 - sbox-age: modules/nixos/sbox-age.nix
 - storagebox: modules/nixos/storagebox.nix
