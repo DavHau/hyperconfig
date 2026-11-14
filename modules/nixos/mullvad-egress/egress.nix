@@ -67,6 +67,18 @@ let
     "${lib.elemAt m 0} . ${lib.elemAt m 1}"
   ) cfg.relays;
 
+  # tunnelOnly by uid: "<uid>" -> its units' listeners (address:port),
+  # for the nftables loopback rule. A unit whose user is not a tunneled
+  # one with a uid is the assertion's to report.
+  loopbackUids = lib.foldlAttrs (
+    acc: name: listeners:
+    let
+      user = config.systemd.services.${name}.serviceConfig.User or null;
+      uid = if user != null then config.users.users.${user}.uid or null else null;
+    in
+    if uid == null then acc else acc // { ${toString uid} = lib.unique ((acc.${toString uid} or [ ]) ++ listeners); }
+  ) { } cfg.tunnelOnly;
+
   first = lib.head cfg.relays;
   registered = cfg.addresses != [ ];
 
@@ -114,15 +126,99 @@ in
       default = [ ];
       description = "Public prefixes the users reach directly, bypassing the tunnel.";
     };
+    tunnelOnly = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.listOf lib.types.str);
+      default = { };
+      example = {
+        searx = [ "127.0.0.1:8890" ];
+      };
+      description = ''
+        System units of tunneled users that may reach nothing off the
+        tunnel but their own loopback listeners, given as IPv4
+        `address:port` (and the tunnel's DNS, ./dns.nix). Two layers:
+        - the unit's cgroup: IPAddressDeny on every direct destination
+          above (LAN, meshes, the rest of loopback, directPrefixes),
+          IPAddressAllow the listed addresses; it checks the remote
+          address both ways, so a peer on loopback must connect from a
+          listed address too;
+        - nftables, by the unit's uid (every process of that user, in the
+          unit or not; table mullvad-egress-loopback): on `lo` it may
+          open connections only to the listed address:port pairs and to
+          the tunnel's DNS (127.0.0.153:53); replies of established
+          connections pass (the listener answering its clients); every
+          other new connection over `lo` (other loopback services, other
+          ports on a listed address, the host's own non-loopback
+          addresses) is dropped.
+        So the unit reaches only the internet, through the tunnel, its own
+        listeners and the tunnel's DNS. Connections *to* the listeners
+        are not limited by this (clients send their own packets); who may
+        connect is the listener's own gate.
+      '';
+    };
   };
 
   config = lib.mkIf (cfg.users != [ ]) (
     lib.mkMerge [
       {
-        assertions = map (name: {
-          assertion = config.users.users ? ${name} && config.users.users.${name}.uid != null;
-          message = "hyper.mullvadEgress.users: '${name}' needs a static uid (uid rules and nftables match numbers).";
-        }) cfg.users;
+        assertions =
+          map (name: {
+            assertion = config.users.users ? ${name} && config.users.users.${name}.uid != null;
+            message = "hyper.mullvadEgress.users: '${name}' needs a static uid (uid rules and nftables match numbers).";
+          }) cfg.users
+          ++ lib.mapAttrsToList (name: listeners: {
+            assertion =
+              lib.elem (config.systemd.services.${name}.serviceConfig.User or null) cfg.users
+              && listeners != [ ]
+              && lib.all (l: builtins.match "127\\.[0-9]+\\.[0-9]+\\.[0-9]+:[0-9]+" l != null) listeners;
+            message = "hyper.mullvadEgress.tunnelOnly.${name}: not a unit of a tunneled user, or a listener that is not IPv4 loopback address:port.";
+          }) cfg.tunnelOnly;
+
+        systemd.services = lib.mapAttrs (_: listeners: {
+          serviceConfig = {
+            IPAddressDeny = direct4 ++ direct6;
+            IPAddressAllow = lib.unique (map (l: lib.head (lib.splitString ":" l)) listeners);
+          };
+        }) cfg.tunnelOnly;
+
+        # tunnelOnly's per-port loopback rule (see the option): one chain
+        # per uid, on lo only; everything else is the kill switch
+        # below and the cgroup filter above. `ct state established`
+        # lets the listener answer its clients; conntrack sees lo.
+        networking.nftables.tables.mullvad-egress-loopback = lib.mkIf (loopbackUids != { }) {
+          family = "inet";
+          content = ''
+            chain output {
+              type filter hook output priority filter; policy accept;
+              ${lib.concatMapStringsSep "\n  " (
+                uid: ''oifname "lo" meta skuid ${uid} jump uid_${uid}''
+              ) (lib.attrNames loopbackUids)}
+            }
+          ''
+          + lib.concatStrings (
+            lib.mapAttrsToList (uid: listeners: ''
+
+              chain uid_${uid} {
+                ct state established,related accept
+                ip daddr . meta l4proto . th dport { ${
+                  lib.concatStringsSep ", " (
+                    map (
+                      l:
+                      let
+                        p = lib.splitString ":" l;
+                      in
+                      "${lib.head p} . tcp . ${lib.last p}"
+                    ) listeners
+                    ++ [
+                      "${cfg.dns.address} . udp . 53"
+                      "${cfg.dns.address} . tcp . 53"
+                    ]
+                  )
+                } } accept
+                counter drop
+              }
+            '') loopbackUids
+          );
+        };
 
         networking.nftables.enable = true;
         networking.nftables.tables.mullvad-egress = {

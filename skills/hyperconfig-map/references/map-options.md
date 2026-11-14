@@ -45,6 +45,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.monitoringAlertDigest: modules/nixos/monitoring-alert-digest/default.nix
 - hyper.monitoringAlerts: modules/nixos/monitoring-alerts.nix
 - hyper.mullvadEgress: modules/nixos/mullvad-egress/egress.nix
+- hyper.mullvadEgress.dns.address: modules/nixos/mullvad-egress/dns.nix
 - hyper.mullvadEgress.dns.services: modules/nixos/mullvad-egress/dns.nix
 - hyper.oidc: modules/clan/oidc/default.nix
 - hyper.openrouterApiKey.keyFile: modules/nixos/openrouter-api-key.nix

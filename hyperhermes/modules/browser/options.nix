@@ -46,6 +46,19 @@
       };
     };
 
+    searxng.source = mkOption {
+      type = types.nullOr types.attrs;
+      default = null;
+      example = literalExpression "inputs.searxng";
+      description = ''
+        SearXNG source tree to build web_search's backend from instead of
+        nixpkgs' snapshot: a flake input with `flake = false` (it carries
+        the `rev` and `lastModifiedDate` the version string is made of).
+        Null: nixpkgs' searxng as is. Our patches apply either way
+        (./searxng-package.nix).
+      '';
+    };
+
     ocr.baseUrl = mkOption {
       type = types.nullOr types.str;
       default = null;

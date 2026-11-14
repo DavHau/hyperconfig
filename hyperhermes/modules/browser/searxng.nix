@@ -30,15 +30,11 @@ in
   config = lib.mkIf cfg.browser.enable {
     services.searx = {
       enable = true;
-      # Patches, so the build fails once upstream changes the code they touch.
-      package = pkgs.searxng.overrideAttrs (old: {
-        patches = (old.patches or [ ]) ++ [
-          # Firefox UAs (gen_useragent) get Firefox's TLS/HTTP2 fingerprint
-          # instead of the default Chrome one. Not a global switch: Yahoo
-          # answers 500 to curl_cffi's firefox147 target.
-          ./patches/searxng-firefox-ua-fingerprint.patch
-        ];
-      });
+      # nixpkgs' searxng (or browser.searxng.source) with our patches.
+      package = import ./searxng-package.nix {
+        inherit pkgs;
+        inherit (cfg.browser.searxng) source;
+      };
       # The key rides the SEARXNG_SECRET env var, never the settings:
       # the rendered settings.yml lands in the world-readable store.
       environmentFile = envFile;
@@ -82,16 +78,41 @@ in
               "stackoverflow"
             ]
           # Stock-inactive engines are not even loaded.
-          ++ map
-            (name: {
-              inherit name;
-              disabled = false;
-              inactive = false;
-            })
-            [
-              "startpage"
-              "mojeek"
-            ];
+          ++
+            map
+              (name: {
+                inherit name;
+                disabled = false;
+                inactive = false;
+              })
+              [
+                "startpage"
+                "mojeek"
+              ]
+          # Not loaded while general.contact_url is unset (below).
+          ++
+            map
+              (name: {
+                inherit name;
+                inactive = true;
+              })
+              [
+                "wikipedia"
+                "wikidata"
+                "openstreetmap"
+              ];
+        # No general.contact_url on purpose: upstream master (since
+        # 38929d14, 2026-11-12, newer than the pin; the nightly bump takes
+        # it) puts it into the User-Agent of Wikipedia, Wikidata and OSM
+        # (Wikimedia's User-Agent policy) and logs an error on every query
+        # of theirs without one, and no contact in this repo is
+        # neutral (the agents' mail domain and the instance URL both name
+        # their owner). Those three engines are off instead (engine list
+        # above, `inactive`: not even loaded, so no error per query); they
+        # gave agents no relevant results anyway (2026-11).
+        # To turn them on: set general.contact_url to a role address that
+        # identifies no one (or SEARXNG_CONTACT_URL in environmentFile)
+        # and drop their `inactive` entries.
       };
       # Bot detection reads limiter.toml even with the limiter off, and
       # warns when it is missing. The file only has to exist (the module
@@ -107,6 +128,15 @@ in
     # EnvironmentFile= to every Exec* process, and the upstream module
     # passes the path without the "-" prefix, so on first boot searx-init
     # would fail before its own pre-command could create the file.
+    # nixpkgs' unit is sandboxed already (PrivateUsers, @system-service
+    # minus @privileged/@resources, ProtectSystem=strict); it leaves the
+    # capability bounding set unset (null: full). A web app needs none. Network reach is
+    # the host's call (som: hyper.mullvadEgress.tunnelOnly).
+    systemd.services.searx.serviceConfig = {
+      CapabilityBoundingSet = lib.mkForce "";
+      AmbientCapabilities = "";
+    };
+
     systemd.services.hermes-searxng-secret = {
       description = "Generate the SearXNG secret key";
       before = [

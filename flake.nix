@@ -149,6 +149,13 @@
     hyperhermes.url = "path:./hyperhermes";
     hyperhermes.inputs.nixpkgs.follows = "nixpkgs";
 
+    # SearXNG, the agents' web_search backend, at upstream master instead of
+    # nixpkgs' snapshot (weeks behind; engines break against live sites
+    # faster than that). Source only: nixpkgs' package builds it
+    # (hyperhermes/modules/browser/searxng-package.nix).
+    searxng.url = "github:searxng/searxng";
+    searxng.flake = false;
+
     cctl.url = "github:allouis/cctl";
     cctl.inputs.nixpkgs.follows = "nixpkgs";
 

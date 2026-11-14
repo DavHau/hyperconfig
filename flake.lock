@@ -1816,6 +1816,7 @@
         "ntop": "ntop",
         "retiolum": "retiolum",
         "sbox": "sbox",
+        "searxng": "searxng",
         "spaces": "spaces",
         "srvos": "srvos",
         "stylix": "stylix",
@@ -1836,6 +1837,22 @@
       "original": {
         "owner": "DavHau",
         "repo": "sbox",
+        "type": "github"
+      }
+    },
+    "searxng": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1794388032,
+        "narHash": "sha256-w2wuWO94lzBKKFxoB+Yb8ZvAkYpCw0iPUlLyi8XuO5s=",
+        "owner": "searxng",
+        "repo": "searxng",
+        "rev": "248b8ffc05f6c2fefc55f3ae0e2d79aa8dc58a5d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "searxng",
+        "repo": "searxng",
         "type": "github"
       }
     },

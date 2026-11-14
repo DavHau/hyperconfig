@@ -5,13 +5,15 @@ fingerprint and Chrome's sec-ch-ua headers; impersonate Firefox for them.
 
 --- a/searx/network/network.py
 +++ b/searx/network/network.py
-@@ -273,6 +273,11 @@
+@@ -273,6 +273,13 @@
          was_disconnected = False
          do_raise_for_httperror = Network.extract_do_raise_for_httperror(kwargs)
          kwargs_clients = Network.extract_kwargs_clients(kwargs)
 +        # gen_useragent() only makes Firefox UAs: keep the TLS and HTTP/2
 +        # fingerprint (and the absence of sec-ch-ua) coherent with them.
-+        user_agent = (kwargs.get("headers") or {}).get("User-Agent", "")
++        # (Headers may be a list of pairs: google sends two User-Agents.)
++        headers = kwargs.get("headers") or {}
++        user_agent = headers.get("User-Agent", "") if isinstance(headers, dict) else ""
 +        if "impersonate" not in kwargs_clients and "Firefox/" in user_agent:
 +            kwargs_clients["impersonate"] = "firefox"
          while retries >= 0:  # pragma: no cover

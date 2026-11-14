@@ -131,6 +131,14 @@ in
     default = [ ];
     description = "System units running as one of the tunneled users; they resolve through the tunnel.";
   };
+  # for ./egress.nix's tunnelOnly loopback rule
+  options.hyper.mullvadEgress.dns.address = lib.mkOption {
+    type = lib.types.str;
+    default = address;
+    readOnly = true;
+    internal = true;
+    description = "The tunnel resolver's loopback address (port 53).";
+  };
 
   config = {
     assertions = [
@@ -142,7 +150,11 @@ in
     ++ map (name: {
       assertion = lib.elem (config.systemd.services.${name}.serviceConfig.User or null) cfg.users;
       message = "hyper.mullvadEgress.dns.services: '${name}' does not run as a tunneled user.";
-    }) cfg.dns.services;
+    }) cfg.dns.services
+    ++ map (name: {
+      assertion = lib.elem name cfg.dns.services;
+      message = "hyper.mullvadEgress.tunnelOnly.${name}: also list it in dns.services (its DNS is the tunnel's resolver, the only other loopback address it gets).";
+    }) (lib.attrNames cfg.tunnelOnly);
 
     hyper.mullvadEgress.users = [ user ];
     users.users.${user} = {
@@ -157,8 +169,12 @@ in
     environment.systemPackages = [ restartTunneled ];
 
     systemd.services =
-      lib.genAttrs cfg.dns.services (_: {
-        serviceConfig = confine;
+      lib.genAttrs cfg.dns.services (name: {
+        serviceConfig =
+          confine
+          # ./egress.nix's tunnelOnly denies the rest of loopback (cgroup
+          # filter by address; nftables by port: 53 here).
+          // lib.optionalAttrs (cfg.tunnelOnly ? ${name}) { IPAddressAllow = [ address ]; };
       })
       // lib.optionalAttrs config.services.nscd.enable {
         nscd.serviceConfig.RuntimeDirectoryPreserve = "yes";

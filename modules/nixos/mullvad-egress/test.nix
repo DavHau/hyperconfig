@@ -131,6 +131,19 @@ pkgs.testers.runNixOSTest {
         # Its user manager runs from boot, like an agent's.
         linger = true;
       };
+      # tunnelOnly: a tunneled listener (like searx) that may open no
+      # loopback connection but to its own port and the tunnel's DNS.
+      users.users.listener = {
+        isNormalUser = true;
+        uid = 1213;
+      };
+      systemd.services.listener = {
+        wantedBy = [ "multi-user.target" ];
+        serviceConfig = {
+          User = "listener";
+          ExecStart = "${pkgs.python3}/bin/python3 -m http.server --bind 127.0.0.1 --directory ${pkgs.writeTextDir "index.html" "listener"} 8081";
+        };
+      };
       users.users.direct = {
         isNormalUser = true;
         uid = 1212;
@@ -146,8 +159,15 @@ pkgs.testers.runNixOSTest {
       };
 
       hyper.mullvadEgress = {
-        users = [ "tunneled" ];
-        dns.services = [ "dns-probe" ];
+        users = [
+          "tunneled"
+          "listener"
+        ];
+        dns.services = [
+          "dns-probe"
+          "listener"
+        ];
+        tunnelOnly.listener = [ "127.0.0.1:8081" ];
         addresses = [
           "10.64.0.2/32"
           "fc00:bbbb:bbbb:bb01::2/128"
@@ -302,6 +322,21 @@ pkgs.testers.runNixOSTest {
     with subtest("loopback services stay reachable for the tunneled user"):
         assert curl("tunneled", "http://127.0.0.1:8080/") == "local"
         assert curl("tunneled", "http://[::1]:8080/") == "local"
+
+    with subtest("tunnelOnly: its own listener and DNS on loopback, nothing else"):
+        client.wait_until_succeeds("ss -ltn | grep -q '127.0.0.1:8081 '", timeout=60)
+        # others connect to it, its replies get out
+        assert curl("direct", "http://127.0.0.1:8081/") == "listener"
+        assert curl("tunneled", "http://127.0.0.1:8081/") == "listener"
+        # its uid (in the unit or not) reaches its own port and the DNS
+        assert curl("listener", "http://127.0.0.1:8081/") == "listener"
+        out = client.succeed("runuser -u listener -- dig +short +time=3 +tries=1 @127.0.0.153 ${marker}").strip()
+        assert out == "203.0.113.53", out
+        # but no other loopback service: dropped, so a timeout (28), not a refusal
+        for url in ["http://127.0.0.1:8080/", "http://[::1]:8080/", "http://192.168.1.1:8080/"]:
+            rc = client.execute(f"runuser -u listener -- curl -sS --max-time 3 '{url}'")[0]
+            assert rc == 28, f"listener {url}: curl exited {rc}, expected a drop"
+        print(client.succeed("nft list table inet mullvad-egress-loopback"))
 
     with subtest("tunneled units resolve through the tunnel, others over the uplink"):
         for unit in ["dns-probe.service", "user@1210.service"]:

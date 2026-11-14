@@ -237,7 +237,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/monitoring-alert-digest/test_digest.py — - <- m/monitoring-alert-digest/default.nix
 - modules/nixos/monitoring-alert-digest/test_provision_token.py — - <- m/monitoring-alert-digest/default.nix
 - modules/nixos/mullvad-egress/default.nix — Mullvad egress for hyper.mullvadEgress.users (mechanism in ./egress.nix, their DNS in ./dns.nix), exiting in Singapore. <- som
-- modules/nixos/mullvad-egress/dns.nix — DNS of the tunneled users (./egress.nix) through the tunnel too, so the names they look up do not reach the host's reso… <- m/mullvad-egress/default.nix, m/mullvad-egress/test.nix
+- modules/nixos/mullvad-egress/dns.nix — DNS of the tunneled users (./egress.nix) through the tunnel too, so the names they look up do not reach the host's reso… <- m/mullvad-egress/default.nix, m/mullvad-egress/egress.nix, m/mullvad-egress/test.nix
 - modules/nixos/mullvad-egress/egress.nix — Selected users reach the internet only through a Mullvad WireGuard tunnel; <- m/mullvad-egress/default.nix, m/mullvad-egress/test.nix
 - modules/nixos/mullvad-egress/failover.sh — Usage: mullvad-egress-failover IFACE PUBKEY ENDPOINT [PUBKEY ENDPOINT]... Moves the tunnel to the next relay of the lis… <- m/mullvad-egress/egress.nix
 - modules/nixos/mullvad-egress/register.sh — !/usr/bin/env bash Usage (repo root, logged-in Mullvad app on this machine):
@@ -389,6 +389,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyperhermes/modules/browser/ocr-cli.py — - <- hyperhermes/modules/browser/ocr.nix
 - hyperhermes/modules/browser/ocr.nix — OCR for the agents on the deployment's own hardware (browser.ocr.baseUrl, a Firecrawl-Parse-compatible server the site… <- hyperhermes/modules/browser/default.nix
 - hyperhermes/modules/browser/options.nix — Options of the agents' web tools (./default.nix). <- hyperhermes/modules/browser/default.nix
+- hyperhermes/modules/browser/searxng-package.nix — The SearXNG package of ./searxng.nix: <- hyperhermes/modules/browser/options.nix, hyperhermes/modules/browser/searxng.nix
 - hyperhermes/modules/browser/searxng.nix — A private SearXNG metasearch instance on loopback, the web_search backend of the agents. <- hyperhermes/modules/browser/default.nix
 - hyperhermes/modules/browser/web-access-skill.nix — The agents' `web-access` skill (./web-access-skill): <- hyperhermes/modules/browser/default.nix
 - hyperhermes/modules/browser/web-extract.nix — The web_extract backend of the agents: <- hyperhermes/modules/browser/default.nix

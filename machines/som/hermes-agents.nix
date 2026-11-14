@@ -469,7 +469,17 @@ in
     # vit (../../modules/nixos/ocr-server), same yggdrasil path and
     # admission as the captcha model.
     ocr.baseUrl = "http://vit.d:8098";
+    # web_search's SearXNG at upstream master (flake input `searxng`):
+    # nixpkgs' snapshot lags weeks behind the engine fixes.
+    searxng.source = inputs.searxng;
   };
+  # searx through the tunnel (./configuration.nix) reaches, off it, only
+  # its own listener 127.0.0.1:8890 (replies to the agents) and the
+  # tunnel's DNS on 127.0.0.153:53: no other loopback service, no LAN
+  # (mullvad-egress's tunnelOnly: cgroup filter + nftables by uid).
+  hyper.mullvadEgress.tunnelOnly.searx = lib.mkIf (lib.elem "searx" config.hyper.mullvadEgress.users) [
+    "127.0.0.1:${toString config.services.searx.settings.server.port}"
+  ];
   # spaces' microVM module and its slirp-facing SearXNG stay off: spaces
   # would otherwise give every normal user (dave, agent, hsjobeki,
   # nixremote, ...) a hermes microVM, and the browser module runs its own
