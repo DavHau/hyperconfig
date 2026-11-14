@@ -36,6 +36,11 @@
       # Local STT/TTS on vit (modules/nixos/wyoming-local-speech), added
       # as two Wyoming config entries (host vit.d, ports 10300/10200).
       "wyoming"
+
+      # binary_sensor.tv_screen (TV on/off = its Android TV Remote port
+      # 6466 answers), state source of the template switch "TV"; both
+      # live in the hand-managed configuration.yaml.
+      "command_line"
     ];
     # These are the modules behind "default_config", excluded python-matter-server
     # TODO: fix cross compilation for python-matter-server
