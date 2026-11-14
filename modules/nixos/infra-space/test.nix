@@ -116,40 +116,8 @@ let
     "memberB"
   ];
 
-  # What clan provides to ./default.nix: the generator declarations
-  # (ignored here) and each file's deployed path.
-  clanStub =
-    { lib, ... }:
-    {
-      options.clan.core.vars.generators = lib.mkOption {
-        type = lib.types.attrsOf (
-          lib.types.submodule (
-            { name, ... }:
-            let
-              generator = name;
-            in
-            {
-              freeformType = lib.types.attrsOf lib.types.anything;
-              options.files = lib.mkOption {
-                default = { };
-                type = lib.types.attrsOf (
-                  lib.types.submodule (
-                    { name, ... }:
-                    {
-                      freeformType = lib.types.attrsOf lib.types.anything;
-                      options.path = lib.mkOption {
-                        type = lib.types.str;
-                        default = "/etc/test-vars/${generator}/${name}";
-                      };
-                    }
-                  )
-                );
-              };
-            }
-          )
-        );
-      };
-    };
+  # What clan provides to ./default.nix (./test-clan-stub.nix).
+  clanStub = ./test-clan-stub.nix;
 
   secret = source: {
     inherit source;

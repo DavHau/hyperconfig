@@ -107,11 +107,84 @@ let
   '';
 
   # The agents with the web tools (./options.nix).
-  forEachUser =
-    f:
-    lib.mkMerge (
-      lib.mapAttrsToList (user: _: f user) (lib.filterAttrs (_: a: a.browser.enable) cfg.agents)
-    );
+  browserAgents = lib.filterAttrs (_: a: a.browser.enable) cfg.agents;
+  forEachUser = f: lib.mkMerge (lib.mapAttrsToList (user: _: f user) browserAgents);
+  # Plus the servers of plain system users for a client elsewhere
+  # (browser.extraServers, ./options.nix).
+  extra = cfg.browser.extraServers;
+
+  # Agents are in `users`; an extra server's user keeps its own group.
+  groupOf = user: if browserAgents ? ${user} then "users" else config.users.users.${user}.group;
+
+  # The server of `user` (an agent, or an extra server's system user).
+  serverUnit =
+    user:
+    let
+      dir = hlib.camofoxDir user;
+    in
+    {
+      description = "Camofox browser server of ${if browserAgents ? ${user} then "hermes agent " else ""}${user}";
+      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
+      unitConfig.RequiresMountsFor = [ (hlib.stateDir user) ];
+      environment = {
+        HOME = dir;
+        NODE_ENV = "production";
+        CAMOFOX_BIND_HOST = "127.0.0.1";
+        CAMOUFOX_EXECUTABLE = "${camoufox}/lib/camoufox/camoufox";
+        # Otherwise uBlock is downloaded at every browser launch.
+        CAMOFOX_DISABLE_DEFAULT_ADDONS = "1";
+        CAMOFOX_PROFILE_DIR = "${dir}/profiles";
+        CAMOFOX_CHALLENGE_WAIT_MS = toString (challengeWait * 1000);
+        NAVIGATE_TIMEOUT_MS = toString (navigateTimeout * 1000);
+        # One agent: its persistent userId, plus the odd ephemeral one.
+        MAX_SESSIONS = "2";
+        MAX_TABS_PER_SESSION = "4";
+        MAX_TABS_GLOBAL = "6";
+        # Firefox closes after 5 idle minutes; the server stays.
+        BROWSER_IDLE_TIMEOUT_MS = "300000";
+        BROWSER_RSS_RESTART_THRESHOLD_MB = "1200";
+      }
+      # hermes' browser_solve_captcha: the captcha plugin
+      # (pkgs/camofox-browser) runs CaptchaKraken's engine, which reads
+      # each challenge with this model.
+      // lib.optionalAttrs (cfg.browser.captchaSolver.baseUrl != null) {
+        VLLM_BASE_URL = cfg.browser.captchaSolver.baseUrl;
+        CAPTCHA_LORA_NAME = cfg.browser.captchaSolver.model;
+      };
+      # Xvfb for the headful browser; camoufox-js finds it with `which`.
+      path = [
+        pkgs.xvfb
+        pkgs.which
+      ];
+      serviceConfig = {
+        User = user;
+        Group = groupOf user;
+        UMask = "0077";
+        ExecStartPre = ensureKey user;
+        ExecStart = serve user;
+        ExecStartPost = awaitListen;
+        # SIGTERM to the server only: it saves the profile's cookies
+        # from the live browser, then closes it. Signalled together,
+        # Firefox would be gone before the save.
+        KillMode = "mixed";
+        Restart = "on-failure";
+        RestartSec = 5;
+        MemoryMax = "1536M";
+        TasksMax = 1024;
+        CPUQuota = "200%";
+        # Holds the Xvfb socket: other uids cannot reach the display.
+        # Also where the server keeps downloads (os.tmpdir(), for
+        # hermes' browser_downloads): the last 20 per tab, deleted
+        # with their tab or session, and all of them when the unit
+        # stops. A tmpfs /tmp would count them against MemoryMax.
+        PrivateTmp = true;
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        ReadWritePaths = [ dir ];
+        NoNewPrivileges = true;
+      };
+    };
 in
 {
   # Per agent (./options.nix says why not host-wide).
@@ -152,7 +225,59 @@ in
     );
   };
 
+  options.services.hyperhermes.browser.extraServers = lib.mkOption {
+    type = lib.types.attrsOf (
+      lib.types.submodule (
+        { name, ... }:
+        {
+          options = {
+            listen = lib.mkOption {
+              type = lib.types.str;
+              example = "10.0.0.1:9144";
+              description = ''
+                Address the client dials. Each connection is bridged, as
+                the server's user, by core's owner-checking bridge to the
+                server's loopback backend (127.0.0.1:<camofoxBackendBase +
+                uid>, owner-only like an agent's). Who may dial it is the
+                consumer's firewall.
+              '';
+            };
+            keyFile = lib.mkOption {
+              type = lib.types.str;
+              readOnly = true;
+              default = keyFile name;
+              description = "The server's access key (0600 the user's); hermes-camofox-key-<name> makes it at boot. Hand it to the client as its CAMOFOX_API_KEY.";
+            };
+          };
+        }
+      )
+    );
+    default = { };
+    description = ''
+      Camofox servers of plain system users (users.users.<name>, static
+      uid, the consumer's), each the browser of one client that is not an
+      agent on this host (an agent in a container). The same server as an
+      agent's, under the user's own uid, state in
+      /var/lib/hermes/<name>/state/camofox; egress is the consumer's to
+      confine.
+    '';
+  };
+
   config = lib.mkIf cfg.browser.enable {
+    systemd.sockets = lib.mapAttrs' (
+      user: s:
+      lib.nameValuePair "hermes-camofox-extra-${user}" {
+        description = "Camofox server of ${user} for its client";
+        wantedBy = [ "sockets.target" ];
+        listenStreams = [ s.listen ];
+        socketConfig = {
+          Accept = true;
+          FreeBind = true;
+          MaxConnections = 64;
+        };
+      }
+    ) extra;
+
     services.hyperhermes.forwards.camofox = {
       label = "Camofox";
       portFor = hlib.camofoxPortFor;
@@ -160,75 +285,52 @@ in
       enabledFor = user: cfg.agents.${user}.browser.enable;
     };
 
-    systemd.services = forEachUser (
+    systemd.services = lib.mkMerge [
+    # An extra server's backend is owner-only like an agent's (core's
+    # firewall gates those through the forwards).
+      { hermes-firewall.script = lib.mkIf (extra != { }) (
+      lib.mkAfter (
+        lib.concatMapStrings (user: ''
+          port=$((${toString hlib.camofoxBackendBase} + $(id -u ${user})))
+          iptables -w -A ${hlib.chain} -p tcp --dport "$port" -m owner --uid-owner ${user} -j RETURN
+          iptables -w -A ${hlib.chain} -p tcp --dport "$port" -m owner --uid-owner 0 -j RETURN
+          iptables -w -A ${hlib.chain} -p tcp --dport "$port" -j REJECT --reject-with tcp-reset
+        '') (lib.attrNames extra)
+      )
+    ); }
+      (lib.mkMerge (
+        lib.mapAttrsToList (user: _: {
+          "hermes-camofox-${user}" = serverUnit user;
+          # The key, before the server or its client needs it.
+          "hermes-camofox-key-${user}" = {
+            description = "Camofox access key of ${user}";
+            wantedBy = [ "multi-user.target" ];
+            unitConfig.RequiresMountsFor = [ (hlib.stateDir user) ];
+            serviceConfig = {
+              Type = "oneshot";
+              RemainAfterExit = true;
+              User = user;
+              ExecStart = ensureKey user;
+            };
+          };
+          "hermes-camofox-extra-${user}@" = {
+            description = "Camofox bridge for ${user}'s client";
+            wants = [ "hermes-camofox-${user}.service" ];
+            after = [ "hermes-camofox-${user}.service" ];
+            serviceConfig = {
+              User = user;
+              ExecStart = "${cfg.tcpOwnerBridge}/bin/hermes-tcp-owner-bridge ${toString hlib.camofoxBackendBase}";
+              StandardInput = "socket";
+              StandardError = "journal";
+            };
+            unitConfig.CollectMode = "inactive-or-failed";
+          };
+        }) extra
+      ))
+      (forEachUser (
       user:
-      let
-        dir = hlib.camofoxDir user;
-      in
       {
-        "hermes-camofox-${user}" = {
-          description = "Camofox browser server of hermes agent ${user}";
-          after = [ "network-online.target" ];
-          wants = [ "network-online.target" ];
-          unitConfig.RequiresMountsFor = [ (hlib.stateDir user) ];
-          environment = {
-            HOME = dir;
-            NODE_ENV = "production";
-            CAMOFOX_BIND_HOST = "127.0.0.1";
-            CAMOUFOX_EXECUTABLE = "${camoufox}/lib/camoufox/camoufox";
-            # Otherwise uBlock is downloaded at every browser launch.
-            CAMOFOX_DISABLE_DEFAULT_ADDONS = "1";
-            CAMOFOX_PROFILE_DIR = "${dir}/profiles";
-            CAMOFOX_CHALLENGE_WAIT_MS = toString (challengeWait * 1000);
-            NAVIGATE_TIMEOUT_MS = toString (navigateTimeout * 1000);
-            # One agent: its persistent userId, plus the odd ephemeral one.
-            MAX_SESSIONS = "2";
-            MAX_TABS_PER_SESSION = "4";
-            MAX_TABS_GLOBAL = "6";
-            # Firefox closes after 5 idle minutes; the server stays.
-            BROWSER_IDLE_TIMEOUT_MS = "300000";
-            BROWSER_RSS_RESTART_THRESHOLD_MB = "1200";
-          }
-          # hermes' browser_solve_captcha: the captcha plugin
-          # (pkgs/camofox-browser) runs CaptchaKraken's engine, which reads
-          # each challenge with this model.
-          // lib.optionalAttrs (cfg.browser.captchaSolver.baseUrl != null) {
-            VLLM_BASE_URL = cfg.browser.captchaSolver.baseUrl;
-            CAPTCHA_LORA_NAME = cfg.browser.captchaSolver.model;
-          };
-          # Xvfb for the headful browser; camoufox-js finds it with `which`.
-          path = [
-            pkgs.xvfb
-            pkgs.which
-          ];
-          serviceConfig = {
-            User = user;
-            Group = "users";
-            UMask = "0077";
-            ExecStartPre = ensureKey user;
-            ExecStart = serve user;
-            ExecStartPost = awaitListen;
-            # SIGTERM to the server only: it saves the profile's cookies
-            # from the live browser, then closes it. Signalled together,
-            # Firefox would be gone before the save.
-            KillMode = "mixed";
-            Restart = "on-failure";
-            RestartSec = 5;
-            MemoryMax = "1536M";
-            TasksMax = 1024;
-            CPUQuota = "200%";
-            # Holds the Xvfb socket: other uids cannot reach the display.
-            # Also where the server keeps downloads (os.tmpdir(), for
-            # hermes' browser_downloads): the last 20 per tab, deleted
-            # with their tab or session, and all of them when the unit
-            # stops. A tmpfs /tmp would count them against MemoryMax.
-            PrivateTmp = true;
-            ProtectSystem = "strict";
-            ProtectHome = true;
-            ReadWritePaths = [ dir ];
-            NoNewPrivileges = true;
-          };
-        };
+        "hermes-camofox-${user}" = serverUnit user;
 
         # Started by the first connection to the agent's root-held port.
         "hermes-camofox-fwd-${user}@" = {
@@ -273,10 +375,11 @@ in
           } >> "$env_file"
         '';
       }
-    );
+    ))
+    ];
 
-    systemd.tmpfiles.rules = lib.mapAttrsToList (user: _: "d ${hlib.camofoxDir user} 0700 ${user} users - -") (
-      lib.filterAttrs (_: a: a.browser.enable) cfg.agents
-    );
+    systemd.tmpfiles.rules = lib.mapAttrsToList (
+      user: _: "d ${hlib.camofoxDir user} 0700 ${user} ${groupOf user} - -"
+    ) (browserAgents // extra);
   };
 }

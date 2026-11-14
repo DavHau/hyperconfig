@@ -104,6 +104,7 @@ Shared vars generated (vars/shared): clan-secrets-pull esphome-casa esphome-cm-p
 - hermes-vision: ${inputs.hyperhermes}/checks/vision
 - hermes-managed-unit: ${inputs.hyperhermes}/checks/managed-unit
 - infra-space: modules/nixos/infra-space/test.nix
+- infra-space-agent-tools: modules/nixos/infra-space/agent-tools-test.nix
 - spaces: modules/nixos/spaces/test.nix
 - nixpkgs-bump-guard: modules/nixos/infra-space/nixpkgs-bump/guard-test.nix
 - nixpkgs-bump-workspace: modules/nixos/infra-space/nixpkgs-bump/workspace-test.nix

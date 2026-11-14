@@ -73,9 +73,13 @@ let
   frontDoorHost = if sso == null || !sso.enable then null else sso.frontDoor.host;
   # Agent name -> its mailbox (agents.<name>.mail), for the agents that
   # have one.
-  mailboxes = lib.mapAttrs (_: a: a.mail) (
-    lib.filterAttrs (_: a: a.mail.enable) config.services.hyperhermes.agents
-  );
+  # Plus the remote ones (remoteMailboxes): a host system user standing for
+  # a reader that runs elsewhere (an agent in a container).
+  mailboxes =
+    lib.mapAttrs (_: a: a.mail) (
+      lib.filterAttrs (_: a: a.mail.enable) config.services.hyperhermes.agents
+    )
+    // cfg.remoteMailboxes;
   inStore = path: lib.hasPrefix builtins.storeDir (toString path);
   lmtpPort = 24;
   hookPort = 226;
@@ -167,6 +171,7 @@ let
       agents = lib.mapAttrs (_: a: {
         inherit (a) owner;
         allowlist = map lib.toLower a.allowlist;
+        allowDomains = a.allowDomains or true;
       }) mailboxes;
       ownerUrl = if ownerOrigin == null then null else "${ownerOrigin}/";
       inherit ownerOrigin;
@@ -243,9 +248,7 @@ let
   skill = import ../../lib/agent-skill.nix pkgs {
     name = "mailgate";
     src = pkgs.writeTextDir "SKILL.md" (
-      builtins.replaceStrings
-        [ "@DOMAIN@" "@INBOX_DAYS@" ]
-        [ cfg.domain (toString cfg.limits.inboxDays) ]
+      builtins.replaceStrings [ "@DOMAIN@" "@INBOX_DAYS@" ] [ cfg.domain (toString cfg.limits.inboxDays) ]
         (builtins.readFile ./skill/SKILL.md)
     );
   };
@@ -355,6 +358,51 @@ in
         };
       };
 
+      remoteMailboxes = mkOption {
+        type = types.attrsOf (
+          types.submodule {
+            options = {
+              owner = mkOption {
+                type = types.str;
+                description = "Login account that confirms this mailbox's allowlist requests on the owner page.";
+              };
+              allowlist = mkOption {
+                type = types.listOf types.str;
+                default = [ ];
+                description = "Senders that always reach the INBOX when DMARC passes; runtime entries add to these.";
+              };
+              allowDomains = mkOption {
+                type = types.bool;
+                default = true;
+                description = ''
+                  Whether whole-domain entries (`@example.com`) may allowlist
+                  senders. Off, mailgate refuses them for this mailbox (owner
+                  page, mailgate-admin, the reader's requests) and ignores any
+                  already stored: for a reader that must not take mail from
+                  every address of a domain (an agent with root elsewhere).
+                '';
+              };
+              passwordFile = mkOption {
+                type = types.nullOr types.str;
+                default = null;
+                description = "Runtime path of the mailbox's IMAP password (raw, root-readable); nixosModules.clan sets it.";
+              };
+            };
+          }
+        );
+        default = { };
+        description = ''
+          Mailboxes <name>@<domain> of readers that are not agents on this
+          host, e.g. an agent in a container. Each name is a system user
+          here (users.users.<name>, which the consumer declares) that stands
+          for the reader: mailgate's agent socket answers it by its uid and
+          the IMAP gate admits it, exactly as for an agent. The consumer
+          forwards both to the reader (the agent socket and
+          127.0.0.1:143, dialled as that user) and hands it the password;
+          nothing else of the mail module reaches it.
+        '';
+      };
+
       mxAddresses = mkOption {
         type = types.listOf types.str;
         default = [ ];
@@ -409,6 +457,15 @@ in
         default = package;
         description = "`mailgate` (agents) and `mailgate-admin` (root).";
       };
+      clientPackages = mkOption {
+        type = types.attrsOf types.package;
+        readOnly = true;
+        default = {
+          inherit skill;
+          himalaya = himalayaPackage;
+        };
+        description = "For a remote mailbox's reader: the mailgate skill and himalaya built with the IMAP backend alone (no transport that can send).";
+      };
     };
 
     agents = mkOption {
@@ -462,6 +519,12 @@ in
       {
         assertions = [
           {
+            assertion = lib.all (m: m.allowDomains || !lib.any (lib.hasPrefix "@") m.allowlist) (
+              lib.attrValues cfg.remoteMailboxes
+            );
+            message = "services.hyperhermes.mail.remoteMailboxes: a mailbox with allowDomains = false lists a whole domain (`@...`) in its allowlist.";
+          }
+          {
             assertion = exposure.enable && exposure.mode == "public";
             message = "services.hyperhermes.mail needs services.hyperhermes.exposure in public mode: the MX takes mail from the internet.";
           }
@@ -470,7 +533,8 @@ in
             message = "services.hyperhermes.mail.secrets: set master, hook, lmtp and csrf (nixosModules.clan does on a clan machine).";
           }
           {
-            assertion = cfg.ownerPage.host != null -> frontDoorHost != null && cfg.ownerPage.cookieSecretFile != null;
+            assertion =
+              cfg.ownerPage.host != null -> frontDoorHost != null && cfg.ownerPage.cookieSecretFile != null;
             message = "services.hyperhermes.mail.ownerPage needs the sso front door (sso.frontDoor.host) and ownerPage.cookieSecretFile.";
           }
           {

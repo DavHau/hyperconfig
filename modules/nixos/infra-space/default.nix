@@ -65,6 +65,9 @@
       always-on hermes agent (./hermes.nix, with the p0 and TeamClaude
       keys as credentials), and its dashboard is published by this host's
       nginx (./dashboard.nix); other members are the plain backup.
+    - On som, ./agent-tools.nix (imported by machines/som/hermes-agents.nix) gives
+      the agent a mailbox, a browser and the shared wallet, served here
+      and offered on this host's veth address to the guest only.
     - Where hyper.infraSpace.buildOnHost is set (som), every `clan
       machines update` in the guest builds here: its `clan` wrapper
       (./guest.nix) adds `--build-host localhost` unless the caller names a

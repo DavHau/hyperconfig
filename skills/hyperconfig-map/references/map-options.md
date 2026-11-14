@@ -11,16 +11,16 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - barToggle: modules/clan/remote-building/default.nix
 - browser.enable: hyperhermes/modules/browser/options.nix
 - clan.core.settings: modules/nixos/spaces/test.nix
-- clan.core.settings.directory: modules/nixos/ipv4-forward-slots-test/default.nix
+- clan.core.settings.directory: modules/nixos/infra-space/agent-tools-test.nix, modules/nixos/ipv4-forward-slots-test/default.nix
 - clan.core.vars: modules/nixos/clan-vars-restart-units-test.nix
-- clan.core.vars.generators: modules/nixos/clan-secrets-mirror-test.nix, modules/nixos/infra-space/test.nix, modules/nixos/ipv4-forward-slots-test/default.nix, modules/nixos/porkbun-records/test.nix, modules/nixos/spaces/test.nix, modules/nixos/storagebox-test.nix
+- clan.core.vars.generators: modules/nixos/clan-secrets-mirror-test.nix, modules/nixos/infra-space/test-clan-stub.nix, modules/nixos/ipv4-forward-slots-test/default.nix, modules/nixos/porkbun-records/test.nix, modules/nixos/spaces/test.nix, modules/nixos/storagebox-test.nix
 - clanSecretsMirror.url: modules/nixos/clan-secrets-mirror.nix, modules/nixos/infra-space/nixpkgs-bump/guard-test.nix
 - clients: modules/clan/oidc/default.nix
 - containerSlot.cacheUsers: hyperhermes/modules/slot/default.nix
 - controller: modules/clan/wireguard/default.nix
 - dashboard.url: hyperhermes/modules/dashboards/default.nix
 - domain: modules/clan/wireguard/default.nix
-- files: modules/nixos/infra-space/test.nix, modules/nixos/ipv4-forward-slots-test/default.nix, modules/nixos/spaces/test.nix
+- files: modules/nixos/infra-space/test-clan-stub.nix, modules/nixos/ipv4-forward-slots-test/default.nix, modules/nixos/spaces/test.nix
 - hyper.afk.defaultModel: modules/nixos/afk.nix
 - hyper.afk.extraSkills: modules/nixos/afk.nix
 - hyper.afk.pinnedSettings: modules/nixos/afk.nix
@@ -34,6 +34,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.firmwareOnly: modules/nixos/firmware-only.nix
 - hyper.inferenceApiKey: modules/nixos/inference-api-key.nix
 - hyper.infraSpace: modules/nixos/infra-space/default.nix
+- hyper.infraSpace.agentTools.browser: modules/nixos/infra-space/agent-tools.nix
 - hyper.infraSpace.dashboard: modules/nixos/infra-space/dashboard.nix
 - hyper.infraSpace.fleetAccess.keyFile: modules/nixos/infra-space/fleet-access.nix
 - hyper.infraSpace.gcRoots: modules/nixos/infra-space/gcroots.nix
@@ -75,7 +76,10 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.zfsEphemeralTmp.dataset: modules/nixos/zfs-ephemeral-tmp.nix
 - hyper.ztEuLanGuard.refusedUsers: modules/nixos/zt-eu-lan-guard/default.nix
 - infraSpace: modules/nixos/infra-space/guest.nix
+- infraSpace.agentTools: modules/nixos/infra-space/agent-tools-guest.nix
 - infraSpace.hermes.dashboard: modules/nixos/infra-space/hermes.nix
+- infraSpace.hermes.extraSkills: modules/nixos/infra-space/hermes.nix
+- infraSpace.hermes.extraToolsets: modules/nixos/infra-space/hermes.nix
 - infraSpace.hermes.skills: modules/nixos/infra-space/hermes.nix
 - infraSpace.secretPrompt: modules/nixos/infra-space/secret-prompt/default.nix
 - infraSpace.voiceApi: modules/nixos/infra-space/voice-api.nix
@@ -84,7 +88,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - networking.publicIPv6: modules/nixos/public-ipv6-token.nix
 - niri.outputExtras: modules/nixos/niri-output-extras.nix
 - openrouter: machines/som/hermes-inference.nix
-- path: modules/nixos/infra-space/test.nix, modules/nixos/ipv4-forward-slots-test/default.nix, modules/nixos/monitoring-exec-usage.nix, modules/nixos/monitoring-teamclaude.nix, modules/nixos/spaces/test.nix
+- path: modules/nixos/infra-space/test-clan-stub.nix, modules/nixos/ipv4-forward-slots-test/default.nix, modules/nixos/monitoring-exec-usage.nix, modules/nixos/monitoring-teamclaude.nix, modules/nixos/spaces/test.nix
 - port: modules/clan/wireguard/default.nix
 - publish.enable: hyperhermes/modules/publish/default.nix
 - rea.enable: hyperhermes/modules/rea/default.nix
@@ -93,11 +97,13 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - services.hyperhermes: hyperhermes/modules/core/options.nix, hyperhermes/modules/local-container/guest.nix, hyperhermes/modules/mail/default.nix, hyperhermes/modules/rea/default.nix, hyperhermes/modules/slots/default.nix, hyperhermes/modules/teamclaude.nix, hyperhermes/modules/wallet/default.nix
 - services.hyperhermes.agents: hyperhermes/modules/browser/camofox.nix, hyperhermes/modules/browser/ocr.nix, hyperhermes/modules/browser/options.nix, hyperhermes/modules/browser/searxng.nix, hyperhermes/modules/browser/web-access-skill.nix, hyperhermes/modules/browser/web-extract.nix, hyperhermes/modules/clan.nix, hyperhermes/modules/dashboards/default.nix, hyperhermes/modules/publish/default.nix, machines/som/hermes-inference.nix
 - services.hyperhermes.browser: hyperhermes/modules/browser/options.nix
+- services.hyperhermes.browser.extraServers: hyperhermes/modules/browser/camofox.nix
 - services.hyperhermes.claudeAuth: hyperhermes/modules/claude-auth/default.nix
 - services.hyperhermes.dashboards: hyperhermes/modules/dashboards/default.nix
 - services.hyperhermes.desktop: hyperhermes/modules/desktop/default.nix
 - services.hyperhermes.exposure: hyperhermes/modules/exposure.nix
 - services.hyperhermes.localContainer: hyperhermes/modules/local-container/default.nix
+- services.hyperhermes.mail: hyperhermes/modules/clan.nix
 - services.hyperhermes.publish: hyperhermes/modules/publish/default.nix
 - services.hyperhermes.sso: hyperhermes/modules/sso.nix
 - services.noctalia: modules/nixos/noctalia/default.nix

@@ -327,6 +327,11 @@
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
             inherit inputs;
           };
+        # The infra agent's mailbox, browser and wallet on som's host side.
+        infra-space-agent-tools = import ./modules/nixos/infra-space/agent-tools-test.nix {
+          pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          inherit inputs;
+        };
         # The named agent spaces beside infra-space on one host (amy), and
         # Dave's herdr machines for them.
         spaces =

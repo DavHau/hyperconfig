@@ -111,11 +111,13 @@ let
     name = "mullvad-egress-restart-tunneled";
     text = ''
       failed=()
-      for unit in ${
+      # an array, so a list of one unit passes shellcheck (SC2043)
+      units=(${
         lib.escapeShellArgs (
           map (s: "${s}.service") cfg.dns.services ++ map (uid: "user@${toString uid}.service") uids
         )
-      }; do
+      })
+      for unit in "''${units[@]}"; do
         systemctl try-restart "$unit" || failed+=("$unit")
       done
       if (( ''${#failed[@]} )); then

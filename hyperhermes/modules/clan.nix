@@ -45,7 +45,8 @@
 # `hook`, `lmtp`, `csrf`, root-only; Stalwart's and mailgate's internal
 # secrets) fills mail.secrets, per mailbox agent mailgate-imap-<agent>
 # (`password`, root-only; Stalwart reads it, the agent gets its own copy)
-# fills agents.<agent>.mail.passwordFile, and with an owner page
+# fills agents.<agent>.mail.passwordFile (the same per remote mailbox,
+# mail.remoteMailboxes.<name>.passwordFile), and with an owner page
 # mailgate-oauth2-proxy (`cookie_secret`) fills
 # mail.ownerPage.cookieSecretFile.
 {
@@ -64,9 +65,9 @@ let
   hasTeamclaude = options ? services.hyperhermes.teamclaude;
   hasSso = options ? services.hyperhermes.sso.frontDoor;
   hasWallet = options ? services.hyperhermes.wallet;
-  hasMail = options ? services.hyperhermes.mail;
+  hasMail = options ? services.hyperhermes.mail.enable;
   mailOn = hasMail && cfg.mail.enable;
-  mailboxes = lib.filterAttrs (_: a: a.mail.enable) cfg.agents;
+  mailboxes = lib.filterAttrs (_: a: a.mail.enable) cfg.agents // cfg.mail.remoteMailboxes;
   random = len: ''openssl rand -hex ${toString len} | tr -d '\n' '';
   hasSlots = options ? services.hyperhermes.slots;
   walletOn = hasWallet && cfg.wallet.enable;
@@ -78,6 +79,23 @@ let
   publishOn = hasPublish && cfg.publish.enable;
 in
 {
+  # Declared unconditionally (an `options ?` test here would recurse), so
+  # hasMail looks for mail.enable, which only the mail module declares.
+  options.services.hyperhermes.mail = {
+    remoteMailboxes = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule (
+          { name, ... }:
+          {
+            config.passwordFile = lib.mkIf hasClan (
+              lib.mkDefault generators."mailgate-imap-${name}".files.password.path
+            );
+          }
+        )
+      );
+    };
+  };
+
   options.services.hyperhermes.agents = lib.mkOption {
     type = lib.types.attrsOf (
       lib.types.submodule (

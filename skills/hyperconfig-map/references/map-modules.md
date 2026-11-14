@@ -197,18 +197,23 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/exec-usage/tracer.py — - <- m/exec-usage/default.nix
 - modules/nixos/infra-space/afk.nix — afk in the infra-space container, for Dave's interactive sessions as `infra` (hermes never starts it): <- m/infra-space/default.nix, m/spaces/afk.nix
 - modules/nixos/infra-space/age-recipients.nix — The clan vars' age recipients (vars.settings.recipients.default in ../../flake-parts/nixosConfigurations.nix): <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/default.nix, m/infra-space/guest.nix, m/spaces/default.nix
+- modules/nixos/infra-space/agent-tools-guest.nix — The infra agent's side of ./agent-tools.nix (the host serves; <- m/infra-space/agent-tools.nix, m/infra-space/hermes.nix
+- modules/nixos/infra-space/agent-tools-test.nix — ./agent-tools.nix and ./agent-tools-guest.nix on one host (som): <- flake.nix
+- modules/nixos/infra-space/agent-tools-toolsets.py — - <- m/infra-space/agent-tools-test.nix
+- modules/nixos/infra-space/agent-tools.nix — The infra agent's tools for web signups (som only, ./agent-tools-guest.nix in the guest): <- machines/som/hermes-agents.nix, m/infra-space/agent-tools-guest.nix, m/infra-space/agent-tools-test.nix, m/infra-space/default.nix, m/infra-space/hermes.nix
 - modules/nixos/infra-space/dashboard-account.nix — Who signs in to the infra-space dashboard (./dashboard.nix, on som), as plain data for the two evaluations that need it: <- som, modules/flake-parts/nixosConfigurations.nix, m/infra-space/dashboard.nix
 - modules/nixos/infra-space/dashboard.nix — The infra-space agent's hermes dashboard, published by this host's nginx (som only: <- m/infra-space/default.nix, m/infra-space/hermes.nix, m/infra-space/secret-prompt/default.nix
 - modules/nixos/infra-space/decisions.nix — The fleet's decision registry: <- m/infra-space/hermes.nix, m/telegram-send/default.nix
-- modules/nixos/infra-space/default.nix — infra-space: a NixOS container on every member machine (./members.nix), identical on each, from which the fleet is mana… <- amy, som, m/infra-space/afk.nix, m/infra-space/dashboard.nix, m/infra-space/fleet-access.nix, m/infra-space/gcroots.nix, m/infra-space/guest.nix, m/infra-space/hermes.nix, +8
+- modules/nixos/infra-space/default.nix — infra-space: a NixOS container on every member machine (./members.nix), identical on each, from which the fleet is mana… <- amy, som, m/infra-space/afk.nix, m/infra-space/agent-tools-test.nix, m/infra-space/dashboard.nix, m/infra-space/fleet-access.nix, m/infra-space/gcroots.nix, m/infra-space/guest.nix, +9
 - modules/nixos/infra-space/fleet-access.nix — infra-space's root access on every clan machine (wired via the `sshd` instance's server extraModules in modules/flake-p… <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/default.nix, m/infra-space/test.nix, m/telegram-send/default.nix
 - modules/nixos/infra-space/gcroots.nix — GC roots on this host for systems built from the infra-space guest (a host module, imported by ./default.nix; <- m/infra-space/default.nix
 - modules/nixos/infra-space/guest.nix — The system inside the infra-space container (./default.nix sets the options below from the host side). <- m/infra-space/default.nix, m/infra-space/gcroots.nix, m/infra-space/hermes.nix, m/infra-space/secret-prompt/default.nix, m/spaces/guest-base.nix
-- modules/nixos/infra-space/hermes.nix — The infra-space's hermes agent, inside the container (./default.nix appends this to the guest's modules on every member… <- m/infra-space/dashboard.nix, m/infra-space/decisions.nix, m/infra-space/default.nix, m/infra-space/nixpkgs-bump.nix, m/infra-space/voice-api.nix
+- modules/nixos/infra-space/hermes.nix — The infra-space's hermes agent, inside the container (./default.nix appends this to the guest's modules on every member… <- m/infra-space/agent-tools-guest.nix, m/infra-space/dashboard.nix, m/infra-space/decisions.nix, m/infra-space/default.nix, m/infra-space/nixpkgs-bump.nix, m/infra-space/voice-api.nix
 - modules/nixos/infra-space/launchers.nix — Dave's way into infra-space, on his desktops (../dave.nix): <- m/dave-desktop/default.nix, m/infra-space/afk.nix, m/spaces/client.nix
 - modules/nixos/infra-space/members.nix — The machines that run an infra-space container (./default.nix), and the port on the machine's yggdrasil address that re… <- m/infra-space/default.nix, m/infra-space/public-members.nix
 - modules/nixos/infra-space/nixpkgs-bump.nix — The nightly nixpkgs-unstable bump, run by the infra-space agent itself (./nixpkgs-bump/SKILL.md says what it does: <- m/infra-space/decisions.nix, m/infra-space/hermes.nix
 - modules/nixos/infra-space/public-members.nix — Every member of ./members.nix with its mesh address and its container's pinned host key, from the members' public clan… <- m/infra-space/default.nix, m/infra-space/launchers.nix
+- modules/nixos/infra-space/test-clan-stub.nix — What clan provides to ./default.nix in the VM tests (./test.nix, ./agent-tools-test.nix): <- m/infra-space/agent-tools-test.nix, m/infra-space/test.nix
 - modules/nixos/infra-space/test-oidc.py — - <- m/infra-space/test.nix
 - modules/nixos/infra-space/test-toolsets.py — - <- m/infra-space/test.nix
 - modules/nixos/infra-space/test.nix — ./default.nix on two members and ./fleet-access.nix on a third machine: <- flake.nix, m/infra-space/guest.nix
@@ -217,7 +222,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/infra-space/decisions/decision.py — - <- m/infra-space/decisions.nix
 - modules/nixos/infra-space/decisions/test_decision.py — - <- m/infra-space/decisions.nix
 - modules/nixos/infra-space/decisions/curate/SKILL.md — The daily 08:00 curation of the decision registry - re-check every open decision, obsolete what no longer applies, merge <- m/infra-space/decisions.nix, m/infra-space/hermes.nix
-- modules/nixos/infra-space/hermes-skill/SKILL.md — Manage Dave's NixOS fleet from infra-space - change hyperconfig, push it, deploy machines with clan, reach the other inf <- m/infra-space/guest.nix, m/infra-space/hermes.nix
+- modules/nixos/infra-space/hermes-skill/SKILL.md — Manage Dave's NixOS fleet from infra-space - change hyperconfig, push it, deploy machines with clan, reach the other inf <- m/infra-space/agent-tools.nix, m/infra-space/guest.nix, m/infra-space/hermes.nix
 - modules/nixos/infra-space/nixpkgs-bump/SKILL.md — The nightly nixpkgs-unstable bump of hyperconfig - update nixpkgs, build every machine, fix, review, guard, merge to mai <- m/infra-space/hermes.nix, m/infra-space/nixpkgs-bump.nix
 - modules/nixos/infra-space/nixpkgs-bump/guard-test.nix — ./guard.sh against a scratch repository, without network: <- flake.nix
 - modules/nixos/infra-space/nixpkgs-bump/guard.nix — nixpkgs-bump-guard (./guard.sh), for ../nixpkgs-bump.nix (the guest's PATH) and ./guard-test.nix (which passes stubs as… <- m/infra-space/nixpkgs-bump.nix, m/infra-space/nixpkgs-bump/guard-test.nix
@@ -243,8 +248,8 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/monitoring-alert-digest/test_digest.py — - <- m/monitoring-alert-digest/default.nix
 - modules/nixos/monitoring-alert-digest/test_provision_token.py — - <- m/monitoring-alert-digest/default.nix
 - modules/nixos/mullvad-egress/default.nix — Mullvad egress for hyper.mullvadEgress.users (mechanism in ./egress.nix, their DNS in ./dns.nix), exiting in Singapore. <- som
-- modules/nixos/mullvad-egress/dns.nix — DNS of the tunneled users (./egress.nix) through the tunnel too, so the names they look up do not reach the host's reso… <- m/mullvad-egress/default.nix, m/mullvad-egress/egress.nix, m/mullvad-egress/test.nix
-- modules/nixos/mullvad-egress/egress.nix — Selected users reach the internet only through a Mullvad WireGuard tunnel; <- m/mullvad-egress/default.nix, m/mullvad-egress/test.nix
+- modules/nixos/mullvad-egress/dns.nix — DNS of the tunneled users (./egress.nix) through the tunnel too, so the names they look up do not reach the host's reso… <- m/infra-space/agent-tools-test.nix, m/mullvad-egress/default.nix, m/mullvad-egress/egress.nix, m/mullvad-egress/test.nix
+- modules/nixos/mullvad-egress/egress.nix — Selected users reach the internet only through a Mullvad WireGuard tunnel; <- m/infra-space/agent-tools-test.nix, m/mullvad-egress/default.nix, m/mullvad-egress/test.nix
 - modules/nixos/mullvad-egress/failover.sh — Usage: mullvad-egress-failover IFACE PUBKEY ENDPOINT [PUBKEY ENDPOINT]... Moves the tunnel to the next relay of the lis… <- m/mullvad-egress/egress.nix
 - modules/nixos/mullvad-egress/register.sh — !/usr/bin/env bash Usage (repo root, logged-in Mullvad app on this machine):
 - modules/nixos/mullvad-egress/test.nix — ./egress.nix and ./dns.nix against a fake Mullvad relay. <- flake.nix
@@ -331,7 +336,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/users/stefan-vault.nix — stefan on the wg-vault client machines (som, vit): <- vit, machines/som/hermes-agents.nix
 - modules/nixos/users/stefan.nix — - <- machines/nas/users.nix, m/users/stefan-vault.nix
 - modules/nixos/voice-gateway/cm-pi.nix — cm-pi's part of ./default.nix: <- cm-pi, m/voice-gateway/default.nix
-- modules/nixos/voice-gateway/default.nix — voice-gateway (som): Home Assistant's Voice PE talks to hermes. <- som, m/infra-space/default.nix, m/infra-space/voice-api.nix
+- modules/nixos/voice-gateway/default.nix — voice-gateway (som): Home Assistant's Voice PE talks to hermes. <- som, m/infra-space/agent-tools.nix, m/infra-space/default.nix, m/infra-space/voice-api.nix
 - modules/nixos/voice-gateway/edi.nix — edi's part of ./default.nix: <- edi, m/voice-gateway/default.nix
 - modules/nixos/voice-gateway/gateway.py — - <- m/voice-gateway/default.nix
 - modules/nixos/voice-gateway/shared-vars.nix — Clan vars shared between som (./default.nix, the router) and its peers: <- m/voice-gateway/cm-pi.nix, m/voice-gateway/default.nix, m/voice-gateway/edi.nix

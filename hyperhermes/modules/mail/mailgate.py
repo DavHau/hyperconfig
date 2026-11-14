@@ -222,9 +222,14 @@ def allowlist(agent: str) -> list[dict]:
     return entries
 
 
+def domains_allowed(agent: str) -> bool:
+    """Whether whole-domain (`@domain`) entries count for `agent` (allowDomains)."""
+    return AGENTS[agent].get("allowDomains", True)
+
+
 def allowed(agent: str, addr: str) -> bool:
     entries = {e["entry"] for e in allowlist(agent)}
-    return addr in entries or "@" + addr.rsplit("@", 1)[1] in entries
+    return addr in entries or (domains_allowed(agent) and "@" + addr.rsplit("@", 1)[1] in entries)
 
 
 def under(domain: str | None, parent: str) -> bool:
@@ -708,12 +713,16 @@ async def hook(request: web.Request) -> web.Response:
 # ------------------------------------------------------------------ operations
 
 
-def norm_entry(entry: str) -> str:
+def norm_entry(entry: str, agent: str | None = None) -> str:
+    """The entry, normalised; with `agent`, refused when it is a whole domain
+    and that mailbox takes single addresses only (allowDomains = false)."""
     e = (entry or "").strip().lower()
     if e.startswith("*@"):
         e = e[1:]
     if len(e) > 254 or not ENTRY_RE.fullmatch(e):
         raise ApiError("not an email address (user@example.com) or a whole domain (@example.com)")
+    if agent is not None and e.startswith("@") and not domains_allowed(agent):
+        raise ApiError("this mailbox takes single addresses only (user@example.com), never a whole domain")
     return e
 
 
@@ -722,7 +731,7 @@ def owner_url() -> str | None:
 
 
 def request_allow(agent: str, entry: str, reason: str) -> dict:
-    entry = norm_entry(entry)
+    entry = norm_entry(entry, agent)
     reason = sanitize.clean_line(reason or "", 500)
     if not reason:
         raise ApiError("give a reason: the owner sees it when deciding")
@@ -778,7 +787,7 @@ async def decide_request(rid: int, approve: bool, actor: str, agents: list[str] 
 
 
 async def allow_add(agent: str, entry: str, actor: str) -> dict:
-    entry = norm_entry(entry)
+    entry = norm_entry(entry, agent)
     DB.execute(
         "INSERT OR IGNORE INTO allowlist (agent, entry, added_by, added_at) VALUES (?,?,?,?)",
         (agent, entry, actor, now()),

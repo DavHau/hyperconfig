@@ -82,6 +82,12 @@ in
           mode 0440. The agents' `lnwallet` reads it from its directory.
         '';
       };
+      clientPackages = lib.mkOption {
+        type = lib.types.attrsOf lib.types.package;
+        readOnly = true;
+        default = { inherit skill; };
+        description = "For a wallet client elsewhere (an agent in a container): the lightning-wallet skill.";
+      };
       autoLiquidity = lib.mkOption {
         type = lib.types.enum [
           "off"

@@ -77,6 +77,9 @@ in
     ../../modules/nixos/searxng-canary
     inputs.hyperhermes.nixosModules.publish
     inputs.hyperhermes.nixosModules.wallet
+    # The infra-space agent's mailbox, browser and wallet, from the modules
+    # above (web signups).
+    ../../modules/nixos/infra-space/agent-tools.nix
     # REA reverse engineering for every agent below: its MCP server, the
     # `rea` CLI with Ghidra and the other analysis tools, its skill.
     inputs.hyperhermes.nixosModules.rea

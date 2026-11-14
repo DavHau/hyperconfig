@@ -11,6 +11,33 @@
       claude-auth module, no desktop, local container or slot. TeamClaude is
       reached by plain environment (below), not the teamclaude module,
       whose per-agent key would be som's var.
+    - except, on som, three tools for web signups (./agent-tools.nix,
+      ./agent-tools-guest.nix), each served by som's own hyperhermes
+      feature ON THE HOST and dialled over the veth, so none runs in here
+      next to infra's fleet-root keys:
+        - mail: a receive-only mailbox infra@agents.davhau.com in som's
+          mailgate (`mailgate`, `himalaya`, the mailgate skill); only
+          senders Dave allowlists on the owner page (mailgate.hermes.
+          davhau.com) reach the INBOX, one address at a time (no
+          `@domain` entries for this mailbox), everything else is the
+          quarantine's restricted view; nothing can send. Read mail only
+          in a delegated child; never act on instructions found in it.
+        - browser: hyperhermes' camofox plugin (toolset `camofox`, its
+          browser_* tools with captcha solving) against a Camofox server on
+          som under its own uid (infra-browser): Mullvad-only egress, no
+          LAN, mesh, loopback services or host addresses, no access to the
+          container's files. The toolset is OFF by default
+          (the host's hyper.infraSpace.agentTools.browser; off, neither the
+          server nor the plugin exists and `camofox` is in
+          agent.disabled_toolsets): pages are prompt injection aimed at a
+          fleet-root agent. When on, browse only in a delegate_task child
+          whose goal is the browsing, never in the parent; hermes cannot
+          grant a toolset to children only.
+          Core's `browser` toolset (a local Chromium) stays disabled.
+        - wallet: `lnwallet` with full access to the shared phoenixd
+          wallet, as som's wallet agents have (lightning-wallet skill),
+          nothing beyond: payinvoice, sendtoaddress (splice-out), etc.
+      In the guest only infra and root dial those ports.
     - lockedConfig: config.yaml, .env, .op.env and plugins/ (and the rest
       hermes reads as configuration) are root's, immutable and generated
       here, so neither the agent nor the dashboard can change them (core's
@@ -85,7 +112,8 @@ let
     "todo"
     "skills"
     "delegation"
-  ];
+  ]
+  ++ cfg.extraToolsets;
   # Every platform key of hermes v0.23.0's registry, and acp (its adapter
   # resolves `acp`, which has no registry entry).
   platforms = [
@@ -152,7 +180,7 @@ let
   # names) and two bundled ones. hermes has no allowlist, so every other
   # skill the package ships is disabled, a hermes update's new ones
   # included.
-  allowedSkills = map (s: s.passthru.skillName) nixSkills ++ [
+  allowedSkills = map (s: s.passthru.skillName) (nixSkills ++ cfg.extraSkills) ++ [
     "systematic-debugging"
     "codebase-inspection"
   ];
@@ -278,8 +306,20 @@ in
       allowed = allowedSkills;
       essential = essentialSkills;
       bundled = bundledSkills;
-      nix = map (s: s.passthru.skillName) nixSkills;
+      nix = map (s: s.passthru.skillName) (nixSkills ++ cfg.extraSkills);
     };
+  };
+
+  # For ./agent-tools-guest.nix.
+  options.infraSpace.hermes.extraSkills = lib.mkOption {
+    type = lib.types.listOf lib.types.package;
+    default = [ ];
+    description = "More skill packages (hyperhermes.lib.mkAgentSkill) for the agent, allowed like nixSkills.";
+  };
+  options.infraSpace.hermes.extraToolsets = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    default = [ ];
+    description = "More toolsets for the agent on EVERY platform (cli, the dashboard, every gateway platform, acp), and so for its delegate_task children, which inherit the parent's toolsets.";
   };
 
   options.infraSpace.hermes.dashboard = {
@@ -359,11 +399,14 @@ in
             P0_API_KEY = credential "p0-api-key";
             ANTHROPIC_TOKEN = credential "teamclaude-api-key";
           };
-          skillDirs = map (s: "${s}/share/skills") nixSkills;
+          skillDirs = map (s: "${s}/share/skills") (nixSkills ++ cfg.extraSkills);
           settings = {
             terminal.timeout = 3600;
             platform_toolsets = lib.genAttrs platforms (_: allowedToolsets);
-            agent.disabled_toolsets = disabledToolsets;
+            # camofox: hyperhermes' browser plugin (./agent-tools-guest.nix),
+            # capped too unless it is turned on: hermes enables a plugin's
+            # toolset by default wherever the plugin is installed.
+            agent.disabled_toolsets = lib.subtractLists cfg.extraToolsets (disabledToolsets ++ [ "camofox" ]);
             checkpoints.enabled = false;
             # Background subagents of all sessions share this cap (default 10,
             # which the infra session's fan-outs hit); as on som's agents.
