@@ -349,6 +349,9 @@ in
             platform_toolsets = lib.genAttrs platforms (_: allowedToolsets);
             agent.disabled_toolsets = disabledToolsets;
             checkpoints.enabled = false;
+            # Background subagents of all sessions share this cap (default 10,
+            # which the infra session's fan-outs hit); as on som's agents.
+            delegation.max_concurrent_children = 20;
           };
         };
       };

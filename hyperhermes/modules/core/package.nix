@@ -44,6 +44,7 @@ let
     ./patches/hermes-gateway-managed-unit-only.patch
     ./patches/hermes-subagent-process-notice-stays-in-child.patch
     ./patches/hermes-no-sudo-prompt.patch
+    ./patches/hermes-delegate-reject-at-capacity.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {

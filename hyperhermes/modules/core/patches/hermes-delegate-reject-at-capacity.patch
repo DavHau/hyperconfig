@@ -1,0 +1,240 @@
+hermes v0.23.0: a background delegate_task the full async pool refuses
+is rejected right away instead of running inline.
+
+Root cause. tools/delegate_tool_dispatch.py _dispatch_background: when the
+first unit of a background call was refused by the async registry
+(tools/async_delegation.py _dispatch_admitted, "Async delegation capacity
+reached (N running)"), it ran the whole batch synchronously
+(_run_sync_with_note(batch, "at_capacity")) inside the parent's tool call.
+The parent's turn then blocked for the child's whole run: new user
+messages, steers and finished background results queued behind it, and
+slots freed meanwhile made no difference. The model learned why only from
+a note on the result, after the inline run.
+
+Fix:
+- _dispatch_admitted tags the capacity refusal with reason "at_capacity"
+  (the same marker the upstream fix uses).
+- _dispatch_background returns {"status": "rejected", "error":
+  "background delegation pool full (N/N running); nothing was started.
+  ..."} at once (the upstream fix's wording): children are released (_release_unstarted_child after
+  _restore_parent_cancellation), their live transcripts and manifest are
+  settled as rejected and the call's metrics row is closed. No slot, no
+  attached child, no running transcript is left behind.
+- Other refusals of the first unit (backend retiring, session closed,
+  scheduler failure) still run inline as before, as does a later unit
+  of an admitted call (it shares the call's slot, so it is never refused
+  for capacity: only scheduler failures reach that path).
+- The restart re-dispatch (hermes-subagents-resume-after-restart.patch,
+  _RESUME_META) is unchanged: it still gets "re-dispatch cannot run
+  inline (at_capacity)", which session_auto_continue matches to park the
+  unit until a slot frees.
+- Sessions that cannot receive detached results ("no_async": hermes -z,
+  cron, ...) still run inline.
+
+Test: tests/tools/test_delegate_capacity_interrupt.py
+test_full_pool_rejects_without_running_inline (cap 1: the second call is
+rejected within 1 s, its child never starts and is closed, the slot count
+stays 1 and the freed slot admits the next call); its parametrized test
+drops the "capacity" case, which no longer runs inline. Fails without
+the fix (the second call ran inline for 30 s), passes with it; upstream's
+own repro test (tests/tools/test_delegate_capacity_rejection.py of the
+upstream PR, fix commit d5522f1f2d) passes against this tree as well.
+Differences from that fix: it renames the remaining inline note to
+"not_accepted", which here would break the resume patch's "at_capacity"
+match, so the key stays; this patch also closes the call's metrics row.
+
+Generated against v0.23.0 with every earlier patch of
+modules/core/package.nix applied.
+
+diff --git a/hermes_cli/config_defaults.py b/hermes_cli/config_defaults.py
+index b2369174..a265cf2e 100644
+--- a/hermes_cli/config_defaults.py
++++ b/hermes_cli/config_defaults.py
+@@ -1355,7 +1355,7 @@ DEFAULT_CONFIG = {
+         "child_timeout_seconds": 0,
+         # Subagent effort: "ultra" | "max" | "xhigh" | "high" | "medium" | "low" | "minimal" | "none" (empty = inherit)
+         "reasoning_effort": "",
+-        # Max parallel children per batch AND concurrent background units (async beyond it runs sync). Floor 1.
++        # Max parallel children per batch AND concurrent background units (async beyond it is rejected). Floor 1.
+         "max_concurrent_children": 10,
+         "prefix_stagger_seconds": 0,  # max s siblings wait for the 1st child's 1st chunk (not a stagger); 0 = off
+         # Background fan-outs return as ONE message when the whole call finishes. true = each task
+diff --git a/tests/tools/test_delegate_capacity_interrupt.py b/tests/tools/test_delegate_capacity_interrupt.py
+index 8f847bc5..6f95880c 100644
+--- a/tests/tools/test_delegate_capacity_interrupt.py
++++ b/tests/tools/test_delegate_capacity_interrupt.py
+@@ -123,7 +123,9 @@ def registry_state(tmp_path, monkeypatch):
+     async_delegation._reset_for_tests()
+ 
+ 
+-@pytest.mark.parametrize("rejection", ["capacity", "schedule_failure", "partial_schedule_failure"])
++# A capacity rejection runs nothing inline (test_full_pool_rejects_without_running_inline); a scheduler failure still
++# runs the batch inline under the parent's cancellation.
++@pytest.mark.parametrize("rejection", ["schedule_failure", "partial_schedule_failure"])
+ @pytest.mark.parametrize("stop_timing", ["running", "during_admission"])
+ @pytest.mark.parametrize("stop_kind", ["soft", "hard"])
+ def test_rejected_background_child_stops_with_parent(
+@@ -303,3 +305,68 @@ def test_accepted_background_child_keeps_registry_cancellation_ownership(registr
+             child.hard_interrupt("test teardown")
+         child.allow_finish.set()
+         assert child.closed.wait(5)
++
++
++class _FinishingChild(_ControlledChild):
++    """Runs until the test releases it, then completes normally."""
++
++    def run_conversation(self, **_kwargs):
++        self.started.set()
++        try:
++            assert self.allow_finish.wait(30), "test did not release the child"
++            return {"final_response": "done", "completed": True, "interrupted": False, "api_calls": 1, "messages": []}
++        finally:
++            self.finished.set()
++
++
++def test_full_pool_rejects_without_running_inline(registry_state, tmp_path):
++    """Cap 1: the first background call is accepted, the second is rejected at once with nothing started (no inline
++    run blocking the parent's turn, no leaked child or transcript dir), and the slot frees when the first finishes."""
++    from tools.delegation_live_log import create_live_transcripts, live_transcript_root
++    parent, first, second = _Parent(), _FinishingChild(), _FinishingChild()
++    second.session_id += "-second"
++    try:
++        accepted = json.loads(_dispatch_background(_batch(parent, first)))
++        assert accepted["status"] == "dispatched"
++        assert first.started.wait(5)
++        assert async_delegation.active_count() == 1
++
++        rejected_batch = _batch(parent, second)
++        live_id, writers, paths = create_live_transcripts(rejected_batch.task_list, home=tmp_path)
++        assert live_id and paths
++        rejected_batch.live_deleg_id, rejected_batch.live_writers, rejected_batch.live_paths = live_id, writers, paths
++        rejected_batch.live_home = tmp_path
++        t0 = time.monotonic()
++        rejected = json.loads(_dispatch_background(rejected_batch))
++        assert time.monotonic() - t0 < 1.0
++        assert rejected["status"] == "rejected"
++        assert "background delegation pool full (1/1 running)" in rejected["error"]
++        assert "nothing was started" in rejected["error"]
++        assert "results" not in rejected and "note" not in rejected
++        assert not second.started.is_set(), "a rejected call must not run its child inline"
++        assert second.close_count == 1
++        assert second not in parent._active_children
++        manifest = json.loads((live_transcript_root(tmp_path) / live_id / "manifest.json").read_text())
++        assert [t["status"] for t in manifest["tasks"]] == ["rejected"] and manifest.get("completed")
++        assert async_delegation.active_count() == 1
++        assert len(async_delegation.list_async_delegations()) == 1
++
++        first.allow_finish.set()
++        completion = registry_state.get(timeout=5)
++        assert completion["delegation_id"] == accepted["delegation_id"]
++        assert completion["results"][0]["status"] == "completed"
++        deadline = time.monotonic() + 5
++        while async_delegation.active_count() and time.monotonic() < deadline:
++            time.sleep(0.02)
++        assert async_delegation.active_count() == 0
++
++        third = _FinishingChild()
++        third.session_id += "-third"
++        again = json.loads(_dispatch_background(_batch(parent, third)))
++        assert again["status"] == "dispatched", "the freed slot must admit the next call"
++        assert third.started.wait(5)
++        third.allow_finish.set()
++        assert registry_state.get(timeout=5)["delegation_id"] == again["delegation_id"]
++    finally:
++        for c in (first, second):
++            c.allow_finish.set()
+diff --git a/tools/async_delegation.py b/tools/async_delegation.py
+index 7e320ab8..45003ee7 100644
+--- a/tools/async_delegation.py
++++ b/tools/async_delegation.py
+@@ -1284,7 +1284,7 @@ def _dispatch_admitted(
+             return {"status": "rejected", "error": "This session was closed (exit or /new): no new background work."}
+         active_slots = {r.get("slot_key") or r["delegation_id"] for r in _records.values() if r.get("status") in _ACTIVE_STATES}
+         if record["slot_key"] not in active_slots and len(active_slots) >= max_async_children:
+-            return {"status": "rejected", "error": capacity_error}
++            return {"status": "rejected", "error": capacity_error, "reason": "at_capacity"}
+         _records[delegation_id] = record
+         live_units = sum(1 for r in _records.values() if r.get("status") in _LIVE_STATES)
+     _persist_dispatch(record)
+diff --git a/tools/delegate_tool_config.py b/tools/delegate_tool_config.py
+index 02245fea..c68e57ea 100644
+--- a/tools/delegate_tool_config.py
++++ b/tools/delegate_tool_config.py
+@@ -174,7 +174,7 @@ def _get_worktree_isolation() -> bool:
+ def _get_max_async_children() -> int:
+     """Concurrency cap for background delegations == delegation.max_concurrent_children. At capacity a new async
+     dispatch is REJECTED (not queued) so a runaway model can't pile up unbounded background work; the caller then
+-    runs synchronously. A leftover ``delegation.max_async_children`` key is ignored with a one-time warning."""
++    returns the rejection to the model (nothing runs inline). A leftover ``delegation.max_async_children`` key is ignored with a one-time warning."""
+     from tools.delegate_tool import _get_max_concurrent_children
+     if _cfg().get("max_async_children") is not None:
+         _warn_once(
+diff --git a/tools/delegate_tool_dispatch.py b/tools/delegate_tool_dispatch.py
+index e4c0e989..f50d2d80 100644
+--- a/tools/delegate_tool_dispatch.py
++++ b/tools/delegate_tool_dispatch.py
+@@ -257,13 +257,36 @@ _SYNC_FALLBACK_NOTES = {
+         "finite chat using -Q, --oneshot, or non-TTY stdio, `hermes -z`, a /bg background task, a cron "
+         "job, a Kanban worker, or a stateless HTTP endpoint). The subagent(s) ran SYNCHRONOUSLY and the result is included above."
+     ),
++    # Kept under its old key: a restart re-dispatch matches "at_capacity" in its error and waits for a slot.
+     "at_capacity": (
+-        "The background delegation pool was at capacity (delegation.max_concurrent_children), so the subagent(s) ran "
+-        "SYNCHRONOUSLY and the result is included above. Raise "
+-        "delegation.max_concurrent_children in config.yaml to allow more concurrent background delegations."
++        "The background scheduler did not accept this call, so the subagent(s) ran SYNCHRONOUSLY and the result is "
++        "included above."
+     ),
+ }
+ 
++def _reject_at_capacity(batch: _Batch, max_async: int) -> str:
++    """Background pool full: refuse the call without running anything. Running it inline instead blocked the
++    parent's whole turn (new user messages, steers and finished background results) until the child finished."""
++    from tools.async_delegation import _RESUME_META
++    if _RESUME_META.get():  # the restart re-dispatch matches "at_capacity" and waits for a slot
++        return _run_sync_with_note(batch, "at_capacity")
++    from tools.registry import tool_error
++    error = (f"background delegation pool full ({max_async}/{max_async} running); nothing was started. Wait for a "
++             "running delegation to finish (its result re-enters the chat) and dispatch again, or tell the user.")
++    for _, _, child in batch.children:
++        _release_unstarted_child(batch, child)
++    # No child ran: settle its transcripts and manifest as rejected and close the call's metrics row.
++    entries = [{**_fabricated_entry(i, "rejected", error, c), "exit_reason": "at_capacity"} for i, _, c in batch.children]
++    for entry in entries:
++        writer = batch.live_writers[entry["task_index"]] if entry["task_index"] < len(batch.live_writers) else None
++        if writer is not None:
++            with _quiet("Live transcript finalize failed", exc_info=True):
++                writer.finalize(entry)
++    from tools.delegation_live_log import update_manifest_statuses
++    update_manifest_statuses(batch.live_deleg_id, entries, home=batch.live_home)
++    finish_delegation_unit(batch.task_list, entries, background=True)
++    return tool_error(error, status="rejected")
++
+ def _run_sync_with_note(batch: _Batch, reason: str) -> str:
+     """Inline fallback: run the batch now and explain why it was not detached."""
+     from tools.async_delegation import _RESUME_META
+@@ -498,7 +521,7 @@ def _dispatch_background(batch: _Batch) -> str:
+     """Dispatch the call as independent async units (see ``_units_of``) and return the tool result JSON. Every unit
+     of one call shares ONE pool slot (``slot_key``), so grouping never changes capacity accounting. Falls back to
+     running synchronously (with an explanatory ``note``) when the session cannot receive detached completions or the
+-    async pool is at capacity."""
++    scheduler fails; a call the full async pool refuses is rejected with nothing started."""
+     from tools.delegate_tool import _get_max_async_children
+     wake_sid = _resolve_async_wake_sid(
+         batch.origin_wake_sid, batch.origin_session_history_delivery,
+@@ -535,10 +558,11 @@ def _dispatch_background(batch: _Batch) -> str:
+             continue
+         _restore_parent_cancellation(unit)
+         if not dispatched:
+-            logger.info(
+-                "delegate_task: async pool at capacity (%s); running the whole batch synchronously instead.",
+-                dispatch.get("error", "rejected"),
+-            )
++            if dispatch.get("reason") == "at_capacity":
++                logger.info("delegate_task: async pool at capacity (%s); rejecting the call.", dispatch.get("error"))
++                return _reject_at_capacity(batch, routing["max_async_children"])
++            logger.info("delegate_task: background dispatch not accepted (%s); running the whole batch synchronously "
++                        "instead.", dispatch.get("error", "rejected"))
+             return _run_sync_with_note(batch, "at_capacity")
+         # Later units of an admitted call share its slot and cannot be capacity-rejected; a scheduler failure runs
+         # the unit inline so no task is silently dropped.
