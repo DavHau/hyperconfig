@@ -311,7 +311,7 @@ in
 
     # The picker's translator: p0's Qwen over the internet with the fleet
     # inference key, so outside speech-tts' IP sandbox. Loopback only.
-    hyper.inferenceApiKey.users = [ "speech" ];
+    hyper.providerKeys.p0.users = [ "speech" ];
     systemd.services.speech-translate = {
       description = "Voice picker: sample sentence -> en/de/th (p0 Qwen)";
       wantedBy = [ "multi-user.target" ];
@@ -325,7 +325,7 @@ in
           "--port" (toString cfg.translatePort)
           "--base-url" "https://inference.p0.contact/v1"
           "--model" "qwen"
-          "--key-file" (config.hyper.inferenceApiKey.userTokenPath "speech")
+          "--key-file" (config.hyper.providerKeys.p0.userKeyPath "speech")
         ]}";
         Restart = "on-failure";
         RestartSec = 10;

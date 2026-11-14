@@ -34,7 +34,6 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.execUsage: modules/nixos/exec-usage/default.nix
 - hyper.firmwareOnly: modules/nixos/firmware-only.nix
 - hyper.geninfSpace.ciToken: modules/nixos/spaces/geninf-space.nix
-- hyper.inferenceApiKey: modules/nixos/inference-api-key.nix
 - hyper.infraSpace: modules/nixos/infra-space/default.nix
 - hyper.infraSpace.agentTools.browser: modules/nixos/infra-space/agent-tools.nix
 - hyper.infraSpace.dashboard: modules/nixos/infra-space/dashboard.nix
@@ -52,9 +51,10 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.mullvadEgress.dns.services: modules/nixos/mullvad-egress/dns.nix
 - hyper.mullvadEgress.dns.upstream: modules/nixos/mullvad-egress/dns.nix
 - hyper.oidc: modules/clan/oidc/default.nix
-- hyper.openrouterApiKey.keyFile: modules/nixos/openrouter-api-key.nix
 - hyper.perUserTmp.enable: modules/nixos/per-user-tmp/default.nix
 - hyper.porkbunRecords: modules/nixos/porkbun-records/default.nix
+- hyper.providerKeyPaths: modules/nixos/provider-keys.nix
+- hyper.providerKeys: modules/nixos/provider-keys.nix
 - hyper.recurringTasks: modules/nixos/recurring-tasks/default.nix
 - hyper.rgbOff.colorfulArgb: modules/nixos/rgb-off.nix
 - hyper.rgbOff.dramMode: modules/nixos/rgb-off.nix
@@ -65,7 +65,6 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.spacesClient: modules/nixos/spaces/client.nix
 - hyper.tangClient: modules/nixos/tang-client.nix
 - hyper.tangServer: modules/nixos/tang-server.nix
-- hyper.teamclaudeApiKey.keyFile: modules/nixos/teamclaude-api-key.nix
 - hyper.teamclaudeGateway.clientKeys: modules/nixos/teamclaude-gateway/default.nix
 - hyper.teamclaudeGateway.upstreamAccounts: modules/nixos/teamclaude-gateway/default.nix
 - hyper.toolchainCacheDirs: modules/nixos/toolchain-cache-dirs/default.nix
@@ -139,7 +138,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - clan-secrets-pull: modules/nixos/clan-secrets-mirror.nix
 - grafana-telegram: modules/nixos/monitoring-alerts.nix
 - ha-rack-plug-token: machines/som/dave-hermes-ha.nix
-- inference-api-key: modules/nixos/inference-api-key.nix
+- inference-api-key: modules/nixos/provider-keys.nix
 - infra-space-brief: modules/nixos/infra-space/default.nix
 - initrd-ssh: modules/nixos/initrd-ssh.nix
 - initrd-wifi: modules/nixos/initrd-wifi.nix
@@ -162,7 +161,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - storagebox: modules/nixos/storagebox.nix
 - tang: modules/nixos/tang-server.nix
 - tasmota-password: machines/nas/automount/default.nix
-- teamclaude-api-key: modules/nixos/teamclaude-api-key.nix
+- teamclaude-api-key: modules/nixos/provider-keys.nix
 - teamclaude-nmm: machines/som/configuration.nix
 - url: flake.nix
 - vault-key: machines/bam/zfs.nix

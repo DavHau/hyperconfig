@@ -4,8 +4,8 @@
 # afk-nosand is opt-in per host. The bare `omp` and `pi` from spaces'
 # agentHarnesses stay beside it as unrelated harnesses; ./omp-p0.nix gives
 # bare omp the same models.yml, and every harness shares the p0 key through
-# `p0-api-key` (inference-api-key.nix), the TeamClaude key through
-# `teamclaude-api-key` (teamclaude-api-key.nix) and the skills in
+# `p0-api-key` (provider-keys.nix), the TeamClaude key through
+# `teamclaude-api-key` (provider-keys.nix) and the skills in
 # ~/.agents/skills.
 #
 # afk owns its own profile bootstrap (distribution config.yml via

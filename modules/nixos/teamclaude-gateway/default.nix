@@ -21,7 +21,7 @@
 # Some client keys are static, declared in hyper.teamclaudeGateway.clientKeys
 # (client name -> clan generator whose `key` file holds the key): our own
 # infrastructure's, the shared clan var teamclaude-api-key
-# (../teamclaude-api-key.nix) as `hyperconfig`, and one per hermes agent
+# (../provider-keys.nix, hyper.providerKeys.teamclaude) as `hyperconfig`, and one per hermes agent
 # that routes its Anthropic provider here (hyperhermes' teamclaude, wired
 # in ../../../machines/som/hermes-agents.nix). The
 # config var carries them and preStart keeps them in proxy.clientKeys on
@@ -141,7 +141,7 @@ in
 {
   imports = [
     inputs.teamclaude.nixosModules.default
-    ../teamclaude-api-key.nix
+    ../provider-keys.nix
     # Its A/AAAA record (hyper.porkbunRecords below).
     ../porkbun-records
     # Usage counters for Grafana (stats.davhau.com).

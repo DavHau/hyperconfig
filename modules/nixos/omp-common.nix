@@ -63,7 +63,7 @@
     "    baseUrl: https://inference.p0.contact/v1"
     "    api: openai-completions"
     # Resolved by running the command (model-registry.ts resolveCommandConfig);
-    # the token never sits in a config file or the store. inference-api-key.nix.
+    # the token never sits in a config file or the store. ./provider-keys.nix.
     "    apiKey: \"!p0-api-key\""
     "    discovery:"
     "      type: litellm"
@@ -81,7 +81,7 @@
   #   Anthropic OAuth logins (pi-ai auth/cascade.ts KeyOverrides.setConfig).
   #   Without it omp would forward a personal subscription token to the
   #   gateway. Resolved by running the command (resolve-config-value.ts), so
-  #   the key never sits in a config file or the store; ./teamclaude-api-key.nix.
+  #   the key never sits in a config file or the store; ./provider-keys.nix.
   # - Gateway keys look like subscription tokens (`sk-ant-oat01-`), which is
   #   what makes omp present as Claude Code, the only shape Anthropic accepts
   #   subscription OAuth in. omp then sends the key as `Authorization: Bearer`;
@@ -102,7 +102,7 @@
   # container): elsewhere the command would not exist and the provider
   # would 401 on the first turn. Detected by its option, which exists with
   # or without clan.
-  teamclaude-enabled = config ? hyper && config.hyper ? teamclaudeApiKey;
+  teamclaude-enabled = config ? hyper && config.hyper ? providerKeys && config.hyper.providerKeys ? teamclaude;
   teamclaudeProvider = lib.concatStringsSep "\n" [
     "  anthropic:"
     "    baseUrl: https://teamclaude.davhau.com"
@@ -113,10 +113,10 @@
   # OpenRouter: omp's builtin `openrouter` provider (baseUrl
   # https://openrouter.ai/api/v1, its model catalog); only the key is
   # ours. Resolved by running the command, so the key never sits in a
-  # config file or the store; ./openrouter-api-key.nix. Only where that
+  # config file or the store; ./provider-keys.nix. Only where that
   # module is imported (dave.nix, the containers' ./spaces/afk.nix),
   # detected by its option as for TeamClaude below.
-  openrouter-enabled = config ? hyper && config.hyper ? openrouterApiKey;
+  openrouter-enabled = config ? hyper && config.hyper ? providerKeys && config.hyper.providerKeys ? openrouter;
   openrouterProvider = lib.concatStringsSep "\n" [
     "  openrouter:"
     "    apiKey: \"!openrouter-api-key\""

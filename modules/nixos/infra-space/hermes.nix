@@ -73,7 +73,7 @@
       curation run, the 09:00 brief and the /decisions skill; som only.
 
   Inference: Claude Opus 5.5 through TeamClaude (the model) with the
-  shared client key (../teamclaude-api-key.nix, booked as `hyperconfig`),
+  shared client key (../provider-keys.nix, booked as `hyperconfig`),
   and p0's Qwen as a provider (machines/som/hermes-inference.nix) for
   titles and as the vision describer for text-only models. Both keys arrive as the host's credentials
   `p0-api-key` and `teamclaude-api-key`, the dashboard's OIDC client secret

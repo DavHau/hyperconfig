@@ -87,14 +87,10 @@ in
           "${home}/.ssh/id_ed25519_github1"
           "${home}/.ssh/id_ed25519_github1.pub"
           config.clan.core.vars.generators.sbox-age.files.identity.path
-          # p0 inference token, read by `p0-api-key` (inference-api-key.nix).
-          config.clan.core.vars.generators.inference-api-key.files.token.path
-          (config.hyper.inferenceApiKey.userTokenPath "grmpf")
-          # TeamClaude key, read by `teamclaude-api-key` (teamclaude-api-key.nix).
-          config.clan.core.vars.generators.teamclaude-api-key.files.key.path
-          # OpenRouter key, read by `openrouter-api-key` (openrouter-api-key.nix).
-          config.clan.core.vars.generators.openrouter.files.apikey.path
-        ];
+        ]
+        # Provider keys, read by the `<name>-api-key` commands
+        # (./provider-keys.nix): var files and grmpf's per-user copies.
+        ++ config.hyper.providerKeyPaths "grmpf";
         # The nix daemon socket is root-equivalent for trusted users (grmpf
         # is one); sbox exposes it too via its read-only /nix bind.
         socketFiles = [ nixDaemonSocket ];

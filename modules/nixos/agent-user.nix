@@ -36,12 +36,12 @@ in
   # oneshot installs a 0400 copy of the shared token at
   # /run/inference-api-key/agent/token, which `p0-api-key` (models.yml
   # apiKey: "!p0-api-key") reads for the calling user
-  # (./inference-api-key.nix). That module only rides along dave.nix
+  # (./provider-keys.nix). That module only rides along dave.nix
   # (amy, vit, som); this file is fleet-wide, so the option is set only
   # where it exists — `lib.mkIf` would still declare the path and fail
   # evaluation on the other hosts.
-  config = lib.mkIf config.hyper.agentUser.enable (lib.optionalAttrs (options ? hyper && options.hyper ? inferenceApiKey) {
-    hyper.inferenceApiKey.users = [ "agent" ];
+  config = lib.mkIf config.hyper.agentUser.enable (lib.optionalAttrs (options ? hyper && options.hyper ? providerKeys) {
+    hyper.providerKeys.p0.users = [ "agent" ];
   } // {
   users.groups.agent = { };
   users.users.agent = {

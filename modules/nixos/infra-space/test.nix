@@ -314,7 +314,7 @@ let
           }
         );
       };
-      # what ../inference-api-key.nix, ../teamclaude-api-key.nix and
+      # what ../provider-keys.nix and
       # ../pi-chat-openrouter.nix declare on som and amy
       clan.core.vars.generators.inference-api-key.files.token = { };
       clan.core.vars.generators.teamclaude-api-key.files.key = { };

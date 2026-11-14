@@ -8,7 +8,7 @@
 #     openrouter var when `openrouter` is on,
 #   - restartUnits on both vars, aimed at hermes-agent-<agent>,
 #   - oh-my-pi on p0 through a per-user token copy
-#     (../../modules/nixos/inference-api-key.nix).
+#     (../../modules/nixos/provider-keys.nix).
 #
 # Seeding is safe on a host with existing agents: the seed writes only
 # when config.yaml has no `model` key.
@@ -44,7 +44,7 @@ in
       );
     };
 
-    hyper.inferenceApiKey.users = lib.attrNames agents;
+    hyper.providerKeys.p0.users = lib.attrNames agents;
 
     services.hyperhermes = {
       settings.providers.p0 = {

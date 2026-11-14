@@ -63,23 +63,14 @@
       "$HOME/.ssh/id_ed25519_github1.pub".to = "$HOME/.ssh/id_ed25519.pub";
       # VSCode extensions (nix-managed) and CLI
       "$HOME/.vscode" = {};
-    } // lib.optionalAttrs (config ? hyper && config.hyper ? inferenceApiKey) {
-      # p0 inference token: omp/afk resolve it INSIDE the sandbox by running
-      # `p0-api-key` (models.yml apiKey: "!p0-api-key", inference-api-key.nix),
-      # which reads the caller's copy first, then the var file. Neither
-      # lives under $HOME, so bind both; --bind-try skips whichever is
-      # absent (the copy exists only for hyper.inferenceApiKey.users).
-      # Guarded: joy imports this file without inference-api-key.nix.
-      "${config.clan.core.vars.generators.inference-api-key.files.token.path}" = {};
-      "${config.hyper.inferenceApiKey.userTokenPath "$USER"}" = {};
-    } // lib.optionalAttrs (config.clan.core.vars.generators ? teamclaude-api-key) {
-      # TeamClaude key, read by `teamclaude-api-key` inside the sandbox
-      # (models.yml anthropic apiKey: "!teamclaude-api-key").
-      "${config.clan.core.vars.generators.teamclaude-api-key.files.key.path}" = {};
-    } // lib.optionalAttrs (config.clan.core.vars.generators ? openrouter) {
-      # OpenRouter key, read by `openrouter-api-key` inside the sandbox
-      # (models.yml openrouter apiKey, ./openrouter-api-key.nix).
-      "${config.clan.core.vars.generators.openrouter.files.apikey.path}" = {};
-    };
+    } // lib.optionalAttrs (config ? hyper && config.hyper ? providerKeyPaths) (
+      # Provider keys: omp/afk resolve them INSIDE the sandbox by running
+      # `<name>-api-key` (./provider-keys.nix), which reads the var file
+      # and, for per-user keys (p0), the caller's copy first. None lives
+      # under $HOME, so bind all; --bind-try skips whichever is absent
+      # (a copy exists only for that key's `users`). Guarded: joy, bam,
+      # nas, edi and cm-pi import this file without provider-keys.nix.
+      lib.genAttrs (config.hyper.providerKeyPaths "$USER") (_: {})
+    );
   };
 }

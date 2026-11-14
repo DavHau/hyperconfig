@@ -36,8 +36,8 @@ let
 in
 {
   # The client key: the shared clan var, readable by the user via group
-  # teamclaude-api-key.
-  imports = [ ../teamclaude-api-key.nix ];
+  # teamclaude-api-key (hyper.providerKeys.teamclaude).
+  imports = [ ../provider-keys.nix ];
 
   systemd.user.services.anthropic-usage-poll = {
     description = "Publish per-account Anthropic weekly usage for the noctalia bar";

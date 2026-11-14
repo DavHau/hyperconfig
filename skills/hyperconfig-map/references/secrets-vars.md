@@ -19,8 +19,8 @@
   `/run/nixos/activation-restart-list`; first switch after boot only
   records). Enabled fleet-wide by the `clan-vars-restart-units` importer
   instance in nixosConfigurations.nix. Test: `checks...clan-vars-restart-units`.
-- Shared keys used by many modules: `inference-api-key.nix` (p0 token),
-  `teamclaude-api-key.nix`, `iodine-password.nix`, porkbun (dyndns).
+- Shared keys used by many modules: `provider-keys.nix` (`hyper.providerKeys`: p0 token,
+  TeamClaude and OpenRouter keys), `iodine-password.nix`, porkbun (dyndns).
 - Secrets mirror on every machine: `modules/nixos/clan-secrets-mirror.nix`.
 
 Recipe, add a generator: declare it in the module that consumes it

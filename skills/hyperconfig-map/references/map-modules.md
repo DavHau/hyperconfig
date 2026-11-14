@@ -59,7 +59,6 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/home-manager.nix — home-manager as a NixOS module on Dave's desktops (shared settings for every home-manager user; <- m/dave.nix
 - modules/nixos/houses-grmpf.nix — grmpf's nix-housing houses (see houses.nix): <- amy
 - modules/nixos/houses.nix — nix-housing (codeberg.org/decentstates/nix-housing): <- m/houses-grmpf.nix
-- modules/nixos/inference-api-key.nix — Bearer token for the fleet inference endpoint (https://inference.p0.contact). <- m/dave.nix, m/spaces/afk.nix
 - modules/nixos/initrd-ssh.nix — sshd in the initrd on port 2222: <- vit
 - modules/nixos/initrd-wifi.nix — Wifi in the initrd, so a machine without a cable can reach its Tang servers (./tang-client.nix). <- vit
 - modules/nixos/iodine-password.nix — Password of the iodine IP-over-DNS tunnel (ns.bruch-bu.de). <- m/role-iodine/default.nix
@@ -115,7 +114,6 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/omr.nix — - <- m/dave.nix
 - modules/nixos/oomd.nix — systemd-oomd on the user slices, tuned to act within seconds. <- amy
 - modules/nixos/opengl.nix — - <- m/dave.nix
-- modules/nixos/openrouter-api-key.nix — The shared OpenRouter key for Dave's harnesses (afk): <- m/dave.nix, m/spaces/afk.nix
 - modules/nixos/packages.nix — Dave's desktop package set (./dave.nix): <- m/dave.nix
 - modules/nixos/pi-agent.nix — The `pi` agent, split out of the former pi.nix when the patched-omp wrappers were dropped in favour of afk (./afk.nix). <- m/dave.nix
 - modules/nixos/pi-chat-openrouter.nix — The shared OpenRouter key (spaces.openrouter; <- m/dave.nix
@@ -124,6 +122,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/printer-canon-mf272dw.nix — The home Canon i-SENSYS MF272dw (IoT Wi-Fi, fixed 192.168.18.20) as the default printer, driverless over IPP (AirPrint/… <- amy, joy, vit, m/scan-trigger/test.nix
 - modules/nixos/printing.nix — - <- m/dave.nix
 - modules/nixos/proton-vpn.nix — - <- m/dave.nix
+- modules/nixos/provider-keys.nix — Provider keys for Dave's harnesses (afk, omp, pi): <- m/dave.nix, m/infra-space/hermes.nix, m/noctalia-anthropic-usage/default.nix, m/spaces/afk.nix, m/teamclaude-gateway/default.nix
 - modules/nixos/prune-gcroots.nix — CLI to prune stale auto GC roots (nix-direnv devshells and old result links). <- m/common-tools.nix
 - modules/nixos/prune-gcroots.sh — - <- m/prune-gcroots.nix
 - modules/nixos/public-ipv6-token.nix — A stable, hand-picked IPv6 suffix on the LAN uplink, so the host has a predictable public address in whatever /64 the A… <- som
@@ -154,7 +153,6 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/storagebox.nix — The Hetzner storage box (sub-account u632961-sub1) mounted read-only over sshfs at /mnt/storagebox — the shared depth a… <- m/storagebox-sync.nix, m/storagebox-test.nix
 - modules/nixos/tang-client.nix — Boot unlock through Tang servers on the LAN (./tang-server.nix): <- m/luks-unlock/default.nix, m/zfs-remote-unlock/default.nix
 - modules/nixos/tang-server.nix — Tang server: lets LAN peers unlock their encrypted root at boot without a passphrase (client side: ./tang-client.nix). <- som, vit
-- modules/nixos/teamclaude-api-key.nix — Client key for the TeamClaude pooled Claude subscription gateway (https://teamclaude.davhau.com, ./teamclaude-gateway o… <- m/dave.nix, m/infra-space/hermes.nix, m/noctalia-anthropic-usage/default.nix, m/spaces/afk.nix, m/teamclaude-gateway/default.nix
 - modules/nixos/thunderbird.nix — - <- m/dave.nix
 - modules/nixos/timedated-ntp.nix — - <- m/common.nix
 - modules/nixos/udev.nix — udev rules for Dave's USB devices: <- m/dave.nix

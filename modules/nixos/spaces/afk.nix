@@ -27,13 +27,11 @@
 secretsDir: {
   imports = [
     ../afk.nix
-    ../inference-api-key.nix
-    ../teamclaude-api-key.nix
-    ../openrouter-api-key.nix
+    ../provider-keys.nix
   ];
-  hyper.inferenceApiKey.tokenFile = "${secretsDir}/p0-api-key";
-  hyper.teamclaudeApiKey.keyFile = "${secretsDir}/teamclaude-api-key";
-  hyper.openrouterApiKey.keyFile = "${secretsDir}/openrouter-api-key";
+  hyper.providerKeys.p0.keyFile = "${secretsDir}/p0-api-key";
+  hyper.providerKeys.teamclaude.keyFile = "${secretsDir}/teamclaude-api-key";
+  hyper.providerKeys.openrouter.keyFile = "${secretsDir}/openrouter-api-key";
   hyper.afk.pinnedSettings = {
     web_search.enabled = false;
     # also URL reads through the read tool

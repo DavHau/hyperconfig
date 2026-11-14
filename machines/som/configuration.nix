@@ -444,7 +444,7 @@ in
   # alone. No restartUnits: restarting the slot would end the swarm's
   # sessions, so a rotated key reaches the slot at its next restart of
   # container@asof-agents. The `sk-ant-oat01-` prefix is load-bearing, as
-  # for every gateway key (../../modules/nixos/teamclaude-api-key.nix): omp
+  # for every gateway key (../../modules/nixos/provider-keys.nix): omp
   # presents as Claude Code only when its key looks like a subscription
   # token.
   hyper.teamclaudeGateway.clientKeys.nmm = "teamclaude-nmm";

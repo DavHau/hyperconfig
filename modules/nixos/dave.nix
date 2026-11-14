@@ -53,16 +53,11 @@ in
     ./afk.nix
     # Same p0 models.yml for spaces' bare omp.
     ./omp-p0.nix
-    # Bearer token for the fleet inference endpoint; `p0-api-key` hands it
-    # to every harness's models.yml.
-    ./inference-api-key.nix
-    # TeamClaude gateway key; `teamclaude-api-key` hands it to the anthropic
-    # provider override in every harness's models.yml (./omp-common.nix).
-    ./teamclaude-api-key.nix
-    # OpenRouter key (the shared var of ./pi-chat-openrouter.nix);
-    # `openrouter-api-key` hands it to the openrouter provider in afk's
-    # models.yml (./omp-common.nix).
-    ./openrouter-api-key.nix
+    # Provider keys (p0 inference token, TeamClaude client key, OpenRouter
+    # key from ./pi-chat-openrouter.nix): `p0-api-key`, `teamclaude-api-key`
+    # and `openrouter-api-key` hand them to every harness's models.yml
+    # (./omp-common.nix).
+    ./provider-keys.nix
     ./amd-pstate-resume-fix.nix
     ./omr.nix
     ./ntop.nix
