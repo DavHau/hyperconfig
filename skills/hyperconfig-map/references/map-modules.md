@@ -279,6 +279,10 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/scan-trigger/scan_ocr.py — - <- m/scan-trigger/default.nix
 - modules/nixos/scan-trigger/scan_trigger.py — - <- m/scan-trigger/default.nix
 - modules/nixos/scan-trigger/test.nix — scan-trigger (./default.nix) and the driverless queue (../lan-printer.nix) against a fake MF272dw: <- flake.nix
+- modules/nixos/searxng-canary/canary.py — - <- m/searxng-canary/package.nix
+- modules/nixos/searxng-canary/candidate.nix — searxng-candidate: the nightly bump's scratch SearXNG, run on this host in a sandbox instead of in the infra-space gues… <- m/searxng-canary/default.nix
+- modules/nixos/searxng-canary/default.nix — searxng-canary: is web_search's SearXNG (../../../hyperhermes/modules/ browser/searxng.nix, 127.0.0.1:8890) still answe… <- machines/som/hermes-agents.nix
+- modules/nixos/searxng-canary/package.nix — The canary script (./canary.py) as a command, for ./default.nix (som's 10-min timer) and ./candidate.nix (the nightly b… <- m/searxng-canary/candidate.nix, m/searxng-canary/default.nix
 - modules/nixos/short-videos/default.nix — - <- m/dave.nix
 - modules/nixos/short-videos/short-videos.sh — !/usr/bin/env bash List video files in DIR (default: <- m/short-videos/default.nix
 - modules/nixos/skills/external-scripts/SKILL.md — >

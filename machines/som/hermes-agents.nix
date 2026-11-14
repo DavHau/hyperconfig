@@ -74,6 +74,7 @@ in
     inputs.hyperhermes.nixosModules.clan
     ./hermes-inference.nix
     inputs.hyperhermes.nixosModules.browser
+    ../../modules/nixos/searxng-canary
     inputs.hyperhermes.nixosModules.publish
     inputs.hyperhermes.nixosModules.wallet
     # REA reverse engineering for every agent below: its MCP server, the
@@ -480,6 +481,9 @@ in
   hyper.mullvadEgress.tunnelOnly.searx = lib.mkIf (lib.elem "searx" config.hyper.mullvadEgress.users) [
     "127.0.0.1:${toString config.services.searx.settings.server.port}"
   ];
+  # web_search's 10-min canary and the nightly bump's sandboxed scratch
+  # SearXNG (its own Mullvad user, like searx).
+  hyper.searxngCanary.candidate.enable = true;
   # spaces' microVM module and its slirp-facing SearXNG stay off: spaces
   # would otherwise give every normal user (dave, agent, hsjobeki,
   # nixremote, ...) a hermes microVM, and the browser module runs its own

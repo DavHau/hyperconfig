@@ -10,6 +10,8 @@
 #   - ZFS pool not ONLINE (critical)
 #   - ZFS dataset quota/refquota >= 80 % used (warning) / >= 95 % (critical),
 #     held 30 min
+#   - SearXNG (som, ./searxng-canary) degraded for 1 h: < 2 relevant canary
+#     queries, >= 4 engines unresponsive, or the canary stale (warning)
 # ZFS is judged per pool from ./monitoring-zfs-pools.nix (pool health and the
 # root dataset's used/avail) plus per-dataset quota usage from the same
 # exporter; per-dataset filesystem series are skipped.
@@ -126,7 +128,7 @@ let
     ''absent_over_time(up{${sel}}[10m]) or count by (job, instance) (count_over_time(up{${sel}}[10m])) * 0''
   ) cfg.alwaysOn;
 
-  fsLabel = ''{{ if .Labels.pool }}pool {{ .Labels.pool }}{{ else }}{{ .Labels.mountpoint }}{{ end }}'';
+  fsLabel = "{{ if .Labels.pool }}pool {{ .Labels.pool }}{{ else }}{{ .Labels.mountpoint }}{{ end }}";
 
   # Annotations go through Grafana's provisioning interpolation, which
   # expands `$name` as an environment variable; the dot forms (.Labels,
@@ -350,6 +352,23 @@ in
                 keepFiringFor = "30m";
                 severity = "critical";
                 summary = quotaSummary;
+              })
+              # web_search's SearXNG on som (./searxng-canary): a canary
+              # search every 10 min, metrics through Alloy. One rule for
+              # "search is degraded", whichever part trips (the `tripped`
+              # label says which); an hour rides out single engines'
+              # 429 suspensions and restarts. Each part's value is > 0.
+              (rule {
+                uid = "searxng-degraded";
+                title = "SearXNG degraded";
+                expr = lib.concatStringsSep " or " [
+                  ''label_replace((searxng_canary_relevant_queries < 2) + 1, "tripped", "fewer than 2 canary queries found a relevant result in the top 5", "", "")''
+                  ''label_replace(searxng_canary_engines_unresponsive >= 4, "tripped", "4 or more engines unresponsive or suspended (searxng_canary_engine_unresponsive says which)", "", "")''
+                  ''label_replace(time() - searxng_canary_last_run_timestamp_seconds > 1800, "tripped", "the canary has not run for over 30 min", "", "")''
+                ];
+                for = "1h";
+                severity = "warning";
+                summary = "SearXNG on {{ .Labels.instance }} degraded for an hour: {{ .Labels.tripped }}";
               })
             ];
           }

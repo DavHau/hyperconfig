@@ -79,7 +79,11 @@
 # gid; som's Voice PE router, modules/nixos/voice-gateway; not a vault
 # principal), 1214 the voice desktop app container's user `hermes` and
 # 1215 the infra-space one's (uid and gid; each owns its home on Dave's
-# desktops, dave-desktop/apps.nix; not vault principals). gid 1100 stays unallocated.
+# desktops, dave-desktop/apps.nix; not vault principals), 1216/1217
+# (held for infra and infra-browser, infra-space/agent-tools.nix, an
+# open change), 1218 searxng-candidate (uid and gid; som's sandboxed
+# scratch SearXNG of the nightly bump, searxng-canary/candidate.nix,
+# Mullvad-tunneled; not a vault principal). gid 1100 stays unallocated.
 { lib, ... }:
 {
   options.hyper.vaultIds.deniedUsers = lib.mkOption {
