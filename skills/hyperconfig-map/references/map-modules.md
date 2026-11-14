@@ -231,7 +231,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/infra-space/nixpkgs-bump/searxng-diff.sh — nixpkgs-bump-searxng-diff OLD NEW OUT [LABEL]: <- m/infra-space/nixpkgs-bump/searxng-diff.nix
 - modules/nixos/infra-space/nixpkgs-bump/searxng-readcheck.py — searxng-readcheck PART...: <- m/infra-space/nixpkgs-bump/searxng-diff.nix
 - modules/nixos/infra-space/nixpkgs-bump/searxng-text.py — searxng-text: the character rules of the review file (./searxng-diff.sh). <- m/infra-space/nixpkgs-bump/searxng-diff.nix
-- modules/nixos/infra-space/nixpkgs-bump/searxng.nix — nixpkgs-bump-searxng (./searxng.sh), for ../nixpkgs-bump.nix (the guest's PATH). <- m/infra-space/nixpkgs-bump.nix
+- modules/nixos/infra-space/nixpkgs-bump/searxng.nix — nixpkgs-bump-searxng (./searxng.sh), for ../nixpkgs-bump.nix (the guest's PATH). <- m/infra-space/nixpkgs-bump.nix, m/infra-space/nixpkgs-bump/guard-test.nix
 - modules/nixos/infra-space/nixpkgs-bump/searxng.sh — nixpkgs-bump-searxng: the nightly bump's steps for web_search's SearXNG (the root flake input `searxng`, upstream maste… <- m/infra-space/nixpkgs-bump/searxng.nix
 - modules/nixos/infra-space/nixpkgs-bump/workspace-test.nix — ./workspace.sh against a scratch colocated repository with a local origin (no network): <- flake.nix
 - modules/nixos/infra-space/nixpkgs-bump/workspace.nix — nixpkgs-bump-workspace (./workspace.sh), for ../nixpkgs-bump.nix (the guest's PATH) and ./workspace-test.nix. <- m/infra-space/nixpkgs-bump.nix, m/infra-space/nixpkgs-bump/workspace-test.nix

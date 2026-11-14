@@ -44,6 +44,26 @@
 # stdout: one `HOLD <reason>` line per part the reviewer would see
 # changed; exit 3 if any, 0 if none, anything else = the check failed
 # (the caller holds then too).
+#
+# A reviewer with a small context window (a smaller model's subagent)
+# spills tool results earlier than this budget: it then sees a
+# `<persisted-output>` stub, which SKILL.md 2b makes a reject, so such a
+# reviewer fails closed; this check does not model it.
+#
+#   searxng-readcheck escape FROM <IN >OUT
+# The review file IN with every span hermes' secret redactor would
+# rewrite (redact_sensitive_text, as read_file calls it) written as
+# `\xNN` per character (`*` as `\x2a`; non-ASCII as `\u{XXXX}`), on lines
+# FROM and later only (the uncounted diffs: the code diff before FROM is
+# never rewritten, a redaction there still holds). Lossless: the review
+# reads the escaped bytes; on such a line every backslash is written
+# `\x5c` as well, so each `\xNN` there is unambiguous. Per line, the
+# changed span is escaped; if the redactor still changes the line, the
+# whitespace-delimited tokens around it, then the whole line, always
+# from the original (an escape is never escaped again); a line it still
+# changes then, or a change across lines (a key block), stays as it is,
+# and the read check of the parts that follows holds it. stderr: the number
+# of escaped spans (`escaped <n>`).
 import json
 import os
 import shutil
@@ -54,12 +74,63 @@ import tempfile
 def main(parts):
     scratch = tempfile.mkdtemp(prefix="searxng-readcheck-")
     try:
-        return check(scratch, parts)
+        if len(parts) == 2 and parts[0] == "escape" and parts[1].isdigit():
+            setup(scratch)
+            return escape(int(parts[1]))
+        setup(scratch)
+        return check(parts)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 
 
-def check(scratch, parts):
+def esc_chars(t):
+    return "".join(f"\\x{ord(c):02x}" if ord(c) < 0x80 else f"\\u{{{ord(c):04X}}}" for c in t)
+
+
+def escape(start):
+    from agent.redact import redact_sensitive_text
+
+    def red(t):
+        # as read_file sees it: behind a `<n>|` gutter
+        r = redact_sensitive_text("1|" + t, file_read=True)
+        return r[2:] if r.startswith("1|") else ""
+
+    raw = sys.stdin.buffer.read()
+    rows = raw.decode("utf-8").split("\n")
+    n = 0
+    for i in range(start - 1, len(rows)):
+        line = rows[i]
+        r = red(line)
+        if r == line:
+            continue
+        # the changed span: common prefix and suffix trimmed
+        a = 0
+        while a < min(len(line), len(r)) and line[a] == r[a]:
+            a += 1
+        b = 0
+        while b < min(len(line), len(r)) - a and line[-1 - b] == r[-1 - b]:
+            b += 1
+        e = max(len(line) - b, a + 1)
+        # wider each time, always from the original line (an escape is
+        # never escaped again): the span, the tokens around it, the line
+        ta = line.rfind(" ", 0, a) + 1
+        te = line.find(" ", e)
+        te = len(line) if te < 0 else te
+        for sa, se in ((a, e), (ta, te), (0, len(line))):
+            # every backslash of the line too: then each `\x` on an
+            # escaped line is ours, never the source's (lossless)
+            cand = (line[:sa].replace("\\", "\\x5c") + esc_chars(line[sa:se])
+                    + line[se:].replace("\\", "\\x5c"))
+            if red(cand) == cand:
+                rows[i] = cand
+                n += 1
+                break
+    sys.stdout.buffer.write("\n".join(rows).encode("utf-8"))
+    print(f"escaped {n}", file=sys.stderr)
+    return 0
+
+
+def setup(scratch):
     home = os.path.join(scratch, "hermes")
     os.mkdir(home)
     agent_home = os.environ.get("HERMES_HOME")
@@ -73,6 +144,8 @@ def check(scratch, parts):
         os.environ[v] = scratch
     os.environ.pop("TERMINAL_CWD", None)
 
+
+def check(parts):
     import model_tools
     from agent.tool_dispatch_helpers import make_tool_result_message
     from tools.budget_config import budget_for_context_window

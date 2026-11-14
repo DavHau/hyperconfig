@@ -23,7 +23,13 @@
 #     in the new tree that escapes the counted diff: the pin goes back, a
 #     decision for Dave is filed. The pick file holds old, new, the diff
 #     file's hash and the parts' (count, hash), which review and the guard
-#     check. Last line:
+#     check. When the aged tip holds, the pick walks back over master's
+#     first-parent commits between the pin and that tip (GitHub's
+#     compare, oldest first), newest first, at most @maxSteps@ diffs, and
+#     takes the newest one that passes: the pin advances up to the
+#     commit that blocks, which a decision names (the walk's candidates
+#     are ancestors of an aged tip, so the age gate holds for them; the
+#     guard checks that online). Last line:
 #       PICKED <old8>..<new8> <n> lines   review it (step 2b)
 #       STAYS                             nothing to review or test
 #       HELD-BACK                         too big or unreviewable; pin back
@@ -113,13 +119,15 @@ revert() {
 
 # One JSON line for the decision registry (its inbox; the registry's
 # curation takes it in), or a pending file when the registry is not there.
-decide() { # title why recommendation still-relevant-if option...
-  local title=$1 why=$2 rec=$3 still=$4 inbox=@decisionInbox@ line
-  shift 4
+# The same title refiles the open decision with this night's why,
+# still_relevant_if and range (decision.py: a refile updates them).
+decide() { # title why recommendation still-relevant-if range option...
+  local title=$1 why=$2 rec=$3 still=$4 range=$5 inbox=@decisionInbox@ line
+  shift 5
   line=$(jq -cn --arg t "$title" --arg w "$why" --arg r "$rec" --arg s "$still" \
-    --arg d "$(date -u +%F)" --arg src "nixpkgs-bump ($name)" \
+    --arg g "$range" --arg d "$(date -u +%F)" --arg src "nixpkgs-bump ($name)" \
     '{title: $t, why: $w, options: $ARGS.positional, recommendation: $r,
-      source: $src, date: $d, still_relevant_if: $s}' --args "$@")
+      source: $src, date: $d, still_relevant_if: $s, range: $g}' --args "$@")
   if [ -d "$(dirname "$inbox")" ] && echo "$line" >>"$inbox"; then
     say "decision filed for Dave: $title"
   else
@@ -142,6 +150,7 @@ record() { # outcome old new
       "The nightly bump held SearXNG back three nights in a row (canary, review, diff size or code the review cannot see, or upstream force-pushed away the tips old enough to take). web_search keeps working on the old pin, but falls behind upstream's engine fixes; usually one of our patches no longer fits master." \
       "a) (have a session) rebase our SearXNG patches onto master and retest" \
       "SearXNG still at ${old:0:8} on main" \
+      "${old:0:8}" \
       "a) rebase our patches onto master and run the canary by hand" \
       "b) keep the old pin for now" \
       "c) drop the failing patch"
@@ -257,42 +266,111 @@ case "$cmd" in
       echo "nixpkgs-bump-searxng: STAYS"
       exit 0
     fi
-    new=$cand
-    pn=$(prefetch "$new") || die "prefetch of searxng $new failed"
     po=$(prefetch "$old") || die "prefetch of searxng $old failed"
+    # try NEW: write the diff of old..NEW; why it holds in $why (empty:
+    # the review can take it)
+    # (a step of the walk, `try <rev> step`, whose prefetch fails is
+    # skipped: it holds with that reason, the walk goes on)
+    try() {
+      local rc=0 p
+      rm -f "$diffFile" "$diffFile".part-*
+      if ! p=$(prefetch "$1"); then
+        [ "${2:-}" = step ] || die "prefetch of searxng $1 failed"
+        why="its prefetch failed (skipped)"
+        say "prefetch of searxng ${1:0:8} failed: skipping that commit"
+        return 0
+      fi
+      pn=$p
+      nixpkgs-bump-searxng-diff "$(jq -r .storePath <<<"$po")" "$(jq -r .storePath <<<"$pn")" \
+        "$diffFile" "$old -> $1" >"$tmp/diffout" || rc=$?
+      [ "$rc" = 0 ] || [ "$rc" = 3 ] || die "could not diff the sources"
+      read -r lines bytes _ <"$tmp/diffout" || true
+      [[ $lines =~ ^[0-9]+$ ]] && [[ $bytes =~ ^[0-9]+$ ]] || die "no size from the diff"
+      why=$(sed -n 's/^HOLD //p' "$tmp/diffout" | paste -sd ';' -)
+      [ "$rc" = 3 ] && [ -z "$why" ] && why="the diff tool held it back"
+      if [ -n "$why" ]; then
+        why="the review cannot see all of the new tree: $why"
+      elif [ "$lines" -gt @maxDiffLines@ ]; then
+        why="$lines lines of code diff, over @maxDiffLines@: too big for the nightly review"
+      elif [ "$bytes" -gt @maxDiffBytes@ ]; then
+        why="$bytes bytes of code diff, over @maxDiffBytes@: too big for the nightly review"
+      fi
+    }
+    tip=$cand
+    try "$tip"
+    tip_why=$why new=$tip
+    if [ -n "$why" ]; then
+      # Step-wise: master's first-parent commits old..tip, newest first
+      # after the tip, at most @maxSteps@ diffs; the newest that passes
+      # is the pick (it is an ancestor of the aged tip: the age gate's).
+      # The blocking commit (the oldest one tried that holds, the one
+      # after the pick) is what the decision names.
+      say "searxng ${old:0:8}..${tip:0:8} holds ($why); walking back over master's first-parent commits"
+      # (compare lists the commits tip has and old has not; first
+      # parents from the tip down, until old or the list's end)
+      gh "compare/$old...$tip?per_page=250" |
+        jq -r --arg old "$old" --arg tip "$tip" '
+          (.commits | map({key: .sha, value: (.parents[0].sha // null)}) | from_entries) as $p
+          | [$tip] | until(.[-1] == null or .[-1] == $old; . + [$p[.[-1]]])
+          | .[1:] | map(select(. != null and . != $old)) | .[]' >"$tmp/steps" 2>/dev/null ||
+        : >"$tmp/steps"
+      blocker=$tip blocker_why=$why new=
+      tries=1
+      while read -r c && [ "$tries" -lt @maxSteps@ ]; do
+        [[ $c =~ ^[0-9a-f]{40}$ ]] || continue
+        tries=$((tries + 1))
+        try "$c" step
+        if [ -z "$why" ]; then
+          # forward from the pin (a first parent may come from a branch)
+          if [ "$(compare "$old" "$c" || echo unreachable)" = ahead ]; then
+            new=$c
+            break
+          fi
+          why="not ahead of the pin ${old:0:8}"
+        fi
+        blocker=$c blocker_why=$why
+      done <"$tmp/steps"
+      if [ -z "$new" ]; then
+        # the decision is about old..tip: its diff file must be that one,
+        # not the last step's
+        try "$tip"
+        why="$tip_why (and the $((tries - 1)) first-parent commits before it tried: none passes; the oldest tried, ${blocker:0:8}: $blocker_why)"
+        new=$tip
+      else
+        why=
+        say "searxng ${old:0:8}..${new:0:8} passes (the first-parent commit before ${blocker:0:8}, which holds: $blocker_why)"
+      fi
+    fi
     jq --arg n "$node" --argjson p "$pn" \
       '.nodes[$n].locked = ($p.locked | {lastModified, narHash: $p.hash, owner, repo, rev, type})' \
       flake.lock >"$tmp/lock" || die "could not write the searxng node"
     cat "$tmp/lock" >flake.lock
-    rc=0
-    nixpkgs-bump-searxng-diff "$(jq -r .storePath <<<"$po")" "$(jq -r .storePath <<<"$pn")" \
-      "$diffFile" "$old -> $new" >"$tmp/diffout" || rc=$?
-    [ "$rc" = 0 ] || [ "$rc" = 3 ] || die "could not diff the sources"
-    read -r lines bytes _ <"$tmp/diffout" || true
-    [[ $lines =~ ^[0-9]+$ ]] && [[ $bytes =~ ^[0-9]+$ ]] || die "no size from the diff"
-    # why the nightly review cannot take it (empty: it can)
-    why=$(sed -n 's/^HOLD //p' "$tmp/diffout" | paste -sd ';' -)
-    [ "$rc" = 3 ] && [ -z "$why" ] && why="the diff tool held it back"
-    if [ -n "$why" ]; then
-      why="the review cannot see all of the new tree: $why"
-    elif [ "$lines" -gt @maxDiffLines@ ]; then
-      why="$lines lines of code diff, over @maxDiffLines@: too big for the nightly review"
-    elif [ "$bytes" -gt @maxDiffBytes@ ]; then
-      why="$bytes bytes of code diff, over @maxDiffBytes@: too big for the nightly review"
-    fi
     if [ -n "$why" ]; then
       revert
       say "searxng ${old:0:8}..${new:0:8} held back: $why"
       decide "SearXNG update held back from the nightly review" \
-        "Upstream SearXNG moved ${old:0:8}..${new:0:8}, but $why. The nightly bump only takes upstream code its review has seen, so SearXNG stays on the old pin until someone reviews this update; the diff is in $diffFile." \
+        "Upstream SearXNG moved ${old:0:8}..${new:0:8} (as of $(date -u +%F)), but $why. The nightly bump only takes upstream code its review has seen, so SearXNG stays on the old pin until someone reviews this update; the diff of ${old:0:8}..${new:0:8} is in $diffFile." \
         "a) (have a session) review the diff with a subagent and take the update" \
-        "the pin on main is still ${old:0:8}" \
+        "the pin on main is still ${old:0:8} and master's aged tip ${new:0:8} still holds the nightly review" \
+        "${old:0:8}..${new:0:8}" \
         "a) have a session review it and take it" \
         "b) keep the old pin, re-check next week" \
         "c) raise the nightly size limit (only if it was the size)"
       record HELD-BACK "$old" "$new"
       echo "nixpkgs-bump-searxng: HELD-BACK"
       exit 0
+    fi
+    if [ "$new" != "$tip" ]; then
+      # the pin moves, but master's newer commits still wait: Dave sees
+      # which commit blocks (refiled each night with the current range)
+      decide "SearXNG update held back from the nightly review" \
+        "Upstream SearXNG moved ${old:0:8}..${tip:0:8} (as of $(date -u +%F)). Tonight's pick takes it up to ${new:0:8}; the next first-parent commit ${blocker:0:8} holds: $blocker_why. Until someone reviews that one, the nightly bump stops there." \
+        "a) (have a session) review ${blocker:0:8} with a subagent and take it" \
+        "master's aged tip ${tip:0:8} is still ahead of the pin and ${blocker:0:8} still holds the nightly review" \
+        "${new:0:8}..${tip:0:8}" \
+        "a) have a session review it and take it" \
+        "b) keep stepping nightly, re-check next week" \
+        "c) raise the nightly size limit (only if it was the size)"
     fi
     ph=$(parts_hash) || die "the diff's parts $diffFile.part-NN are not 01..NN"
     printf '%s %s %s %s\n' "$old" "$new" "$(sha256sum <"$diffFile" | cut -c1-64)" "$ph" >"$pickFile"

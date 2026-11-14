@@ -96,6 +96,14 @@ def clean(value, kind):
     return value if len(value) <= limit else value[: limit - 1] + "…"
 
 
+AS_OF = re.compile(r"\s*\(as of [^()]{1,40}\)")
+
+
+def undated(t):
+    """t without its `(as of <date>)` stamps (a refile's day alone is no news)."""
+    return AS_OF.sub("", t)
+
+
 def norm_title(t):
     return re.sub(r"[^a-z0-9]+", " ", t.casefold()).strip()
 
@@ -242,6 +250,21 @@ class Store:
                         dup["links"].append(link)
                 if URGENCIES.index(urgency) < URGENCIES.index(dup["urgency"]):
                     dup["urgency"] = urgency
+                # a job refiling an OPEN decision with fresh facts (the
+                # range it is about now, tonight's reason): those replace
+                # the stale ones, the old value kept in a note (whole up to
+                # the long cap, else marked cut). A date stamp `(as of
+                # <date>)` alone is no news: no note, no change. An
+                # answered decision keeps what Dave answered.
+                for k, kind in (("why", "long"), ("still_relevant_if", "short"), ("range", "short")):
+                    if dup["status"] != "open":
+                        break
+                    v = clean(f.get(k), kind)
+                    if not v or undated(v) == undated(dup.get(k) or ""):
+                        continue
+                    if dup.get(k):
+                        self.note(dup, by, f"{k} was: {dup[k]}", "long")
+                    dup[k] = v
                 self.put(dup)
                 self.log("refiled", dup["id"], by, source=source)
                 return dup, False
@@ -263,6 +286,8 @@ class Store:
             "updated": now(),
             "status": "open",
             "still_relevant_if": clean(f.get("still_relevant_if"), "short"),
+            # what it is about, for a job's refiles (e.g. a commit range)
+            "range": clean(f.get("range"), "short"),
             "links": links,
             "follow_up": clean(f.get("follow_up"), "long"),
             "answer": None,
@@ -274,8 +299,11 @@ class Store:
         self.log("add", d["id"], by, source=source, title=title)
         return d, True
 
-    def note(self, d, by, text):
-        d["notes"].append({"at": now(), "by": by, "text": clean(text, "short")})
+    def note(self, d, by, text, kind="short"):
+        t = clean(text, kind)
+        if len(t) == CAP[kind] and t.endswith("…"):  # clean() cut it: say so
+            t = t[: CAP[kind] - 30] + " [cut: the rest is not kept]"
+        d["notes"].append({"at": now(), "by": by, "text": t})
         d["notes"] = d["notes"][-30:]
 
     # -- inbox ----------------------------------------------------------
@@ -438,6 +466,8 @@ def render(d):
         lines.append(f"Follow-up: {d['follow_up']}")
     if d["still_relevant_if"]:
         lines.append(f"Still relevant if: {d['still_relevant_if']}")
+    if d.get("range"):
+        lines.append(f"Range: {d['range']}")
     for link in d["links"]:
         lines.append(f"Link: {link}")
     lines.append(f"Source: {', '.join(d['sources'])}; created {local(d['created'])}, updated {local(d['updated'])}")

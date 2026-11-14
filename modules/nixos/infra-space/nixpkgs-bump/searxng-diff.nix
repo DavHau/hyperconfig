@@ -21,11 +21,15 @@
   genBytes ? 200000,
 }:
 let
-  # ./searxng-text.py with Unicode's Default_Ignorable_Code_Point table
-  # (DerivedCoreProperties.txt of nixpkgs' UCD, not a hand list)
+  # ./searxng-text.py with Unicode's Default_Ignorable_Code_Point and
+  # XID_Continue tables and its Scripts.txt (nixpkgs' UCD, one package,
+  # not a hand list), and the public suffix list for registrable domains
+  ucd = "${pkgs.unicode-character-database}/share/unicode";
   textPy = pkgs.writeText "searxng-text.py" (
-    builtins.replaceStrings [ "@ucdDerived@" ] [
-      "${pkgs.unicode-character-database}/share/unicode/DerivedCoreProperties.txt"
+    builtins.replaceStrings [ "@ucdDerived@" "@ucdScripts@" "@publicSuffixList@" ] [
+      "${ucd}/DerivedCoreProperties.txt"
+      "${ucd}/Scripts.txt"
+      "${pkgs.publicsuffix-list}/share/publicsuffix/public_suffix_list.dat"
     ] (builtins.readFile ./searxng-text.py)
   );
 in

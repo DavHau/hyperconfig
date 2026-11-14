@@ -6,6 +6,8 @@
 {
   pkgs,
   bumpNix,
+  # ./guard-test.nix passes a stub (GitHub's API from files)
+  curl ? pkgs.curl,
   # the reviewer's hermes python env (./searxng-diff.nix says why)
   hermesVenv,
   logDir ? "/home/infra/nixpkgs-bump",
@@ -17,13 +19,17 @@
   maxDiffLines ? 3000,
   # the counted code diff's bytes (long lines slip under the line cap)
   maxDiffBytes ? 300000,
+  # the step-wise pick's diffs per night, when the aged tip holds
+  # (each a prefetch and a diff; GitHub's unauthenticated rate limit is
+  # 60 calls an hour)
+  maxSteps ? 20,
 }:
 pkgs.writeShellApplication {
   name = "nixpkgs-bump-searxng";
   runtimeInputs = [
     pkgs.coreutils
     pkgs.findutils
-    pkgs.curl
+    curl
     pkgs.gawk
     pkgs.git
     pkgs.gnugrep
@@ -35,7 +41,7 @@ pkgs.writeShellApplication {
   ];
   text =
     builtins.replaceStrings
-      [ "@logDir@" "@socket@" "@decisionInbox@" "@minAgeHours@" "@maxDiffLines@" "@maxDiffBytes@" "@tips@" ]
+      [ "@logDir@" "@socket@" "@decisionInbox@" "@minAgeHours@" "@maxDiffLines@" "@maxDiffBytes@" "@maxSteps@" "@tips@" ]
       [
         logDir
         socket
@@ -43,6 +49,7 @@ pkgs.writeShellApplication {
         (toString minAgeHours)
         (toString maxDiffLines)
         (toString maxDiffBytes)
+        (toString maxSteps)
         # master's tips as we first saw them: the age gate's record (the
         # guard reads it too, ./guard.nix)
         "${logDir}/searxng-tips.jsonl"

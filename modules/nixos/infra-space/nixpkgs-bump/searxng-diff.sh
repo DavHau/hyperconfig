@@ -13,18 +13,38 @@
 # ./searxng-text.py's (its header has the rules): in the counted code
 # diff anything outside printable ASCII and TAB holds the update back,
 # but for visible letters, marks, digits, punctuation and symbols that
-# NFKC leaves alone, are not default-ignorable and not right-to-left
-# (written `\u{XXXX}` after the character); in the searx/data diff
-# (engine names: legitimately non-ASCII) only control bytes, invalid
-# UTF-8 and the file tool's fence marker hold; there and in the other
-# uncounted diff (translations, binary .mo files: shown, not scanned)
-# invisible characters are written `\u{XXXX}`, bytes `\xNN`.
+# are not default-ignorable, not right-to-left and, if they can be part
+# of a name, unchanged by NFKC (written `\u{XXXX}` after the character);
+# a word mixing scripts holds too; .md/.rst files there have the data
+# rules. Elsewhere only control bytes, invalid UTF-8 and the file tool's
+# fence marker hold; invisible characters are written `\u{XXXX}`, bytes
+# `\xNN`.
+#
+# searx/data's JSON (URL templates and engine hosts live there): its
+# raw diff is the review's view whenever it fits in @genBytes@ bytes
+# (shown whole, character-scanned and read-checked like the rest, with
+# the summary's registrable domains and holds before it). Only above
+# that the structural summary (./searxng-text.py summary) stands in for
+# it: every changed or added scalar by JSON path, old -> new, in every
+# searx/data file whatever its size or name (removed ones counted),
+# except the two display-only files engine_descriptions.json and
+# wikidata_properties.json (counts only; any URL, `<`/`>` or structure
+# change in them holds; ./searxng-text.py DISPLAY_ONLY has why);
+# whole or HOLD when over @genBytes@ bytes. The raw diff then follows,
+# cut after @genBytes@ bytes. In both modes every new or changed string
+# that starts (after leading blanks or controls, which hold themselves)
+# with a scheme or two slashes must be exactly http(s):// + a plain
+# host[:port] (only external_bangs.json's `//host`, \x02 and \x01<rank>
+# tail, and the few non-URL forms upstream's data has, excepted;
+# ./searxng-text.py NOT_URL): else HOLD.
 #
 # In the other uncounted diff, and only in a package-lock.json hunk, a
 # line that is exactly an npm `"integrity": "sha512-..."` entry is
-# masked (hermes' secret redactor would rewrite it, holding every
-# update); OUT's header gives their number. Any other line hermes'
-# redactor would change, in any section, holds the update back.
+# masked; OUT's header gives their number. After the code diff (the
+# summary and the uncounted diffs) every span hermes' secret redactor
+# would rewrite is written escaped, losslessly (`*` as `\x2a`,
+# ./searxng-readcheck.py escape); their number is in OUT's last lines.
+# In the code diff a line the redactor would change holds.
 #
 # Last, every part goes through the reviewer's own read_file
 # (./searxng-readcheck.py, the hermes infra-space runs): anything it
@@ -47,10 +67,9 @@
 # path/extension only (never a whole directory), regular files only:
 # searx/data/**.json (data the engines read), *.min.js, *.map,
 # package-lock.json, translations (*.po, *.mo). Everything else, under
-# any directory, and every symlink, is code. Their diff follows the code
-# in OUT: first searx/data's (URL templates and engine hosts live there),
-# whole or HOLD when over @genBytes@ bytes (the review must see all of
-# it); then the rest's, cut after @genBytes@ bytes with a note.
+# any directory, and every symlink, is code. After the code in OUT:
+# searx/data's raw diff (whole) or its summary (whole, or HOLD) and the
+# raw diff cut, then the rest's diff, cut after @genBytes@ bytes.
 #
 # A symlink in NEW whose target lies outside the tree, or is one of those
 # uncounted files, or a directory holding one, would run code the counted
@@ -169,16 +188,28 @@ lines=$(wc -l <"$tmp/code.diff")
 bytes=$(wc -c <"$tmp/code.diff")
 data_total=$(wc -c <"$tmp/data.diff")
 gen_total=$(wc -c <"$tmp/gen.diff")
-[ "$data_total" -le "$genBytes" ] ||
-  hold "the searx/data diff is $data_total bytes, over the review file's $genBytes: its end (engine data, URL templates) would be cut from the review"
+# raw: the searx/data diff itself is the review's view (it fits);
+# summary: it does not, the full summary stands in for it
+if [ "$data_total" -le "$genBytes" ]; then data_mode=raw smode=hosts; else data_mode=summary smode=full; fi
+text summary "$tmp/data/old" "$tmp/data/new" "$smode" >"$tmp/summary.all" || hold "the searx/data summary failed"
+grep -v '^HOLD ' "$tmp/summary.all" >"$tmp/summary" || true
+grep '^HOLD ' "$tmp/summary.all" >>"$tmp/holds" || true
+sum_total=$(wc -c <"$tmp/summary")
+[ "$sum_total" -le "$genBytes" ] ||
+  hold "the searx/data summary is $sum_total bytes, over the review file's $genBytes: its end (URL templates, hosts) would be cut from the review"
 w=$(text scan code "$tmp/code.diff") || hold "the code diff's character scan failed"
 [ -z "$w" ] ||
   hold "the code diff's $w: code must be ASCII or a visible character the review reads as itself (shown as \\xNN or \\u{XXXX} in the review file)"
 # (the other uncounted diff is shown escaped, not scanned: binary .mo
 # files are all control bytes; the read check still sees every part)
-w=$(text scan data "$tmp/data.diff") || hold "the data diff's character scan failed"
+w=$(text scan data "$tmp/summary") || hold "the searx/data summary's character scan failed"
 [ -z "$w" ] ||
-  hold "the data diff's $w: the review's file tool strips or refuses that (shown as \\xNN in the review file)"
+  hold "the searx/data summary's $w: the review's file tool strips or refuses that (shown as \\xNN in the review file)"
+if [ "$data_mode" = raw ]; then
+  w=$(text scan data "$tmp/data.diff") || hold "the searx/data diff's character scan failed"
+  [ -z "$w" ] ||
+    hold "the searx/data diff's $w: the review's file tool strips or refuses that (shown as \\xNN in the review file)"
+fi
 text mask "$tmp/masked" <"$tmp/gen.diff" >"$tmp/gen.masked" || hold "the package-lock.json integrity mask failed"
 masked=$(cat "$tmp/masked" 2>/dev/null || echo '?')
 {
@@ -199,14 +230,27 @@ masked=$(cat "$tmp/masked" 2>/dev/null || echo '?')
   text esc code <"$tmp/code.diff"
   {
     echo "# --- end of the code diff"
-    echo "# --- the searx/data diff ($data_total bytes): not code, but read it, URL templates and engine data live here"
-    if [ "$data_total" -gt "$genBytes" ]; then
-      head -c "$genBytes" "$tmp/data.diff"
-      echo
-      echo "# --- TRUNCATED: the searx/data diff's first $genBytes bytes only, $((data_total - genBytes)) more not shown (HELD BACK)"
-    else
+    if [ "$data_mode" = raw ]; then
+      echo "# --- the searx/data hosts ($sum_total bytes: registrable domains per changed file; the raw diff below is what counts)"
+      cat "$tmp/summary"
+      echo "# --- end of the searx/data hosts"
+      echo "# --- the searx/data diff ($data_total bytes, raw, whole: the review's view of it): not code, but read it, URL templates and engine hosts live here"
       cat "$tmp/data.diff"
       echo "# --- end of the searx/data diff"
+    else
+      echo "# --- the searx/data summary ($sum_total bytes; the raw diff, $data_total bytes, is over $genBytes): what counts, read it, URL templates and engine hosts live here"
+      if [ "$sum_total" -gt "$genBytes" ]; then
+        head -c "$genBytes" "$tmp/summary"
+        echo
+        echo "# --- TRUNCATED: the searx/data summary's first $genBytes bytes only, $((sum_total - genBytes)) more not shown (HELD BACK)"
+      else
+        cat "$tmp/summary"
+        echo "# --- end of the searx/data summary"
+      fi
+      echo "# --- the searx/data diff ($data_total bytes, raw; the summary above is what counts)"
+      head -c "$genBytes" "$tmp/data.diff"
+      echo
+      echo "# --- TRUNCATED: the searx/data diff's first $genBytes bytes only, $((data_total - genBytes)) more not shown"
     fi
     echo "# --- the other uncounted diff ($gen_total bytes: minified assets, source maps, package-lock.json, translations)"
     if [ "$gen_total" -gt "$genBytes" ]; then
@@ -218,7 +262,24 @@ masked=$(cat "$tmp/masked" 2>/dev/null || echo '?')
       echo "# --- end of the other uncounted diff"
     fi
   } | text esc data
-} >"$out"
+} >"$tmp/out0"
+# After the code diff, spans hermes' redactor would rewrite are written
+# escaped (lossless, ./searxng-readcheck.py escape); the code diff itself
+# is left as it is (a redaction there holds, by the read check below).
+from=$(grep -n -m1 -x -F '# --- end of the code diff' "$tmp/out0" | cut -d: -f1)
+[[ $from =~ ^[0-9]+$ ]] || {
+  echo "nixpkgs-bump-searxng-diff: no end of the code diff in the review file" >&2
+  exit 1
+}
+esc_n='?'
+if env -u PYTHONPATH -u PYTHONHOME -u PYTHONSTARTUP \
+  @hermesPython@ -I @readcheck@ escape "$from" <"$tmp/out0" >"$out" 2>"$tmp/escape.err"; then
+  esc_n=$(sed -n 's/^escaped //p' "$tmp/escape.err" | tail -n 1)
+  echo "# spans hermes' secret redactor would rewrite after the code diff, written escaped (\\xNN per character): ${esc_n:-?}" >>"$out"
+else
+  hold "the redactor escape after the code diff failed ($(tail -n 1 "$tmp/escape.err" | cut -c1-200))"
+  cp "$tmp/out0" "$out"
+fi
 rm -f -- "$out".part-*
 # at line ends; a line costs its bytes plus ~9 for the file tool's
 # `<number>|` prefix; at most @partLines@ lines (that tool's page). A

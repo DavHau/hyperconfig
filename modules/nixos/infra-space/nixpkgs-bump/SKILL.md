@@ -109,8 +109,11 @@ sha; never edit it). Then it takes the newest tip in that record first
 seen at least 72 h ago (a push that went wrong upstream has three days
 to be noticed and reverted first) that is still on master (after a
 force-push upstream dropped it, the next older such tip), if it is
-ahead of the pin. Upstream's commit dates count for nothing: the
-committer sets them. Until the record holds a tip that old (the first
+ahead of the pin. If that tip's diff holds (below), it walks back over
+master's first-parent commits between the pin and the tip, newest first
+(at most 20 diffs a night), and picks the newest one that passes: the
+pin moves up to the commit that blocks, and a decision names that one.
+Upstream's commit dates count for nothing: the committer sets them. Until the record holds a tip that old (the first
 72 h after it was started, i.e. three nights; it was seeded 2026-11-14
 18:54 UTC, so the first possible pick is the night after 2026-11-17
 18:54 UTC) nothing can be picked: `STAYS`, and the pin on main stays;
@@ -122,24 +125,64 @@ trees, no git repository, so nothing in the sources (their
 `.gitignore`, `.gitattributes`) hides a file from the review or the
 size cap; only generated data (`searx/data/*.json`), `*.min.js`,
 `*.map`, `package-lock.json` and translations (`*.po`, `*.mo`), regular
-files only, are not counted: their diff follows the code diff in the
-same file, searx/data's first (whole: over 200 KB it holds the update
-back), then the rest's, cut after 200 KB with a `TRUNCATED` note. A
+files only, are not counted. After the code diff, in the same file,
+comes searx/data: its raw diff, whole, whenever it fits in 200 KB (that
+is then the review's view of it, character-scanned and read-checked
+like the code; the registrable domains new and gone per file before
+it). Above 200 KB a summary stands in for it (counted: over 200 KB it
+holds the update back), followed by the raw diff cut after 200 KB: per
+changed JSON file its key and string counts and every changed or
+added value by JSON path, old -> new, in every file whatever its size
+or name (booleans, regexes, region codes, netlocs included; removed
+values counted only); the registrable domains new and gone. Two files
+are the exception, by exact path: `searx/data/engine_descriptions.json`
+and `searx/data/wikidata_properties.json` are display-only (Dave's
+decision; checked in SearXNG's source: ENGINE_DESCRIPTIONS is read only
+by webapp.py's `/engine_descriptions.json` route for the HTML
+preferences page, WIKIDATA_PROPERTIES only by
+`wikidata_properties.py:get_label_for_entity` for infobox labels). For
+them the summary shows no values, only counts (keys and strings added,
+changed, removed) and the source links' domains, and holds on any new
+or changed URL candidate in them (excepted only the forms that do not
+start like a URL, `bing:af`, `Modelo:...`, and a plain
+http(s)://host source link at `/<lang>/<engine>[1]`), on `<` or `>` in
+an engine description (the page sets it as HTML), and on a change of
+their type structure (descriptions: lang -> engine -> string or
+[string, string]; wikidata: id -> string or lang -> string). A URL is
+shown with its host; a non-ASCII character is spelled out
+(`goo\u{043E}gle.com`). Held, in both modes: a new or changed string
+that starts (after leading blanks or controls, which hold by
+themselves) with a scheme (`[A-Za-z][A-Za-z0-9+.-]*:`) or two slashes
+and is not exactly `http(s)://` (any case) + a plain host[:port]
+(`https:\\x`, `https:/x`, `https:x`, `javascript:`, `data:`, `//x`,
+userinfo, `%`, IPv6, a dotless or non-ASCII host), or has a control or
+invisible character in it; excepted only external_bangs.json's `//host`,
+`\x02` and trailing `\x01<rank>`, and the few non-URL forms upstream's
+data has (`bing:af`, `AE:ar`, `Spezial:Suche`, `wlan:in saatavuus`;
+`searxng-text.py` NOT_URL); a bare host with
+`@`, a new host mixing scripts, a file that is not JSON. Then the rest's
+diff, cut after 200 KB with a `TRUNCATED` note. A
 symlink in the new tree pointing outside it or at such an uncounted
 file (code the counted diff would never show) holds the update back
-too. So does anything `read_file` would strip or refuse in the code or
-searx/data diff: a control byte other than TAB (ESC, BEL, CR, NUL
+too. So does anything `read_file` would strip or refuse in the code
+diff or the summary: a control byte other than TAB (ESC, BEL, CR, NUL
 included), DEL, a `__HERMES_FENCE_` marker, invalid UTF-8; the diff
 file shows such bytes as `\xNN`. The code diff may hold only printable
 ASCII and TAB, and beyond that only visible letters, marks, digits,
-punctuation and symbols that NFKC leaves alone, are not
-default-ignorable and not right-to-left (each shown followed by
-`\u{XXXX}`); any other character (invisible, a fullwidth lookalike,
-a separator, a bidi control, Hebrew/Arabic) holds the update back. In
-the uncounted diffs, invisible characters (every default-ignorable one,
-format and control characters, separators) are shown as `\u{XXXX}`.
+punctuation and symbols that are not default-ignorable, not
+right-to-left and, if they can be part of a name, unchanged by NFKC
+(each shown followed by `\u{XXXX}`); any other character (invisible, a
+fullwidth lookalike letter, a separator, a bidi control, Hebrew/Arabic)
+and a word mixing scripts (a Cyrillic a in a Latin name) hold the update
+back. `.md` and `.rst` files in the code diff, and the uncounted diffs,
+show invisible and blank characters (every default-ignorable one,
+format and control characters, separators, U+2800) as `\u{XXXX}`.
 Only npm `"integrity"` lines of package-lock.json hunks are masked (the
-review file's header counts them). Last, every
+review file's header counts them); anything else after the code diff
+that hermes' secret redactor would rewrite is written escaped, every
+character as `\xNN` (`*` as `\x2a`, a backslash on that line as
+`\x5c`; the file's last line counts them), so it is read as it is. In
+the code diff itself it holds the update back. Last, every
 part is read through this agent's own `read_file` (the installed
 hermes, in-process, then its turn budget for one read alone): if what
 the reviewer would see differs from the
@@ -148,14 +191,18 @@ stripped sequence), the update is held back. Its last line:
 
 - `STAYS`: no aged tip ahead of the pin (or none aged yet); skip 2b and
   go to 2c.
-- `PICKED <old>..<new> <n> lines`: step 2b reviews it.
-- `HELD-BACK`: the code diff is over 3000 lines or 300 KB, the
-  searx/data diff over 200 KB, a symlink escapes the review, the
-  diff holds bytes `read_file` strips or refuses, a line separator or
-  bidi control in the code, or `read_file` would show a part changed
-  (the reason is in its
-  output: put it in the report); it put the pin back and filed a
-  decision for Dave. Skip 2b, go to 2c.
+- `PICKED <old>..<new> <n> lines`: step 2b reviews it. When `<new>` is
+  a step short of the aged tip, its output names the blocking commit
+  (say so in the report).
+- `HELD-BACK`: no step between the pin and the aged tip passes: the code
+  diff is over 3000 lines or 300 KB, the searx/data summary (when its
+  raw diff is over 200 KB) over 200 KB, a searx/data URL that is not
+  exactly http(s):// + a plain host, a symlink escapes the review, the diff holds bytes
+  `read_file` strips or refuses, a character or mixed-script word the
+  code rules hold, or `read_file` would show a part changed (the
+  reason is in its output: put it in the report); it put the pin back
+  and filed (or refiled, with tonight's range and reason) a decision
+  for Dave. Skip 2b, go to 2c.
 - `FAIL`, or anything else: put nothing on the pin yourself; a failed
   night (as a failed gate).
 
@@ -189,9 +236,21 @@ see the part as it is: it answers `reject`, naming the part and line.**
 In the code diff every non-ASCII character is followed by its code
 point, `\u{XXXX}`: a letter that looks like an ASCII one (Cyrillic,
 Greek, a combining mark) in an identifier, string or URL is a finding.
-The searx/data diff right
-after the code is part of the review: changed URL templates or hosts
-there count like new network calls. Its focus, in that order:
+searx/data right after the code is part of the review: its raw diff
+when it is whole (`the searx/data diff ... whole`), else the summary
+(every changed or added value of every file by JSON path, then the raw
+diff cut, for context; the two display-only files as counts only). Any
+code change that makes SearXNG read `engine_descriptions.json` or
+`wikidata_properties.json` (or ENGINE_DESCRIPTIONS, WIKIDATA_PROPERTIES,
+get_label_for_entity) anywhere beyond those two usage sites, or puts
+their values into a URL, a request or a template without escaping, is a
+finding: their values are not shown, on the strength of that usage.
+New or changed URL templates,
+hosts, netlocs (`wiki_netloc`, base URLs), region/locale codes spliced
+into URLs and every new registrable domain there count like new network
+calls; a `\xNN` run after the code diff is a span the redactor would
+have rewritten, shown escaped: read it as its bytes. Its focus, in that
+order:
 
 - new imports and new network calls (hosts, sockets, `httpx`/`requests`
   outside the engines' own search requests), anything phoning home;

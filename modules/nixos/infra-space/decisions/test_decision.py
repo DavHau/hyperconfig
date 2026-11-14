@@ -74,6 +74,53 @@ class Registry(unittest.TestCase):
         self.assertEqual(d["urgency"], "urgent")
         self.assertEqual(self.ok("list", "--count").strip(), "1")
 
+    def test_refile_updates_why_still_and_range(self):
+        # the nightly bump refiles a held-back SearXNG update with the
+        # night's range and reason: the stale ones go to the notes
+        t = "SearXNG update held back from the nightly review"
+        self.inbox({"title": t, "why": "a..b: too big", "still_relevant_if": "pin a", "range": "aaaa..bbbb"})
+        self.ok("list")
+        self.inbox({"title": t, "why": "a..c: U+2026", "still_relevant_if": "pin a, tip c", "range": "aaaa..cccc"})
+        self.ok("list")
+        d = self.show("D1")
+        self.assertEqual((d["why"], d["still_relevant_if"], d["range"]), ("a..c: U+2026", "pin a, tip c", "aaaa..cccc"))
+        self.assertEqual(d["seen"], 2)
+        notes = " ".join(n["text"] for n in d["notes"])
+        self.assertIn("why was: a..b: too big", notes)
+        self.assertIn("range was: aaaa..bbbb", notes)
+        self.assertIn("Range: aaaa..cccc", self.ok("show", "D1"))
+        # a refile without them keeps them
+        self.ok("add", "--title", t, "--source", "x")
+        self.assertEqual(self.show("D1")["range"], "aaaa..cccc")
+
+    def test_refile_date_only_long_why_and_answered(self):
+        t = "SearXNG update held back from the nightly review"
+        long_why = "x" * 3000 + " (as of 2026-11-14) end"
+        self.inbox({"title": t, "why": long_why, "range": "a..b"})
+        self.ok("list")
+        # only the `(as of <date>)` part changed: no note, why kept
+        self.inbox({"title": t, "why": long_why.replace("2026-11-14", "2026-11-15"), "range": "a..b"})
+        self.ok("list")
+        d = self.show("D1")
+        self.assertEqual((d["why"], d["notes"]), (long_why, []))
+        # a real change: the old why in the note uncut (3000+ characters)
+        self.inbox({"title": t, "why": "new reason", "range": "a..c"})
+        self.ok("list")
+        d = self.show("D1")
+        self.assertIn(f"why was: {long_why}", [n["text"] for n in d["notes"]])
+        # over the long cap: the note says it was cut
+        self.inbox({"title": t, "why": "y" * 3999})
+        self.ok("list")
+        self.inbox({"title": t, "why": "z"})
+        self.ok("list")
+        self.assertTrue(self.show("D1")["notes"][-1]["text"].endswith("[cut: the rest is not kept]"))
+        # answered: a refile counts but leaves why/range as Dave saw them
+        self.ok("answer", "D1", "b")
+        self.inbox({"title": t, "why": "tonight's", "range": "a..d"})
+        self.ok("list")
+        d = self.show("D1")
+        self.assertEqual((d["status"], d["why"], d["range"]), ("answered", "z", "a..c"))
+
     def test_inbox_ingest_formats_and_rejects(self):
         # the security jobs' infra-decision line, a notice, junk
         self.inbox(
