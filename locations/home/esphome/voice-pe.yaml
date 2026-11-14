@@ -47,7 +47,7 @@ packages:
 esphome:
   project:
     name: Nabu Casa.Home Assistant Voice PE
-    version: 26.9.0-diggi.4
+    version: 26.9.0-diggi.5
 
 # The factory image offers Nabu Casa's builds as an update in HA; installing
 # one would drop the Diggi wake words. Updates come from this file instead.
@@ -85,9 +85,10 @@ micro_wake_word:
     - model: okay_diggi/okay_diggi.json
       id: okay_diggi
       # The model's json says 0.8; with people talking the score rarely
-      # reaches that. 0.6: same held-out recall on clean clips (47/48), about
-      # 2 false accepts/h on the AudioSet noise set (0.7/h at 0.8).
-      probability_cutoff: 0.6
+      # reaches that. 0.7: same held-out recall on clean clips (47/48) as
+      # 0.6, 1.5 false accepts/h on the AudioSet noise set (2.2/h at 0.6,
+      # which woke up on room chatter; 0.7/h at 0.8).
+      probability_cutoff: 0.7
     - model: hey_diggi/hey_diggi.json
       id: hey_diggi
       # Held-out (48 clips of unseen voices, 1.37 h AudioSet): 0.9 -> recall
