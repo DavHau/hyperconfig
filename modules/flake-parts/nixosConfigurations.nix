@@ -67,10 +67,6 @@ in {
 
         pkgsForSystem = system: import inputs.nixpkgs {
           inherit system;
-          # config = {
-          #   replaceStdenv = ({ pkgs }: pkgs.withCFlags [ "-funroll-loops" "-O3" "-march=x86-64-v3" ] pkgs.stdenv);
-          # };
-          # config.contentAddressedByDefault = true;
           config = import ../nixos/nixpkgs-config.nix {inherit lib;};
         };
 
@@ -112,7 +108,6 @@ in {
             # builds the flake itself (sgp has 1 vCPU, 1G RAM).
             edi.deploy.buildHost = "localhost";
             sgp.deploy.buildHost = "localhost";
-            # joy.deploy.targetHost = "joy.dave";
           };
 
           instances = {
@@ -128,14 +123,6 @@ in {
                 prompt = true;
               };
             };
-            # zt-home = {
-            #   module.name = "zerotier";
-            #   roles.peer.tags.all = {};
-            #   roles.controller.machines.nas = {};
-            #   roles.controller.settings.allowedIps = [
-            #     "7c29125877"
-            #   ];
-            # };
             # The clan-managed zerotier network. Its controller (edi) also
             # bridges the home LANs (../../home-networks): it authorizes the
             # site routers and routes their LANs (../nixos/zt-eu-sites.nix).
@@ -357,15 +344,6 @@ in {
               roles.server.tags.all = {};
             };
 
-            # cctl = {
-            #   module.name = "cctl";
-            #   module.input = "self";
-            #   roles.server.machines.amy.settings.user = "grmpf";
-            #   roles.server.extraModules = [
-            #     { networking.firewall.interfaces."ztfwr2j6pf".allowedTCPPorts = [ 80 ]; }
-            #   ];
-            # };
-
             # VPNs
             yggdrasil = {
               roles.default.tags = ["all"];
@@ -442,20 +420,6 @@ in {
               };
               roles.peer.machines = lib.genAttrs [ "amy" "vit" "som" ] (_: { });
             };
-            # ncps = {
-            #   module.name = "ncps";
-            #   module.input = "self";
-            #   roles.server.machines.bam = {
-            #     settings.caches = [
-            #       "https://cache.nixos.org"
-            #     ];
-            #     settings.publicKeys = [
-            #       "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
-            #     ];
-            #   };
-            #   roles.client.machines.amy = {};
-            #   roles.client.machines.bam = {};
-            # };
 
             # clan-core monitoring: Alloy on every machine pushes metrics
             # (Mimir) and journal logs (Loki) to edi over zt-eu (edi.d);

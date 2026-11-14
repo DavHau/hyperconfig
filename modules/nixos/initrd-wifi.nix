@@ -105,7 +105,7 @@ in
     boot.initrd.systemd.network.enable = true;
     # DHCPv4 gives the initrd some LAN address, not necessarily stage 2's
     # (another client id, maybe another MAC); rely on the fixed link-local
-    # one ../unlock-target.nix adds to this network. The interface vanishes
+    # one ./unlock-target.nix adds to this network. The interface vanishes
     # with the driver unload, so nothing outlives the initrd.
     boot.initrd.systemd.network.networks."30-initrd-wifi" = {
       matchConfig.Name = cfg.interface;

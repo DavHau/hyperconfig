@@ -11,7 +11,7 @@
     - The guest's sshd at [address]:sshPort only (a socket-activated
       systemd-socket-proxyd as its own uid, opened on meshInterface).
       sshPort null: no forward, no proxy user (a guest nobody logs into,
-      ../hermes-desktop-spaces.nix).
+      ../dave-desktop/isolated-apps.nix).
     - nftables table <name>: no new forwarded connection into the veth;
       on this host only root, the proxy (port 22) and `toGuestRules` reach
       the guest.
@@ -27,7 +27,7 @@
       every container start.
     - `credentials` (name -> host path, the ssh host key's included) as
       systemd credentials (nspawn --load-credential), copied in at start.
-    - `hostNixDaemon` false (../hermes-desktop-spaces.nix): the guest gets
+    - `hostNixDaemon` false (../dave-desktop/isolated-apps.nix): the guest gets
       no way to this host's nix-daemon. nixos-containers binds the
       daemon's socket directory into every container; this host's daemon
       builds (fixed-output derivations: with network) in this host's

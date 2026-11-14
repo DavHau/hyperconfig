@@ -43,7 +43,7 @@ in
   };
 
   # The dataset mounts are nofail and the pool import can lag or fail (see
-  # ./machines/bam/zfs.nix hazards). Without this, nfsd would happily export
+  # machines/bam/zfs.nix hazards). Without this, nfsd would happily export
   # the empty mountpoint directories.
   systemd.services.nfs-server.unitConfig.RequiresMountsFor = [
     "/vault/parquet"

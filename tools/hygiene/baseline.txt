@@ -1,31 +1,9 @@
 # Known hygiene debt (tools/hygiene/hygiene.py --update-baseline).
 # <kind> <path> <detail>; the check fails only on entries not listed here.
 # Shrink it by fixing things; grow it only with a reason in the commit body.
-dangling machines/vit/configuration.nix modules/nixos/default.nix
-dangling modules/nixos/exec-usage/default.nix ./monitoring-exec-usage.nix
-dangling modules/nixos/exec-usage/default.nix ./monitoring-zfs-pools.nix
-dangling modules/nixos/initrd-wifi.nix ../unlock-target.nix
-dangling modules/nixos/niri-spaces/desktop-profile.nix modules/nixos/spaces-commands.nix
-dangling modules/nixos/niri-spaces/desktop-profile.nix modules/nixos/spaces.nix
-dangling modules/nixos/niri-spaces/niri.nix ../keybinds.nix
-dangling modules/nixos/niri-spaces/niri.nix ./spaces-commands.nix
-dangling modules/nixos/niri-spaces/niri.nix modules/nixos/niri.nix
-dangling modules/nixos/niri-spaces/niri.nix modules/nixos/spaces-commands.nix
-dangling modules/nixos/omp-common.nix machines/inference/chat-template.md
-dangling modules/nixos/omp-common.nix machines/inference/omp-quickstart.md
-dangling modules/nixos/spaces/host.nix ../hermes-desktop-spaces.nix
-dangling modules/nixos/teamclaude-gateway/default.nix docs/quota.md
-dangling modules/nixos/teamclaude-gateway/default.nix docs/teamclaude-gateway.md
-dangling modules/nixos/teamclaude-gateway/default.nix modules/nixos/teamclaude-gateway.nix
-dangling modules/nixos/unlock-target.nix ../clan-unlock
-dangling modules/nixos/vault-nfs-server.nix ./machines/bam/zfs.nix
-dangling modules/nixos/voice-gateway/default.nix ./voice-agent.nix
-dangling pkgs/firefox-no-tabs/default.nix ./pkgs/firefox-no-tabs
-dangling tools/router-ais/default.nix docs/default.nix
 generator machines/bam/nextcloud.nix nextcloud
 generator machines/som/configuration.nix teamclaude-nmm
 generator modules/nixos/dyndns-porkbun.nix porkbun
-generator modules/nixos/hyprspace/default.nix hyprspace
 generator modules/nixos/pi-chat-openrouter.nix openrouter
 generator modules/nixos/porkbun-records/default.nix porkbun
 generator modules/nixos/storagebox.nix storagebox
@@ -42,21 +20,3 @@ sshkey-admin guests/bam-inference/configuration.nix 63eaef7c97ff
 sshkey-admin machines/edi/users.nix 27edf0f2a904
 sshkey-admin machines/edi/users.nix 63eaef7c97ff
 sshkey-admin modules/nixos/user-grmpf.nix 63eaef7c97ff
-unimported modules/nixos/backup.nix -
-unimported modules/nixos/cura.nix -
-unimported modules/nixos/envfs.nix -
-unimported modules/nixos/fish-ai.nix -
-unimported modules/nixos/gnome.nix -
-unimported modules/nixos/hyprspace/default.nix -
-unimported modules/nixos/iodine-client.nix -
-unimported modules/nixos/nether.nix -
-unimported modules/nixos/nix-heuristic-gc.nix -
-unimported modules/nixos/nix-local.nix -
-unimported modules/nixos/powerprofilectl.nix -
-unimported modules/nixos/retiolum.nix -
-unimported modules/nixos/role-flixbus.nix -
-unimported modules/nixos/sway/default.nix -
-unimported modules/nixos/tplink-archer-t2u-nano.nix -
-unimported modules/nixos/ups.nix -
-unimported modules/nixos/vagrant.nix -
-unimported modules/nixos/vscode.nix -

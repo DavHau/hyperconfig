@@ -1,3 +1,5 @@
+# VPN clients on Dave's desktops: the Mullvad app and his personal
+# zerotier networks (the clan's own zt-eu is in the clan inventory).
 { config, pkgs, lib, ... }:
 {
   # mullvad

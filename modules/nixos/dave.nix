@@ -1,3 +1,7 @@
+# Dave's desktops and workstations (amy, som, vit): the shared desktop
+# stack, harnesses (afk/omp, sbox), dev tools and his apps. Fleet-wide
+# defaults belong in ./common.nix instead; a module used by only one of the
+# three goes into that machine's configuration.nix imports.
 { config, pkgs, lib, inputs, self, ... }:
 let
   l = lib // builtins;
@@ -27,7 +31,6 @@ in
     ./encrypted-dns.nix
     ./nix.nix
     ./nix-parallel-downloads.nix
-    # ./hyprspace
     ./nrb
     ./clan-unlock
     # niri compositor is vendored from spaces (upstream moved to COSMIC in
@@ -66,12 +69,7 @@ in
     ./proton-vpn.nix
     ./vpn.nix
     ./home-manager.nix
-    # fish-ai is now a home-manager module: ../home-manager/fish-ai.nix
-    # ./backup.nix
-    # ./retiolum.nix
     ./opengl.nix
-    # ./cura.nix  # slicer for 3d printing
-    # ./tplink-archer-t2u-nano.nix
     ./printing.nix
     ./nix-registry.nix
     ./nix-lazy.nix
@@ -84,18 +82,11 @@ in
     ./bitwarden.nix
     ./thunderbird.nix
     ./short-videos
-    # ./envfs.nix
-    # ./nix-heuristic-gc.nix
     ./ollama.nix
     ./fonts.nix
     ./gocr.nix
     ./ocr
-    # ./nether.nix
-    # ./vagrant.nix
-    # ./iodine-client.nix
     ./udev.nix
-    # ./sway
-    # ./ups.nix
     ./packages.nix
     # exec tracing + `infra-unused`: which installed programs get used.
     ./exec-usage
@@ -125,10 +116,6 @@ in
   # agent here uses it.
   services.spaces-integrations.enable = false;
 
-  # services.hyprspace.settings.peers = [
-  #   { id = self.nixosConfigurations.nas.config.clan.core.vars.generators.hyprspace.files.peer-id.value; }
-  # ];
-
   clan.core.networking.targetHost = lib.mkForce "root@localhost";
 
   # NIX settings
@@ -136,17 +123,4 @@ in
     "tb=/home/grmpf/synced/projects/github/nix-toolbox"
     "nixpkgs=${pkgs.path}"
   ];
-
-  # TLP
-  # services.tlp.enable = true;
-  # services.tlp.settings = {
-  #   CPU_SCALING_GOVERNOR_ON_AC = "powersave";
-  #   CPU_SCALING_GOVERNOR_ON_BAT = "powersave";
-  #   CPU_MAX_PERF_ON_AC = 100;
-  #   STOP_CHARGE_THRESH_BAT0 = 100;
-  #   START_CHARGE_THRESH_BAT0 = 85;
-  #   CPU_SCALING_MAX_FREQ_ON_BAT = 1600000;
-  #   CPU_SCALING_MAX_FREQ_ON_AC = 9999999;
-  #   CPU_MAX_PERF_ON_BAT=40;
-  # };
 }

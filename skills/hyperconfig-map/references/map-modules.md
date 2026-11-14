@@ -17,43 +17,38 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/all-hardware.nix — - <- m/common.nix
 - modules/nixos/amd-powersave-limits.nix — Tighter SoC power limits and GPU/panel savings while power-profiles-daemon is in `power-saver`, for the Framework 13 AM… <- amy
 - modules/nixos/amd-pstate-resume-fix.nix — Workaround for amd-pstate-epp (active / EPP mode) failing to restore the upper CPU frequency cap after s2idle resume on… <- m/dave.nix
-- modules/nixos/amdgpu.nix — - <- amy, som
+- modules/nixos/amdgpu.nix — Links libdrm to /opt/amdgpu, where ROCm/amdgpu userspace tools look for their ids file (amy, som). <- amy, som
 - modules/nixos/audio.nix — - <- m/dave.nix
-- modules/nixos/backup.nix — -
 - modules/nixos/bitwarden.nix — - <- m/dave.nix
 - modules/nixos/bluetooth-resume-fix.nix — Workaround for Intel AX210 (USB id 8087:0032) Bluetooth controller: <- amy
 - modules/nixos/bluetooth.nix — - <- m/dave.nix
-- modules/nixos/boot.nix — - <- m/dave.nix
+- modules/nixos/boot.nix — Boot defaults for Dave's desktops: <- m/dave.nix
 - modules/nixos/captchakraken-server.nix — CaptchaKraken v1.2 (Qwen3.5-9B captcha merge, GGUF Q4_K_M + F16 vision projector) on llama-server, for web-bench's camo… <- vit
 - modules/nixos/chores-on-ac.nix — Run maintenance chores (store GC/optimise, backups, ZFS scrub/trim, fstrim, firmware metadata refresh) only while the l… <- amy
 - modules/nixos/clan-secrets-mirror-test.nix — The secrets mirror (./clan-secrets-mirror.nix) against a local bare repo standing in for GitHub: <- flake.nix
 - modules/nixos/clan-secrets-mirror.nix — A root-only copy of the clan's encrypted vars store (the private GitHub repo hyperconfig-secrets) on every machine but… <- modules/flake-parts/nixosConfigurations.nix, m/clan-secrets-mirror-test.nix
 - modules/nixos/clan-vars-restart-units-test.nix — restartUnits of clan vars with the age backend (./clan-vars-restart-units.nix) in real switches. <- flake.nix
 - modules/nixos/clan-vars-restart-units.nix — `restartUnits` of clan vars, for clan's age backend. <- modules/flake-parts/nixosConfigurations.nix, m/clan-vars-restart-units-test.nix
-- modules/nixos/common-tools.nix — - <- bam, cm-pi, edi, joy, nas, sgp, m/shell-profile.nix
-- modules/nixos/common.nix — - <- bam, cm-pi, edi, joy, nas, sgp, modules/flake-parts/nixosConfigurations.nix, m/dave.nix, +3
+- modules/nixos/common-tools.nix — Small CLI toolset (bat, git, htop, tmux, vim, ...) on every server and desktop, plus ./prune-gcroots.nix. <- bam, cm-pi, edi, joy, nas, sgp, m/shell-profile.nix
+- modules/nixos/common.nix — Fleet-wide defaults for every machine but the installer (imported by each machine's configuration.nix): <- bam, cm-pi, edi, joy, nas, sgp, modules/flake-parts/nixosConfigurations.nix, m/dave.nix, +3
 - modules/nixos/cpu-powersave-cap.nix — Apply an extra CPU frequency ceiling on top of power-profiles-daemon's `power-saver` profile, going below what PPD does… <- m/laptop.nix
-- modules/nixos/cura.nix — -
-- modules/nixos/dave.nix — - <- amy, som, vit, m/dave-desktop/default.nix, m/infra-space/afk.nix, m/infra-space/launchers.nix
+- modules/nixos/dave.nix — Dave's desktops and workstations (amy, som, vit): <- amy, som, vit, m/dave-desktop/default.nix, m/infra-space/afk.nix, m/infra-space/launchers.nix
 - modules/nixos/deluge.nix — - <- m/dave.nix
-- modules/nixos/desktop.nix — - <- m/dave.nix
-- modules/nixos/dyndns-porkbun.nix — - <- edi, machines/nas/porkbun.nix
+- modules/nixos/desktop.nix — X11/libinput basics and session variables (terminal = ghostty) on Dave's desktops; <- m/dave.nix
+- modules/nixos/dyndns-porkbun.nix — Dynamic DNS through the Porkbun API: <- edi, machines/nas/porkbun.nix
 - modules/nixos/encrypted-dns.nix — System DNS only ever leaves this machine encrypted: <- m/dave.nix
-- modules/nixos/envfs.nix — -
 - modules/nixos/esphome-secrets.nix — Secrets of the ESPHome devices (locations/*/esphome, machines/cm-pi/esphome), one shared generator per ESPHome director… <- amy
 - modules/nixos/etc-hosts.nix — - <- m/dave.nix
 - modules/nixos/fast-nix-gc.nix — Fleet-wide store GC (imported by ./common.nix, so every machine gets it): <- m/common.nix, m/disk-hygiene/default.nix, m/infra-space/gcroots.nix
-- modules/nixos/firewall.nix — - <- m/dave.nix
+- modules/nixos/firewall.nix — Desktop firewall openings: <- m/dave.nix
 - modules/nixos/firmware-only.nix — Only the linux-firmware files a machine loads, instead of the whole ~850 MiB redistributable set that hardware.enableAl… <- m/all-hardware.nix
-- modules/nixos/fish-ai.nix — -
 - modules/nixos/fish.nix — - <- m/shell-profile.nix
 - modules/nixos/fonts.nix — - <- m/dave.nix
 - modules/nixos/fw-fanctrl.nix — Declarative Framework laptop fan curve via fw-fanctrl, gated on the active power-profiles-daemon profile. <- amy
 - modules/nixos/ghostty-terminfo.nix — Ghostty's terminfo (xterm-ghostty) on every machine and in the spaces' guests, so an ssh session from Dave's ghostty (.… <- m/common.nix, m/spaces/guest-base.nix
 - modules/nixos/ghostty.nix — Ghostty, Dave's default terminal on his desktops (TERMINAL in ./desktop.nix, niri's Mod+Return / Mod+T, nautilus, the s… <- m/dave.nix
 - modules/nixos/git-lfs.nix — Git LFS for every user of the host: <- som
-- modules/nixos/git.nix — - <- m/dave.nix
-- modules/nixos/gnome.nix — -
+- modules/nixos/git.nix — git defaults on Dave's desktops (identity, aliases, tools). <- m/dave.nix
 - modules/nixos/gocr.nix — - <- m/dave.nix
 - modules/nixos/greetd-idle-restart-test.nix — greetd-idle-restart.sh (greetd.nix) against fake inputs: <- flake.nix
 - modules/nixos/greetd-idle-restart.sh — shellcheck shell=bash Restart greetd when the running greetd is definitely an old one and seat0 is idle: <- m/greetd-idle-restart-test.nix, m/greetd.nix
@@ -61,16 +56,15 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/herdr-jj.nix — jj workspace support for herdr via the community herdr-jj plugin (OliverGilan/herdr-jj, MIT): <- m/dave.nix, m/spaces/guest.nix, m/spaces/test.nix
 - modules/nixos/herdr-pin-config.py — - <- m/herdr-jj.nix
 - modules/nixos/hermes-agents-gpu-host.nix — GPU host for som's hermes agents: <- vit
-- modules/nixos/home-manager.nix — - <- m/dave.nix
+- modules/nixos/home-manager.nix — home-manager as a NixOS module on Dave's desktops (shared settings for every home-manager user; <- m/dave.nix
 - modules/nixos/houses-grmpf.nix — grmpf's nix-housing houses (see houses.nix): <- amy
 - modules/nixos/houses.nix — nix-housing (codeberg.org/decentstates/nix-housing): <- m/houses-grmpf.nix
 - modules/nixos/inference-api-key.nix — Bearer token for the fleet inference endpoint (https://inference.p0.contact). <- m/dave.nix, m/spaces/afk.nix
 - modules/nixos/initrd-ssh.nix — sshd in the initrd on port 2222: <- vit
 - modules/nixos/initrd-wifi.nix — Wifi in the initrd, so a machine without a cable can reach its Tang servers (./tang-client.nix). <- vit
-- modules/nixos/iodine-client.nix — -
-- modules/nixos/iodine-password.nix — Password of the iodine IP-over-DNS tunnel (ns.bruch-bu.de). <- m/iodine-client.nix, m/role-iodine/default.nix
+- modules/nixos/iodine-password.nix — Password of the iodine IP-over-DNS tunnel (ns.bruch-bu.de). <- m/role-iodine/default.nix
 - modules/nixos/ipv4-forward.nix — Lend sgp's public IPv4 to som. <- sgp, som, m/ipv4-forward-slots-test/default.nix
-- modules/nixos/jujutsu.nix — - <- m/dave.nix
+- modules/nixos/jujutsu.nix — jj (jujutsu) on Dave's desktops, with its config. <- m/dave.nix
 - modules/nixos/kernel-latest-zfs.nix — Use the newest kernel series that the configured ZFS package supports. <- amy
 - modules/nixos/lan-printer.nix — lan-printer: one driverless (IPP Everywhere / AirPrint) CUPS queue for a network printer, created by our own oneshot in… <- m/printer-canon-mf272dw.nix
 - modules/nixos/laptop.nix — Battery-only behaviour. Compose next to ./dave.nix on laptops. <- amy, vit
@@ -81,7 +75,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/llama-swap-nanbeige42-amy.nix — Nanbeige4.2-3B (dense looped transformer, 3B non-embedding params, 256K native ctx) + DSpark speculative decoding for l… <- amy
 - modules/nixos/llama-swap-qwen36-amy.nix — Qwen3.6-35B-A3B (unsloth dynamic quants, MTP variant) for llama-swap, tuned for amy: <- amy
 - modules/nixos/llama-swap.nix — Extra llama-swap config for hyperconfig machines. <- amy
-- modules/nixos/locale.nix — - <- m/dave.nix
+- modules/nixos/locale.nix — Time zone, locale and console keymap for Dave's desktops. <- m/dave.nix
 - modules/nixos/low-battery-power-off.nix — - <- m/laptop.nix
 - modules/nixos/monitoring-alerts.nix — Fleet alerts: Grafana unified alerting on the monitoring server (edi), evaluated against the Mimir datasource the clan-… <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/nixpkgs-bump.nix
 - modules/nixos/monitoring-exec-usage.nix — "Unused packages" dashboard on the monitoring server's Grafana (stats.davhau.com/d/exec-usage), fed by ./exec-usage on… <- modules/flake-parts/nixosConfigurations.nix
@@ -90,8 +84,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/monitoring-teamclaude.nix — "TeamClaude usage" dashboard on the monitoring server's Grafana (stats.davhau.com/d/teamclaude-usage), fed by som's exp… <- modules/flake-parts/nixosConfigurations.nix
 - modules/nixos/monitoring-zfs-pools.nix — Pushes ZFS pool health and capacity to Mimir for ./monitoring-alerts.nix. <- modules/flake-parts/nixosConfigurations.nix
 - modules/nixos/nautilus.nix — Nautilus right-click "Open in Ghostty" (folder background and folder items), via the nautilus-open-any-terminal extensi… <- m/dave.nix
-- modules/nixos/nether.nix — -
-- modules/nixos/networking-desktop.nix — - <- m/dave.nix
+- modules/nixos/networking-desktop.nix — Desktop networking: NetworkManager, tailscale, and the wired link-local address (./wired-link-local.nix). <- m/dave.nix
 - modules/nixos/networkmanager-restart-late.nix — Keep the network up through switch-to-configuration's daemon-reload. <- modules/flake-parts/nixosConfigurations.nix
 - modules/nixos/niri-float-rules.nix — Floating window rules layered on top of the spaces base niri config. <- m/dave.nix
 - modules/nixos/niri-layout-tweaks.nix — Host-local niri layout tweaks layered on top of the spaces base config. <- m/dave.nix
@@ -103,15 +96,13 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/nix-development.nix — - <- m/dave.nix
 - modules/nixos/nix-gc-server.nix — Store settings for small-disk servers (no local development, deployed from elsewhere): <- edi
 - modules/nixos/nix-gc.nix — - <- m/dave.nix
-- modules/nixos/nix-heuristic-gc.nix — -
 - modules/nixos/nix-lazy.nix — - <- m/dave.nix
-- modules/nixos/nix-local.nix — -
 - modules/nixos/nix-parallel-downloads.nix — - <- m/dave.nix
 - modules/nixos/nix-registry.nix — - <- m/dave.nix
 - modules/nixos/nix-sandbox-strict.nix — som's nix-daemon builds for users it does not trust: <- som
 - modules/nixos/nix-ssh-client.nix — Unified ssh client key for the nix daemon. <- m/dave.nix
-- modules/nixos/nix.nix — - <- m/dave.nix
-- modules/nixos/nixpkgs-config.nix — - <- modules/flake-parts/nixosConfigurations.nix, m/dave.nix
+- modules/nixos/nix.nix — The nix package on Dave's desktops: <- m/dave.nix
+- modules/nixos/nixpkgs-config.nix — nixpkgs `config` for the whole fleet (imported, not a module): <- modules/flake-parts/nixosConfigurations.nix, m/dave.nix
 - modules/nixos/no-ca-derivations.nix — Keeps nix's experimental `ca-derivations` feature off on every machine (imported by ./common.nix), see docs/security/ni… <- m/common.nix
 - modules/nixos/ntop.nix — ntop: nix-native htop from the local ../ntop checkout (input in flake.nix). One TUI for live builds, substituter transf… <- m/dave.nix
 - modules/nixos/nvidia-patchelf-split.nix — nvidia-smi, nvidia-powerd and nvidia-cuda-mps-* segfault in ld.so before main: <- m/nvidia.nix
@@ -125,11 +116,10 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/oomd.nix — systemd-oomd on the user slices, tuned to act within seconds. <- amy
 - modules/nixos/opengl.nix — - <- m/dave.nix
 - modules/nixos/openrouter-api-key.nix — The shared OpenRouter key for Dave's harnesses (afk): <- m/dave.nix, m/spaces/afk.nix
-- modules/nixos/packages.nix — - <- m/dave.nix
+- modules/nixos/packages.nix — Dave's desktop package set (./dave.nix): <- m/dave.nix
 - modules/nixos/pi-agent.nix — The `pi` agent, split out of the former pi.nix when the patched-omp wrappers were dropped in favour of afk (./afk.nix). <- m/dave.nix
 - modules/nixos/pi-chat-openrouter.nix — The shared OpenRouter key (spaces.openrouter; <- m/dave.nix
 - modules/nixos/pinentry.nix — - <- m/bitwarden.nix
-- modules/nixos/powerprofilectl.nix — -
 - modules/nixos/powersave-panel-refresh.nix — Drop the built-in laptop panel (eDP-*) to its lowest refresh rate at the current resolution while power-profiles-daemon… <- amy
 - modules/nixos/printer-canon-mf272dw.nix — The home Canon i-SENSYS MF272dw (IoT Wi-Fi, fixed 192.168.18.20) as the default printer, driverless over IPP (AirPrint/… <- amy, joy, vit, m/scan-trigger/test.nix
 - modules/nixos/printing.nix — - <- m/dave.nix
@@ -137,10 +127,8 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/prune-gcroots.nix — CLI to prune stale auto GC roots (nix-direnv devshells and old result links). <- m/common-tools.nix
 - modules/nixos/prune-gcroots.sh — - <- m/prune-gcroots.nix
 - modules/nixos/public-ipv6-token.nix — A stable, hand-picked IPv6 suffix on the LAN uplink, so the host has a predictable public address in whatever /64 the A… <- som
-- modules/nixos/retiolum.nix — -
 - modules/nixos/rgb-off.nix — Control the machine's RGB LEDs. <- bam, som
 - modules/nixos/riscv64.nix — - <- cm-pi
-- modules/nixos/role-flixbus.nix — -
 - modules/nixos/role-parasit.nix — Wi-Fi client for the Parasit / Parasit_5G networks. <- nas
 - modules/nixos/router-ais.nix — Admin credentials of the AIS-issued ZTE F6107A router (http://192.168.1.1), the IPv6 firewall in front of the whole hom… <- amy
 - modules/nixos/router-cm-beryl.nix — Admin credentials of the GL.iNet Beryl (cm-beryl, OpenWrt) at http://192.168.8.1 — the LAN's IPv6 relay and the second… <- amy
@@ -149,7 +137,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/sbox-age.nix — Shared age identity for sandboxes. <- m/dave.nix
 - modules/nixos/sbox-mullvad.nix — - <- m/dave.nix
 - modules/nixos/sbox-omp-worktrees.nix — omp task-isolation worktrees inside sbox live on the projects' filesystem. <- m/sbox.nix
-- modules/nixos/sbox.nix — - <- bam, cm-pi, edi, joy, nas, m/dave.nix
+- modules/nixos/sbox.nix — sbox: the bubblewrap sandbox for agent harnesses (afk/omp, claude) and direnv on Dave's machines. Persisted dirs, key-f… <- bam, cm-pi, edi, joy, nas, m/dave.nix
 - modules/nixos/shell-aliases.nix — - <- m/shell-profile.nix
 - modules/nixos/shell-profile.nix — Dave's default shell profile, for every place he gets a shell: <- m/dave.nix, m/infra-space/guest.nix, m/spaces/guest-base.nix
 - modules/nixos/ssh-tpm-agent-confirm-test.nix — End-to-end regression test for the ssh-tpm-agent confirm-grant cache. <- flake.nix
@@ -158,7 +146,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/ssh-tpm-confirm-dialog-test.nix — Sandboxed regression test + screenshot harness for the ssh-tpm-agent confirm dialog (see ssh-tpm-confirm-dialog.py). <- flake.nix
 - modules/nixos/ssh-tpm-confirm-dialog.nix — The ssh-tpm-agent confirmation dialog (see ssh-tpm-confirm-dialog.py). <- flake.nix, m/ssh-tpm-agent.nix, m/ssh-tpm-confirm-dialog-test.nix
 - modules/nixos/ssh-tpm-confirm-dialog.py — !/usr/bin/env python3 <- m/niri-float-rules.nix, m/ssh-tpm-confirm-dialog.nix
-- modules/nixos/ssh.nix — - <- m/dave.nix
+- modules/nixos/ssh.nix — ssh client defaults on Dave's desktops: <- m/dave.nix
 - modules/nixos/storagebox-readahead.sh — Tune a FUSE mount for a high-latency link. <- m/storagebox.nix
 - modules/nixos/storagebox-sync.nix — Daily pull of the storage box's depth archive into the vault's parquet dataset. <- bam
 - modules/nixos/storagebox-sync.sh — Pull the storage box's depth archive into the vault, newest hours first. <- m/storagebox-sync.nix
@@ -169,20 +157,16 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/teamclaude-api-key.nix — Client key for the TeamClaude pooled Claude subscription gateway (https://teamclaude.davhau.com, ./teamclaude-gateway o… <- m/dave.nix, m/infra-space/hermes.nix, m/noctalia-anthropic-usage/default.nix, m/spaces/afk.nix, m/teamclaude-gateway/default.nix
 - modules/nixos/thunderbird.nix — - <- m/dave.nix
 - modules/nixos/timedated-ntp.nix — - <- m/common.nix
-- modules/nixos/tplink-archer-t2u-nano.nix — -
-- modules/nixos/udev.nix — - <- m/dave.nix
+- modules/nixos/udev.nix — udev rules for Dave's USB devices: <- m/dave.nix
 - modules/nixos/udiskie.nix — - <- m/dave.nix
-- modules/nixos/unlock-target.nix — Where and how ../clan-unlock reaches this machine's initrd, so `clan-unlock <machine>` needs nothing else. <- m/luks-unlock/default.nix, m/zfs-remote-unlock/default.nix
-- modules/nixos/ups.nix — -
-- modules/nixos/user-dave.nix — - <- amy, som, vit
-- modules/nixos/user-grmpf.nix — - <- amy
-- modules/nixos/vagrant.nix — -
+- modules/nixos/unlock-target.nix — Where and how ./clan-unlock reaches this machine's initrd, so `clan-unlock <machine>` needs nothing else. <- m/luks-unlock/default.nix, m/zfs-remote-unlock/default.nix
+- modules/nixos/user-dave.nix — Home-manager profile and nix trust for the `dave` user on Dave's desktops (amy, som, vit via ./dave.nix); <- amy, som, vit
+- modules/nixos/user-grmpf.nix — The `grmpf` user: Dave's desktop account on amy (uid 1000 there; dave is 1001), with dave's password and home-manager p… <- amy
 - modules/nixos/vault-ids.nix — Principals of the vault NFS export, pinned to the same numeric ids on the server (bam) and every wg-vault client. <- m/hermes-agents-gpu-host.nix, m/vault-nfs-client.nix, m/vault-nfs-server.nix
 - modules/nixos/vault-nfs-client.nix — Mount bam's vault pool at /vault over NFSv4.2, via the wg-vault kernel WireGuard star (bam.wg-vault comes from the inst… <- amy, som, vit
 - modules/nixos/vault-nfs-server.nix — NFSv4.2 export of bam's `vault` pool to amy/vit/som over the wg-vault WireGuard star (instance in modules/flake-parts/n… <- bam
-- modules/nixos/virtualisation.nix — - <- m/dave.nix
-- modules/nixos/vpn.nix — - <- m/dave.nix
-- modules/nixos/vscode.nix — -
+- modules/nixos/virtualisation.nix — Containers and VMs on Dave's desktops: <- m/dave.nix
+- modules/nixos/vpn.nix — VPN clients on Dave's desktops: <- m/dave.nix
 - modules/nixos/wdisplays.nix — wdisplays + niri-display persistence. <- m/dave.nix
 - modules/nixos/web-bench-mullvad.nix — The fixed identity of `web-bench launch --egress mullvad` (tools/web-bench): <- som
 - modules/nixos/wired-link-local.nix — Keep wired interfaces usable on a peer-to-peer cable (laptop <-> laptop). <- m/networking-desktop.nix
@@ -198,7 +182,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/cooler-lcd/stream.py — - <- m/cooler-lcd/default.nix
 - modules/nixos/dave-desktop/apps.nix — THE list of Hermes apps on Dave's desktops (./default.nix): <- machines/som/hermes-agents.nix, m/dave-desktop/isolated-apps.nix, m/dave-desktop/shared-app.nix
 - modules/nixos/dave-desktop/default.nix — Dave's desktop apps, the same set on every desktop that imports ../dave.nix (amy, vit, som): <- m/dave.nix, m/space-gui/default.nix, m/spaces/client.nix
-- modules/nixos/dave-desktop/isolated-apps.nix — "Hermes (<label>)": for each app marked `isolated` in ./apps.nix (voice, infra-space), the hermes desktop app run in a… <- m/dave-desktop/default.nix
+- modules/nixos/dave-desktop/isolated-apps.nix — "Hermes (<label>)": for each app marked `isolated` in ./apps.nix (voice, infra-space), the hermes desktop app run in a… <- m/dave-desktop/default.nix, m/spaces/host.nix
 - modules/nixos/dave-desktop/shared-app.nix — The shared "Hermes Desktop" app on Dave's desktops (./default.nix) for som's agents (machines/som/hermes-agents.nix), t… <- m/dave-desktop/default.nix, m/space-gui/hermes-app.nix
 - modules/nixos/disk-hygiene/cargo-build-gc.sh — Delete cargo build dirs (see ../rust-build-cache.nix) that are dead: <- m/disk-hygiene/default.nix
 - modules/nixos/disk-hygiene/default.nix — Keep the disk from filling up (store GC itself: <- amy, som, m/rust-build-cache.nix
@@ -210,7 +194,6 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/exec-usage/default.nix — Exec usage: which installed programs get run, so the config can be slimmed. <- m/dave.nix
 - modules/nixos/exec-usage/infra-unused.py — - <- m/exec-usage/default.nix
 - modules/nixos/exec-usage/tracer.py — - <- m/exec-usage/default.nix
-- modules/nixos/hyprspace/default.nix — -
 - modules/nixos/infra-space/afk.nix — afk in the infra-space container, for Dave's interactive sessions as `infra` (hermes never starts it): <- m/infra-space/default.nix, m/spaces/afk.nix
 - modules/nixos/infra-space/age-recipients.nix — The clan vars' age recipients (vars.settings.recipients.default in ../../flake-parts/nixosConfigurations.nix): <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/default.nix, m/infra-space/guest.nix, m/spaces/default.nix
 - modules/nixos/infra-space/dashboard-account.nix — Who signs in to the infra-space dashboard (./dashboard.nix, on som), as plain data for the two evaluations that need it: <- som, modules/flake-parts/nixosConfigurations.nix, m/infra-space/dashboard.nix
@@ -313,9 +296,6 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/spaces/test.nix — The named spaces (./default.nix) on one host beside infra-space, and Dave's side of them (./client.nix) on the same hos… <- flake.nix
 - modules/nixos/spaces/forge-prs-skill/SKILL.md — > <- m/spaces/forges.nix
 - modules/nixos/spaces/publish-skill/SKILL.md — >
-- modules/nixos/sway/default.nix — -
-- modules/nixos/sway/sway.config.nix — - <- m/sway/default.nix
-- modules/nixos/sway/waybar.jsonc.nix — - <- m/sway/sway.config.nix
 - modules/nixos/teamclaude-gateway/default.nix — TeamClaude: pooled Claude subscription gateway at https://teamclaude.davhau.com/, after project-zero's pubproxy01 setup… <- som
 - modules/nixos/teamclaude-gateway/metrics.nix — Pushes TeamClaude usage to Mimir for the "TeamClaude usage" dashboard (../monitoring-teamclaude.nix on the monitoring s… <- m/teamclaude-gateway/default.nix
 - modules/nixos/toolchain-cache-dirs/default.nix — Tool defaults that keep rebuildable downloads (module caches, package stores, model files) in ~/.cache, for hosts where… <- som

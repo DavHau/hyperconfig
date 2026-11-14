@@ -1,3 +1,6 @@
+# Dave's desktop package set (./dave.nix): CLI and GUI tools, the patched
+# no-tabs Firefox (../../pkgs/firefox-no-tabs). Use `infra-unused`
+# (./exec-usage) before adding to or pruning this list.
 { pkgs, inputs, ... }:
 {
   environment.systemPackages = with pkgs; [

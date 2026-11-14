@@ -1,3 +1,4 @@
+# Desktop firewall openings: game servers and deluge (./deluge.nix).
 { ... }:
 {
   networking.firewall.allowedTCPPorts = [

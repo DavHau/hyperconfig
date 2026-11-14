@@ -10,7 +10,8 @@
 # of opening a tab still produces one.
 #
 # Returns the patched *unwrapped* Firefox; wrap it at the call site with
-# `pkgs.wrapFirefox (pkgs.callPackage ./pkgs/firefox-no-tabs { }) { }`.
+# `pkgs.wrapFirefox (pkgs.callPackage ../../pkgs/firefox-no-tabs { }) { }`
+# (path as seen from a module in modules/nixos/).
 # (callPackage's own .override would shadow wrapFirefox's, and
 # home-manager could then not add policies.)
 {

@@ -25,7 +25,6 @@ dangling modules/nixos/teamclaude-gateway/default.nix ../geninf/project-zero  # 
 dangling * ./target                                          # cargo's ./target dir, prose
 dangling * ./target/*                                        # cargo's ./target dir, prose
 dangling machines/*/disko.nix ./secret.key                   # an installer CLI argument, prose
-dangling modules/nixos/hyprspace/default.nix ./config.json   # generator script's cwd
 dangling modules/nixos/nvidia-patchelf-split.nix ./builder.sh  # nixpkgs mkDerivation idiom, prose
 dangling modules/nixos/afk.nix ./forge-prs-skill             # literalExpression example
 dangling modules/flake-parts/nixvim/default.nix ./dev        # nixvim's own flake partition
@@ -39,3 +38,13 @@ dangling machines/som/hermes-agents.nix ./hyperhermes        # the repo's hyperh
 # secret (CONVENTIONS.md: never rename a var that guards a disk).
 generator modules/nixos/infra-space/nixpkgs-bump/guard-test.nix x  # test fixture
 sshkey modules/nixos/agent-user.nix                 # defines the agent@amy key (the fleet `agent` user's registry)
+
+# dangling: paths in other repos, named with their repo.
+dangling modules/nixos/teamclaude-gateway/default.nix docs/*  # project-zero's tree (../geninf/project-zero)
+dangling modules/nixos/teamclaude-gateway/default.nix modules/nixos/teamclaude-gateway.nix  # project-zero's tree
+dangling modules/nixos/omp-common.nix machines/inference/*   # project-zero's tree
+dangling modules/nixos/niri-spaces/* modules/nixos/spaces*.nix  # provenance: paths in the upstream spaces tree
+dangling modules/nixos/niri-spaces/niri.nix modules/nixos/niri.nix  # provenance: the upstream spaces tree
+dangling modules/nixos/niri-spaces/niri.nix ../keybinds.nix   # provenance: the upstream spaces tree
+dangling modules/nixos/niri-spaces/niri.nix ./spaces-commands.nix  # provenance: the upstream spaces tree
+dangling machines/vit/configuration.nix modules/nixos/default.nix  # the spaces input's tree

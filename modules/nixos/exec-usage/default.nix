@@ -18,7 +18,7 @@
 #
 # Metrics: a timer writes `infra-unused --prom` (package counts and one
 # last-used series per package) to a textfile for Alloy -> Mimir, like
-# ./monitoring-zfs-pools.nix; dashboard in ./monitoring-exec-usage.nix.
+# ../monitoring-zfs-pools.nix; dashboard in ../monitoring-exec-usage.nix.
 #
 # Extending to services later: the same usage.json can carry other kinds
 # of "use" next to `exes` (e.g. units' last activation / socket hits).

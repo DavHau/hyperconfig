@@ -13,9 +13,6 @@
     # Our own nixpkgs, not spaces': fleet updates (security fixes) land on
     # our schedule. spaces keeps its own pin for its own outputs.
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    # nixpkgs.url = "git+https://github.com/DavHau/nixpkgs?&ref=dave&shallow=1";
-    # nixpkgs-riscv.url = "git+https://github.com/davhau/nixpkgs?&ref=riscv&shallow=1";
-    # nixpkgs-riscv.url = "git+https://github.com/DavHau/nixpkgs?&ref=dave&shallow=1";
     nixpkgs-riscv.follows = "nixpkgs";
     # Newer nixpkgs ONLY for llama-cpp: the fleet nixpkgs lags
     # the llama.cpp release train, and inference modules that need a recent
@@ -45,7 +42,6 @@
 
     # Nix with parallel chunked substituter downloads (DavHau/nix branch
     # parallel-downloads; see modules/nixos/nix-parallel-downloads.nix).
-    # nix.url = "https://flakehub.com/f/NixOS/nix/2.*.*.tar.gz";
     nix.url = "github:DavHau/nix/parallel-downloads";
     # nix builds on its own pinned nixpkgs: against nixpkgs 2026-09-22
     # (boost 1.91) its URL-parsing unit tests fail (IPv6 cases).
@@ -61,7 +57,6 @@
     clan-core.inputs.nixpkgs.follows = "nixpkgs";
     clan-core.inputs.disko.follows = "disko";
     clan-core.inputs.flake-parts.follows = "flake-parts";
-    # clan-core.inputs.systems.follows = "systems";
 
     disko.url = "github:nix-community/disko";
     disko.inputs.nixpkgs.follows = "nixpkgs";
@@ -78,12 +73,6 @@
     srvos.url = "github:nix-community/srvos";
     srvos.inputs.nixpkgs.follows = "nixpkgs";
 
-    # nether.url = "github:Lassulus/nether";
-    # nether.inputs.nixpkgs.follows = "nixpkgs";
-
-    # lassulus.url = "github:Lassulus/superconfig";
-    # lassulus.inputs.nixpkgs.follows = "nixpkgs";
-
     hyprspace.url = "github:hyprspace/hyprspace";
     hyprspace.inputs.nixpkgs.follows = "nixpkgs";
     hyprspace.inputs.flake-parts.follows = "flake-parts";
@@ -96,7 +85,6 @@
     nixvim.inputs.nixpkgs.follows = "nixpkgs";
     nixvim.inputs.flake-parts.follows = "flake-parts";
 
-    # buildbot-nix.url = "github:nix-community/buildbot-nix";
     buildbot-nix.url = "github:nix-community/buildbot-nix";
     buildbot-nix.inputs.nixpkgs.follows = "nixpkgs";
     buildbot-nix.inputs.flake-parts.follows = "flake-parts";

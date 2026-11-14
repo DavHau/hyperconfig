@@ -7,7 +7,7 @@
     address only) -> ./gateway.py -> one of
       untrusted (default): the `voice` hermes agent's api_server
         (../../../machines/som/hermes-agents.nix; HA through its MCP server as
-        the non-admin HA user voice-agent, ./voice-agent.nix),
+        the non-admin HA user voice-agent, ./cm-pi.nix),
       trusted: the infra agent's api_server in the infra-space container
         (../infra-space/voice-api.nix), session `voice`.
 

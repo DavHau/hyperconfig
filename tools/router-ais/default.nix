@@ -3,7 +3,7 @@ pkgs.python3Packages.buildPythonApplication {
   pname = "router-ais";
   version = "0.1.0";
   pyproject = true;
-  # Only what setuptools packages; docs/default.nix edits don't rebuild.
+  # Only what setuptools packages; doc and default.nix edits don't rebuild.
   src = pkgs.lib.fileset.toSource {
     root = ./.;
     fileset = pkgs.lib.fileset.unions [

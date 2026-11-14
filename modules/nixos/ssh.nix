@@ -1,3 +1,5 @@
+# ssh client defaults on Dave's desktops: agent, connection multiplexing,
+# and jump hosts for clan's build machines.
 { ... }:
 {
   programs.ssh.startAgent = true;

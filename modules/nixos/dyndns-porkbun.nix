@@ -1,3 +1,6 @@
+# Dynamic DNS through the Porkbun API: a timer keeps the A/AAAA records in
+# services.porkbun.ipv{4,6}Entries pointed at this machine's address. API
+# keys: the shared `porkbun` generator (also used by ./porkbun-records).
 {config, lib, pkgs, ...}:
 let
   cfg = config.services.porkbun;

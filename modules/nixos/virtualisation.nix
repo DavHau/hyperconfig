@@ -1,3 +1,6 @@
+# Containers and VMs on Dave's desktops: binfmt emulation for aarch64/
+# riscv64 builds, rootless docker on pasta (IPv6), podman, virtualbox,
+# waydroid.
 { config, lib, pkgs, ... }:
 {
   # qemu

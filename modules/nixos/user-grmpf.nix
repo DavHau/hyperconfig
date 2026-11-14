@@ -1,3 +1,5 @@
+# The `grmpf` user: Dave's desktop account on amy (uid 1000 there; dave is
+# 1001), with dave's password and home-manager profile.
 { config, pkgs, lib, ... }:
 {
   users.users.grmpf = {

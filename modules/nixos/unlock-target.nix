@@ -1,4 +1,4 @@
-# Where and how ../clan-unlock reaches this machine's initrd, so
+# Where and how ./clan-unlock reaches this machine's initrd, so
 # `clan-unlock <machine>` needs nothing else.
 #
 # The initrd carries a fixed link-local `address` on its LAN interface: no

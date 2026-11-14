@@ -1,3 +1,5 @@
+# X11/libinput basics and session variables (terminal = ghostty) on Dave's
+# desktops; the compositor is niri (./niri-spaces).
 { pkgs, lib, ... }:
 {
   # VIDEO

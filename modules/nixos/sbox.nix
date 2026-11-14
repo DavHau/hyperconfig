@@ -1,3 +1,7 @@
+# sbox: the bubblewrap sandbox for agent harnesses (afk/omp, claude) and
+# direnv on Dave's machines. Persisted dirs, key-file binds (one per
+# provider key module, guarded by `generators ? <gen>`) and the host ports
+# bridged into the sandbox's netns.
 {
   inputs,
   config,

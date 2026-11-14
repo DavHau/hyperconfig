@@ -1,3 +1,4 @@
+# Time zone, locale and console keymap for Dave's desktops.
 { ... }:
 {
   # Set your time zone.

@@ -1,3 +1,6 @@
+# Home-manager profile and nix trust for the `dave` user on Dave's
+# desktops (amy, som, vit via ./dave.nix); amy's desktop user is grmpf
+# (./user-grmpf.nix).
 { config, pkgs, lib, ... }:
 {
   home-manager.users.dave = {

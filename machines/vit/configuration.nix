@@ -201,7 +201,7 @@
   # clan-wide `sshd` authorizedKeys stay limited to dave's own keys.
   #
   # NOTE: sshd here reads ONLY /etc/ssh/authorized_keys.d/%u — spaces'
-  # modules/nixos/default.nix mkForces services.openssh.authorizedKeysFiles
+  # modules/nixos/default.nix (in the spaces input) mkForces services.openssh.authorizedKeysFiles
   # to that single path (authorizedKeysInHomedir itself is still true, but
   # its "%h/.ssh/authorized_keys" entry is overridden away). A key
   # hand-appended to /root/.ssh/authorized_keys is silently ignored.

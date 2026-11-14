@@ -1,3 +1,4 @@
+# git defaults on Dave's desktops (identity, aliases, tools).
 { pkgs, lib, ... }:
 let
   settings = {

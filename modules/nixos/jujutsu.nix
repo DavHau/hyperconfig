@@ -1,3 +1,4 @@
+# jj (jujutsu) on Dave's desktops, with its config.
 { pkgs, lib, inputs, ... }:
 let
   jj = (inputs.wrappers.wrapperModules.jujutsu.apply {

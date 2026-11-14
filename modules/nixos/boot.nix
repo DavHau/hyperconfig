@@ -1,3 +1,5 @@
+# Boot defaults for Dave's desktops: systemd-boot, tmpfs /tmp, extra
+# kernel modules and filesystems.
 { lib, pkgs, ... }:
 {
   # BOOTLOADER

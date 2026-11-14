@@ -1,3 +1,5 @@
+# udev rules for Dave's USB devices: laser engraver, betaflight flight
+# controllers (DFU), serial ttys owned by grmpf where that account exists.
 { config, lib, pkgs, ... }: {
   services.udev.extraRules =
   # sculfun laser engraver

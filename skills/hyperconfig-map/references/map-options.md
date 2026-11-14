@@ -120,7 +120,6 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - cctl-${instanceName}: modules/clan/cctl/default.nix
 - clan-secrets-pull: modules/nixos/clan-secrets-mirror.nix
 - grafana-telegram: modules/nixos/monitoring-alerts.nix
-- hyprspace: modules/nixos/hyprspace/default.nix
 - inference-api-key: modules/nixos/inference-api-key.nix
 - initrd-ssh: modules/nixos/initrd-ssh.nix
 - initrd-wifi: modules/nixos/initrd-wifi.nix

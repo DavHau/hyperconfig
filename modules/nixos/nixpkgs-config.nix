@@ -1,3 +1,6 @@
+# nixpkgs `config` for the whole fleet (imported, not a module): the
+# unfree allowlist (CUDA, steam, vscode, ...). Read by the clan's
+# pkgsForSystem (modules/flake-parts/nixosConfigurations.nix) and ./dave.nix.
 {lib, ... }: {
   allowUnfreePredicate = pkg: builtins.elem (lib.getName pkg) [
     "claude-code"

@@ -1,3 +1,7 @@
+# Fleet-wide defaults for every machine but the installer (imported by each
+# machine's configuration.nix): immutable users, dave's default uid, the
+# hardware/NTP/GC basics below. Settings here use lib.mkDefault so machines
+# can override them; see CONVENTIONS.md.
 {
   config,
   lib,

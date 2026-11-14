@@ -1,3 +1,5 @@
+# Small CLI toolset (bat, git, htop, tmux, vim, ...) on every server and
+# desktop, plus ./prune-gcroots.nix. Desktop-only tools go into ./packages.nix.
 {
   config,
   pkgs,
