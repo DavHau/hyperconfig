@@ -8,6 +8,7 @@
     ./timedated-ntp.nix
     ./fast-nix-gc.nix
     ./ghostty-terminfo.nix
+    ./no-ca-derivations.nix
   ];
   users.mutableUsers = false;
 
@@ -50,6 +51,6 @@
   nix.settings.experimental-features = [
     "auto-allocate-uids"
     "cgroups"
-    "ca-derivations"
+    # No ca-derivations: ./no-ca-derivations.nix keeps it off (security).
   ];
 }

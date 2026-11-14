@@ -31,7 +31,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/clan-vars-restart-units-test.nix — restartUnits of clan vars with the age backend (./clan-vars-restart-units.nix) in real switches. <- flake.nix
 - modules/nixos/clan-vars-restart-units.nix — `restartUnits` of clan vars, for clan's age backend. <- modules/flake-parts/nixosConfigurations.nix, m/clan-vars-restart-units-test.nix
 - modules/nixos/common-tools.nix — - <- bam, cm-pi, edi, joy, nas, sgp, m/shell-profile.nix
-- modules/nixos/common.nix — - <- bam, cm-pi, edi, joy, nas, sgp, modules/flake-parts/nixosConfigurations.nix, m/dave.nix, +2
+- modules/nixos/common.nix — - <- bam, cm-pi, edi, joy, nas, sgp, modules/flake-parts/nixosConfigurations.nix, m/dave.nix, +3
 - modules/nixos/cpu-powersave-cap.nix — Apply an extra CPU frequency ceiling on top of power-profiles-daemon's `power-saver` profile, going below what PPD does… <- m/laptop.nix
 - modules/nixos/cura.nix — -
 - modules/nixos/dave.nix — - <- amy, som, vit, m/infra-space/afk.nix, m/infra-space/launchers.nix
@@ -113,6 +113,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/nix-ssh-client.nix — Unified ssh client key for the nix daemon. <- m/dave.nix
 - modules/nixos/nix.nix — - <- m/dave.nix
 - modules/nixos/nixpkgs-config.nix — - <- modules/flake-parts/nixosConfigurations.nix, m/dave.nix
+- modules/nixos/no-ca-derivations.nix — Keeps nix's experimental `ca-derivations` feature off on every machine (imported by ./common.nix), see docs/security/ni… <- m/common.nix
 - modules/nixos/ntop.nix — ntop: nix-native htop from the local ../ntop checkout (input in flake.nix). One TUI for live builds, substituter transf… <- m/dave.nix
 - modules/nixos/nvidia-patchelf-split.nix — nvidia-smi, nvidia-powerd and nvidia-cuda-mps-* segfault in ld.so before main: <- m/nvidia.nix
 - modules/nixos/nvidia.nix — - <- vit

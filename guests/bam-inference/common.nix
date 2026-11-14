@@ -35,6 +35,6 @@
   nix.settings.experimental-features = [
     "auto-allocate-uids"
     "cgroups"
-    "ca-derivations"
+    # No ca-derivations (docs/security/nix-ca-realisation.md in hyperconfig).
   ];
 }
