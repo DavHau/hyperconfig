@@ -46,6 +46,15 @@ let
       fileset = ./hermes-gpu-skill/SKILL.md;
     };
   };
+  # dave-hermes only: photos of the living-room TV through vit's webcam
+  # (../../modules/nixos/webcam-snap, enabled in ../vit/configuration.nix).
+  tvCameraSkill = inputs.hyperhermes.lib.mkAgentSkill pkgs {
+    name = "tv-camera";
+    src = lib.fileset.toSource {
+      root = ./hermes-tv-camera-skill;
+      fileset = ./hermes-tv-camera-skill/SKILL.md;
+    };
+  };
   # Where files go (small backed-up ~, large unbacked ~/scratch; see
   # ../../modules/nixos/entity-storage).
   storageSkill = inputs.hyperhermes.lib.mkAgentSkill pkgs {
@@ -197,6 +206,8 @@ in
         teamclaude.enable = true;
         # The shared OpenRouter key as OPENROUTER_API_KEY (./hermes-inference.nix).
         openrouter = true;
+        # Photos of the living-room TV through vit's webcam (dave-hermes only).
+        skillDirs = [ "${tvCameraSkill}/share/skills" ];
       };
 
       # joe: dave's former amy microVM agent (hermes-grmpf), its state and

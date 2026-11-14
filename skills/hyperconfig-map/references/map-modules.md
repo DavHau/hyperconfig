@@ -315,6 +315,9 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/voice-gateway/hermes_conversation/config_flow.py — -
 - modules/nixos/voice-gateway/hermes_conversation/const.py — -
 - modules/nixos/voice-gateway/hermes_conversation/conversation.py — -
+- modules/nixos/webcam-snap/client.py — - <- m/webcam-snap/default.nix
+- modules/nixos/webcam-snap/default.nix — webcam-snap: lets named users (an agent's ssh account) take ONE still photo through this machine's webcam, and blank/un… <- vit
+- modules/nixos/webcam-snap/server.py — - <- m/webcam-snap/default.nix
 - modules/nixos/wyoming-local-speech/bt-speaker.nix — Bluetooth speaker output for speech-tts (./tts.py --bt-*): <- m/wyoming-local-speech/default.nix
 - modules/nixos/wyoming-local-speech/default.nix — Local speech for Home Assistant (cm-pi) on vit: <- vit
 - modules/nixos/wyoming-local-speech/stt.py — -

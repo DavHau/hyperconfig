@@ -10,6 +10,7 @@
     ../../modules/nixos/vault-nfs-client.nix
     ../../modules/nixos/printer-canon-mf272dw.nix
     ../../modules/nixos/hermes-agents-gpu-host.nix
+    ../../modules/nixos/webcam-snap
     ../../modules/nixos/captchakraken-server.nix
     ../../modules/nixos/ocr-server
     ../../modules/nixos/wyoming-local-speech
@@ -154,6 +155,16 @@
     HandleLidSwitch = "ignore";
     HandleLidSwitchExternalPower = "ignore";
     HandleLidSwitchDocked = "ignore";
+  };
+
+  # vit sits open in front of the living-room TV, webcam on the screen:
+  # dave-hermes takes stills of it (`ssh vit.d webcam-snap > tv.jpg`) and
+  # blanks the panel (`vit-screen off`); ../../modules/nixos/webcam-snap.
+  # The colour camera by USB path: by-id's video-index0 is the IR sensor.
+  hyper.webcamSnap = {
+    enable = true;
+    users = [ "dave-hermes" ];
+    device = "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:7:1.0-video-index0";
   };
 
   # Turn off the "Slash" LED array on the back of the lid. asusd (enabled by
