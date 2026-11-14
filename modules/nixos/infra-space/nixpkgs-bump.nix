@@ -97,6 +97,18 @@ let
     nix = config.nix.package;
   };
 
+  # Steps 2a-2c: web_search's SearXNG (flake input `searxng`, upstream
+  # master) moves with nixpkgs, but only to a master tip we first saw at
+  # least 72 h ago (our own record, ~/nixpkgs-bump/searxng-tips.jsonl),
+  # after a code review of its diff and a search canary on som's sandbox
+  # (./nixpkgs-bump/searxng.sh says how; the guard wants both for a moved
+  # pin).
+  searxng = import ./nixpkgs-bump/searxng.nix {
+    inherit pkgs logDir bumpNix;
+    # the review's parts are read through this agent's own hermes
+    inherit (config.services.hyperhermes.package) hermesVenv;
+  };
+
   # Steps 1 and 6's workspace: created and verified by facts, removed
   # with its git worktree (./nixpkgs-bump/workspace.sh says why), tested
   # by ./nixpkgs-bump/workspace-test.nix.
@@ -178,6 +190,7 @@ in
     workspace
     verdict
     bumpNix
+    searxng
   ];
 
   systemd.services.nixpkgs-bump = {

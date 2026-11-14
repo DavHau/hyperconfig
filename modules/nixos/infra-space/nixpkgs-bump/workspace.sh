@@ -56,7 +56,9 @@
 # - after snapshotting DIR, every non-empty commit in ::NAME@ is in
 #   ::main@origin, so finished but unpushed bump work is never deleted.
 # A failing jj or git counts as a refusal. Then forgets the workspace
-# (jj also drops its git worktree), removes DIR and @logDir@/NAME.old-rev,
+# (jj also drops its git worktree), removes DIR, @logDir@/NAME.old-rev and
+# NAME.searxng-* (./searxng.sh's pick, diff and its parts, review and
+# canary files),
 # prunes git's worktree entries, and exits 0 only if none of them is left
 # (a failing listing counts as left).
 
@@ -156,6 +158,9 @@ leftovers() {
   fi
   [ -e "$repo/.git/worktrees/$name" ] && echo "git worktree entry .git/worktrees/$name"
   [ -e "$logDir/$name.old-rev" ] && echo "$logDir/$name.old-rev"
+  for f in "$logDir/$name".searxng-{pick,diff,review,canary} "$logDir/$name".searxng-diff.part-*; do
+    [ -e "$f" ] && echo "$f"
+  done
   true
 }
 
@@ -251,7 +256,7 @@ remove() {
     git -C "$repo" worktree remove --force "$ws" >&2 || true
   fi
   rm -rf -- "${parent:?}/$name"
-  rm -f -- "$logDir/$name.old-rev"
+  rm -f -- "$logDir/$name.old-rev" "$logDir/$name".searxng-{pick,diff,review,canary} "$logDir/$name".searxng-diff.part-*
   git -C "$repo" worktree prune >&2 || say "git worktree prune failed"
   local left
   left=$(leftovers "$name")

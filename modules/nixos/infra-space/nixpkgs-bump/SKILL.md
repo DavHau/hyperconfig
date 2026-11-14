@@ -94,13 +94,173 @@ Before moving anything, record the rev you start from; the guard (step
       > ~/nixpkgs-bump/$(basename $ws).old-rev
     nixpkgs-bump-nix flake update nixpkgs
 
+Then SearXNG (steps 2a-2c), before you judge or describe the lock.
+`searxng` is web_search's SearXNG at upstream master (source only,
+`flake = false`): it moves through `nixpkgs-bump-searxng` only, never
+`flake update searxng`, never by hand.
+
+## 2a. SearXNG: pick
+
+    nixpkgs-bump-searxng pick
+
+It first records master's current tip with our own clock in
+`~/nixpkgs-bump/searxng-tips.jsonl` (one line per new tip: date, epoch,
+sha; never edit it). Then it takes the newest tip in that record first
+seen at least 72 h ago (a push that went wrong upstream has three days
+to be noticed and reverted first) that is still on master (after a
+force-push upstream dropped it, the next older such tip), if it is
+ahead of the pin. Upstream's commit dates count for nothing: the
+committer sets them. Until the record holds a tip that old (the first
+72 h after it was started, i.e. three nights; it was seeded 2026-11-14
+18:54 UTC, so the first possible pick is the night after 2026-11-17
+18:54 UTC) nothing can be picked: `STAYS`, and the pin on main stays;
+say so in the report.
+
+It writes the code diff of the two prefetched sources to
+`~/nixpkgs-bump/<workspace>.searxng-diff`: a plain diff of the two
+trees, no git repository, so nothing in the sources (their
+`.gitignore`, `.gitattributes`) hides a file from the review or the
+size cap; only generated data (`searx/data/*.json`), `*.min.js`,
+`*.map`, `package-lock.json` and translations (`*.po`, `*.mo`), regular
+files only, are not counted: their diff follows the code diff in the
+same file, searx/data's first (whole: over 200 KB it holds the update
+back), then the rest's, cut after 200 KB with a `TRUNCATED` note. A
+symlink in the new tree pointing outside it or at such an uncounted
+file (code the counted diff would never show) holds the update back
+too. So does anything `read_file` would strip or refuse in the code or
+searx/data diff: a control byte other than TAB (ESC, BEL, CR, NUL
+included), DEL, a `__HERMES_FENCE_` marker, invalid UTF-8; the diff
+file shows such bytes as `\xNN`. The code diff may hold only printable
+ASCII and TAB, and beyond that only visible letters, marks, digits,
+punctuation and symbols that NFKC leaves alone, are not
+default-ignorable and not right-to-left (each shown followed by
+`\u{XXXX}`); any other character (invisible, a fullwidth lookalike,
+a separator, a bidi control, Hebrew/Arabic) holds the update back. In
+the uncounted diffs, invisible characters (every default-ignorable one,
+format and control characters, separators) are shown as `\u{XXXX}`.
+Only npm `"integrity"` lines of package-lock.json hunks are masked (the
+review file's header counts them). Last, every
+part is read through this agent's own `read_file` (the installed
+hermes, in-process, then its turn budget for one read alone): if what
+the reviewer would see differs from the
+part in any way but the line numbers (a redacted secret, a cut line, a
+stripped sequence), the update is held back. Its last line:
+
+- `STAYS`: no aged tip ahead of the pin (or none aged yet); skip 2b and
+  go to 2c.
+- `PICKED <old>..<new> <n> lines`: step 2b reviews it.
+- `HELD-BACK`: the code diff is over 3000 lines or 300 KB, the
+  searx/data diff over 200 KB, a symlink escapes the review, the
+  diff holds bytes `read_file` strips or refuses, a line separator or
+  bidi control in the code, or `read_file` would show a part changed
+  (the reason is in its
+  output: put it in the report); it put the pin back and filed a
+  decision for Dave. Skip 2b, go to 2c.
+- `FAIL`, or anything else: put nothing on the pin yourself; a failed
+  night (as a failed gate).
+
+## 2b. SearXNG: code review
+
+Only after `PICKED`. The reviewer is a subagent of this run, i.e. of the
+bump agent itself, and the review's record is a file this agent writes,
+as is the age gate's record `~/nixpkgs-bump/searxng-tips.jsonl`:
+the gate guards against mistakes and a skipped step, not against a
+compromised agent. One read-only review subagent (`delegate_task`,
+the step 5 brief rules: workspace rule, no edits, no repo-changing jj,
+no nix builds, the Untrusted input section word for word). Give it the
+diff's parts, not URLs: `~/nixpkgs-bump/<workspace>.searxng-diff.part-01`,
+`-02`, ... (`ls` them; together they are the diff file, cut so that
+each is one `read_file` call of at most ~90 K characters, no line over
+1900 bytes (so no more characters), as `read_file` cuts longer lines; a
+longer line continues on lines starting `\~ `, cut between UTF-8
+characters). The pick file records a hash of the parts (each part's
+size and sha256, in order), which `review` and the guard check: the
+review's subject is exactly the parts it read. It reads every part in
+turn, in full, never only the first, and only those (and the prefetched
+sources they name, if it must), never fetches anything; its verdict
+names the number of parts it read. **Exactly one part per turn: one
+`read_file` call, nothing else batched with it** (several reads in one
+turn share hermes' turn budget, and the largest is then spilled to a
+file; the diff tool checked that one part alone never is). **Any
+`<persisted-output>`, `[REDACTED`, `«redacted` marker, `... [truncated]`
+or a gap in the line numbers of a part (a line number skipped, or a
+page that ends early with a `next_offset`) means the reviewer did not
+see the part as it is: it answers `reject`, naming the part and line.**
+In the code diff every non-ASCII character is followed by its code
+point, `\u{XXXX}`: a letter that looks like an ASCII one (Cyrillic,
+Greek, a combining mark) in an identifier, string or URL is a finding.
+The searx/data diff right
+after the code is part of the review: changed URL templates or hosts
+there count like new network calls. Its focus, in that order:
+
+- new imports and new network calls (hosts, sockets, `httpx`/`requests`
+  outside the engines' own search requests), anything phoning home;
+- `subprocess`, `os.system`, `eval`, `exec`, `pickle`, `__import__`,
+  dynamic code loading, file writes outside SearXNG's own cache;
+- `setup.py`, `pyproject.toml`, `requirements*.txt`, `manage`, build
+  hooks: new dependencies or build steps;
+- engines newly enabled by default in `searx/settings.yml`;
+- anything else that does not fit a search engine's upstream fixes.
+
+It answers `approve` or `reject` with file:line findings. Record it:
+
+    nixpkgs-bump-searxng review approve
+    nixpkgs-bump-searxng review reject "<one line: the finding>"
+
+`reject` puts the pin back (`HELD-BACK`); quote the finding in the
+report. The guard wants the approve for exactly this old..new pair and
+exactly the picked diff (its hash in the pick file).
+
+## 2c. SearXNG: canary
+
+Always (also after `STAYS` or `HELD-BACK`: it checks the new nixpkgs
+with SearXNG). It builds som's SearXNG package from the workspace and
+som runs it in a sandbox (its own uid, Mullvad egress like production,
+no secrets; started through `/run/searxng-candidate/socket`), with the
+search canary (fixed test queries; enough with an expected site in the
+top 5, results from at least two engines). It can take longer than the
+terminal's 600 s: start it in the background with its output in a log,
+and poll the log:
+
+    nixpkgs-bump-searxng canary > $TMPDIR/searxng-canary.log 2>&1
+
+If a moved `searxng` fails, it puts the pin back itself and checks
+again. Its last line:
+
+- `PASS`: keep the lock as it is.
+- `HELD-BACK`: searxng stays at main@origin's; the nixpkgs bump goes on.
+  The report says the new searxng rev failed, with the canary's output.
+- `NO-SIGNAL`: main@origin's own lock fails as well (the egress or the
+  sites): searxng stays, the nixpkgs bump goes on, the report says so.
+- `FAIL`, or anything else: the new nixpkgs breaks SearXNG (main@origin's
+  lock passes, the bump's does not), or the check could not run. A
+  failed night, as any failed gate: step 4 may fix it.
+
+A line `SEARXNG-STUCK: ...` (from any SearXNG step: the third night in
+a row held back, or staying because upstream force-pushed away the aged
+tips) goes into the report verbatim, near the top; a decision
+for Dave is filed with it.
+
+Never edit the `searxng` node by hand, never write its files
+(`~/nixpkgs-bump/<workspace>.searxng-*`) yourself: the guard lets a
+moved `searxng` through only with the review's approve for exactly
+old..new and the canary's PASS for exactly the lock it checks. Run 2c
+again after anything that changes `flake.lock` (a rebase onto a
+main@origin that moved; after a rebase that moved main@origin's pin,
+start again at 2a).
+
+## 2d. Describe
+
 If `flake.lock` did not change (`jj diff --stat` is empty): `cd ~`,
 then `nixpkgs-bump-workspace remove $(basename $ws)` (forgets the jj
-workspace, its git worktree, the directory and the `.old-rev` file;
-exit 0 means nothing is left), report `unchanged`. Otherwise read the new rev the same way and
+workspace, its git worktree, the directory, the `.old-rev` and
+`.searxng-*` files; exit 0 means nothing is left), report `unchanged`.
+Otherwise read the new revs and
 `jj describe -m "flake.lock: nixpkgs <old 8> -> <new 8>"` (first eight
-characters of each rev). Only `nixpkgs` moves; inputs that follow it stay
-as they are.
+characters of each rev; add `, searxng <old 8> -> <new 8>` when it
+moved, and only nixpkgs' part or only searxng's when the other stayed).
+Only `nixpkgs` and `searxng` move; inputs that follow nixpkgs stay as
+they are.
 
 ## 3. Gates (all required)
 
@@ -238,7 +398,9 @@ or `request changes` with file:line findings.
   machine set (`inventory.json`, `modules/flake-parts/nixosConfigurations.nix`);
   `modules/nixos/infra-space/**`, `hyperhermes/`, `flake.nix`; CI; any
   new fetch (`fetch*`, `builtins.fetch*`, `getFlake`).
-  `flake.lock`: only the root `nixpkgs` node's `locked` moved, no new
+  `flake.lock`: only the root `nixpkgs` node's `locked` moved (and the
+  root `searxng` node's: owner `searxng`, repo `searxng`, no ref,
+  `flake = false`), no new
   nodes; still owner `NixOS`, repo `nixpkgs`, ref `nixpkgs-unstable`; no
   other input's url, owner, repo, ref or rev changed; `rev` and `narHash`
   changed together, `lastModified` moved forward, and the `narHash` is
@@ -256,10 +418,11 @@ and both reviews again. A second rejection is a failed night.
 
 After a rebase run ALL of step 3 again: the flake check, every machine's
 evaluation, every build (cached where nothing changed: everything built
-within the last day survives som's GC, see step 3.2). If `jj diff --from main@origin`
-then changed beyond `flake.lock`'s `nixpkgs` node compared to what the
-reviews saw, both reviews run again. A conflict in `flake.lock` means
-someone else bumped: push nothing, report `failed`.
+within the last day survives som's GC, see step 3.2). If `jj diff
+--from main@origin` then changed beyond `flake.lock`'s `nixpkgs` and
+`searxng` nodes compared to what the reviews saw, both reviews run
+again. A conflict in `flake.lock` means someone else bumped: push
+nothing, report `failed`.
 
 Right before pushing, in `$ws` at its root, always:
 
@@ -267,10 +430,13 @@ Right before pushing, in `$ws` at its root, always:
 
 It checks mechanically what the reviews checked by reading: the lock
 moved only nixpkgs, to a commit on nixpkgs-unstable that descends from
-the old one, with the real narHash; `main@origin` is still at the rev of
-your `.old-rev` file (nobody else bumped); the diff touches no denied
-path or option. Exit 0 and a last line exactly `nixpkgs-bump-guard:
-PASS`, or push nothing and report `failed` with its FAIL lines. It is
+the old one, with the real narHash (and searxng, likewise on its master,
+with step 2a's pick, 2b's approve of that diff and 2c's PASS for this
+lock, and a master tip first seen at least 72 h ago in
+`searxng-tips.jsonl`, or an ancestor of one); `main@origin` is still at
+the rev of your `.old-rev` file (nobody else bumped); the diff touches
+no denied path or option. Exit 0 and a last line exactly
+`nixpkgs-bump-guard: PASS`, or push nothing and report `failed` with its FAIL lines. It is
 not negotiable: never edit around it, never push without it, never run
 it with `--offline` (that is for its tests: it skips the network checks
 and never passes; `PASS-OFFLINE` with exit 3 is not a permit). Then:
@@ -315,8 +481,10 @@ while the workspace holds work that is not in `main@origin`).
 Your last message is the run's report: it lands in
 `~/nixpkgs-bump/<YYYY-MM-DD>T<HHMM>Z.log` (UTC, the start of the run)
 and in the dashboard's sessions (filter Automation, source `oneshot`).
-Keep it short: nixpkgs old -> new rev, per machine built/failed (the
-installer's two images; cm-pi `evaluated` or `built`),
+Keep it short: nixpkgs old -> new rev, searxng old -> new rev, the pick's
+line, the review's verdict and the canary's (with the canary's lines on
+anything but PASS; any `SEARXNG-STUCK` line verbatim), per machine
+built/failed (the installer's two images; cm-pi `evaluated` or `built`),
 the flake check, each fix (commit id and one line), both review verdicts,
 the guard's result, the pushed commit or why nothing was pushed, the
 GC roots (`infra-space-gcroot`: ok, or its refusals), the

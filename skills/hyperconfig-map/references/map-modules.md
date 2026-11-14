@@ -222,6 +222,12 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/infra-space/nixpkgs-bump/guard-test.nix — ./guard.sh against a scratch repository, without network: <- flake.nix
 - modules/nixos/infra-space/nixpkgs-bump/guard.nix — nixpkgs-bump-guard (./guard.sh), for ../nixpkgs-bump.nix (the guest's PATH) and ./guard-test.nix (which passes stubs as… <- m/infra-space/nixpkgs-bump.nix, m/infra-space/nixpkgs-bump/guard-test.nix
 - modules/nixos/infra-space/nixpkgs-bump/guard.sh — nixpkgs-bump-guard: the nightly bump's last check before it pushes (../nixpkgs-bump/SKILL.md step 6), run in the bump w… <- m/infra-space/nixpkgs-bump/guard.nix
+- modules/nixos/infra-space/nixpkgs-bump/searxng-diff.nix — nixpkgs-bump-searxng-diff (./searxng-diff.sh): <- m/infra-space/nixpkgs-bump/guard-test.nix, m/infra-space/nixpkgs-bump/searxng.nix
+- modules/nixos/infra-space/nixpkgs-bump/searxng-diff.sh — nixpkgs-bump-searxng-diff OLD NEW OUT [LABEL]: <- m/infra-space/nixpkgs-bump/searxng-diff.nix
+- modules/nixos/infra-space/nixpkgs-bump/searxng-readcheck.py — searxng-readcheck PART...: <- m/infra-space/nixpkgs-bump/searxng-diff.nix
+- modules/nixos/infra-space/nixpkgs-bump/searxng-text.py — searxng-text: the character rules of the review file (./searxng-diff.sh). <- m/infra-space/nixpkgs-bump/searxng-diff.nix
+- modules/nixos/infra-space/nixpkgs-bump/searxng.nix — nixpkgs-bump-searxng (./searxng.sh), for ../nixpkgs-bump.nix (the guest's PATH). <- m/infra-space/nixpkgs-bump.nix
+- modules/nixos/infra-space/nixpkgs-bump/searxng.sh — nixpkgs-bump-searxng: the nightly bump's steps for web_search's SearXNG (the root flake input `searxng`, upstream maste… <- m/infra-space/nixpkgs-bump/searxng.nix
 - modules/nixos/infra-space/nixpkgs-bump/workspace-test.nix — ./workspace.sh against a scratch colocated repository with a local origin (no network): <- flake.nix
 - modules/nixos/infra-space/nixpkgs-bump/workspace.nix — nixpkgs-bump-workspace (./workspace.sh), for ../nixpkgs-bump.nix (the guest's PATH) and ./workspace-test.nix. <- m/infra-space/nixpkgs-bump.nix, m/infra-space/nixpkgs-bump/workspace-test.nix
 - modules/nixos/infra-space/nixpkgs-bump/workspace.sh — nixpkgs-bump-workspace: creates and removes the nightly bump's jj workspace (../nixpkgs-bump/SKILL.md steps 1 and 6), s… <- m/infra-space/nixpkgs-bump/workspace.nix
