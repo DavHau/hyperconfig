@@ -65,7 +65,7 @@ in
       package = lib.mkOption {
         type = lib.types.package;
         default = import ./phoenixd.nix pkgs;
-        defaultText = lib.literalMD "pkgs.phoenixd, patched with patchelf 0.15.2 (./phoenixd.nix)";
+        defaultText = lib.literalMD "pkgs.phoenixd, patched with patchelf 0.15.2 unless pkgs.patchelf is older than 0.18 (./phoenixd.nix)";
         description = "The phoenixd package (phoenixd and phoenix-cli).";
       };
       seedFile = lib.mkOption {

@@ -5,13 +5,15 @@
 # tracking https://github.com/NixOS/nixpkgs/issues/577387). The upstream fix
 # (https://github.com/NixOS/patchelf/pull/672) is merged but unreleased.
 # Same workaround nixpkgs applies to other autoPatchelfHook users (rgp,
-# cudaPackages): patch with patchelf 0.15.2. Evaluation stops once the
-# host's nixpkgs moves past patchelf 0.19.2; then default
-# services.hyperhermes.wallet.package to plain pkgs.phoenixd and delete
-# this file.
+# cudaPackages): patch with patchelf 0.15.2. The bug is in every release
+# from 0.18 on (0.18.0 to 0.19.x), so the workaround stays for any
+# pkgs.patchelf >= 0.18; nixpkgs-unstable reverted patchelf to 0.15.2 (by
+# 2026-11-12), where plain pkgs.phoenixd works. Once the fleet's nixpkgs
+# has a patchelf below 0.18 or one with #672 released, default
+# services.hyperhermes.wallet.package to pkgs.phoenixd and delete this file.
 pkgs:
-if pkgs.patchelf.version != "0.19.2" then
-  throw "hyperhermes wallet: patchelf moved past 0.19.2; drop modules/wallet/phoenixd.nix and default wallet.package to pkgs.phoenixd"
+if pkgs.lib.versionOlder pkgs.patchelf.version "0.18" then
+  pkgs.phoenixd
 else
   pkgs.phoenixd.overrideAttrs (old: {
     nativeBuildInputs = [
