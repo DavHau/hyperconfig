@@ -1,0 +1,23 @@
+Per-engine curl_cffi impersonate target from settings.yml (`impersonate:`
+in an engine's entry). Upstream only lets an engine's own request() set
+it; which target a site lets through depends on the egress (from som,
+2026-11: Brave only chrome*_android, Yahoo only safari2601). Upstream
+discussion of making the target configurable:
+https://github.com/searxng/searxng/issues/6931
+
+diff --git a/searx/search/processors/online.py b/searx/search/processors/online.py
+index ee92dedf1..7b08f983f 100644
+--- a/searx/search/processors/online.py
++++ b/searx/search/processors/online.py
+@@ -148,6 +148,11 @@ class OnlineProcessor(EngineProcessor):
+ 
+         params: OnlineParams = {**default_request_params(), **base_params}
+ 
++        # settings.yml `impersonate:` per engine (hyperconfig patch, searxng#6931); an
++        # engine's own request() still overrides it.
++        if getattr(self.engine, "impersonate", None):
++            params["impersonate"] = self.engine.impersonate
++
+         headers = params["headers"]
+ 
+         # add Accept-Language header

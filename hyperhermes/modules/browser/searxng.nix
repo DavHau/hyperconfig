@@ -67,40 +67,86 @@ in
               disabled = false;
             })
             [
-              "google"
               "bing"
-              "qwant"
-              "yahoo"
               "duckduckgo"
-              "brave"
               "arxiv"
               "github"
               "stackoverflow"
             ]
+          ++ [
+            # Which curl_cffi target a site lets through depends on the
+            # egress; measured from som (Mullvad), 2026-11, all others
+            # tried were blocked. `impersonate` per engine is our patch
+            # (./searxng-package.nix; with nixpkgs' searxng it is an
+            # unused engine attribute).
+            {
+              name = "yahoo";
+              disabled = false;
+              impersonate = "safari2601"; # chrome/firefox targets: HTTP 500
+            }
+            {
+              name = "brave";
+              disabled = false;
+              impersonate = "chrome131_android"; # desktop targets: 429
+              # Brave answers 429 over the egress' IPv6, 200 over IPv4.
+              network = "ipv4";
+            }
+          ]
           # Stock-inactive engines are not even loaded.
+          ++ [
+            {
+              name = "mojeek";
+              disabled = false;
+              inactive = false;
+            }
+          ]
+          # Dead from the egress with every curl_cffi target (2026-11);
+          # off so they don't sit suspended. Google: /wml/search 403
+          # (searxng#6835, open); Qwant: API 403 AccessDenied.
           ++
             map
               (name: {
                 inherit name;
-                disabled = false;
-                inactive = false;
+                disabled = true;
               })
               [
-                "startpage"
-                "mojeek"
+                "google"
+                "qwant"
               ]
-          # Not loaded while general.contact_url is unset (below).
-          ++
-            map
-              (name: {
-                inherit name;
-                inactive = true;
-              })
-              [
-                "wikipedia"
-                "wikidata"
-                "openstreetmap"
-              ];
+          # Startpage: an Anubis challenge for every target (2026-11). Back
+          # to stock-inactive on purpose (not even loaded) rather than
+          # merely disabled; turn it on again by hand after a manual
+          # retest, nothing retests it automatically.
+          ++ [
+            {
+              name = "startpage";
+              inactive = true;
+            }
+          ]
+          # Not loaded while general.contact_url is unset (below). The
+          # Wikimedia two are slow from the egress (the 3 s default times
+          # out): 6 s, for when they come back.
+          ++ [
+            {
+              name = "wikipedia";
+              inactive = true;
+              timeout = 6.0;
+            }
+            {
+              name = "wikidata";
+              inactive = true;
+              timeout = 6.0;
+            }
+            {
+              name = "openstreetmap";
+              inactive = true;
+            }
+          ];
+        # Dave's default country is Singapore. With "all" Bing sends no
+        # market and answers with unrelated results (searxng#4964); with
+        # en-SG it and DuckDuckGo answer on topic. Engines without
+        # regions use the language part.
+        search.default_lang = "en-SG";
         # No general.contact_url on purpose: upstream master (since
         # 38929d14, 2026-11-12, newer than the pin; the nightly bump takes
         # it) puts it into the User-Agent of Wikipedia, Wikidata and OSM

@@ -1,0 +1,46 @@
+Brave: send safesearch/country/ui_lang as URL parameters instead of
+cookies. search.brave.com answers 429 to any request with a cookie
+(even one alone) from som's egress (2026-11), and 200 to the same request
+without; it honours the URL parameters the same way. No upstream issue
+yet; upstream's engine still sets the cookies (master a7128d5d).
+
+Scope: brave.py's request() serves every Brave engine of settings.yml
+(brave, brave.images, brave.videos, brave.news, brave.goggles), so all of
+them go cookie-less. Dropped without a replacement: the `useLocation=0`
+and `summarizer=0` cookies. Brave then may localise by the egress IP
+(the `country` parameter still names the region) and may add its
+summarizer block, which the result parser ignores.
+
+diff --git a/searx/engines/brave.py b/searx/engines/brave.py
+index 9031269ea..b728baa69 100644
+--- a/searx/engines/brave.py
++++ b/searx/engines/brave.py
+@@ -225,21 +225,15 @@ def request(query: str, params: dict[str, t.Any]) -> None:
+     if brave_category == "goggles":
+         args["goggles_id"] = Goggles
+ 
+-    params["url"] = f"{base_url}{brave_category}?{urlencode(args)}"
+-    logger.debug("url %s", params["url"])
+-
+-    # set properties in the cookies
+-    params["cookies"]["safesearch"] = safesearch_map.get(params["safesearch"], "off")
+-    # the useLocation is IP based, we use cookie "country" for the region
+-    params["cookies"]["useLocation"] = "0"
+-    params["cookies"]["summarizer"] = "0"
+-
++    # Brave answers 429 to any request carrying a cookie (2026-11, from
++    # som's egress); it takes the same preferences as URL parameters.
++    args["safesearch"] = safesearch_map.get(params["safesearch"], "off")
+     engine_region = traits.get_region(params["searxng_locale"], "all")
+-    params["cookies"]["country"] = engine_region.split("-")[-1].lower()  # type: ignore
++    args["country"] = engine_region.split("-")[-1].lower()  # type: ignore
++    args["ui_lang"] = locales.get_engine_locale(params["searxng_locale"], traits.custom["ui_lang"], "en-us")
+ 
+-    ui_lang = locales.get_engine_locale(params["searxng_locale"], traits.custom["ui_lang"], "en-us")
+-    params["cookies"]["ui_lang"] = ui_lang
+-    logger.debug("cookies %s", params["cookies"])
++    params["url"] = f"{base_url}{brave_category}?{urlencode(args)}"
++    logger.debug("url %s", params["url"])
+ 
+ 
+ def _extract_published_date(published_date_raw: str | None):

@@ -48,6 +48,14 @@ pkgs.searxng.overrideAttrs (
       # instead of the default Chrome one. Not a global switch: Yahoo
       # answers 500 to curl_cffi's firefox147 target.
       ./patches/searxng-firefox-ua-fingerprint.patch
+    ]
+    # Written against upstream master (2026-11-14, a7128d5d), apply to the
+    # 248b8ffc pin too; nixpkgs' older snapshot lacks the code they touch.
+    ++ lib.optionals (source != null) [
+      # settings.yml `impersonate:` per engine (searxng#6931).
+      ./patches/searxng-engine-impersonate.patch
+      # Brave: preferences as URL parameters; any cookie gets a 429.
+      ./patches/searxng-brave-no-cookies.patch
     ];
   }
 )
