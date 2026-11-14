@@ -1,0 +1,102 @@
+hermes v0.23.0: a background process a delegate_task subagent starts
+never wakes the parent's TUI/Desktop/dashboard session.
+
+Symptom: when a subagent's terminal(background=true) command ends, the
+parent session gets a new turn "[IMPORTANT: Background process proc_...
+completed normally ... Started by subagent sa-... of delegation ...]",
+although the child was told (subagent_note) that its notice will NOT
+reach the parent.
+
+Cause: the child's process carries the parent's session_key, so the
+parent's notification poller (tui_gateway/session_notifications.py
+_notif_handle_event) proves ownership and dispatches it. Every other
+drain (ProcessRegistry.drain_notifications, the gateway watchers, the
+post-turn safety net in prompt_turn.py) filters child-owned processes
+with should_surface_notification (delegation.
+surface_child_process_notifications, default false); this poller did not.
+
+Fix: apply the same policy there; a suppressed notice is dropped, not
+requeued (children never drain). Handed-off processes are re-owned by
+the parent and still notify it; the parent's own processes are
+unchanged; the opt-in flag still surfaces child processes.
+
+diff --git a/tui_gateway/session_notifications.py b/tui_gateway/session_notifications.py
+index 24e9b63a..a28c2f1d 100644
+--- a/tui_gateway/session_notifications.py
++++ b/tui_gateway/session_notifications.py
+@@ -643,6 +643,12 @@ def _notif_handle_event(sid, session, evt, emitted, registry, fmt, deferred, com
+         return True
+     if evt_type == "completion" and registry.is_completion_consumed(evt.get("session_id", "")):
+         return True
++    # A subagent's own process carries its parent's session_key, so the parent's poller owns it: apply the same
++    # child-process policy as every other drain (delegation.surface_child_process_notifications, default off).
++    # Dropped, not requeued — children never drain. Handed-off processes are re-owned by the parent and pass.
++    from tools.process_registry_notifications import should_surface_notification
++    if not should_surface_notification(evt):
++        return True
+     text = fmt(evt)
+     if not text:
+         return True
+diff --git a/tests/tui_gateway/test_subagent_process_notice_stays_out_of_parent.py b/tests/tui_gateway/test_subagent_process_notice_stays_out_of_parent.py
+new file mode 100644
+index 00000000..3e38a067
+--- /dev/null
++++ b/tests/tui_gateway/test_subagent_process_notice_stays_out_of_parent.py
+@@ -0,0 +1,57 @@
++"""A subagent's own background process never wakes the parent's TUI/Desktop/dashboard session.
++
++The child's process carries the parent's ``session_key`` (the conversation it runs under), so the parent's notification
++poller proves ownership of its completion. Every other drain (CLI, gateway watchers, the post-turn safety net) applies
++``should_surface_notification``; the poller must too, or the parent gets an unasked-for turn.
++"""
++
++from __future__ import annotations
++
++import queue
++import threading
++from types import SimpleNamespace
++
++import pytest
++
++from tui_gateway import server
++
++CHILD = {"type": "completion", "session_id": "proc_child", "session_key": "s", "task_id": "sa-0-abc",
++         "owner_task_id": "sa-0-abc", "command": "sleep 1", "exit_code": 0}
++PARENT = {"type": "completion", "session_id": "proc_parent", "session_key": "s", "task_id": "s",
++          "owner_task_id": "s", "command": "sleep 1", "exit_code": 0}
++# handoff re-owns the process to the parent (transfer_ownership): owner_task_id is the parent's from then on
++HANDED = dict(PARENT, session_id="proc_handed", handoff_note="watch CI")
++
++
++@pytest.fixture
++def surface(monkeypatch):
++    submits: list = []
++    monkeypatch.setattr("tools.async_delegation.claim_event_delivery", lambda evt, consumer: "claimed")
++    monkeypatch.setattr("tools.async_delegation.complete_event_delivery", lambda *a, **k: None)
++    monkeypatch.setattr(server, "_run_prompt_submit", lambda rid, sid, session, text, **kw: submits.append(text))
++    monkeypatch.setattr(server, "_emit", lambda *a, **k: None)
++    monkeypatch.setattr(server, "_notification_event_belongs_elsewhere", lambda sid, session, evt: False)
++    monkeypatch.setattr(server, "_session_owns_notification_event", lambda sid, session, evt: True)
++    monkeypatch.setattr(server, "_background_notifications_off", lambda session: False)
++    return submits
++
++
++def _run(events, monkeypatch, surface_child):
++    from tools.process_registry import ProcessRegistry
++    monkeypatch.setattr(ProcessRegistry, "_surface_child_process_notifications", staticmethod(lambda: surface_child))
++    session = {"history_lock": threading.RLock(), "running": False, "history": [], "agent": None}
++    registry = SimpleNamespace(completion_queue=queue.Queue(), is_completion_consumed=lambda session_id: False)
++    completions: list = []
++    for evt in events:
++        assert server._notif_handle_event("sid", session, dict(evt), set(), registry,
++                                          lambda e: e["session_id"], None, completions) is True
++    assert registry.completion_queue.empty(), "a dropped child notice is never requeued"
++    return [evt["session_id"] for evt, _text in completions]
++
++
++def test_child_process_completion_is_dropped_by_default(surface, monkeypatch):
++    assert _run([CHILD, PARENT, HANDED], monkeypatch, surface_child=False) == ["proc_parent", "proc_handed"]
++
++
++def test_opt_in_flag_still_surfaces_child_processes(surface, monkeypatch):
++    assert _run([CHILD, PARENT], monkeypatch, surface_child=True) == ["proc_child", "proc_parent"]

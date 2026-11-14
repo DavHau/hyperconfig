@@ -42,6 +42,7 @@ let
     ./patches/hermes-openrouter-all-models.patch
     ./patches/hermes-busy-message-yields-command.patch
     ./patches/hermes-gateway-managed-unit-only.patch
+    ./patches/hermes-subagent-process-notice-stays-in-child.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {
