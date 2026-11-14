@@ -6,14 +6,21 @@
 # left alone); a failed create removing the workspace it made; remove on
 # a half-made workspace, a symlink (only the link goes), unpushed work
 # (refused, committed or not) and pushed work; names that are not bump
-# names or are paths refused.
+# names or are paths refused. The review's hardening: remove goes by
+# path (a foreign workspace at the path, a bump-named workspace elsewhere,
+# foreign content refused); a .jj symlinked or copied from the repository
+# refused, default@ unchanged; a hostile JJ_CONFIG / ~/.config/jj (alias
+# `empty()` = `all()`, nothing auto-tracked) does not make remove delete
+# unpushed work; no --repo flag (the repository is fixed at build time).
 { pkgs }:
 let
+  # the test's variant; the guest's has the default repo
   helper = import ./workspace.nix {
     inherit pkgs;
-    repo = "/nonexistent"; # always --repo here
+    repo = "/build/top/hyperconfig";
     logDir = "/build/log";
   };
+  production = import ./workspace.nix { inherit pkgs; };
 in
 pkgs.runCommand "nixpkgs-bump-workspace-test"
   {
@@ -39,9 +46,10 @@ pkgs.runCommand "nixpkgs-bump-workspace-test"
     mkdir top && cd top
     jj git clone --colocate ../origin.git hyperconfig >/dev/null 2>&1
     repo=$PWD/hyperconfig
+    [ "$repo" = /build/top/hyperconfig ] # the variant's repo
     # a stray file in the repository's working copy must not be committed
     echo stray >hyperconfig/stray.txt
-    w() { nixpkgs-bump-workspace --repo "$repo" "$@"; }
+    w() { nixpkgs-bump-workspace "$@"; }
     clean() { # no workspace, worktree, directory or worktree entry left
       [ "$(jj -R "$repo" --ignore-working-copy workspace list -T 'name ++ "\n"')" = default ]
       [ "$(git -C "$repo" worktree list --porcelain | grep -c '^worktree ')" = 1 ]
@@ -168,5 +176,105 @@ pkgs.runCommand "nixpkgs-bump-workspace-test"
     w remove hyperconfig-nixpkgs-bump-test-8
     clean
     echo "ok: remove after the push"
+
+    # --- the review's hardening ---
+    jr() { jj -R "$repo" --ignore-working-copy "$@"; }
+    default_at() { jr log --no-graph -r default@ -T commit_id; }
+
+    # no --repo flag: usage error, nothing touched; the production
+    # binary has the repository built in
+    mkdir $TMPDIR/fake
+    if w --repo $TMPDIR/fake create hyperconfig-nixpkgs-bump-test-9 2>$TMPDIR/err; then echo "FAILED: --repo accepted"; exit 1; fi
+    grep -q "^usage:" $TMPDIR/err
+    [ -z "$(ls -A $TMPDIR/fake)" ] && [ ! -e hyperconfig-nixpkgs-bump-test-9 ]
+    grep -q "^repo=/home/infra/hyperconfig$" ${production}/bin/nixpkgs-bump-workspace
+    ! grep -q -- "--repo" ${production}/bin/nixpkgs-bump-workspace
+    clean
+    echo "ok: no --repo flag; production repo built in"
+
+    # remove goes by path: another jj workspace registered at the path ...
+    mkdir hyperconfig-nixpkgs-bump-test-9
+    jr workspace add --name other hyperconfig-nixpkgs-bump-test-9 >/dev/null 2>&1 || true
+    echo keep >hyperconfig-nixpkgs-bump-test-9/keep
+    if w remove hyperconfig-nixpkgs-bump-test-9 2>$TMPDIR/err; then echo "FAILED: removed a foreign workspace"; exit 1; fi
+    grep -q "another jj workspace is at" $TMPDIR/err
+    [ -f hyperconfig-nixpkgs-bump-test-9/keep ]
+    jr workspace list -T 'name ++ "\n"' | grep -qx other
+    jr workspace forget other && rm -rf hyperconfig-nixpkgs-bump-test-9
+    # ... a bump-named workspace somewhere else (not forgotten, its git
+    # worktree kept) ...
+    mkdir $TMPDIR/elsewhere
+    jr workspace add --colocate --name hyperconfig-nixpkgs-bump-test-10 $TMPDIR/elsewhere >/dev/null 2>&1 || true
+    wt_before=$(git -C "$repo" worktree list --porcelain)
+    if w remove hyperconfig-nixpkgs-bump-test-10 2>$TMPDIR/err; then echo "FAILED: removed a workspace elsewhere"; exit 1; fi
+    grep -q "jj workspace hyperconfig-nixpkgs-bump-test-10 is not at" $TMPDIR/err
+    jr workspace list -T 'name ++ "\n"' | grep -qx hyperconfig-nixpkgs-bump-test-10
+    [ "$(git -C "$repo" worktree list --porcelain)" = "$wt_before" ] && [ -d $TMPDIR/elsewhere/.jj ]
+    jr workspace forget hyperconfig-nixpkgs-bump-test-10 && rm -rf $TMPDIR/elsewhere
+    git -C "$repo" worktree prune
+    # ... and a directory that is no jj workspace: a foreign git repo,
+    # a foreign jj repo, a stray file
+    git init -q hyperconfig-nixpkgs-bump-test-11
+    jj git init hyperconfig-nixpkgs-bump-test-12 >/dev/null 2>&1
+    mkdir hyperconfig-nixpkgs-bump-test-13 && echo keep >hyperconfig-nixpkgs-bump-test-13/f
+    for n in 11 12 13; do
+      if w remove hyperconfig-nixpkgs-bump-test-$n 2>$TMPDIR/err; then echo "FAILED: removed foreign $n"; exit 1; fi
+      grep -q "is no jj workspace hyperconfig-nixpkgs-bump-test-$n and not empty" $TMPDIR/err
+      [ -d hyperconfig-nixpkgs-bump-test-$n ]
+    done
+    [ -d hyperconfig-nixpkgs-bump-test-11/.git ] && [ -d hyperconfig-nixpkgs-bump-test-12/.jj ]
+    rm -rf hyperconfig-nixpkgs-bump-test-1[123]
+    clean
+    echo "ok: remove refuses a foreign workspace at the path, one elsewhere, foreign content"
+
+    # a .jj symlinked (or copied) from the repository's: refused before
+    # any snapshot, default@ and the workspace's files unchanged
+    ws=$(w create hyperconfig-nixpkgs-bump-test-14)
+    echo bump >"$ws/flake.lock"
+    mv "$ws/.jj" $TMPDIR/ws14.jj
+    ln -s "$repo/.jj" "$ws/.jj"
+    before=$(default_at)
+    if w remove hyperconfig-nixpkgs-bump-test-14 2>$TMPDIR/err; then echo "FAILED: removed via .jj symlink"; exit 1; fi
+    grep -q "/.jj is not a real directory" $TMPDIR/err
+    [ "$(default_at)" = "$before" ] && [ "$(cat "$ws/flake.lock")" = bump ]
+    rm "$ws/.jj" && cp -r "$repo/.jj" "$ws/.jj"
+    if w remove hyperconfig-nixpkgs-bump-test-14 2>$TMPDIR/err; then echo "FAILED: removed via copied .jj"; exit 1; fi
+    grep -q "touching nothing" $TMPDIR/err
+    [ "$(default_at)" = "$before" ] && [ "$(cat "$ws/flake.lock")" = bump ]
+    rm -rf "$ws/.jj" && mv $TMPDIR/ws14.jj "$ws/.jj"
+    ln -s "$repo/.jj/working_copy/tree_state" "$ws/.jj/working_copy/x"
+    if w remove hyperconfig-nixpkgs-bump-test-14 2>$TMPDIR/err; then echo "FAILED: removed with a symlink in .jj"; exit 1; fi
+    grep -q "a symlink in" $TMPDIR/err
+    rm "$ws/.jj/working_copy/x"
+    mv "$ws/.git" $TMPDIR/ws14.git && ln -s $TMPDIR/ws14.git "$ws/.git"
+    if w remove hyperconfig-nixpkgs-bump-test-14 2>$TMPDIR/err; then echo "FAILED: removed with a .git symlink"; exit 1; fi
+    grep -q "/.git is not a plain file" $TMPDIR/err
+    rm "$ws/.git" && mv $TMPDIR/ws14.git "$ws/.git"
+    [ "$(default_at)" = "$before" ]
+    echo "ok: .jj / .git symlinks and a copied .jj refused, default@ unchanged"
+
+    # a hostile jj config (JJ_CONFIG and ~/.config/jj) and git env do
+    # not make remove delete the unpushed work in that same workspace
+    printf '[revset-aliases]\n"empty()" = "all()"\n"main@origin" = "all()"\n[snapshot]\nauto-track = "none()"\n' >$TMPDIR/evil.toml
+    mkdir -p $HOME/.config/jj && cp $TMPDIR/evil.toml $HOME/.config/jj/config.toml
+    echo new >"$ws/untracked-new-file"
+    if JJ_CONFIG=$TMPDIR/evil.toml GIT_DIR=$TMPDIR/fake w remove hyperconfig-nixpkgs-bump-test-14 2>$TMPDIR/err; then
+      echo "FAILED: hostile config removed unpushed work"; exit 1
+    fi
+    grep -q "has work not in main@origin" $TMPDIR/err
+    [ "$(cat "$ws/flake.lock")" = bump ] && [ -f "$ws/untracked-new-file" ]
+    rm $HOME/.config/jj/config.toml
+    # a new file alone (auto-track = none() would hide it): still refused
+    (cd "$ws" && jj restore flake.lock) >/dev/null 2>&1
+    if JJ_CONFIG=$TMPDIR/evil.toml w remove hyperconfig-nixpkgs-bump-test-14 2>$TMPDIR/err; then
+      echo "FAILED: hostile config removed an untracked new file"; exit 1
+    fi
+    grep -q "has work not in main@origin" $TMPDIR/err && [ -f "$ws/untracked-new-file" ]
+    echo "ok: hostile jj config does not make remove delete unpushed work"
+    (cd "$ws" && jj abandon @) >/dev/null 2>&1
+    [ ! -e "$ws/untracked-new-file" ]
+    w remove hyperconfig-nixpkgs-bump-test-14
+    clean
+    echo "ok: removed once the work is gone"
     touch $out
   ''

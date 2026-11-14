@@ -73,7 +73,10 @@ is the workspace's path and nothing else.
   `$ws` is non-empty, and `$ws` starts with
   `/home/infra/hyperconfig-nixpkgs-bump-`. Then `cd "$ws"` and confirm
   `jj log -r @-` is `main@origin`. Do everything below in `$ws`, and
-  note the name: you clean it up at the end.
+  note the name: you clean it up at the end. Write nothing into `$ws`
+  but the bump itself (scratch files and logs go to `$TMPDIR`): any
+  stray file there makes the final `remove` refuse, and the next night
+  then fails at step 1.
 - Otherwise (non-zero exit, empty or other `$ws`): you have no
   workspace. Touch nothing (no `cd`, no `jj new`, no retry, no cleanup
   of your own), report `failed` quoting its `FAIL:` line. If the failure
