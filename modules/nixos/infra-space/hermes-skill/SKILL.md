@@ -226,6 +226,21 @@ A timer starts you on @MEMBER@ every night with the `nixpkgs-bump` skill
 every machine, reviews, merge to main, no deploy. Its reports are in
 `~/nixpkgs-bump/`. When Dave asks for a bump, follow that skill.
 
+## Decisions for Dave: the registry
+
+Every decision only Dave can make goes to the registry (`decision`,
+`modules/nixos/infra-space/decisions.nix`), not into a chat list:
+`decision add --title ... --why ... --option "a) ..." --recommendation
+... --still-relevant-if ... --source <job or session>` (`decision add
+--help`). Jobs without the CLI append a JSON line to
+`/var/lib/infra-space/decisions/inbox.jsonl`, one line per single
+write in append mode (`>>`; never rewrite or truncate the file); a service taken down
+overnight is `decision notice "<what, where, how to undo>"`. 08:00 a
+run curates it (`decisions-curate` skill), 09:00 Dave gets one short
+Telegram brief (open count, top titles, warnings, notices), and he
+answers with /decisions (the `decisions` skill). Ask in chat only when
+it is urgent and he is active right now; file it as well.
+
 ## The other instance
 
 @OTHERS@ reaches the other infra-space container as `infra`, over the

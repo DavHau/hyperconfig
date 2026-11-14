@@ -40,6 +40,8 @@
       bundled claude-code skill is another one, disabled).
     - the nightly nixpkgs bump (./nixpkgs-bump.nix): a timer that starts
       the agent with ./nixpkgs-bump/SKILL.md; here only, so on som only.
+    - the decision registry (./decisions.nix): `decision`, the 08:00
+      curation run, the 09:00 brief and the /decisions skill; som only.
 
   Inference: Claude Opus 5.5 through TeamClaude (the model) with the
   shared client key (../teamclaude-api-key.nix, booked as `hyperconfig`),
@@ -226,6 +228,17 @@ let
     );
   };
 
+  # The decision registry (./decisions.nix): /decisions for Dave's
+  # sessions, decisions-curate for the 08:00 run.
+  decisionsSkill = hlib.mkAgentSkill pkgs {
+    name = "decisions";
+    src = pkgs.writeTextDir "SKILL.md" (builtins.readFile ./decisions/SKILL.md);
+  };
+  curateSkill = hlib.mkAgentSkill pkgs {
+    name = "decisions-curate";
+    src = pkgs.writeTextDir "SKILL.md" (builtins.readFile ./decisions/curate/SKILL.md);
+  };
+
   # Where things live in hyperconfig: SKILL.md, hand-written area
   # references and the generated map (../../flake-parts/repo-map.nix keeps
   # it fresh). Only the skill's directory goes into the store.
@@ -242,6 +255,8 @@ let
     skill
     bumpSkill
     mapSkill
+    decisionsSkill
+    curateSkill
   ];
 
   dashboardPort = hlib.dashboardPortFor user;
@@ -251,6 +266,7 @@ in
   imports = [
     inputs.hyperhermes.nixosModules.core
     ./nixpkgs-bump.nix
+    ./decisions.nix
   ];
 
   # For ./test.nix, which checks hermes' own view against them.

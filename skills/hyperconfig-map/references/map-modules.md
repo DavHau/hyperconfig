@@ -77,7 +77,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/llama-swap.nix — Extra llama-swap config for hyperconfig machines. <- amy
 - modules/nixos/locale.nix — Time zone, locale and console keymap for Dave's desktops. <- m/dave.nix
 - modules/nixos/low-battery-power-off.nix — - <- m/laptop.nix
-- modules/nixos/monitoring-alerts.nix — Fleet alerts: Grafana unified alerting on the monitoring server (edi), evaluated against the Mimir datasource the clan-… <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/nixpkgs-bump.nix
+- modules/nixos/monitoring-alerts.nix — Fleet alerts: Grafana unified alerting on the monitoring server (edi), evaluated against the Mimir datasource the clan-… <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/nixpkgs-bump.nix, m/telegram-send/default.nix
 - modules/nixos/monitoring-exec-usage.nix — "Unused packages" dashboard on the monitoring server's Grafana (stats.davhau.com/d/exec-usage), fed by ./exec-usage on… <- modules/flake-parts/nixosConfigurations.nix
 - modules/nixos/monitoring-grafana-sso.nix — Grafana of the clan-core monitoring server, published at stats.davhau.com behind the clan's pocket-id (modules/clan/oid… <- edi
 - modules/nixos/monitoring-server.nix — Local overrides for the clan-core monitoring server (Mimir + Loki). <- modules/flake-parts/nixosConfigurations.nix
@@ -199,19 +199,24 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/infra-space/age-recipients.nix — The clan vars' age recipients (vars.settings.recipients.default in ../../flake-parts/nixosConfigurations.nix): <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/default.nix, m/infra-space/guest.nix, m/spaces/default.nix
 - modules/nixos/infra-space/dashboard-account.nix — Who signs in to the infra-space dashboard (./dashboard.nix, on som), as plain data for the two evaluations that need it: <- som, modules/flake-parts/nixosConfigurations.nix, m/infra-space/dashboard.nix
 - modules/nixos/infra-space/dashboard.nix — The infra-space agent's hermes dashboard, published by this host's nginx (som only: <- m/infra-space/default.nix, m/infra-space/hermes.nix, m/infra-space/secret-prompt/default.nix
-- modules/nixos/infra-space/default.nix — infra-space: a NixOS container on every member machine (./members.nix), identical on each, from which the fleet is mana… <- amy, som, m/infra-space/afk.nix, m/infra-space/dashboard.nix, m/infra-space/fleet-access.nix, m/infra-space/gcroots.nix, m/infra-space/guest.nix, m/infra-space/hermes.nix, +7
-- modules/nixos/infra-space/fleet-access.nix — infra-space's root access on every clan machine (wired via the `sshd` instance's server extraModules in modules/flake-p… <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/default.nix, m/infra-space/test.nix
+- modules/nixos/infra-space/decisions.nix — The fleet's decision registry: <- m/infra-space/hermes.nix, m/telegram-send/default.nix
+- modules/nixos/infra-space/default.nix — infra-space: a NixOS container on every member machine (./members.nix), identical on each, from which the fleet is mana… <- amy, som, m/infra-space/afk.nix, m/infra-space/dashboard.nix, m/infra-space/fleet-access.nix, m/infra-space/gcroots.nix, m/infra-space/guest.nix, m/infra-space/hermes.nix, +8
+- modules/nixos/infra-space/fleet-access.nix — infra-space's root access on every clan machine (wired via the `sshd` instance's server extraModules in modules/flake-p… <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/default.nix, m/infra-space/test.nix, m/telegram-send/default.nix
 - modules/nixos/infra-space/gcroots.nix — GC roots on this host for systems built from the infra-space guest (a host module, imported by ./default.nix; <- m/infra-space/default.nix
 - modules/nixos/infra-space/guest.nix — The system inside the infra-space container (./default.nix sets the options below from the host side). <- m/infra-space/default.nix, m/infra-space/gcroots.nix, m/infra-space/hermes.nix, m/infra-space/secret-prompt/default.nix, m/spaces/guest-base.nix
-- modules/nixos/infra-space/hermes.nix — The infra-space's hermes agent, inside the container (./default.nix appends this to the guest's modules on every member… <- m/infra-space/dashboard.nix, m/infra-space/default.nix, m/infra-space/nixpkgs-bump.nix, m/infra-space/voice-api.nix
+- modules/nixos/infra-space/hermes.nix — The infra-space's hermes agent, inside the container (./default.nix appends this to the guest's modules on every member… <- m/infra-space/dashboard.nix, m/infra-space/decisions.nix, m/infra-space/default.nix, m/infra-space/nixpkgs-bump.nix, m/infra-space/voice-api.nix
 - modules/nixos/infra-space/launchers.nix — Dave's way into infra-space, on his desktops (../dave.nix): <- m/dave-desktop/default.nix, m/infra-space/afk.nix, m/spaces/client.nix
 - modules/nixos/infra-space/members.nix — The machines that run an infra-space container (./default.nix), and the port on the machine's yggdrasil address that re… <- m/infra-space/default.nix, m/infra-space/public-members.nix
-- modules/nixos/infra-space/nixpkgs-bump.nix — The nightly nixpkgs-unstable bump, run by the infra-space agent itself (./nixpkgs-bump/SKILL.md says what it does: <- m/infra-space/hermes.nix
+- modules/nixos/infra-space/nixpkgs-bump.nix — The nightly nixpkgs-unstable bump, run by the infra-space agent itself (./nixpkgs-bump/SKILL.md says what it does: <- m/infra-space/decisions.nix, m/infra-space/hermes.nix
 - modules/nixos/infra-space/public-members.nix — Every member of ./members.nix with its mesh address and its container's pinned host key, from the members' public clan… <- m/infra-space/default.nix, m/infra-space/launchers.nix
 - modules/nixos/infra-space/test-oidc.py — - <- m/infra-space/test.nix
 - modules/nixos/infra-space/test-toolsets.py — - <- m/infra-space/test.nix
 - modules/nixos/infra-space/test.nix — ./default.nix on two members and ./fleet-access.nix on a third machine: <- flake.nix, m/infra-space/guest.nix
 - modules/nixos/infra-space/voice-api.nix — The infra agent's OpenAI-compatible api_server, for som's voice-gateway only (../voice-gateway: <- m/voice-gateway/default.nix
+- modules/nixos/infra-space/decisions/SKILL.md — Walk Dave through the open decisions of the fleet's registry one at a time (urgent first), record his short answers and  <- m/infra-space/decisions.nix, m/infra-space/hermes.nix
+- modules/nixos/infra-space/decisions/decision.py — - <- m/infra-space/decisions.nix
+- modules/nixos/infra-space/decisions/test_decision.py — - <- m/infra-space/decisions.nix
+- modules/nixos/infra-space/decisions/curate/SKILL.md — The daily 08:00 curation of the decision registry - re-check every open decision, obsolete what no longer applies, merge <- m/infra-space/decisions.nix, m/infra-space/hermes.nix
 - modules/nixos/infra-space/hermes-skill/SKILL.md — Manage Dave's NixOS fleet from infra-space - change hyperconfig, push it, deploy machines with clan, reach the other inf <- m/infra-space/guest.nix, m/infra-space/hermes.nix
 - modules/nixos/infra-space/nixpkgs-bump/SKILL.md — The nightly nixpkgs-unstable bump of hyperconfig - update nixpkgs, build every machine, fix, review, guard, merge to mai <- m/infra-space/hermes.nix, m/infra-space/nixpkgs-bump.nix
 - modules/nixos/infra-space/nixpkgs-bump/guard-test.nix — ./guard.sh against a scratch repository, without network: <- flake.nix
@@ -226,7 +231,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/luks-unlock/agent.sh — Answer systemd-cryptsetup's passphrase request with the key from Tang. <- m/luks-unlock/default.nix
 - modules/nixos/luks-unlock/default.nix — Encrypted LUKS root, key held by clan, unlockable three ways: <- vit
 - modules/nixos/luks-unlock/unlock.sh — Answer systemd-cryptsetup's pending passphrase request with stdin. <- m/luks-unlock/default.nix
-- modules/nixos/monitoring-alert-digest/default.nix — Daily digest of the fleet's warnings, one Telegram message at 09:00 (+07, Asia/Bangkok). <- modules/flake-parts/nixosConfigurations.nix
+- modules/nixos/monitoring-alert-digest/default.nix — Daily digest of the fleet's warnings, one Telegram message at 09:00 (+07, Asia/Bangkok). <- modules/flake-parts/nixosConfigurations.nix, m/telegram-send/default.nix
 - modules/nixos/monitoring-alert-digest/digest.py — - <- m/monitoring-alert-digest/default.nix
 - modules/nixos/monitoring-alert-digest/provision_token.py — - <- m/monitoring-alert-digest/default.nix
 - modules/nixos/monitoring-alert-digest/test_digest.py — - <- m/monitoring-alert-digest/default.nix
@@ -304,6 +309,10 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/spaces/publish-skill/SKILL.md — >
 - modules/nixos/teamclaude-gateway/default.nix — TeamClaude: pooled Claude subscription gateway at https://teamclaude.davhau.com/, after project-zero's pubproxy01 setup… <- som
 - modules/nixos/teamclaude-gateway/metrics.nix — Pushes TeamClaude usage to Mimir for the "TeamClaude usage" dashboard (../monitoring-teamclaude.nix on the monitoring s… <- m/teamclaude-gateway/default.nix
+- modules/nixos/telegram-send/default.nix — edi's side of infra-space's morning brief (../infra-space/decisions.nix): <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/decisions.nix, m/infra-space/default.nix
+- modules/nixos/telegram-send/dispatch.sh — !/usr/bin/env bash fleet-brief-dispatch: <- m/infra-space/test.nix, m/telegram-send/default.nix
+- modules/nixos/telegram-send/send.py — - <- m/telegram-send/default.nix
+- modules/nixos/telegram-send/test_send.py — - <- m/telegram-send/default.nix
 - modules/nixos/toolchain-cache-dirs/default.nix — Tool defaults that keep rebuildable downloads (module caches, package stores, model files) in ~/.cache, for hosts where… <- som
 - modules/nixos/toolchain-cache-dirs/storage-skill/SKILL.md — Where to put files on this machine. Your home is small and backed up, ~/scratch and ~/.cache are large and not. Read bef <- machines/som/hermes-agents.nix
 - modules/nixos/user-manager-restart/default.nix — Bring a user's `systemd --user` manager back after it dies. <- som, m/user-manager-restart/test.nix

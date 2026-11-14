@@ -97,6 +97,10 @@
                          above); credential `secrets-github`. Manual: add
                          its public value on that repository as a deploy key
                          with write access.
+    infra-space-brief    shared, made and used on the hermes member only:
+                         the morning brief's key to edi, a forced command
+                         for an unprivileged user (../telegram-send);
+                         credential `brief-ssh`
     infra-space-hostkey  per member: the guest's ssh host key, pinned by
                          the other members and Dave's launcher from its
                          public value
@@ -340,8 +344,20 @@ in
     };
     # The always-on agent, where enabled (som); its dashboard: ./dashboard.nix.
     hyper.infraSpace.guestModules = lib.optional cfg.hermes ./hermes.nix;
-
-    }
+  }
+  (lib.mkIf cfg.hermes {
+    # The morning brief's key to edi (./decisions.nix): only the agent's
+    # member has it; edi authorizes its public half for an unprivileged
+    # user with a forced command (../telegram-send).
+    clan.core.vars.generators.infra-space-brief = {
+      share = true;
+      files.id_ed25519.restartUnits = [ containerUnit ];
+      files."id_ed25519.pub".secret = false;
+      runtimeInputs = [ pkgs.openssh ];
+      script = sshKeygen "infra-space-brief";
+    };
+    hyper.infraSpace.credentials.brief-ssh = vars.infra-space-brief.files.id_ed25519.path;
+  })
     # The container itself, its network, isolation and sshd forward: the
     # host side shared with the named spaces (../spaces/host.nix).
     (spaceHost {

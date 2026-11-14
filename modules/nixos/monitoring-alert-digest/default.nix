@@ -23,6 +23,12 @@
 # state file the digest gets as a systemd credential.
 # Neither token is ever printed.
 #
+# For other modules (../telegram-send: the morning brief's edi side):
+# hyper.monitoringAlertDigest.{package,hardening,tokenCredential} (read
+# only: the tested binary, the units' sandbox, the Viewer token as a
+# LoadCredential= value) and .onCalendar / .skipCondition (the brief
+# moves the timer behind itself and skips a day it already reported).
+#
 # A failed digest (after its retries) or token run pages: OnFailure=
 # starts fleet-alert-digest-failed, which sends one short "alert digest
 # failed" naming the unit ($MONITOR_UNIT) through the same bot. That
@@ -82,6 +88,37 @@ let
   };
 in
 {
+  options.hyper.monitoringAlertDigest = {
+    package = lib.mkOption {
+      type = lib.types.package;
+      readOnly = true;
+      default = tested;
+      description = "fleet-alert-digest, its unit tests run at build.";
+    };
+    hardening = lib.mkOption {
+      type = lib.types.attrsOf lib.types.anything;
+      readOnly = true;
+      default = hardening;
+      description = "The sandbox of the digest's units (serviceConfig).";
+    };
+    tokenCredential = lib.mkOption {
+      type = lib.types.str;
+      readOnly = true;
+      default = "grafana-token:${tokenDir}/grafana-token";
+      description = "The Grafana Viewer token as a LoadCredential= value.";
+    };
+    onCalendar = lib.mkOption {
+      type = lib.types.str;
+      default = "*-*-* 09:00:00 Asia/Bangkok";
+      description = "When the digest is sent (edi runs in UTC: name the zone).";
+    };
+    skipCondition = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      description = "A root ExecCondition= of the digest: exit 1 skips that run (no message, no failure).";
+    };
+  };
+
   config = lib.mkIf config.hyper.monitoringAlerts.telegram.enable {
     environment.systemPackages = [ tested ];
 
@@ -127,6 +164,10 @@ in
         ExecStart = "${tested}/bin/fleet-alert-digest";
         DynamicUser = true;
         LoadCredential = [ "grafana-token:${tokenDir}/grafana-token" ] ++ telegramCreds;
+        # "+": as root, outside the sandbox (reads another unit's state)
+        ExecCondition = lib.mkIf (
+          config.hyper.monitoringAlertDigest.skipCondition != null
+        ) "+${config.hyper.monitoringAlertDigest.skipCondition}";
         # Retry a Grafana restart or a Telegram hiccup from before the
         # request went out, then page through fleet-alert-digest-failed.
         Restart = "on-failure";
@@ -155,8 +196,7 @@ in
     systemd.timers.fleet-alert-digest = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        # edi runs in UTC; an explicit zone keeps it at 09:00 +07.
-        OnCalendar = "*-*-* 09:00:00 Asia/Bangkok";
+        OnCalendar = config.hyper.monitoringAlertDigest.onCalendar;
         # A digest missed while edi was down is sent when it is back.
         Persistent = true;
       };

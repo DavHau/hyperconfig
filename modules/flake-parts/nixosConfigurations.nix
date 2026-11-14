@@ -437,6 +437,8 @@ in {
                 ../../modules/nixos/monitoring-server.nix
                 ../../modules/nixos/monitoring-alerts.nix
                 ../../modules/nixos/monitoring-alert-digest
+                # the decision brief's sender (infra-space/decisions.nix)
+                ../../modules/nixos/telegram-send
                 ../../modules/nixos/monitoring-teamclaude.nix
                 ../../modules/nixos/monitoring-exec-usage.nix
               ];

@@ -328,3 +328,17 @@ of the message is exactly one of
     NIXPKGS-BUMP: failed
 
 with nothing after it. Anything else counts as failed.
+
+## Decisions for Dave
+
+Anything only Dave can decide (a new machine to gate, a fix that needs a
+denied path, a workspace left for him) goes to the decision registry as
+well as into the report, so the morning brief carries it:
+
+    decision --by nixpkgs-bump add --title "<plain words, what he decides>" \
+      --why "<one or two lines>" --option "a) ..." --option "b) ..." \
+      --recommendation "<yours>" --still-relevant-if "<a checkable fact>" \
+      --source nixpkgs-bump --link ~/nixpkgs-bump/<log>
+
+The same title again only refiles the open one. A failed night by
+itself is not a decision; the report and the log cover it.

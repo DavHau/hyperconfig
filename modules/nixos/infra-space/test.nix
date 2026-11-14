@@ -61,7 +61,9 @@
 # nginx only the dashboard's; root and the sshd forward still do.
 #
 # ./test-keys is test-only material: infra-space(.pub) the shared
-# identity, hostkey-member{A,B}(.pub) the guests' host keys, managed-host
+# identity, brief(.pub) the morning brief's key to edi (managed plays
+# edi's fleet-brief user, with ../telegram-send/dispatch.sh and a stub
+# root helper), hostkey-member{A,B}(.pub) the guests' host keys, managed-host
 # with managed-host-cert.pub signed by ca.pub (the stand-in for the clan
 # sshd CA; its private half was discarded after signing).
 {
@@ -87,6 +89,25 @@ let
   # dashboard session for the secret page, without pocket-id
   oidcPort = 9898;
   lockedHome = inputs.hyperhermes.lib.lockedHermesHome "infra";
+  briefState = "/var/lib/brief-test";
+  briefRoot = pkgs.writeShellScript "brief-root-stub" ''
+    [ "$1" = -n ] || exit 9
+    case "$3" in
+      send | send-nostamp)
+        echo "$3" > ${briefState}/verb.txt
+        cat > ${briefState}/sent.txt
+        rc=$(cat ${briefState}/send-rc 2>/dev/null || echo 0)
+        exit "$rc" ;;
+      digest-json)
+        cat ${briefState}/digest.json
+        exit "$(cat ${briefState}/digest-rc 2>/dev/null || echo 0)" ;;
+    esac
+    exit 8
+  '';
+  briefDispatch = pkgs.writeShellScript "fleet-brief-dispatch" ''
+    export DISPATCH_SUDO=${briefRoot} DISPATCH_ROOT=stub
+    exec ${pkgs.bash}/bin/bash ${../telegram-send/dispatch.sh}
+  '';
   # the guest's veth addresses (./default.nix)
   guestV4 = "10.235.0.2";
   guestV6 = "fd23:5ace::2";
@@ -191,7 +212,11 @@ let
         };
         # A later guest service for the host only (som's nginx in front of
         # a dashboard), carelessly opened in the guest's firewall.
-        guestModules = [
+        guestModules = lib.optional (me == "memberA") {
+          # the morning brief's real ssh path, to managed as edi
+          space.decisions.ediHost = "managed";
+        }
+        ++ [
           (
             { pkgs, ... }:
             {
@@ -346,6 +371,7 @@ let
 
       environment.etc = {
         "test-vars/infra-space-ssh/id_ed25519" = secret (keys + "/infra-space");
+        "test-vars/infra-space-brief/id_ed25519" = secret (keys + "/brief");
         "test-vars/infra-space-github/id_ed25519" = secret (pkgs.writeText "github" "not a key\n");
         "test-vars/infra-space-secrets-github/id_ed25519" = secret (pkgs.writeText "secrets-github" "not a key\n");
         "test-vars/infra-space-hostkey/ssh_host_ed25519_key" = secret (keys + "/hostkey-${me}");
@@ -384,11 +410,26 @@ pkgs.testers.runNixOSTest {
       mode = "0600";
     };
     environment.systemPackages = [ pkgs.netcat-openbsd ];
+
+    # edi's fleet-brief (../telegram-send): the real forced command and
+    # dispatcher; the root helper is a stub working in ${briefState}
+    # (send/send-nostamp: the verb to verb.txt, stdin to sent.txt, exit
+    # with send-rc if present;
+    # digest-json: digest.json, exit with digest-rc if present).
+    users.users.fleet-brief = {
+      isSystemUser = true;
+      group = "fleet-brief";
+      useDefaultShell = true;
+      openssh.authorizedKeys.keys = [ ''restrict,command="${briefDispatch}" ${pub "brief.pub"}'' ];
+    };
+    users.groups.fleet-brief = { };
+    systemd.tmpfiles.rules = [ "d ${briefState} 0777 root root -" ];
   };
 
   testScript =
     { nodes, ... }:
     ''
+      import re
       import shlex
 
       def guest(m, cmd, check=True):
@@ -815,6 +856,113 @@ pkgs.testers.runNixOSTest {
           assert guest(memberA, "stat -c %a /home/infra/nixpkgs-bump/*.log").split() == ["600"]
           guest(memberA, "rm -r /home/infra/hyperconfig /home/infra/nixpkgs-bump")
           guest_root(memberA, "systemctl reset-failed nixpkgs-bump.service")
+
+      with subtest("the decision registry: inbox, 08:00 curation, 09:00 brief on memberA only"):
+          memberB.fail("nixos-container run infra-space -- systemctl cat decisions-brief.service")
+          for unit, at in [("decisions-curate", "08:00:00"), ("decisions-brief", "09:00:00")]:
+              guest_root(memberA, f"systemctl is-active {unit}.timer")
+              cal = guest_root(memberA, f"systemctl show -p TimersCalendar --value {unit}.timer")
+              assert f"{at} Asia/Bangkok" in cal, cal
+          # the contract path other jobs write to is the persistent store
+          assert guest_root(memberA, "readlink /var/lib/infra-space/decisions").strip() == "/home/infra/decisions"
+          assert guest(memberA, "stat -c '%U %a' /home/infra/decisions").split() == ["infra", "700"]
+          # the brief's key: memberA's guest only
+          guest_root(memberA, "test -s /run/infra-space/secrets/brief-ssh")
+          guest_root(memberB, "test ! -e /run/infra-space/secrets/brief-ssh")
+          # edi's forced command: send and digest-json, nothing else; the
+          # key is no root key there
+          brief_ssh = ("ssh -F /dev/null -i /run/infra-space/secrets/brief-ssh -o IdentitiesOnly=yes "
+                       "-o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/dev/null "
+                       "-o GlobalKnownHostsFile=/etc/ssh/ssh_known_hosts")
+          for cmd in ["id", "send x", "'send; id'", "send-nostamp x", "digest-json --dry-run"]:
+              code, out = guest(memberA, f"{brief_ssh} -l fleet-brief managed {cmd} 2>&1", check=False)
+              assert code != 0 and "refused" in out, (cmd, code, out)
+          code, out = guest(memberA, f"{brief_ssh} -l root managed id 2>&1", check=False)
+          assert code != 0 and "uid=0" not in out, out
+          managed.succeed("test ! -e ${briefState}/sent.txt")
+
+          def brief_run(expect_ok=True):
+              # many starts here: past the unit's StartLimitBurst otherwise
+              guest_root(memberA, "systemctl reset-failed decisions-brief.service")
+              if expect_ok:
+                  guest_root(memberA, "systemctl start decisions-brief.service")
+              else:
+                  # a failure ends in auto-restart or failed; never wait for the retry
+                  guest_root(memberA, "systemctl start --no-block decisions-brief.service")
+                  memberA.wait_until_succeeds("nixos-container run infra-space -- systemctl show -p SubState --value decisions-brief.service | grep -qxE 'auto-restart|failed'", timeout=120)
+              state = guest_root(memberA, "systemctl show -p SubState --value decisions-brief.service").strip()
+              guest_root(memberA, "systemctl stop decisions-brief.service")
+              return state
+
+          def sent(verb="send"):
+              code, out = managed.execute("cat ${briefState}/sent.txt")
+              if code == 0:
+                  got = managed.succeed("cat ${briefState}/verb.txt").strip()
+                  assert got == verb, (got, verb)
+              managed.succeed("rm -f ${briefState}/sent.txt ${briefState}/verb.txt")
+              return out if code == 0 else None
+
+          # nothing open, no warnings: nothing sent
+          managed.succeed("echo '[]' > ${briefState}/digest.json")
+          brief_run()
+          assert sent() is None
+          # the digest unreadable, nothing else: still one line, sent
+          # without the stamp (edi's own 09:30 digest still goes out)
+          managed.succeed("echo 1 > ${briefState}/digest-rc")
+          brief_run()
+          out = sent("send-nostamp")
+          assert out is not None and "warning digest could not be read" in out, out
+          managed.succeed("rm ${briefState}/digest-rc")
+          # a failed bump night: a line
+          guest(memberA, "mkdir -p /home/infra/nixpkgs-bump && printf 'NIXPKGS-BUMP: failed\\nsession_id: x\\n' > /home/infra/nixpkgs-bump/$(date -u +%FT%H%MZ).log")
+          brief_run()
+          out = sent()
+          assert out is not None and "Nightly nixpkgs bump failed last night" in out, out
+          guest(memberA, "rm -r /home/infra/nixpkgs-bump")
+          # a job's inbox line, a takedown notice, a warning
+          guest(memberA, """printf '%s\\n' '{"title": "Take down foo?", "severity": "critical", "options": ["a) yes", "b) no"], "source": "cve-watch"}' '{"kind": "notice", "text": "stopped foo.service on bam", "source": "cve-watch"}' >> /var/lib/infra-space/decisions/inbox.jsonl""")
+          guest(memberA, "decision add --title 'Buy a proxy?' --urgency low --source test")
+          out = guest(memberA, "decision list")
+          assert "urgent" in out and "Take down foo?" in out, out
+          managed.succeed("""echo '[{"alert": "Disk almost full", "host": "vit", "state": "firing", "fired": 2}]' > ${briefState}/digest.json""")
+          # Telegram refused (exit 1): failed, retried later, notices kept
+          managed.succeed("echo 1 > ${briefState}/send-rc")
+          state = brief_run(expect_ok=False)
+          assert state == "auto-restart", state  # retried in 10 min
+          assert "stopped foo.service on bam" in guest(memberA, "decision notice --list")
+          # maybe sent (exit 3): failed, never retried, notices kept
+          managed.succeed("echo 3 > ${briefState}/send-rc")
+          state = brief_run(expect_ok=False)
+          assert state == "failed", state
+          assert "stopped foo.service on bam" in guest(memberA, "decision notice --list")
+          # ssh's own error (255) or a timeout may come after the message
+          # is out: never retried either
+          managed.succeed("echo 255 > ${briefState}/send-rc")
+          state = brief_run(expect_ok=False)
+          assert state == "failed", state
+          managed.succeed("rm ${briefState}/send-rc ${briefState}/sent.txt")
+          brief_run()
+          out = sent()
+          assert out is not None, out
+          print(out)
+          assert out.startswith("2 decisions waiting"), out
+          assert "- URGENT: Take down foo?" in out, out
+          assert "vit: Disk almost full, 2x" in out, out
+          assert "stopped foo.service on bam" in out, out
+          # the notice went out once
+          assert guest(memberA, "decision notice --list").strip() == ""
+          # the curation run: the stub model gives no verdict, so it fails
+          code, _ = memberA.execute("nixos-container run infra-space -- systemctl start decisions-curate.service")
+          assert code != 0, code
+          journal = guest_root(memberA, "journalctl -u decisions-curate.service")
+          assert "last line: " in journal and "last line: session_id" not in journal, journal
+          assert "decisions-curate" in guest(memberA, "cat /home/infra/decisions-curate/last-prompt")
+          # its toolsets: terminal and file only
+          unit = guest_root(memberA, "systemctl cat decisions-curate.service")
+          script = re.search(r"ExecStart=(\S+)", unit)
+          assert script is not None, unit
+          assert "-t terminal,file " in guest_root(memberA, f"cat {script.group(1)}")
+          guest_root(memberA, "systemctl reset-failed decisions-curate.service")
 
       with subtest("the nightly bump's nix: its own cores and jobs, from an untrusted client"):
           busybox = "${pkgs.pkgsStatic.busybox}"

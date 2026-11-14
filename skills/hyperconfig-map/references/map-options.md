@@ -42,6 +42,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.ipv4Forward: modules/nixos/ipv4-forward.nix
 - hyper.lanPrinter: modules/nixos/lan-printer.nix
 - hyper.luksUnlock.name: modules/nixos/luks-unlock/default.nix
+- hyper.monitoringAlertDigest: modules/nixos/monitoring-alert-digest/default.nix
 - hyper.monitoringAlerts: modules/nixos/monitoring-alerts.nix
 - hyper.mullvadEgress: modules/nixos/mullvad-egress/egress.nix
 - hyper.mullvadEgress.dns.services: modules/nixos/mullvad-egress/dns.nix
@@ -105,6 +106,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - slot: hyperhermes/modules/slots/default.nix
 - sortBy: modules/nixos/monitoring-exec-usage.nix, modules/nixos/monitoring-teamclaude.nix
 - space: modules/nixos/spaces/guest-base.nix, modules/nixos/spaces/guest.nix
+- space.decisions: modules/nixos/infra-space/decisions.nix
 - space.defaultForge: modules/nixos/spaces/forges.nix
 - space.forges: modules/nixos/spaces/forges.nix
 - space.publish: modules/nixos/spaces/publish-guest.nix
@@ -123,6 +125,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - clan-secrets-pull: modules/nixos/clan-secrets-mirror.nix
 - grafana-telegram: modules/nixos/monitoring-alerts.nix
 - inference-api-key: modules/nixos/inference-api-key.nix
+- infra-space-brief: modules/nixos/infra-space/default.nix
 - initrd-ssh: modules/nixos/initrd-ssh.nix
 - initrd-wifi: modules/nixos/initrd-wifi.nix
 - iodine-password: modules/nixos/iodine-password.nix
