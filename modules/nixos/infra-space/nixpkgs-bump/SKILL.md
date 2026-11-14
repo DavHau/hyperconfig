@@ -53,31 +53,33 @@ Every subagent brief below repeats this section word for word.
 
 Never the main checkout: `/home/infra/hyperconfig` is only the
 repository, every command that could snapshot its working copy gets
-`--ignore-working-copy`. First, the overlap rule: if any
-`/home/infra/hyperconfig-nixpkgs-bump-*` exists (`ls -d
-/home/infra/hyperconfig-nixpkgs-bump-*`), an earlier night failed or is
-still running: touch nothing, report `failed` naming it (Dave cleans up).
-Otherwise:
+`--ignore-working-copy`. The workspace comes from one command, never
+from `jj workspace add` by hand:
 
-    jj -R /home/infra/hyperconfig --ignore-working-copy git fetch
-    ws=/home/infra/hyperconfig-nixpkgs-bump-$(date -u +%F)
-    mkdir "$ws"
-    jj -R /home/infra/hyperconfig --ignore-working-copy workspace add "$ws" -r main@origin
-    jj -R /home/infra/hyperconfig --ignore-working-copy workspace list
-    cd "$ws" && jj new main@origin
+    ws=$(nixpkgs-bump-workspace create)
 
-`mkdir "$ws"` (no `-p`) is the overlap lock: if it fails, another run
-got there first; touch nothing, report `failed`. The `workspace add`
-then prints `Created workspace in ...` and ends with exactly
-`Error: This command must be able to update the working copy.` (jj 0.46
-cannot check out a new workspace without touching the current one).
-That error, and only that one, is expected, and only if the `workspace
-list` then has a line starting with `$(basename "$ws"):`. Any other
-error or output, or no such line: do not `cd` or `jj new` anywhere,
-report `failed` with the output (the directory is left for Dave). The
-`jj new` in `$ws` checks out `main@origin`. Confirm `jj log -r @-` is
-`main@origin` and `ls` shows the tree. Do everything below in `$ws`, and
-note the name: you clean it up at the end.
+It checks the overlap rule (any `/home/infra/hyperconfig-nixpkgs-bump-*`
+directory, jj workspace or git worktree: an earlier night failed or is
+still running), fetches, `mkdir`s the directory (no `-p`), adds the
+workspace (a jj workspace with its own git worktree) on `main@origin`
+and checks it out. It decides by facts, not by jj's messages: jj lists
+the workspace, its `@` is an empty change on top of `main@origin`, the
+tree is there, git lists the worktree. jj's own output goes to stderr
+and includes an expected `Error: This command must be able to update
+the working copy.`; ignore it, the exit code is the verdict. Its stdout
+is the workspace's path and nothing else.
+
+- You have a workspace only if all three hold: the exit code is 0,
+  `$ws` is non-empty, and `$ws` starts with
+  `/home/infra/hyperconfig-nixpkgs-bump-`. Then `cd "$ws"` and confirm
+  `jj log -r @-` is `main@origin`. Do everything below in `$ws`, and
+  note the name: you clean it up at the end.
+- Otherwise (non-zero exit, empty or other `$ws`): you have no
+  workspace. Touch nothing (no `cd`, no `jj new`, no retry, no cleanup
+  of your own), report `failed` quoting its `FAIL:` line. If the failure
+  came after its `mkdir`, it already removed the empty workspace it made
+  (`removing the workspace this call created`), so the next night starts
+  clean; an earlier one it refused to touch stays for Dave.
 
 ## 2. Bump
 
@@ -89,10 +91,10 @@ Before moving anything, record the rev you start from; the guard (step
       > ~/nixpkgs-bump/$(basename $ws).old-rev
     nixpkgs-bump-nix flake update nixpkgs
 
-If `flake.lock` did not change (`jj diff --stat` is empty): forget the
-workspace (`jj -R /home/infra/hyperconfig --ignore-working-copy workspace
-forget $(basename $ws)`), remove its directory and the `.old-rev` file,
-report `unchanged`. Otherwise read the new rev the same way and
+If `flake.lock` did not change (`jj diff --stat` is empty): `cd ~`,
+then `nixpkgs-bump-workspace remove $(basename $ws)` (forgets the jj
+workspace, its git worktree, the directory and the `.old-rev` file;
+exit 0 means nothing is left), report `unchanged`. Otherwise read the new rev the same way and
 `jj describe -m "flake.lock: nixpkgs <old 8> -> <new 8>"` (first eight
 characters of each rev). Only `nixpkgs` moves; inputs that follow it stay
 as they are.
@@ -292,13 +294,18 @@ and every machine (joy, cm-pi: mostly offline) stays deployable when it
 comes online. A night that does not build cm-pi leaves its roots at the
 last Saturday's. Each prints `ok <m>: ...`; anything else (`refused:
 ...`, no socket) goes in the report as a finding, the night still counts
-as merged. Afterwards
-`jj -R /home/infra/hyperconfig --ignore-working-copy workspace forget $(basename $ws)`,
-remove the directory (and the `result-*` links) and the
-`.old-rev` file.
+as merged. Afterwards `cd ~` and
+`nixpkgs-bump-workspace remove $(basename $ws)`: it forgets the jj
+workspace and its git worktree, removes the directory (the `result-*`
+links with it) and the `.old-rev` file, prunes git's worktree entries,
+and exits 0 only if none of them is left; it refuses, touching
+nothing, while `$ws` holds a non-empty change not in `main@origin`.
+Anything else goes in the report as a finding (the night still counts
+as merged; the next night fails at step 1 until Dave cleans up).
 
 On failure push nothing; leave the workspace (and its `.old-rev`) as it
-is for Dave.
+is for Dave: never `nixpkgs-bump-workspace remove` it (it refuses anyway
+while the workspace holds work that is not in `main@origin`).
 
 ## Report
 

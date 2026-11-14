@@ -97,6 +97,14 @@ let
     nix = config.nix.package;
   };
 
+  # Steps 1 and 6's workspace: created and verified by facts, removed
+  # with its git worktree (./nixpkgs-bump/workspace.sh says why), tested
+  # by ./nixpkgs-bump/workspace-test.nix.
+  workspace = import ./nixpkgs-bump/workspace.nix {
+    inherit pkgs logDir;
+    repo = checkout;
+  };
+
   # The run's verdict: the report's last non-empty line, nothing earlier.
   # `hermes chat -Q` ends its output with `session_id: <id>` (on stderr,
   # which the log captures too): that line is hermes', not the report's.
@@ -167,6 +175,7 @@ in
   # On the system PATH, which the gateway's commands (and subagents) end in.
   environment.systemPackages = [
     guard
+    workspace
     verdict
     bumpNix
   ];

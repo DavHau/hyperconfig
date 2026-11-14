@@ -760,6 +760,7 @@ pkgs.testers.runNixOSTest {
           # and refuses outside a bump workspace (its offline test is the
           # nixpkgs-bump-guard check)
           assert guest(memberA, "command -v nixpkgs-bump-guard").strip() == "/run/current-system/sw/bin/nixpkgs-bump-guard"
+          assert guest(memberA, "command -v nixpkgs-bump-workspace").strip() == "/run/current-system/sw/bin/nixpkgs-bump-workspace"
           code, out = guest(memberA, "cd /home/infra && nixpkgs-bump-guard 2>&1", check=False)
           assert code != 0 and "not in a bump workspace" in out, (code, out)
           # the verdict is the log's last non-empty line, exactly (hermes

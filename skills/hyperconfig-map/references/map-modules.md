@@ -226,6 +226,9 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/infra-space/nixpkgs-bump/guard-test.nix — ./guard.sh against a scratch repository, without network: <- flake.nix
 - modules/nixos/infra-space/nixpkgs-bump/guard.nix — nixpkgs-bump-guard (./guard.sh), for ../nixpkgs-bump.nix (the guest's PATH) and ./guard-test.nix (which passes stubs as… <- m/infra-space/nixpkgs-bump.nix, m/infra-space/nixpkgs-bump/guard-test.nix
 - modules/nixos/infra-space/nixpkgs-bump/guard.sh — nixpkgs-bump-guard: the nightly bump's last check before it pushes (../nixpkgs-bump/SKILL.md step 6), run in the bump w… <- m/infra-space/nixpkgs-bump/guard.nix
+- modules/nixos/infra-space/nixpkgs-bump/workspace-test.nix — ./workspace.sh against a scratch colocated repository with a local origin (no network): <- flake.nix
+- modules/nixos/infra-space/nixpkgs-bump/workspace.nix — nixpkgs-bump-workspace (./workspace.sh), for ../nixpkgs-bump.nix (the guest's PATH) and ./workspace-test.nix. <- m/infra-space/nixpkgs-bump.nix, m/infra-space/nixpkgs-bump/workspace-test.nix
+- modules/nixos/infra-space/nixpkgs-bump/workspace.sh — nixpkgs-bump-workspace: creates and removes the nightly bump's jj workspace (../nixpkgs-bump/SKILL.md steps 1 and 6), s… <- m/infra-space/nixpkgs-bump/workspace.nix
 - modules/nixos/infra-space/secret-prompt/clan-secret-prompt.py — - <- m/infra-space/secret-prompt/default.nix
 - modules/nixos/infra-space/secret-prompt/default.nix — clan-secret-prompt (./clan-secret-prompt.py): <- m/infra-space/dashboard.nix, m/infra-space/guest.nix
 - modules/nixos/ipv4-forward-slots-test/default.nix — ../ipv4-forward.nix with a container slot behind it (hyperhermes' nixosModules.container-slots), set up as on som: <- flake.nix

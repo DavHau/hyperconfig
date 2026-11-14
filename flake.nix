@@ -322,6 +322,11 @@
         nixpkgs-bump-guard = import ./modules/nixos/infra-space/nixpkgs-bump/guard-test.nix {
           pkgs = nixpkgs.legacyPackages.x86_64-linux;
         };
+        # The bump's workspace helper: create and remove twice, overlap,
+        # self-cleanup on a failed create (local origin, no network).
+        nixpkgs-bump-workspace = import ./modules/nixos/infra-space/nixpkgs-bump/workspace-test.nix {
+          pkgs = nixpkgs.legacyPackages.x86_64-linux;
+        };
       };
     };
 }
