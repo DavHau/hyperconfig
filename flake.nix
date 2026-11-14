@@ -200,7 +200,17 @@
         ]
         (
           host: self.nixosConfigurations.${host}.config.system.build.toplevel
-        )) // {
+        ))
+      # The other machines: evaluated, not built (`nix flake check
+      # --no-build` and the check itself fail on any eval error; the
+      # deploy builds them). The drvPath's context is discarded, so building
+      # the check builds nothing of the machine.
+      // nixpkgs.lib.mapAttrs' (host: _: nixpkgs.lib.nameValuePair "eval-${host}" (
+        nixpkgs.legacyPackages.x86_64-linux.writeText "eval-${host}"
+          (builtins.unsafeDiscardStringContext
+            self.nixosConfigurations.${host}.config.system.build.toplevel.drvPath)
+      )) (genAttrs [ "som" "vit" "edi" "sgp" "joy" "installer" ] (_: null))
+      // {
         ssh-tpm-confirm-cache =
           import ./modules/nixos/ssh-tpm-agent-confirm-test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;

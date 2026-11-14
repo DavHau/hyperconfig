@@ -44,7 +44,7 @@ line already states a fact, confirm it with at most one grep and move on.
 
 | path | what |
 |---|---|
-| `flake.nix` | inputs; `flake.checks.x86_64-linux` (toplevels of amy bam cm-pi nas, VM tests, `hygiene`, `repo-map`) |
+| `flake.nix` | inputs; `flake.checks.x86_64-linux` (toplevels of amy bam cm-pi nas built, `eval-<m>` for som vit edi sgp joy installer evaluated only, VM tests, `hygiene`, `repo-map`) |
 | `modules/flake-parts/nixosConfigurations.nix` | THE clan: inventory, machines' tags/deploy, service instances (users, sshd, nix-cache, oidc + **pocket-id users**, wireguard, monitoring, zerotier), `importer` instances adding modules to every machine |
 | `modules/flake-parts/*.nix` | other flake outputs (apps, packages, devShells), auto-imported |
 | `machines/<m>/configuration.nix` | per-machine imports and settings; other files there are that machine's own |

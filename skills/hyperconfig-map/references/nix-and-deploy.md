@@ -22,7 +22,8 @@
 
 ## Checks
 - `flake.checks.x86_64-linux` in `flake.nix`: toplevels (amy bam cm-pi
-  nas), VM tests (list: `references/map-machines.md` "Flake checks"),
+  nas, built), `eval-<m>` (som vit edi sgp joy installer: drvPath only,
+  builds nothing), VM tests (list: `references/map-machines.md` "Flake checks"),
   `repo-map` (this skill's maps are fresh), `hygiene` (CONVENTIONS.md
   lint against `tools/hygiene/baseline.txt`). `nix flake check --no-build`
   evaluates all (~1.5 min). Run one VM test only for module logic.
