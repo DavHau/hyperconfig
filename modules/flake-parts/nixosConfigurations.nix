@@ -436,6 +436,7 @@ in {
               roles.server.extraModules = [
                 ../../modules/nixos/monitoring-server.nix
                 ../../modules/nixos/monitoring-alerts.nix
+                ../../modules/nixos/monitoring-alert-digest
                 ../../modules/nixos/monitoring-teamclaude.nix
                 ../../modules/nixos/monitoring-exec-usage.nix
               ];

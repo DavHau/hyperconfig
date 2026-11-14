@@ -225,6 +225,11 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/luks-unlock/agent.sh — Answer systemd-cryptsetup's passphrase request with the key from Tang. <- m/luks-unlock/default.nix
 - modules/nixos/luks-unlock/default.nix — Encrypted LUKS root, key held by clan, unlockable three ways: <- vit
 - modules/nixos/luks-unlock/unlock.sh — Answer systemd-cryptsetup's pending passphrase request with stdin. <- m/luks-unlock/default.nix
+- modules/nixos/monitoring-alert-digest/default.nix — Daily digest of the fleet's warnings, one Telegram message at 09:00 (+07, Asia/Bangkok). <- modules/flake-parts/nixosConfigurations.nix
+- modules/nixos/monitoring-alert-digest/digest.py — - <- m/monitoring-alert-digest/default.nix
+- modules/nixos/monitoring-alert-digest/provision_token.py — - <- m/monitoring-alert-digest/default.nix
+- modules/nixos/monitoring-alert-digest/test_digest.py — - <- m/monitoring-alert-digest/default.nix
+- modules/nixos/monitoring-alert-digest/test_provision_token.py — - <- m/monitoring-alert-digest/default.nix
 - modules/nixos/mullvad-egress/default.nix — Mullvad egress for hyper.mullvadEgress.users (mechanism in ./egress.nix, their DNS in ./dns.nix), exiting in Singapore. <- som
 - modules/nixos/mullvad-egress/dns.nix — DNS of the tunneled users (./egress.nix) through the tunnel too, so the names they look up do not reach the host's reso… <- m/mullvad-egress/default.nix, m/mullvad-egress/test.nix
 - modules/nixos/mullvad-egress/egress.nix — Selected users reach the internet only through a Mullvad WireGuard tunnel; <- m/mullvad-egress/default.nix, m/mullvad-egress/test.nix
