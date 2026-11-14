@@ -275,9 +275,8 @@ in
         # reason (p0 enables it for every other agent: ./hermes-inference.nix).
         settings.agent.reasoning_effort = "none";
         settings.providers.p0.extra_body.chat_template_kwargs.enable_thinking = false;
-        # dave's admin keys, for the "Hermes TUI (voice)" launcher on his
-        # desktops (only he logs in; the agent itself gains nothing).
-        sshKeys = adminKeys;
+        # No ssh keys: dave reaches it only through its dashboard, in the
+        # isolated "Hermes (voice)" app (../../modules/nixos/hermes-desktop-spaces.nix).
         mail.enable = false;
         # Claude through TeamClaude stays selectable (/model).
         teamclaude.enable = true;
@@ -346,8 +345,14 @@ in
       # Agents in dave's desktop launchers (../../modules/nixos/hermes-desktop.nix)
       # get a "Hermes TUI (<agent>)" entry that ssh-es in as the agent: an
       # account without keys makes that entry fail with "Permission denied".
+      # Not the `isolatedDesktop` ones: they have no TUI entry, only their
+      # own app on the dashboard (../../modules/nixos/hermes-desktop-spaces.nix).
       tuiKeyless = lib.filter (name: (agents.${name}.sshKeys or [ ]) == [ ]) (
-        lib.attrNames (import ../../modules/nixos/hermes-desktop-agents.nix)
+        lib.attrNames (
+          lib.filterAttrs (_: a: !(a ? isolatedDesktop)) (
+            import ../../modules/nixos/hermes-desktop-agents.nix
+          )
+        )
       );
     in
     [

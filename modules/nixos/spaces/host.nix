@@ -10,6 +10,8 @@
     - DNS from this host's resolved through an extra stub on hostAddress.
     - The guest's sshd at [address]:sshPort only (a socket-activated
       systemd-socket-proxyd as its own uid, opened on meshInterface).
+      sshPort null: no forward, no proxy user (a guest nobody logs into,
+      ../hermes-desktop-spaces.nix).
     - nftables table <name>: no new forwarded connection into the veth;
       on this host only root, the proxy (port 22) and `toGuestRules` reach
       the guest.
@@ -25,6 +27,15 @@
       every container start.
     - `credentials` (name -> host path, the ssh host key's included) as
       systemd credentials (nspawn --load-credential), copied in at start.
+    - `hostNixDaemon` false (../hermes-desktop-spaces.nix): the guest gets
+      no way to this host's nix-daemon. nixos-containers binds the
+      daemon's socket directory into every container; this host's daemon
+      builds (fixed-output derivations: with network) in this host's
+      network namespace and hands builds to its build machines, so a guest
+      user who can talk to it is past `confine`. nspawn's
+      --inaccessible over that directory (it sorts after the module's
+      bind of the same path, so it wins) and nix.enable = false in the
+      guest. The store stays bound read-only, the guest runs from it.
 
   A change of the guest alone switches it in place (reload); anything on
   this side restarts it (../infra-space/default.nix has the details).
@@ -40,8 +51,8 @@
 {
   name,
   uid,
-  proxyUser,
-  proxyUid,
+  proxyUser ? null,
+  proxyUid ? null,
   hostAddress,
   localAddress,
   hostAddress6,
@@ -49,11 +60,12 @@
   stateDir,
   homeDir,
   guestHome,
-  address,
-  sshPort,
-  meshInterface,
+  address ? null,
+  sshPort ? null,
+  meshInterface ? null,
   tpm,
   credentials,
+  hostNixDaemon ? true,
   guestConfig,
   specialArgs,
   toGuestRules ? "",
@@ -73,6 +85,7 @@ let
       or config.environment.etc."containers/${name}.conf";
   bracket = address: if lib.hasInfix ":" address then "[${address}]" else address;
   set = list: "{ ${lib.concatStringsSep ", " list} }";
+  ssh = sshPort != null;
 
   # The named spaces: no mesh, no LAN, and of this host DNS only.
   confinement = ''
@@ -91,10 +104,18 @@ let
     }
   '';
 in
+lib.mkMerge [
 {
   systemd.tmpfiles.rules = [
     "d ${stateDir} 0755 root root -"
     "d ${homeDir} 0700 ${toString uid} ${toString uid} -"
+  ];
+
+  assertions = [
+    {
+      assertion = !ssh || lib.all (v: v != null) [ address meshInterface proxyUser proxyUid ];
+      message = "spaces/host.nix: ${name} has an sshPort, so it needs address, meshInterface, proxyUser and proxyUid too";
+    }
   ];
 
   containers.${name} = {
@@ -124,9 +145,18 @@ in
         modifier = "rw";
       }
     ];
-    extraFlags = lib.mapAttrsToList (n: path: "--load-credential=${n}:${path}") credentials;
+    extraFlags =
+      lib.mapAttrsToList (n: path: "--load-credential=${n}:${path}") credentials
+      ++ lib.optional (!hostNixDaemon) "--inaccessible=/nix/var/nix/daemon-socket";
     inherit specialArgs;
-    config = guestConfig;
+    config =
+      if hostNixDaemon then
+        guestConfig
+      else
+        {
+          imports = [ guestConfig ];
+          nix.enable = false;
+        };
   };
 
   networking.nat = {
@@ -197,7 +227,7 @@ in
       }
       chain to-guest {
         meta skuid 0 return
-        meta skuid ${toString proxyUid} tcp dport 22 return
+        ${lib.optionalString ssh "meta skuid ${toString proxyUid} tcp dport 22 return"}
         ${toGuestRules}
         meta skuid != 0 jump refuse
       }
@@ -217,6 +247,9 @@ in
     allowedTCPPorts = [ 53 ];
   };
 
+}
+# The ssh forward, its proxy user and port.
+(lib.mkIf ssh {
   systemd.sockets."${name}-ssh" = {
     description = "${name} sshd on the mesh address";
     wantedBy = [ "sockets.target" ];
@@ -248,4 +281,5 @@ in
   };
   users.groups.${proxyUser}.gid = proxyUid;
   networking.firewall.interfaces.${meshInterface}.allowedTCPPorts = [ sshPort ];
-}
+})
+]

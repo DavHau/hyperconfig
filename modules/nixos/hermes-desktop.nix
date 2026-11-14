@@ -3,7 +3,9 @@
 # `hermes-desktop` (the Electron app, also what the niri keybind and the
 # bar button spawn via spaces-hermes), plus a "Hermes Desktop" entry and
 # one "Hermes TUI (<agent>)" entry per agent. The module's header has the
-# connection mechanics; this file has som's side of them.
+# connection mechanics; this file has som's side of them. Agents with
+# `isolatedDesktop` (./hermes-desktop-agents.nix) are in neither: they get
+# an app of their own in a container (./hermes-desktop-spaces.nix).
 #
 # The app opens each agent's always-on dashboard on som,
 # https://<agent>.davhau.fyi (../../machines/som/hermes-dashboards.nix),
@@ -16,7 +18,7 @@
 # the host verified as `som.d`: som presents its clan sshd CA certificate
 # (principal som.d) on every address, and the sshd client role trusts that
 # CA for `*.d` in ssh_known_hosts.
-{ config, ... }:
+{ config, lib, ... }:
 {
   # hyperhermes' desktop module itself is imported next to this file in
   # ./dave.nix.
@@ -28,7 +30,9 @@
     hostKeyAlias = "som.d";
     # Agent account on som -> label (also read by som's assertions, which
     # require ssh keys for each: the TUI entries log in as the agent).
-    agents = import ./hermes-desktop-agents.nix;
+    agents = lib.mapAttrs (_: a: a.label) (
+      lib.filterAttrs (_: a: !(a ? isolatedDesktop)) (import ./hermes-desktop-agents.nix)
+    );
     # The first window opens on `primary`.
     primary = "dave-hermes";
     # spaces-hermes runs `hermes-desktop` and turns a failure into a

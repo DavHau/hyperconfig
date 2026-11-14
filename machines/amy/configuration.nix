@@ -42,6 +42,9 @@
     # "Hermes (infra-space)": the hermes app in that container, on Dave's
     # session (../../modules/nixos/space-gui).
     ../../modules/nixos/infra-space/desktop-app.nix
+    # "Hermes (voice)": the app for som's untrusted agents, each in a
+    # container of its own (../../modules/nixos/hermes-desktop-spaces.nix).
+    ../../modules/nixos/hermes-desktop-spaces.nix
     # Dave's way into the agent spaces (geninf-space, on som): launchers,
     # pinned host keys, herdr machines.
     ../../modules/nixos/spaces/client.nix

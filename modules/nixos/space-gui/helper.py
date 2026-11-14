@@ -15,8 +15,10 @@ into the container with:
   redirect_uri of http://127.0.0.1:<port>/... (an OAuth native/PKCE
   sign-in: the app listens on its own loopback, in the container's network
   namespace), this host's 127.0.0.1:<port> is forwarded into the
-  container's loopback for a few minutes, so the browser's redirect
-  reaches the app.
+  container's loopback, so the browser's redirect reaches the app: one
+  shot, closed after the first callback request (`<path>?code=` or
+  `?error=`) has been answered, after FORWARD_SECONDS at the latest, and
+  only for a port of the ephemeral range the app's listen(0) draws from.
 """
 
 import json
@@ -29,11 +31,19 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 import urllib.parse
 from pathlib import Path
 
 CONF = json.loads(Path(os.environ["SPACE_GUI_CONFIG"]).read_text())
-FORWARD_SECONDS = 300
+# The sign-in in the browser (pocket-id, a passkey) takes seconds to a
+# minute; the app itself gives up after five.
+FORWARD_SECONDS = 180
+# The app's loopback listeners (hermes-desktop's native-oauth-login and its
+# MCP OAuth callback) bind port 0: a port of Linux's default ephemeral range
+# (net.ipv4.ip_local_port_range, per network namespace; the container's is
+# the default).
+LOOPBACK_PORTS = range(32768, 61000)
 
 
 def log(msg: str) -> None:
@@ -104,7 +114,8 @@ class Broker:
 
     def __init__(self, container: str, c: dict, pid: str, sock_path: Path, env: dict):
         self.container, self.c, self.pid, self.env = container, c, pid, env
-        self.forwards: list[subprocess.Popen] = []
+        self.forwards: set[int] = set()
+        self.closing = threading.Event()
         self.srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.srv.bind(str(sock_path))
         os.chown(sock_path, c["uid"], -1)
@@ -145,15 +156,12 @@ class Broker:
             log(f"refused to open a URL outside {self.c['openOrigins']}: {url[:120]!r}")
             return False
         redirect = urllib.parse.parse_qs(u.query).get("redirect_uri", [""])[0]
-        m = re.fullmatch(r"http://127\.0\.0\.1:(\d{4,5})/[A-Za-z0-9/_-]*", redirect)
-        if redirect and not m:
+        m = re.fullmatch(r"http://127\.0\.0\.1:(\d{5})(/[A-Za-z0-9/_-]*)", redirect)
+        if redirect and not (m and int(m.group(1)) in LOOPBACK_PORTS):
             log(f"refused: redirect_uri is not the app's loopback: {redirect[:120]!r}")
             return False
         if m:
-            port = int(m.group(1))
-            if not 1024 <= port <= 65535:
-                return False
-            self.forward(port)
+            self.forward(int(m.group(1)), m.group(2))
         log(f"opening {origin}{u.path} in {CONF['hostUser']}'s browser")
         # In the host user's own manager, with their session's environment.
         subprocess.run(
@@ -163,23 +171,107 @@ class Broker:
         )
         return True
 
-    def forward(self, port: int) -> None:
-        # Host 127.0.0.1:<port> -> the container's 127.0.0.1:<port>; socat
-        # forks per connection, each child enters the container's netns.
-        # (socat's address syntax: the inner colons escaped.)
-        inner = f"nsenter -t {self.pid} -n socat STDIO TCP\\:127.0.0.1\\:{port}"
-        p = subprocess.Popen(
-            ["timeout", str(FORWARD_SECONDS), "socat",
-             f"TCP-LISTEN:{port},bind=127.0.0.1,reuseaddr,fork", f"EXEC:{inner}"],
-            stdin=subprocess.DEVNULL, start_new_session=True,
-        )
-        self.forwards.append(p)
-        log(f"forwarding 127.0.0.1:{port} into {self.container} for {FORWARD_SECONDS}s")
+    def forward(self, port: int, path: str) -> None:
+        """This host's 127.0.0.1:<port> -> the container's 127.0.0.1:<port>,
+        one shot: the listener closes once a callback request on `path`
+        (with code= or error=) has had its answer, or after
+        FORWARD_SECONDS."""
+        if port in self.forwards:
+            return
+        try:
+            lst = socket.create_server(("127.0.0.1", port), backlog=8)
+        except OSError as e:
+            log(f"cannot forward 127.0.0.1:{port}: {e}")
+            return
+        self.forwards.add(port)
+        threading.Thread(target=self._accept, args=(lst, port, path), daemon=True).start()
+        log(f"forwarding 127.0.0.1:{port} into {self.container}, one callback, at most {FORWARD_SECONDS}s")
+
+    def _accept(self, lst: socket.socket, port: int, path: str) -> None:
+        done = threading.Event()
+        deadline = time.monotonic() + FORWARD_SECONDS
+        lst.settimeout(0.5)
+        try:
+            while not done.is_set() and not self.closing.is_set() and time.monotonic() < deadline:
+                try:
+                    conn, _ = lst.accept()
+                except TimeoutError:
+                    continue
+                except OSError:
+                    break
+                threading.Thread(target=self._relay, args=(conn, port, path, done), daemon=True).start()
+        finally:
+            lst.close()
+            self.forwards.discard(port)
+            log(f"closed the forward of 127.0.0.1:{port} ({'callback answered' if done.is_set() else 'timeout'})")
+
+    def _guest_socket(self) -> socket.socket:
+        """A TCP socket in the container's network namespace: created by a
+        thread that joined it (setns of a network namespace is per thread;
+        the socket keeps its namespace)."""
+        out: dict = {}
+
+        def enter():
+            try:
+                fd = os.open(f"/proc/{self.pid}/ns/net", os.O_RDONLY)
+                try:
+                    os.setns(fd, os.CLONE_NEWNET)
+                finally:
+                    os.close(fd)
+                out["sock"] = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            except OSError as e:
+                out["err"] = e
+
+        t = threading.Thread(target=enter)
+        t.start()
+        t.join()
+        if "err" in out:
+            raise out["err"]
+        return out["sock"]
+
+    def _relay(self, conn: socket.socket, port: int, path: str, done: threading.Event) -> None:
+        callback = False
+        with conn:
+            try:
+                conn.settimeout(30)
+                first = conn.recv(65536)
+                if not first:
+                    return
+                line = first.split(b"\r\n", 1)[0].decode("latin-1")
+                callback = re.match(rf"GET {re.escape(path)}\?(\S*&)?(code|error)=", line) is not None
+                up = self._guest_socket()
+            except OSError:
+                return
+            with up:
+                try:
+                    up.settimeout(30)
+                    up.connect(("127.0.0.1", port))
+                    up.sendall(first)
+                except OSError:
+                    return
+
+                def forth():
+                    try:
+                        while chunk := conn.recv(65536):
+                            up.sendall(chunk)
+                        up.shutdown(socket.SHUT_WR)
+                    except OSError:
+                        pass
+
+                threading.Thread(target=forth, daemon=True).start()
+                # The app's answer; its end (the app closes, or its
+                # keep-alive times out) ends the relay.
+                try:
+                    while chunk := up.recv(65536):
+                        conn.sendall(chunk)
+                        if callback:
+                            done.set()
+                except OSError:
+                    pass
 
     def close(self) -> None:
+        self.closing.set()
         self.srv.close()
-        for p in self.forwards:
-            p.kill()
 
 
 def main() -> int:

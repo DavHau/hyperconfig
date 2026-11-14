@@ -63,23 +63,7 @@ let
   meshAddress = vars.yggdrasil.files.address.value;
 
   # Mesh, LANs, overlays, the other spaces and infra-space (./host.nix).
-  blockedDestinations = {
-    v4 = [
-      "10.0.0.0/8"
-      "100.64.0.0/10"
-      "169.254.0.0/16"
-      "172.16.0.0/12"
-      "192.168.0.0/16"
-    ];
-    v6 = [
-      # yggdrasil
-      "200::/7"
-      # retiolum
-      "42::/16"
-      "fc00::/7"
-      "fe80::/10"
-    ];
-  };
+  blockedDestinations = import ./blocked-destinations.nix;
 
   hostKeyCredential = "ssh-host-key";
 

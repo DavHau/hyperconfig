@@ -7,6 +7,8 @@
 #   index     the veth subnet: v4 10.235.0.<4i>/30 (this host .<4i+1>,
 #             the guest .<4i+2>), v6 fd23:5ace:0:<i>::/64 (::1, ::2).
 #             0 is infra-space's (10.235.0.0/30, fd23:5ace::/64).
+#             The isolated hermes desktops have their own ladder in
+#             10.235.1 (index in ../hermes-desktop-agents.nix).
 #   sshPort   2222 is the unlock initrd's sshd, 2223 infra-space's
 #             (../infra-space/members.nix).
 #   owners    pocket-id accounts that open the space's published apps

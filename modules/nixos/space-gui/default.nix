@@ -18,8 +18,10 @@
     container's `openOrigins` open, in the host user's browser (their
     systemd user manager). An OAuth native sign-in's redirect_uri
     http://127.0.0.1:<port>/... (the app listens on the container's
-    loopback) gets this host's 127.0.0.1:<port> forwarded into the
-    container for five minutes, so the browser's redirect reaches the app.
+    loopback, a port of its ephemeral range) gets this host's
+    127.0.0.1:<port> forwarded into the container, so the browser's
+    redirect reaches the app: one shot, closed once the callback request
+    has been answered, after three minutes at the latest.
 
   The command runs in the container as the space's user, a transient unit
   (`systemd-run -M`), with WAYLAND_DISPLAY at that socket, its own
