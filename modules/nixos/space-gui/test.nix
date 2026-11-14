@@ -15,7 +15,7 @@
 # the helper.
 #
 # The container is set up like the isolated hermes desktops
-# (../hermes-desktop-spaces.nix): through ../spaces/host.nix with
+# (../dave-desktop/isolated-apps.nix): through ../spaces/host.nix with
 # hostNixDaemon = false, so this test also checks that the guest has no
 # way to the host's nix-daemon (no socket, no nix, a daemon client
 # refused) while the host's own client reaches it.

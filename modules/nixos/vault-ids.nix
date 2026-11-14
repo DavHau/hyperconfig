@@ -77,9 +77,9 @@
 # under /var/lib/spaces, and its sshd forwarder there;
 # spaces/registry.nix; not vault principals), 1209 voice-gateway (uid and
 # gid; som's Voice PE router, modules/nixos/voice-gateway; not a vault
-# principal), 1214 the voice desktop space's user `hermes` (uid and gid;
-# owns its home on amy, hermes-desktop-spaces.nix; not a vault
-# principal). gid 1100 stays unallocated.
+# principal), 1214 the voice desktop app container's user `hermes` and
+# 1215 the infra-space one's (uid and gid; each owns its home on Dave's
+# desktops, dave-desktop/apps.nix; not vault principals). gid 1100 stays unallocated.
 { lib, ... }:
 {
   options.hyper.vaultIds.deniedUsers = lib.mkOption {

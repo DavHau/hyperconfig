@@ -276,7 +276,7 @@ in
         settings.agent.reasoning_effort = "none";
         settings.providers.p0.extra_body.chat_template_kwargs.enable_thinking = false;
         # No ssh keys: dave reaches it only through its dashboard, in the
-        # isolated "Hermes (voice)" app (../../modules/nixos/hermes-desktop-spaces.nix).
+        # isolated "Hermes (voice)" app (../../modules/nixos/dave-desktop/isolated-apps.nix).
         mail.enable = false;
         # Claude through TeamClaude stays selectable (/model).
         teamclaude.enable = true;
@@ -342,15 +342,15 @@ in
       );
       deniedReaders = lib.filter (name: denied ? ${name}) (lib.attrNames vaultReaders);
       slotless = lib.filter (name: !agents.${name}.slot.enable) (lib.attrNames agents);
-      # Agents in dave's desktop launchers (../../modules/nixos/hermes-desktop.nix)
+      # Agents in dave's shared desktop app (../../modules/nixos/dave-desktop/shared-app.nix)
       # get a "Hermes TUI (<agent>)" entry that ssh-es in as the agent: an
       # account without keys makes that entry fail with "Permission denied".
-      # Not the `isolatedDesktop` ones: they have no TUI entry, only their
-      # own app on the dashboard (../../modules/nixos/hermes-desktop-spaces.nix).
+      # Not the `isolated` ones: they have no TUI entry, only their own
+      # app on the dashboard (../../modules/nixos/dave-desktop/isolated-apps.nix).
       tuiKeyless = lib.filter (name: (agents.${name}.sshKeys or [ ]) == [ ]) (
         lib.attrNames (
-          lib.filterAttrs (_: a: !(a ? isolatedDesktop)) (
-            import ../../modules/nixos/hermes-desktop-agents.nix
+          lib.filterAttrs (_: a: !(a ? isolated)) (
+            import ../../modules/nixos/dave-desktop/apps.nix
           )
         )
       );

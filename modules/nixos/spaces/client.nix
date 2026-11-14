@@ -1,6 +1,6 @@
 /*
-  Dave's way into the named spaces (./default.nix), on the machine that
-  imports this (amy): per space of ./public.nix
+  Dave's way into the named spaces (./default.nix), on his desktops
+  (../dave-desktop): per space of ./public.nix
 
     - the guest's host key pinned for `[address]:port` (so it never stands
       in for the host's own sshd on port 22), from its public clan var;

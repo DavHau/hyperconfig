@@ -1,7 +1,7 @@
 # What a confined space's guest may not reach (./host.nix `confine`):
 # yggdrasil, retiolum, ULA (the LANs' v6, zerotier, the other spaces and
 # infra-space), RFC 1918, CGNAT, link-local. Used by ./default.nix and
-# ../hermes-desktop-spaces.nix.
+# ../dave-desktop/isolated-apps.nix.
 {
   v4 = [
     "10.0.0.0/8"

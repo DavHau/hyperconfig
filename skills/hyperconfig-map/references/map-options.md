@@ -26,6 +26,8 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.afk.pinnedSettings: modules/nixos/afk.nix
 - hyper.agentUser.enable: modules/nixos/agent-user.nix
 - hyper.coolerLcd.usbPort: modules/nixos/cooler-lcd/default.nix
+- hyper.daveDesktop.restrictForwarding: modules/nixos/dave-desktop/isolated-apps.nix
+- hyper.daveDesktop.user: modules/nixos/dave-desktop/default.nix
 - hyper.encryptedDns: modules/nixos/encrypted-dns.nix
 - hyper.entityStorage: modules/nixos/entity-storage/default.nix
 - hyper.execUsage: modules/nixos/exec-usage/default.nix

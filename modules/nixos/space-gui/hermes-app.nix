@@ -2,13 +2,13 @@
   The hermes desktop app as a space-gui command (./default.nix): a
   function from a Wayland app id and the managed connections to a script
   that runs in the space's container, as its user. Used by
-  ../infra-space/desktop-app.nix and ../hermes-desktop-spaces.nix.
+  ../dave-desktop/isolated-apps.nix.
 
     import ./hermes-app.nix { inherit lib pkgs; desktop = config.services.hyperhermes.desktop; }
       { appId = "hermes-x"; primary = "x"; remotes.x = { label = "x"; url = "https://x.example.org"; }; }
 
   The app and connection mechanics are Dave's own hermes-desktop's
-  (hyperhermes' desktop module, ../hermes-desktop.nix): `remote`
+  (hyperhermes' desktop module, ../dave-desktop/shared-app.nix): `remote`
   connections with authMode oauth, merged into the app's files by that
   module's connections.py on every launch. All its state (config, cookies,
   tokens) lives in the container user's ~/.config/Hermes, never in the

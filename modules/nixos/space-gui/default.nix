@@ -4,7 +4,8 @@
 
     space-gui <container> <command> [args...]
 
-  run as the host user (`hostUser`, Dave's grmpf) from inside the Wayland
+  run as the host user (`hostUser`; on Dave's desktops
+  hyper.daveDesktop.user, ../dave-desktop) from inside the Wayland
   session. It runs ./helper.py as root through sudo (NOPASSWD for wheel
   and that store path only; the helper admits no one but that user), which for the command's lifetime binds a run
   directory into the container at /run/space-gui/<run>/ with:
@@ -134,7 +135,7 @@ in
     enable = lib.mkEnableOption "launching GUI apps of space containers on the host user's Wayland session";
     hostUser = lib.mkOption {
       type = lib.types.str;
-      default = "grmpf";
+      example = "dave";
       description = "The desktop user whose Wayland session shows the apps; the only one allowed to run `space-gui`.";
     };
     opener = lib.mkOption {

@@ -38,17 +38,9 @@
     # nix-housing needs Landlock ABI 9 (Linux >= 7.1); 6.18 LTS only has ABI 7.
     ../../modules/nixos/kernel-latest-zfs.nix
     ../../modules/nixos/oomd.nix
-    # The fleet-managing container (also on som).
+    # The fleet-managing container (also on som). Its desktop app is
+    # ../../modules/nixos/dave-desktop's (a container of its own).
     ../../modules/nixos/infra-space
-    # "Hermes (infra-space)": the hermes app in that container, on Dave's
-    # session (../../modules/nixos/space-gui).
-    ../../modules/nixos/infra-space/desktop-app.nix
-    # "Hermes (voice)": the app for som's untrusted agents, each in a
-    # container of its own (../../modules/nixos/hermes-desktop-spaces.nix).
-    ../../modules/nixos/hermes-desktop-spaces.nix
-    # Dave's way into the agent spaces (geninf-space, on som): launchers,
-    # pinned host keys, herdr machines.
-    ../../modules/nixos/spaces/client.nix
     ./disko.nix
   ];
 
@@ -67,7 +59,11 @@
 
   hyper.infraSpace.enable = true;
 
-  hyper.spacesClient.herdrUser = "grmpf";
+  # Dave's desktop session here is grmpf's (../../modules/nixos/dave-desktop).
+  hyper.daveDesktop.user = "grmpf";
+  # amy forwards on purpose (infra-space's NAT, docker), not only for the
+  # isolated hermes apps.
+  hyper.daveDesktop.restrictForwarding = false;
 
   networking.extraHosts = "10.0.0.1 127.0.0.0";
 

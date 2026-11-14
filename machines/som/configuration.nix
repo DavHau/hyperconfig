@@ -79,12 +79,16 @@ in
     # The fleet-managing container (also on amy).
     ../../modules/nixos/infra-space
     # Agent spaces for other projects (geninf-space), none a fleet
-    # admin; Dave reaches them from amy (spaces/client.nix there).
+    # admin; Dave reaches them from his desktops (dave-desktop/).
     ../../modules/nixos/spaces
     # their web apps at https://<port>.<space>.davhau.fyi/, behind the
     # agents' serve-port login
     ../../modules/nixos/spaces/publish.nix
   ];
+
+  # som forwards for much more than the isolated hermes apps (container
+  # slots, agents, spaces, infra-space, ipv4-forward, mullvad egress).
+  hyper.daveDesktop.restrictForwarding = false;
 
   # Public IPv4 38.89.142.76, borrowed from sgp through a WireGuard tunnel
   # (../../modules/nixos/ipv4-forward.nix); this firewall still decides which
