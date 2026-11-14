@@ -7,8 +7,11 @@
   run as the host user (`hostUser`; on Dave's desktops
   hyper.daveDesktop.user, ../dave-desktop) from inside the Wayland
   session. It runs ./helper.py as root through sudo (NOPASSWD for wheel
-  and that store path only; the helper admits no one but that user), which for the command's lifetime binds a run
-  directory into the container at /run/space-gui/<run>/ with:
+  and that store path only; the helper admits no one but that user), which for the command's lifetime makes a run
+  directory /run/space-gui/<container>/<run>/ here, in the container
+  /run/space-gui/<run>/ (the container's /run/space-gui is that host
+  directory, bound read-only from its start: `machinectl bind` refuses
+  containers with their own user namespace, ../spaces/host.nix), with:
 
   - wayland-0: a new socket handed to the compositor through
     wp_security_context_v1 (sandbox engine "space-gui", app id the
@@ -156,7 +159,7 @@ in
             };
             uid = lib.mkOption {
               type = lib.types.int;
-              description = "Its uid (the same on host and guest: no user namespace), owner of the run directory.";
+              description = "Its uid in the container, owner of the run directory (here the same number: the bind is idmapped).";
             };
             home = lib.mkOption {
               type = lib.types.str;
@@ -205,6 +208,22 @@ in
       assertion = cfg.containers ? ${a.container};
       message = "hyper.spaceGui.apps.${name}.container (${a.container}) is not in hyper.spaceGui.containers.";
     }) cfg.apps;
+
+    # The run directories' parent, bound into each container from its
+    # start (a container start, i.e. restart, when one is added). Read-only
+    # there: its sockets connect all the same, and the guest's root
+    # cannot swap a run directory for a link before the helper chowns it.
+    # Idmapped where the container has its own user namespace, so the run
+    # directories' owners (the guest user's uid) are the same inside.
+    systemd.tmpfiles.rules = [ "d /run/space-gui 0755 root root -" ]
+    ++ lib.mapAttrsToList (name: _: "d /run/space-gui/${name} 0755 root root -") cfg.containers;
+    containers = lib.mapAttrs (name: _: {
+      extraFlags = [
+        "--bind-ro=/run/space-gui/${name}:/run/space-gui${
+          lib.optionalString (config.containers.${name}.privateUsers != "no") ":idmap"
+        }"
+      ];
+    }) cfg.containers;
 
     environment.systemPackages = [
       launcher

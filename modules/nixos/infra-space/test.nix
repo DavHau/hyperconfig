@@ -73,6 +73,7 @@
 let
   inherit (pkgs) lib;
   keys = ./test-keys;
+  daemonTest = import ../spaces/test-daemon.nix { inherit pkgs; };
   pub = file: lib.trim (builtins.readFile (keys + "/${file}"));
   sshPort = 2223;
   # the host-only guest service below
@@ -131,6 +132,8 @@ let
       imports = [
         clanStub
         ./default.nix
+        # an idmappable store for the guest's own user namespace
+        daemonTest.hostModule
       ];
       # the container runs hermes' gateway and dashboard
       virtualisation.memorySize = 3072;
@@ -409,6 +412,8 @@ pkgs.testers.runNixOSTest {
 
       members = {"memberA": memberA, "memberB": memberB}
 
+      ${daemonTest.pythonHelpers}
+
       def reach_each_other():
           for me, m in members.items():
               for other in members:
@@ -487,6 +492,32 @@ pkgs.testers.runNixOSTest {
                   managed.fail(f"nc -z -w 5 ${guestV4} {port}")
                   managed.fail(f"nc -z -w 5 ${guestV6} {port}")
               managed.succeed("ip route del ${guestV4}/32", "ip -6 route del ${guestV6}/128")
+
+      with subtest("the guest is an untrusted client of the host's nix-daemon, root included"):
+          for m in members.values():
+              check_untrusted(m, "infra-space", "infra", "${pkgs.pkgsStatic.busybox}")
+          # hermes' locked pins: immutable through the host's helper, as
+          # the guest's root (in its own user namespace) cannot set it
+          m = memberA
+          guest_root(m, "systemctl is-active hermes-locked-infra.service")
+          out = m.succeed("${pkgs.e2fsprogs}/bin/lsattr -d /var/lib/nixos-containers/infra-space${lockedHome}/config.yaml")
+          assert out.split()[0].count("i") == 1, out
+          rc, out = m.execute("nixos-container run infra-space -- ${pkgs.e2fsprogs}/bin/chattr -i ${lockedHome}/config.yaml 2>&1")
+          assert rc != 0, out
+          # the helper takes the guest's root only, and its own files only
+          rc, out = m.execute("nixos-container run infra-space -- runuser -u infra -- ${pkgs.python3}/bin/python3 -c "
+              + shlex.quote("import socket, os; s = socket.socket(socket.AF_UNIX); s.connect('/run/space-immutable/socket')"))
+          assert rc != 0, out
+          m.succeed("journalctl -u 'space-immutable-infra-space@*' | grep -q 'ok'")
+          # and only for entries of the locked home: a root file elsewhere
+          # in its tree is refused
+          guest_root(m, "touch /root/not-pinned")
+          rc, out = m.execute("nixos-container run infra-space -- ${pkgs.python3}/bin/python3 -c " + shlex.quote(
+              "import os, socket; s = socket.socket(socket.AF_UNIX); s.connect('/run/space-immutable/socket'); "
+              "fd = os.open('/root/not-pinned', os.O_RDONLY); socket.send_fds(s, [b'1'], [fd]); print(s.recv(512).decode())"))
+          assert rc == 0 and "error: not an entry of ${lockedHome}" in out, out
+          out = m.succeed("${pkgs.e2fsprogs}/bin/lsattr /var/lib/nixos-containers/infra-space/root/not-pinned")
+          assert "i" not in out.split()[0], out
 
       with subtest("nix build works as infra"):
           busybox = "${pkgs.pkgsStatic.busybox}"
@@ -588,6 +619,9 @@ pkgs.testers.runNixOSTest {
           # the path unit fires on clan's commits mid-run, and leaves the
           # store to the run (whose push takes those commits up) instead of
           # pulling under it or waiting for it past its start timeout
+          # (a second's gap: --since has seconds, the deliberate failure
+          # above must fall before it)
+          guest_root(m, "sleep 1.1")
           since = guest_root(m, "date +%s").strip()
           guest(m, "clan slow-commit")
           assert tip(remote) == tip(store)
@@ -986,7 +1020,8 @@ pkgs.testers.runNixOSTest {
           # as on an already booted host after a switch: no device event
           # sets the ACL again, the container's start must
           m = memberB
-          uid = "${toString nodes.memberB.containers.infra-space.config.infraSpace.uid}"
+          # the guest's infra, here (its own user namespace, ../spaces/host.nix)
+          uid = "${toString (nodes.memberB.containers.infra-space.privateUsers + nodes.memberB.containers.infra-space.config.infraSpace.uid)}"
           m.succeed(f"getfacl -n /dev/tpmrm0 | grep -q '^user:{uid}:rw'")
           m.succeed(f"setfacl -x u:{uid} /dev/tpmrm0")
           m.fail(f"getfacl -n /dev/tpmrm0 | grep -q '^user:{uid}:'")

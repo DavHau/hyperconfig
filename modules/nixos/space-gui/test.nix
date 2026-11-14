@@ -67,6 +67,8 @@ pkgs.testers.runNixOSTest {
       imports = [
         ./default.nix
         space
+        # the container's own user namespace needs an idmappable store
+        (import ../spaces/test-daemon.nix { inherit pkgs; }).hostModule
       ];
       virtualisation.memorySize = 2048;
       users.users.alice = {
@@ -158,11 +160,15 @@ pkgs.testers.runNixOSTest {
         match = [w for w in wins if "flower" in f"{w[0]} {w[1]}"]
         assert match, wins
         name, app_id, pid = match[0]
-        # The client's process runs as the space's user, in the container.
-        machine.succeed(f"[ $(stat -c %u /proc/{pid}) = 1203 ]")
+        # The client's process runs as the space's user, in the container
+        # (its own user namespace: here the container's base + 1203).
         leader = machine.succeed("machinectl show gui -p Leader --value").strip()
+        base = int(machine.succeed(f"cat /proc/{leader}/uid_map").split()[1])
+        assert base >= 0x50000000, base
+        machine.succeed(f"[ $(stat -c %u /proc/{pid}) = {base + 1203} ]")
         machine.succeed(f"[ $(readlink /proc/{pid}/ns/mnt) = $(readlink /proc/{leader}/ns/mnt) ]")
-        # Only the run's directory is bound, never the session's socket.
+        # Only the container's run directories are bound, never the
+        # session's socket.
         mounts = machine.succeed(f"grep space-gui /proc/{leader}/mountinfo")
         assert "/run/user" not in mounts and "wayland-1 " not in mounts, mounts
         machine.succeed("ls -d /run/space-gui/gui/*/")
@@ -173,8 +179,11 @@ pkgs.testers.runNixOSTest {
         guest = machine.succeed(
             "su alice -c 'XDG_RUNTIME_DIR=/run/user/1000 "
             "WAYLAND_DISPLAY=$(cd /run/user/1000 && ls wayland-? | head -1) "
-            "space-gui gui ${pkgs.wayland-utils}/bin/wayland-info' 2>&1; "
-            "journalctl -M gui -o cat --no-pager | grep \"^interface\""
+            "space-gui gui ${pkgs.wayland-utils}/bin/wayland-info' 2>&1"
+        )
+        # its output reaches the guest's journal a moment later
+        guest += machine.wait_until_succeeds(
+            "journalctl -M gui -o cat --no-pager | grep \"^interface\"", timeout=30
         )
         assert "wl_compositor" in guest, guest
         for g in ["zwlr_screencopy_manager_v1", "zwlr_data_control_manager_v1", "ext_data_control_manager_v1",
@@ -250,8 +259,11 @@ pkgs.testers.runNixOSTest {
     with subtest("the run is cleaned up when the client exits"):
         machine.succeed("systemctl stop flower")
         leader = machine.succeed("machinectl show gui -p Leader --value").strip()
-        machine.wait_until_succeeds(f"! grep -q space-gui /proc/{leader}/mountinfo", timeout=30)
-        machine.succeed("[ -z \"$(ls -A /run/space-gui/gui)\" ]")
+        # the container's /run/space-gui stays bound (./default.nix), the
+        # run's directory goes
+        machine.wait_until_succeeds("[ -z \"$(ls -A /run/space-gui/gui)\" ]", timeout=30)
+        mounts = machine.succeed(f"grep space-gui /proc/{leader}/mountinfo").strip().splitlines()
+        assert len(mounts) == 1 and " /run/space-gui " in mounts[0], mounts
         machine.succeed("[ -z \"$(ls -A /proc/" + leader + "/root/run/space-gui)\" ]")
 
     with subtest("only the host user may run the helper"):

@@ -85,6 +85,13 @@
 # 1218 searxng-candidate (uid and gid; som's sandboxed scratch SearXNG of
 # the nightly bump, searxng-canary/candidate.nix, Mullvad-tunneled); none
 # are vault principals. gid 1100 stays unallocated.
+# These container uids are their on-disk owners only: inside, each space
+# container runs in its own user namespace (spaces/host.nix,
+# privateUsers), container uid n being host uid 0x50000000 +
+# 0x10000 * <veth slot> + n (slot 64 * <third octet of the guest's
+# 10.235.x.y> + y / 4: infra-space 0, geninf-space 1, the desktop app
+# containers 64 + index); the hermes container slots have 0x60000000 up
+# (hyperhermes/modules/container-slots.nix). No host account in either.
 { lib, ... }:
 {
   options.hyper.vaultIds.deniedUsers = lib.mkOption {

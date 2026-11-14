@@ -119,7 +119,7 @@ let
         localAddress6 = v6 2;
         homeDir = "${stateDir}/home";
         address = cfg.address;
-        inherit (cfg) meshInterface tpm;
+        inherit (cfg) meshInterface tpm privateUsers;
         credentials = cfg.credentials // {
           ${hostKeyCredential} = vars."space-${name}-hostkey".files.ssh_host_ed25519_key.path;
         };
@@ -184,6 +184,11 @@ in
               type = lib.types.bool;
               default = false;
               description = "Bind this host's TPM into the guest, for an age identity sealed to it.";
+            };
+            privateUsers = lib.mkOption {
+              type = lib.types.bool;
+              default = true;
+              description = "Run the guest in its own user namespace (./host.nix, privateUsers); false is the rollback.";
             };
             credentials = lib.mkOption {
               type = lib.types.attrsOf lib.types.str;

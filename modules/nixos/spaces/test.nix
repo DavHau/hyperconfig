@@ -105,6 +105,7 @@ let
     mode = "0400";
   };
   fake = name: secret (pkgs.writeText name "test ${name}\n");
+  daemonTest = import ./test-daemon.nix { inherit pkgs; };
 in
 pkgs.testers.runNixOSTest {
   name = "spaces";
@@ -124,10 +125,18 @@ pkgs.testers.runNixOSTest {
         ./client.nix
         # herdr for Dave, as on amy (../dave.nix)
         ../herdr-jj.nix
+        # an idmappable store for the guests' own user namespaces
+        daemonTest.hostModule
       ];
       virtualisation.memorySize = 4096;
       virtualisation.cores = 2;
       virtualisation.tpm.enable = true;
+      # the guests' test builds' builder
+      virtualisation.additionalPaths = [
+        pkgs.pkgsStatic.busybox
+        # check_no_setuid's binaries
+        pkgs.libcap
+      ];
       networking.nftables.enable = true;
       networking.useNetworkd = true;
       environment.systemPackages = [
@@ -183,6 +192,8 @@ pkgs.testers.runNixOSTest {
       # infra-space), switched in place, and one of geninf-space's host side
       # (an nspawn flag), which restarts it.
       specialisation = {
+        # the rollback: geninf-space without its own user namespace
+        no-userns.configuration.hyper.spaces.geninf-space.privateUsers = false;
         guest-change.configuration = {
           hyper.infraSpace.guestModules = [ { environment.etc."guest-change".text = "changed\n"; } ];
           hyper.spaces = lib.genAttrs spaceNames (_: {
@@ -275,6 +286,8 @@ pkgs.testers.runNixOSTest {
       def space_fails(name, cmd):
           host.fail(f"nixos-container run {name} -- runuser -u {name} -- " + cmd)
 
+      ${daemonTest.pythonHelpers}
+
       start_all()
       peer.wait_for_unit("listener.service")
       for name in ["infra-space", *spaces]:
@@ -283,6 +296,30 @@ pkgs.testers.runNixOSTest {
           host.wait_until_succeeds(f"nixos-container run {name} -- systemctl is-active sshd.service {name}-secrets.service", timeout=120)
 
       peer.succeed("install -d -m 0700 /root/.ssh && install -m 0400 ${keys}/admin /root/.ssh/id_ed25519")
+      with subtest("every container is an untrusted client of the host's nix-daemon, root included"):
+          for name, user in [("infra-space", "infra"), *((n, n) for n in spaces)]:
+              check_untrusted(host, name, user, "${pkgs.pkgsStatic.busybox}")
+          # the home keeps its on-disk owner, the guest sees its user
+          assert host.succeed("stat -c %u /var/lib/spaces/geninf-space/home").strip() == "${toString registry.geninf-space.uid}"
+          assert in_space("geninf-space", "stat -c %U ~").strip() == "geninf-space"
+          in_space("geninf-space", "touch ~/owned && test -O ~/owned")
+          assert host.succeed("stat -c %u /var/lib/spaces/geninf-space/home/owned").strip() == "${toString registry.geninf-space.uid}"
+          # the TPM ACL names the guest user's host uid
+          acl = host.succeed("getfacl -n /dev/tpmrm0")
+          assert "\nuser:${toString (1342177280 + 65536 * registry.geninf-space.index + registry.geninf-space.uid)}:rw" in acl, acl
+          # no host user walks into a container's tree
+          assert host.succeed("stat -c %a /var/lib/nixos-containers").strip() == "700"
+
+      with subtest("a setuid or file-capability binary of the guest's root runs as no one's root"):
+          check_no_setuid(host, "geninf-space", "geninf-space", "/var/lib/spaces/geninf-space/home", "/home/geninf-space")
+          check_no_setuid(host, "infra-space", "infra", "/var/lib/infra-space/home", "/home/infra")
+          assert host.succeed("stat -c %a /var/lib/spaces").strip() == "700"
+          # the guest's root writes its profiles and gcroots too: nosuid,nodev
+          for c in ("geninf-space", "infra-space"):
+              for d in ("profiles", "gcroots"):
+                  opts = host.succeed(f"findmnt -n -o VFS-OPTIONS --mountpoint /nix/var/nix/{d}/per-container/{c}").split(",")
+                  assert "nosuid" in opts and "nodev" in opts, (c, d, opts)
+
       with subtest("sshd on the mesh address only, with its pinned host key"):
           for name, s in spaces.items():
               port = s["port"]
@@ -333,8 +370,13 @@ pkgs.testers.runNixOSTest {
               # `[c]...`: the pattern never matches the command line itself,
               # which `nixos-container run` leaves in a transient unit in /run
               needle = "[" + is_key[0] + "]" + re.escape(is_key[1:])
-              rc, hits = host.execute(f"nixos-container run {name} -- grep -rlsE {shlex.quote(needle)} /run /etc /home /var /root")
-              assert rc == 1, (name, hits)
+              # rc 2 for nspawn's /run/host/incoming only: host root's 0700
+              # directory, closed to the guest's root in its own user
+              # namespace
+              rc, hits = host.execute(f"nixos-container run {name} -- grep -rlE {shlex.quote(needle)} /run /etc /home /var /root 2>/tmp/grep-errors")
+              errors = host.succeed("cat /tmp/grep-errors").strip().splitlines()
+              assert rc in (1, 2) and hits.strip() == "", (name, rc, hits)
+              assert all(e == "grep: /run/host/incoming: Permission denied" for e in errors), errors
               # no fleet names
               space_root(name, "sh -c '! grep -q \"\\.d$\" /etc/hosts'")
           in_space("geninf-space", "test -r /dev/tpmrm0 -a -w /dev/tpmrm0")
@@ -520,6 +562,22 @@ pkgs.testers.runNixOSTest {
           # started by the new unit: its nspawn flag
           host.succeed("tr '\\0' '\\n' < /proc/$(systemctl show -p MainPID --value container@geninf-space.service)/cmdline | grep -qx --  --setenv=SPACE_TEST=1")
           peer.succeed("touch /tmp/knock-stop")
+          peer.succeed("timeout 30 ssh -o BatchMode=yes -p ${toString spaces.geninf-space.port} geninf-space@${hostV6} id -un")
+
+      with subtest("rollback: privateUsers off, owners unchanged, no idmap, the home still nosuid"):
+          switch("no-userns")
+          host.wait_for_unit("container@geninf-space.service")
+          host.wait_until_succeeds("nixos-container run geninf-space -- systemctl is-active multi-user.target", timeout=120)
+          uid_map = host.succeed(f"cat /proc/{leader('geninf-space')}/uid_map").split()
+          assert uid_map[:2] == ["0", "0"], uid_map
+          flags = host.succeed("tr '\\0' '\\n' < /proc/$(systemctl show -p MainPID --value container@geninf-space.service)/cmdline")
+          assert "idmap" not in flags and "--bind=/var/lib/spaces/geninf-space/home:/home/geninf-space" in flags, flags
+          # ownership mapped, never chowned: the tree is still root's
+          assert host.succeed("stat -c %u /var/lib/nixos-containers/geninf-space").strip() == "0"
+          assert host.succeed("stat -c %u /var/lib/spaces/geninf-space/home").strip() == "${toString registry.geninf-space.uid}"
+          assert in_space("geninf-space", "stat -c %U ~/owned").strip() == "geninf-space"
+          opts = host.succeed("findmnt -n -o VFS-OPTIONS --mountpoint /var/lib/spaces/geninf-space/home").split(",")
+          assert "nosuid" in opts and "nodev" in opts, opts
           peer.succeed("timeout 30 ssh -o BatchMode=yes -p ${toString spaces.geninf-space.port} geninf-space@${hostV6} id -un")
     '';
 }

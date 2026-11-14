@@ -314,11 +314,13 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/spaces/guest-base.nix — The base of every space's guest system (infra-space's ../infra-space/guest.nix and the named spaces' ./guest.nix import… <- m/infra-space/guest.nix, m/spaces/default.nix, m/spaces/guest.nix, m/spaces/publish-guest.nix, m/spaces/publish.nix
 - modules/nixos/spaces/guest.nix — The system inside a named space's container (./default.nix sets `space.*` from the host side): <- m/spaces/client.nix, m/spaces/default.nix, m/spaces/geninf-space.nix, m/spaces/guest-base.nix
 - modules/nixos/spaces/herdr-space-machines.py — - <- m/spaces/client.nix
-- modules/nixos/spaces/host.nix — The host side of one space container: <- m/dave-desktop/isolated-apps.nix, m/infra-space/default.nix, m/space-gui/test.nix, m/spaces/default.nix, m/spaces/guest-base.nix, m/spaces/guest.nix, m/spaces/publish-guest.nix, m/spaces/publish.nix
+- modules/nixos/spaces/host.nix — The host side of one space container: <- m/dave-desktop/isolated-apps.nix, m/infra-space/default.nix, m/space-gui/default.nix, m/space-gui/test.nix, m/spaces/default.nix, m/spaces/guest-base.nix, m/spaces/guest.nix, m/spaces/publish-guest.nix, +1
+- modules/nixos/spaces/immutable-helper.py — One request of a space guest's root (./host.nix, immutableHelper): <- m/spaces/host.nix
 - modules/nixos/spaces/public.nix — Every space of ./registry.nix with its machine's mesh address and its guest's pinned host key, from the public clan var… <- m/spaces/client.nix
 - modules/nixos/spaces/publish-guest.nix — A space's published web apps, the guest's side (./publish.nix has the host's, ./default.nix wires both from hyper.space… <- m/spaces/default.nix, m/spaces/publish.nix
 - modules/nixos/spaces/publish.nix — The spaces' published web apps, the host's front (som: <- som, m/spaces/default.nix, m/spaces/publish-guest.nix
 - modules/nixos/spaces/registry.nix — The named agent spaces (./default.nix): <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/default.nix, m/spaces/client.nix, m/spaces/default.nix, m/spaces/public.nix, m/spaces/publish.nix, m/spaces/test.nix
+- modules/nixos/spaces/test-daemon.nix — Shared by the `spaces`, `infra-space` and `infra-space-agent-tools` VM tests (./test.nix, ../infra-space/test.nix, ../i… <- m/infra-space/agent-tools-test.nix, m/infra-space/test.nix, m/space-gui/test.nix, m/spaces/test.nix
 - modules/nixos/spaces/test.nix — The named spaces (./default.nix) on one host beside infra-space, and Dave's side of them (./client.nix) on the same hos… <- flake.nix
 - modules/nixos/spaces/forge-prs-skill/SKILL.md — > <- m/spaces/forges.nix
 - modules/nixos/spaces/publish-skill/SKILL.md — >

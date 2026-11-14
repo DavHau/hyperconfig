@@ -259,6 +259,9 @@ in
       "d ${store} 0700 ${user} ${user} -"
       "d ${store}/items 0700 ${user} ${user} -"
       "f ${store}/inbox.jsonl 0600 ${user} ${user} -"
+      # The guest's own /var/lib/infra-space (this is a guest module), not
+      # the host's 0700 state dir of the same name (../spaces/host.nix):
+      # 0755 so the guest's writers (infra, not root) reach ${contract}.
       "d /var/lib/infra-space 0755 root root -"
       "L+ ${contract} - - - - ${store}"
     ];

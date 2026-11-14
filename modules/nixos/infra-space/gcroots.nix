@@ -239,10 +239,14 @@ in
     };
 
     # the guest's end of it
-    containers.infra-space.bindMounts.${socketDir} = {
-      hostPath = socketDir;
-      isReadOnly = true;
-    };
+    # idmapped where the guest has its own user namespace
+    # (../spaces/host.nix): the socket's host gid is the guest's infra
+    # group there
+    containers.infra-space.extraFlags = [
+      "--bind-ro=${socketDir}:${socketDir}${
+        lib.optionalString (config.containers.infra-space.privateUsers != "no") ":idmap"
+      }"
+    ];
     systemd.services."container@infra-space" = {
       wants = [ "infra-space-gcroot.socket" ];
       after = [ "infra-space-gcroot.socket" ];

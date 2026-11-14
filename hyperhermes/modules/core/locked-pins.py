@@ -27,6 +27,7 @@ import json
 import os
 import secrets
 import shutil
+import socket
 import stat
 import struct
 import sys
@@ -53,7 +54,22 @@ def get_flags(fd):
 
 def set_immutable(fd, on):
     flags = get_flags(fd)
-    fcntl.ioctl(fd, FS_IOC_SETFLAGS, struct.pack("i", flags | FS_IMMUTABLE_FL if on else flags & ~FS_IMMUTABLE_FL))
+    try:
+        fcntl.ioctl(fd, FS_IOC_SETFLAGS, struct.pack("i", flags | FS_IMMUTABLE_FL if on else flags & ~FS_IMMUTABLE_FL))
+    except PermissionError:
+        # In a user namespace root lacks CAP_LINUX_IMMUTABLE (the kernel
+        # wants it in the initial one): the host's helper sets the flag on
+        # this descriptor (hyperconfig's modules/nixos/spaces/immutable-helper.py).
+        helper = os.environ.get("HERMES_LOCKED_IMMUTABLE_HELPER")
+        if not helper:
+            raise
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(30)
+            s.connect(helper)
+            socket.send_fds(s, [b"1" if on else b"0"], [fd])
+            answer = s.recv(512)
+        if answer != b"ok":
+            raise OSError(errno.EPERM, f"immutable helper: {answer.decode(errors='replace')}")
 
 
 def open_entry(home, name, kind):

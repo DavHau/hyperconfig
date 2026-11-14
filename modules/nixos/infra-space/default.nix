@@ -44,7 +44,8 @@
       /var/lib lies on som's snapshotted root dataset anyway.
     - This host's TPM, for the guest's age identity (below): its resource
       manager /dev/tpmrm0 is bound into the guest and allowed in its device
-      cgroup. Access is a POSIX ACL for the guest's `infra` uid on the node,
+      cgroup. Access is a POSIX ACL for the guest's `infra` uid (as this
+      host sees it: the guest has its own user namespace) on the node,
       set by the container unit every time it starts (below); the ACL lives
       on the node itself, so it holds inside the guest too. Not the tss
       group: its gid is dynamic (970 on amy, 986 on som) and would have to
@@ -61,6 +62,13 @@
       only. nspawn copies them in at container start only: each var below
       (and the p0, TeamClaude and dashboard OIDC ones) restarts
       container@infra-space on a rotation.
+    - Its own user namespace (../spaces/host.nix, privateUsers): the
+      guest's root is an unprivileged uid here, an untrusted client of
+      this host's nix-daemon like infra (builds, substitution from the
+      configured caches, signed `nix copy`; no unsigned imports, no
+      daemon settings, no `--option`). What needs host root goes through
+      root-run interfaces (./gcroots.nix) or ssh to this host as root (the
+      infra-space key is in root's authorized_keys on the fleet).
     - Where hyper.infraSpace.hermes is set (som), the guest runs the
       always-on hermes agent (./hermes.nix, with the p0 and TeamClaude
       keys as credentials), and its dashboard is published by this host's
@@ -80,8 +88,12 @@
   Teardown (disabling infra-space, or `nixos-container destroy
   infra-space`): hermes' locked config pins entries of the agent's home
   immutable (hyperhermes' modules/core/locked-config.nix), so deleting the
-  container's root fails until root here clears the flag first:
+  container's root fails until root here clears the flag first (the
+  guest's root cannot, in its user namespace: it asks this host's helper,
+  ../spaces/host.nix immutableHelper):
     chattr -i /var/lib/nixos-containers/infra-space/var/lib/hermes/infra/home/{.env,.op.env,config.yaml,active_profile,gateway.json,plugins,hooks,profiles,lib,patches}
+  (/var/lib/containers/infra-space/... where the containers' directory has
+  no `nixos-` prefix, amy: by stateVersion, ../spaces/host.nix).
   /var/lib/infra-space (the guest's /home/infra) is separate and stays.
 
   Identities (clan vars, and one TPM key; manual steps once, noted per
@@ -181,6 +193,12 @@ in
       type = lib.types.bool;
       default = false;
       description = "Run the always-on hermes infra agent in the guest (./hermes.nix). On som only; other members are a plain backup of the same environment (afk, tools, identities).";
+    };
+
+    privateUsers = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Run the guest in its own user namespace (../spaces/host.nix, privateUsers); false is the rollback.";
     };
 
     buildOnHost = lib.mkOption {
@@ -380,6 +398,10 @@ in
       inherit (self) address sshPort;
       inherit (cfg) meshInterface;
       tpm = true;
+      inherit (cfg) privateUsers;
+      # hermes' lockedConfig pins (./hermes.nix): the entries of its
+      # locked home only
+      immutableHelper = if cfg.hermes then inputs.hyperhermes.lib.lockedHermesHome "infra" else null;
       credentials = cfg.credentials // {
         ${hostKeyCredential} = vars.infra-space-hostkey.files.ssh_host_ed25519_key.path;
       };

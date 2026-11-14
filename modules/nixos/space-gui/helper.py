@@ -62,12 +62,6 @@ def leader(container: str) -> str:
     return pid
 
 
-def in_guest(pid: str, *args: str) -> None:
-    # All namespaces and the guest's root: `-m` alone resolves the path
-    # against this host's root and fails.
-    run("nsenter", "-t", pid, "-a", *args, check=False, stderr=subprocess.DEVNULL)
-
-
 def restricted_socket(host_socket: str, path: Path, uid: int, container: str, run_id: str) -> int:
     """A new listening socket at `path` whose clients the compositor puts in
     a security context (wp_security_context_v1): it keeps privileged
@@ -305,7 +299,10 @@ def main() -> int:
     os.chown(host_dir, c["uid"], -1)
     guest_dir = f"/run/space-gui/{run_id}"
     close_w = restricted_socket(host_socket, host_dir / "wayland-0", c["uid"], container, run_id)
-    run("machinectl", "bind", "--mkdir", container, str(host_dir), guest_dir)
+    # no `machinectl bind` (refused for a container with its own user
+    # namespace): /run/space-gui/<container> is bound at /run/space-gui in
+    # the guest from its start (./default.nix), so the run directory is
+    # there already
 
     user_env = {"WAYLAND_DISPLAY": display}
     broker = Broker(container, c, pid, host_dir / "open.sock", user_env)
@@ -330,8 +327,6 @@ def main() -> int:
     finally:
         broker.close()
         os.close(close_w)  # the compositor stops accepting on the socket
-        in_guest(pid, "/run/current-system/sw/bin/umount", "-l", guest_dir)
-        in_guest(pid, "/run/current-system/sw/bin/rmdir", guest_dir)
         shutil.rmtree(host_dir, ignore_errors=True)
     return rc
 

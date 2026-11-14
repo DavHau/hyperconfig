@@ -48,6 +48,8 @@ let
   browserUid = 1217;
   backend = hlib.camofoxBackendBase + browserUid;
   probePort = 8000;
+  # an idmappable store for the container's own user namespace
+  daemonTest = import ../spaces/test-daemon.nix { inherit pkgs; };
 
   cert = pkgs.runCommand "mx-cert" { nativeBuildInputs = [ pkgs.openssl ]; } ''
     mkdir $out
@@ -127,6 +129,7 @@ pkgs.testers.runNixOSTest {
       imports = [
         ./test-clan-stub.nix
         ./default.nix
+        daemonTest.hostModule
         ./agent-tools.nix
         ../mullvad-egress/egress.nix
         ../mullvad-egress/dns.nix
@@ -149,6 +152,14 @@ pkgs.testers.runNixOSTest {
       virtualisation.memorySize = 6144;
       virtualisation.cores = 4;
       virtualisation.tpm.enable = true;
+      # what only the test script runs: the disk-image store above holds
+      # just the system's closure and these
+      virtualisation.additionalPaths = [
+        lmtpSend
+        fakeApi
+        pkgs.curl
+        pkgs.bash
+      ];
       networking.nftables.enable = true;
       networking.useNetworkd = true;
       services.resolved.enable = true;

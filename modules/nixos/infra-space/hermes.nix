@@ -353,6 +353,12 @@ in
 
   config = lib.mkMerge [
     {
+      # The guest's root has no CAP_LINUX_IMMUTABLE in its user namespace
+      # (../spaces/host.nix, privateUsers): lockedConfig's pins get their
+      # flag from the host's helper (immutableHelper, ./default.nix).
+      systemd.services."hermes-locked-${user}".environment.HERMES_LOCKED_IMMUTABLE_HELPER =
+        "/run/space-immutable/socket";
+
       services.hyperhermes = {
         hardening.enable = true;
 
