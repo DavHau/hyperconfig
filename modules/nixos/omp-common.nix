@@ -110,11 +110,23 @@
     "    compat:"
     "      supportsEagerToolInputStreaming: true"
   ];
-  baseProviderBlocks = lib.optional llama-swap-enabled llamaSwapProvider ++ [ p0Provider ];
+  # OpenRouter: omp's builtin `openrouter` provider (baseUrl
+  # https://openrouter.ai/api/v1, its model catalog); only the key is
+  # ours. Resolved by running the command, so the key never sits in a
+  # config file or the store; ./openrouter-api-key.nix. Only where that
+  # module is imported (dave.nix, the containers' ./spaces/afk.nix),
+  # detected by its option as for TeamClaude below.
+  openrouter-enabled = config ? hyper && config.hyper ? openrouterApiKey;
+  openrouterProvider = lib.concatStringsSep "\n" [
+    "  openrouter:"
+    "    apiKey: \"!openrouter-api-key\""
+  ];
+  baseProviderBlocks = lib.optional llama-swap-enabled llamaSwapProvider ++ [ p0Provider ]
+    ++ lib.optional openrouter-enabled openrouterProvider;
   modelProviderBlocks = baseProviderBlocks ++ lib.optional teamclaude-enabled teamclaudeProvider;
   renderModels = blocks: pkgs.writeText "models.yml" (lib.concatStringsSep "\n" ([ "providers:" ] ++ blocks) + "\n");
 in rec {
-  inherit teamclaude-enabled;
+  inherit teamclaude-enabled openrouter-enabled;
   models-needed = modelProviderBlocks != [ ];
   modelsFile = renderModels modelProviderBlocks;
   # The same without the TeamClaude override: omp's builtin anthropic

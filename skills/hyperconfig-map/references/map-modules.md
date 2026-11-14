@@ -123,6 +123,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/omr.nix — - <- m/dave.nix
 - modules/nixos/oomd.nix — systemd-oomd on the user slices, tuned to act within seconds. <- amy
 - modules/nixos/opengl.nix — - <- m/dave.nix
+- modules/nixos/openrouter-api-key.nix — The shared OpenRouter key for Dave's harnesses (afk): <- m/dave.nix, m/spaces/afk.nix
 - modules/nixos/packages.nix — - <- m/dave.nix
 - modules/nixos/pi-agent.nix — The `pi` agent, split out of the former pi.nix when the patched-omp wrappers were dropped in favour of afk (./afk.nix). <- m/dave.nix
 - modules/nixos/pi-chat-openrouter.nix — The shared OpenRouter key (spaces.openrouter; <- m/dave.nix

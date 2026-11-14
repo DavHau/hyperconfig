@@ -202,6 +202,7 @@ pkgs.testers.runNixOSTest {
 
       clan.core.vars.generators.inference-api-key.files.token = { };
       clan.core.vars.generators.teamclaude-api-key.files.key = { };
+      clan.core.vars.generators.openrouter.files.apikey = { };
       environment.etc = {
         "test-vars/infra-space-ssh/id_ed25519" = secret (isKeys + "/infra-space");
         "test-vars/infra-space-github/id_ed25519" = fake "infra-space-github";
@@ -209,6 +210,7 @@ pkgs.testers.runNixOSTest {
         "test-vars/infra-space-hostkey/ssh_host_ed25519_key" = secret (isKeys + "/hostkey-memberA");
         "test-vars/inference-api-key/token" = fake "p0-token";
         "test-vars/teamclaude-api-key/key" = fake "teamclaude-key";
+        "test-vars/openrouter/apikey" = fake "openrouter-key";
         "test-vars/space-geninf-space-hostkey/ssh_host_ed25519_key" = secret (keys + "/hostkey-geninf-space");
         "test-vars/space-geninf-space-root-ssh/id_ed25519" = fake "geninf-space-root-ssh";
         "test-vars/space-geninf-space-root-ssh-agave/id_ed25519" = fake "geninf-space-root-ssh-agave";
@@ -253,7 +255,7 @@ pkgs.testers.runNixOSTest {
 
       spaces = json.loads('${builtins.toJSON spaces}')
       expected_creds = {
-          "geninf-space": {"p0-api-key", "teamclaude-api-key", "root-ssh", "root-ssh-agave", "git-geninf", "git-clan-lol", "token-geninf", "token-clan-lol"},
+          "geninf-space": {"p0-api-key", "teamclaude-api-key", "openrouter-api-key", "root-ssh", "root-ssh-agave", "git-geninf", "git-clan-lol", "token-geninf", "token-clan-lol"},
       }
       # tea's logins: forge -> (bot user, token credential, default)
       expected_forges = {

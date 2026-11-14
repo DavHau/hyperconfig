@@ -29,7 +29,7 @@
                            each as a credential at
                            /run/<name>/secrets/<credential> (0400, the
                            user), never in the home on this host.
-  Plus the p0 and TeamClaude keys for afk (the same shared vars as
+  Plus the p0, TeamClaude and OpenRouter keys for afk (the same shared vars as
   infra-space and the desktops). nspawn copies credentials in at
   container start only, so a rotation of any of them (and every change
   of the container's .conf: bind mounts, nspawn flags, addresses)
@@ -97,6 +97,7 @@ let
           # restarts it.
           inference-api-key.files.token.restartUnits = [ containerUnit ];
           teamclaude-api-key.files.key.restartUnits = [ containerUnit ];
+          openrouter.files.apikey.restartUnits = [ containerUnit ];
           "space-${name}-hostkey" = {
             files.ssh_host_ed25519_key.restartUnits = [ containerUnit ];
             files."ssh_host_ed25519_key.pub".secret = false;
@@ -262,6 +263,7 @@ in
       hyper.spaces.${name}.credentials = {
         p0-api-key = vars.inference-api-key.files.token.path;
         teamclaude-api-key = vars.teamclaude-api-key.files.key.path;
+        openrouter-api-key = vars.openrouter.files.apikey.path;
       };
     }) registry
   );

@@ -92,6 +92,8 @@ in
           (config.hyper.inferenceApiKey.userTokenPath "grmpf")
           # TeamClaude key, read by `teamclaude-api-key` (teamclaude-api-key.nix).
           config.clan.core.vars.generators.teamclaude-api-key.files.key.path
+          # OpenRouter key, read by `openrouter-api-key` (openrouter-api-key.nix).
+          config.clan.core.vars.generators.openrouter.files.apikey.path
         ];
         # The nix daemon socket is root-equivalent for trusted users (grmpf
         # is one); sbox exposes it too via its read-only /nix bind.

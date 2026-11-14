@@ -72,6 +72,10 @@
       # TeamClaude key, read by `teamclaude-api-key` inside the sandbox
       # (models.yml anthropic apiKey: "!teamclaude-api-key").
       "${config.clan.core.vars.generators.teamclaude-api-key.files.key.path}" = {};
+    } // lib.optionalAttrs (config.clan.core.vars.generators ? openrouter) {
+      # OpenRouter key, read by `openrouter-api-key` inside the sandbox
+      # (models.yml openrouter apiKey, ./openrouter-api-key.nix).
+      "${config.clan.core.vars.generators.openrouter.files.apikey.path}" = {};
     };
   };
 }

@@ -36,9 +36,9 @@
 # across a restart. managed also plays a LAN peer routing to a member's
 # guest net: refused on sshd and on a host-only guest service the guest's
 # firewall opened, which the host itself reaches. afk (./afk.nix) runs as
-# infra, `p0-api-key` and `teamclaude-api-key` print the credentials, and
-# web_search, fetch and browser stay off even against infra's own
-# config.yml.
+# infra, `p0-api-key`, `teamclaude-api-key` and `openrouter-api-key` print
+# the credentials, and web_search, fetch and browser stay off even against
+# infra's own config.yml.
 #
 # hermes (./hermes.nix) in memberA's container only (som), with a stub
 # model instead of p0: the gateway runs as infra; .env, config.yaml and
@@ -315,9 +315,11 @@ let
           }
         );
       };
-      # what ../inference-api-key.nix and ../teamclaude-api-key.nix declare on som and amy
+      # what ../inference-api-key.nix, ../teamclaude-api-key.nix and
+      # ../pi-chat-openrouter.nix declare on som and amy
       clan.core.vars.generators.inference-api-key.files.token = { };
       clan.core.vars.generators.teamclaude-api-key.files.key = { };
+      clan.core.vars.generators.openrouter.files.apikey = { };
 
       # A later deploy of som (memberA): a change of the guest alone,
       # switched in place, and one of the host's side of the container (an
@@ -349,6 +351,7 @@ let
         "test-vars/infra-space-hostkey/ssh_host_ed25519_key" = secret (keys + "/hostkey-${me}");
         "test-vars/inference-api-key/token" = secret (pkgs.writeText "p0-token" "test-p0-token\n");
         "test-vars/teamclaude-api-key/key" = secret (pkgs.writeText "teamclaude-key" "sk-ant-oat01-test\n");
+        "test-vars/openrouter/apikey" = secret (pkgs.writeText "openrouter-key" "sk-or-test-key\n");
         "test-vars/oidc/secret" = secret (pkgs.writeText "oidc" "test-client-secret\n");
       };
     };
@@ -645,6 +648,8 @@ pkgs.testers.runNixOSTest {
               # models.yml routes anthropic through TeamClaude, keys by command
               models = guest(m, "cat ~/.omp/profiles/afk/agent/models.yml")
               assert '"!teamclaude-api-key"' in models and '"!p0-api-key"' in models, models
+              assert '"!openrouter-api-key"' in models, models
+              assert guest(m, "openrouter-api-key").strip() == "sk-or-test-key"
               assert guest(m, "p0-api-key").strip() == "test-p0-token"
               assert guest(m, "teamclaude-api-key").strip() == "sk-ant-oat01-test"
               for key in pinned:

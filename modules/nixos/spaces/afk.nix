@@ -12,8 +12,9 @@
       (hyper.afk.pinnedSettings, ../afk.nix has why that is an overlay and
       not afk's distro layer), so nothing the agent reads comes straight
       off the web.
-    - The p0 and TeamClaude keys are the credentials `p0-api-key` and
-      `teamclaude-api-key` (passed in by the host, from the same clan
+    - The p0, TeamClaude and OpenRouter keys are the credentials
+      `p0-api-key`, `teamclaude-api-key` and `openrouter-api-key`
+      (passed in by the host, from the same clan
       vars the desktops use); the same-named commands models.yml runs read
       them from `secretsDir`.
 
@@ -28,9 +29,11 @@ secretsDir: {
     ../afk.nix
     ../inference-api-key.nix
     ../teamclaude-api-key.nix
+    ../openrouter-api-key.nix
   ];
   hyper.inferenceApiKey.tokenFile = "${secretsDir}/p0-api-key";
   hyper.teamclaudeApiKey.keyFile = "${secretsDir}/teamclaude-api-key";
+  hyper.openrouterApiKey.keyFile = "${secretsDir}/openrouter-api-key";
   hyper.afk.pinnedSettings = {
     web_search.enabled = false;
     # also URL reads through the read tool

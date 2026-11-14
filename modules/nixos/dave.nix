@@ -57,6 +57,10 @@ in
     # TeamClaude gateway key; `teamclaude-api-key` hands it to the anthropic
     # provider override in every harness's models.yml (./omp-common.nix).
     ./teamclaude-api-key.nix
+    # OpenRouter key (the shared var of ./pi-chat-openrouter.nix);
+    # `openrouter-api-key` hands it to the openrouter provider in afk's
+    # models.yml (./omp-common.nix).
+    ./openrouter-api-key.nix
     ./amd-pstate-resume-fix.nix
     ./omr.nix
     ./ntop.nix

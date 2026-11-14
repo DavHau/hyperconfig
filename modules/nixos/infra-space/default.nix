@@ -293,6 +293,7 @@ in
     clan.core.vars.generators = {
       inference-api-key.files.token.restartUnits = [ containerUnit ];
       teamclaude-api-key.files.key.restartUnits = [ containerUnit ];
+      openrouter.files.apikey.restartUnits = [ containerUnit ];
       infra-space-ssh = {
         share = true;
         files.id_ed25519.restartUnits = [ containerUnit ];
@@ -333,6 +334,9 @@ in
       # (../teamclaude-api-key.nix), both shared vars of every member.
       p0-api-key = vars.inference-api-key.files.token.path;
       teamclaude-api-key = vars.teamclaude-api-key.files.key.path;
+      # OpenRouter for the guest's afk (../openrouter-api-key.nix; the
+      # shared var of ../pi-chat-openrouter.nix).
+      openrouter-api-key = vars.openrouter.files.apikey.path;
     };
     # The always-on agent, where enabled (som); its dashboard: ./dashboard.nix.
     hyper.infraSpace.guestModules = lib.optional cfg.hermes ./hermes.nix;
