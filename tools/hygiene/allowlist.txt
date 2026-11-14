@@ -17,6 +17,7 @@ sshkey *-test.nix                                   # test keys
 
 # dangling: fixture paths inside tests, sibling checkouts named in comments.
 dangling modules/nixos/infra-space/nixpkgs-bump/*-test.nix   # paths inside the test's scratch repo
+dangling modules/nixos/infra-space/security-jobs/guard-test.nix  # paths inside the test's scratch repo
 dangling modules/nixos/infra-space/test.nix ../testbox       # VM-side path
 dangling modules/nixos/entity-storage/test.nix *             # VM-side path
 dangling modules/nixos/afk.nix ../afk                        # sibling checkout ~/afk (flake input)

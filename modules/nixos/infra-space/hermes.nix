@@ -57,7 +57,7 @@
       disabled), so a composite like `debugging` would take terminal and
       file with it. Checkpoints off.
     - skills: the infra skill (./hermes-skill), the nightly bump's
-      (./nixpkgs-bump) and the repo's own map of hyperconfig
+      (./nixpkgs-bump), the security jobs' (./security-jobs) and the repo's own map of hyperconfig
       (../../../skills/hyperconfig-map, for the agent and its subagents),
       and of the bundled ones only systematic-debugging
       and codebase-inspection: the rest of what the package ships is
@@ -71,6 +71,8 @@
       now: it builds .#fleetJobs and pushes auto/nixpkgs, never main.
     - the decision registry (./decisions.nix): `decision`, the 08:00
       curation run, the 09:00 brief and the /decisions skill; som only.
+      The security jobs (./security-jobs.nix: nightly CVE watch, weekly
+      hygiene report and security audit) the same way.
 
   Inference: Claude Opus 5.5 through TeamClaude (the model) with the
   shared client key (../provider-keys.nix, booked as `hyperconfig`),
@@ -269,6 +271,16 @@ let
     src = pkgs.writeTextDir "SKILL.md" (builtins.readFile ./decisions/curate/SKILL.md);
   };
 
+  # The security jobs' skills (./security-jobs.nix: policy and machine
+  # list spliced into each SKILL.md).
+  secSkills = lib.mapAttrsToList (
+    name: text:
+    hlib.mkAgentSkill pkgs {
+      inherit name;
+      src = pkgs.writeTextDir "SKILL.md" text;
+    }
+  ) config.infraSpace.securityJobs.skills;
+
   # Where things live in hyperconfig: SKILL.md, hand-written area
   # references and the generated map (../../flake-parts/repo-map.nix keeps
   # it fresh). Only the skill's directory goes into the store.
@@ -287,7 +299,8 @@ let
     mapSkill
     decisionsSkill
     curateSkill
-  ];
+  ]
+  ++ secSkills;
 
   dashboardPort = hlib.dashboardPortFor user;
   proxyUser = "infra-space-dashboard";
@@ -298,6 +311,7 @@ in
     ./nixpkgs-bump.nix
     ./fleet-bump
     ./decisions.nix
+    ./security-jobs.nix
   ];
 
   # For ./test.nix, which checks hermes' own view against them.
@@ -318,6 +332,20 @@ in
     type = lib.types.listOf lib.types.package;
     default = [ ];
     description = "More skill packages (hyperhermes.lib.mkAgentSkill) for the agent, allowed like nixSkills.";
+  };
+  options.infraSpace.agentJobs = lib.mkOption {
+    type = lib.types.attrsOf (
+      lib.types.submodule {
+        options = {
+          logDir = lib.mkOption { type = lib.types.str; };
+          verdictTag = lib.mkOption { type = lib.types.str; };
+          okVerdicts = lib.mkOption { type = lib.types.listOf lib.types.str; };
+        };
+      }
+    );
+    default = { };
+    internal = true;
+    description = "The agent's unattended jobs (./agent-job.nix registers each): where their logs are and which last line is a good run; the morning brief (./decisions.nix) reports a failed one.";
   };
   options.infraSpace.hermes.extraToolsets = lib.mkOption {
     type = lib.types.listOf lib.types.str;

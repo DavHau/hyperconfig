@@ -901,6 +901,20 @@ pkgs.testers.runNixOSTest {
           assert "last line: session_id" not in journal, journal
           # umask 077: the report is infra's alone
           assert guest(memberA, "stat -c %a /home/infra/nixpkgs-bump/*.log").split() == ["600"]
+          # unattended: explicit toolsets, no skills, no memory
+          unit = guest_root(memberA, "systemctl cat nixpkgs-bump.service")
+          script = re.search(r"ExecStart=(\S+)", unit)
+          assert script is not None, unit
+          assert "-t terminal,file,todo,delegation,no_mcp " in guest_root(memberA, f"cat {script.group(1)}")
+          # a failed run files a notice for the morning brief (OnFailure=)
+          assert "OnFailure=nixpkgs-bump-failed-notice.service" in unit, unit
+          memberA.wait_until_succeeds(
+              "nixos-container run infra-space -- runuser -u infra -- decision notice --list | grep -q 'nixpkgs-bump failed on '",
+              timeout=60,
+          )
+          memberA.sleep(5)  # the second failure's notice, too
+          # drop them: the brief subtest starts from an empty registry
+          guest(memberA, "decision notice --sent $(decision notice --list | grep -o 'N[0-9]*')")
           guest(memberA, "rm -r /home/infra/hyperconfig /home/infra/nixpkgs-bump")
           guest_root(memberA, "systemctl reset-failed nixpkgs-bump.service")
 
@@ -981,6 +995,12 @@ pkgs.testers.runNixOSTest {
           out = sent()
           assert out is not None and "Recurring tasks: status could not be read" in out, out
           managed.succeed("rm ${briefState}/recurring.json ${briefState}/recurring-rc")
+          # any other agent job's failed last run: a line too
+          guest(memberA, "mkdir -p /home/infra/security-audit && printf 'SECURITY-AUDIT: failed\\nsession_id: x\\n' > /home/infra/security-audit/$(date -u +%FT%H%MZ).log")
+          brief_run()
+          out = sent()
+          assert out is not None and "security-audit failed in its last run" in out, out
+          guest(memberA, "rm -r /home/infra/security-audit")
           # a job's inbox line, a takedown notice, a warning
           guest(memberA, """printf '%s\\n' '{"title": "Take down foo?", "severity": "critical", "options": ["a) yes", "b) no"], "source": "cve-watch", "needs_dave": "noticeable: foo stops"}' '{"title": "Keep engines off", "recommendation": "no change", "source": "research"}' '{"title": "Urgent without a reason", "severity": "critical", "recommendation": "stop it", "source": "cve-watch"}' '{"kind": "notice", "text": "stopped foo.service on bam", "source": "cve-watch"}' >> /var/lib/infra-space/decisions/inbox.jsonl""")
           guest(memberA, "decision add --title 'Buy a proxy?' --urgency low --source test --needs-dave 'money: 20 USD'")
@@ -1030,8 +1050,66 @@ pkgs.testers.runNixOSTest {
           unit = guest_root(memberA, "systemctl cat decisions-curate.service")
           script = re.search(r"ExecStart=(\S+)", unit)
           assert script is not None, unit
-          assert "-t terminal,file " in guest_root(memberA, f"cat {script.group(1)}")
+          assert "-t terminal,file,no_mcp " in guest_root(memberA, f"cat {script.group(1)}")
           guest_root(memberA, "systemctl reset-failed decisions-curate.service")
+
+      with subtest("the security jobs: memberA only, Dave's schedule, after the bump, registry"):
+          for job in ["cve-watch", "hygiene-report", "security-audit"]:
+              memberB.fail(f"nixos-container run infra-space -- systemctl cat {job}.timer")
+              guest_root(memberA, f"systemctl is-active {job}.timer")
+              deps = guest_root(memberA, f"systemctl show -p Wants -p Requires -p After -p OnFailure {job}.service")
+              assert "Wants=hermes-agent-infra.service" in deps, deps
+              assert "Requires=hermes-agent-infra.service" not in deps, deps
+              # missed nights: after the bump, not racing it for its lock
+              assert "nixpkgs-bump.service" in deps.split("After=")[1].split("\n")[0], deps
+              assert f"OnFailure={job}-failed-notice.service" in deps, deps
+              assert "X-RestartIfChanged=false" in guest_root(memberA, f"systemctl cat {job}.service")
+              assert guest(memberA, f"command -v sec-{job}-workspace").strip() == f"/run/current-system/sw/bin/sec-{job}-workspace"
+          # Dave's schedule at +07: CVE watch daily 02:30, hygiene Saturday
+          # 03:30, audit Sunday 03:30 (19:30 / 20:30 UTC the day before)
+          for job, cal, utc in [("cve-watch", "*-*-* 02:30:00 Asia/Bangkok", "19:30:00 UTC"),
+                                ("hygiene-report", "Sat *-*-* 03:30:00 Asia/Bangkok", "Fri *-*-* 20:30:00 UTC"),
+                                ("security-audit", "Sun *-*-* 03:30:00 Asia/Bangkok", "Sat *-*-* 20:30:00 UTC")]:
+              timer = guest_root(memberA, f"systemctl show -p TimersCalendar --value {job}.timer")
+              assert cal in timer, (job, timer)
+              norm = guest_root(memberA, f"systemd-analyze calendar '{cal}'")
+              assert utc.split()[0] in norm and utc.split()[-2] in norm, (job, norm)
+          for tool in ["sec-job-guard", "sec-job-protected-check", "sec-job-deploy", "sec-collect", "sec-cve-feeds",
+                       "decision", "sec-job-nix", "vulnix"]:
+              guest(memberA, f"command -v {tool}")
+          # a takedown notice through the registry reaches the next brief
+          guest(memberA, "decision --by cve-watch notice --source cve-watch 'vm-test: foo.service on bam taken down; undo: drop the entry'")
+          assert "vm-test: foo.service on bam" in guest(memberA, "decision notice --list")
+          guest(memberA, "decision notice --sent $(decision notice --list | grep -o 'N[0-9]*' | head -n 1)")
+          # a job waits for the bump's lock, and while another security job
+          # runs (the shared lock): it starts only once both are free
+          guest(memberA, "mkdir /home/infra/hyperconfig && mkdir -p /home/infra/nixpkgs-bump && touch /home/infra/nixpkgs-bump/.lock")
+          guest_root(memberA, "systemd-run --unit=hold-bump --uid=infra flock /home/infra/nixpkgs-bump/.lock ${pkgs.coreutils}/bin/sleep 20")
+          guest_root(memberA, "systemctl start --no-block cve-watch.service")
+          memberA.sleep(5)
+          assert "active" == guest_root(memberA, "systemctl show -p ActiveState --value hold-bump.service").strip()
+          assert "activating" in guest_root(memberA, "systemctl show -p ActiveState --value cve-watch.service")
+          before = int(guest_root(memberA, "cat ${llmRecord} | wc -l").strip())
+          assert not guest(memberA, "ls /home/infra/cve-watch/*.log 2>/dev/null || true").strip()
+          memberA.wait_until_succeeds(
+              "nixos-container run infra-space -- systemctl show -p ActiveState --value cve-watch.service | grep -qE 'failed|inactive'",
+              timeout=180,
+          )
+          # the stub's answer is no CVE-WATCH verdict: failed, with a log
+          assert int(guest_root(memberA, "cat ${llmRecord} | wc -l").strip()) > before
+          journal = guest_root(memberA, "journalctl -u cve-watch.service")
+          assert "last line: " in journal, journal
+          prompt = guest(memberA, "cat /home/infra/cve-watch/last-prompt")
+          assert "LOCAL_DATE=" in prompt and "WEEKDAY=" in prompt, prompt
+          assert guest(memberA, "stat -c %a /home/infra/cve-watch/*.log").split() == ["600"]
+          # the failed run: a notice for the brief
+          memberA.wait_until_succeeds(
+              "nixos-container run infra-space -- runuser -u infra -- decision notice --list | grep -q 'cve-watch failed on '",
+              timeout=60,
+          )
+          guest(memberA, "decision notice --sent $(decision notice --list | grep -o 'N[0-9]*')")
+          guest(memberA, "rm -r /home/infra/hyperconfig /home/infra/nixpkgs-bump /home/infra/cve-watch")
+          guest_root(memberA, "systemctl reset-failed cve-watch.service")
 
       with subtest("the nightly bump's nix: its own cores and jobs, from an untrusted client"):
           busybox = "${pkgs.pkgsStatic.busybox}"

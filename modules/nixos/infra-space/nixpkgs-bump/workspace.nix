@@ -14,6 +14,10 @@
   aliveMinutes ? 120,
   # archive bookmarks (nixpkgs-bump-archive/*) older than this are pruned
   archiveDays ? 14,
+  # the command's name and the workspaces' directory prefix (another job's
+  # variant: ../security-jobs.nix)
+  name ? "nixpkgs-bump-workspace",
+  prefix ? "hyperconfig-nixpkgs-bump-",
 }:
 let
   # The only jj config the helper's jj calls see (JJ_CONFIG, with an
@@ -35,7 +39,7 @@ let
   ];
 in
 pkgs.writeShellApplication {
-  name = "nixpkgs-bump-workspace";
+  inherit name;
   runtimeInputs = [
     pkgs.coreutils
     pkgs.findutils
@@ -46,7 +50,7 @@ pkgs.writeShellApplication {
   ];
   text =
     builtins.replaceStrings
-      [ "@repo@" "@logDir@" "@jjConfig@" "@path@" "@liveMinutes@" "@staleMinutes@" "@aliveMinutes@" "@archiveDays@" ]
+      [ "@repo@" "@logDir@" "@jjConfig@" "@path@" "@liveMinutes@" "@staleMinutes@" "@aliveMinutes@" "@archiveDays@" "@name@" "@prefix@" ]
       [
         repo
         logDir
@@ -56,6 +60,8 @@ pkgs.writeShellApplication {
         (toString staleMinutes)
         (toString aliveMinutes)
         (toString archiveDays)
+        name
+        prefix
       ]
       (builtins.readFile ./workspace.sh);
 }

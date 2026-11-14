@@ -56,6 +56,21 @@ in
     repair = "nixpkgs-bump";
   };
 
+  # The security jobs (../infra-space/security-jobs.nix): daily CVE
+  # watch, weekly hygiene report and security audit.
+  cve-watch = infraSpace // {
+    unit = "cve-watch.service";
+    runSlo = h 26;
+  };
+  hygiene-report = infraSpace // {
+    unit = "hygiene-report.service";
+    runSlo = d 7 + h 14;
+  };
+  security-audit = infraSpace // {
+    unit = "security-audit.service";
+    runSlo = d 7 + h 14;
+  };
+
   # Moved by the bump (its SearXNG steps), no unit of its own yet.
   searxng-pin = infraSpace // {
     result = {

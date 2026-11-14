@@ -87,6 +87,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.zfsEphemeralTmp.dataset: modules/nixos/zfs-ephemeral-tmp.nix
 - hyper.ztEuLanGuard: modules/nixos/zt-eu-lan-guard/default.nix
 - infraSpace: modules/nixos/infra-space/guest.nix
+- infraSpace.agentJobs: modules/nixos/infra-space/hermes.nix
 - infraSpace.agentTools: modules/nixos/infra-space/agent-tools-guest.nix
 - infraSpace.fleetBump: modules/nixos/infra-space/fleet-bump/default.nix
 - infraSpace.hermes.dashboard: modules/nixos/infra-space/hermes.nix
@@ -94,6 +95,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - infraSpace.hermes.extraToolsets: modules/nixos/infra-space/hermes.nix
 - infraSpace.hermes.skills: modules/nixos/infra-space/hermes.nix
 - infraSpace.secretPrompt: modules/nixos/infra-space/secret-prompt/default.nix
+- infraSpace.securityJobs.skills: modules/nixos/infra-space/security-jobs.nix
 - infraSpace.voiceApi: modules/nixos/infra-space/voice-api.nix
 - mail: hyperhermes/modules/mail/default.nix
 - mountpoint: machines/amy/disko.nix, machines/bam/disko-zfs-defaults.nix, machines/bam/disko-zfs-enc-lz4.nix, machines/bam/disko-zfs-enc-zstd.nix, machines/bam/disko-zfs-enc.nix, machines/edi/disko.nix, machines/som/disko.nix
@@ -105,6 +107,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - publish.enable: hyperhermes/modules/publish/default.nix
 - rea.enable: hyperhermes/modules/rea/default.nix
 - secretFile: hyperhermes/modules/sso.nix
+- security.takedown.eligible: modules/nixos/security-takedown/default.nix
 - services.container-slots: hyperhermes/modules/container-slots-storage/default.nix, hyperhermes/modules/container-slots.nix
 - services.hyperhermes: hyperhermes/modules/core/options.nix, hyperhermes/modules/local-container/guest.nix, hyperhermes/modules/mail/default.nix, hyperhermes/modules/rea/default.nix, hyperhermes/modules/slots/default.nix, hyperhermes/modules/teamclaude.nix, hyperhermes/modules/wallet/default.nix
 - services.hyperhermes.agents: hyperhermes/modules/browser/camofox.nix, hyperhermes/modules/browser/ocr.nix, hyperhermes/modules/browser/options.nix, hyperhermes/modules/browser/residential-proxy.nix, hyperhermes/modules/browser/searxng.nix, hyperhermes/modules/browser/web-access-skill.nix, hyperhermes/modules/browser/web-extract.nix, hyperhermes/modules/clan.nix, hyperhermes/modules/dashboards/default.nix, hyperhermes/modules/publish/default.nix, hyperhermes/modules/vault-request/default.nix, machines/som/hermes-inference.nix

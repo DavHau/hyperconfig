@@ -774,18 +774,21 @@ def render(d):
     return "\n".join(lines)
 
 
-VERDICT_RE = re.compile(r"NIXPKGS-BUMP: (merged|unchanged|failed)")
 LOG_NAME_RE = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{4})Z\.log")
 
 
 def bump_failed(log_dir, at=None):
-    """True when last night's nixpkgs bump failed: the newest log of the
-    last 24 h (named <UTC start>.log by ../nixpkgs-bump.nix) ends in
-    `NIXPKGS-BUMP: failed`, or has no verdict while no run holds the
-    bump's lock (<log_dir>/.lock: a crashed run; `hermes chat -Q`
-    writes nothing until the end, so a run still going is not judged).
-    Its last non-empty line that is not hermes' trailing `session_id:`
-    is the verdict, as nixpkgs-bump-verdict takes it."""
+    return job_failed(log_dir, "NIXPKGS-BUMP", ["merged", "unchanged"], at)
+
+
+def job_failed(log_dir, tag, ok, at=None):
+    """True when an agent job's last run (../agent-job.nix) failed: the
+    newest log of the last 24 h (named <UTC start>.log) does not end in
+    `<tag>: <one of ok>`, while no run holds the job's lock
+    (<log_dir>/.lock: no verdict and no holder = a crashed run;
+    `hermes chat -Q` writes nothing until the end, so a run still going
+    is not judged). Its last non-empty line that is not hermes' trailing
+    `session_id:` is the verdict, as <job>-verdict takes it."""
     at = at or datetime.now(timezone.utc)
     newest = None
     try:
@@ -811,9 +814,10 @@ def bump_failed(log_dir, at=None):
     except OSError:
         return False
     lines = [x.strip() for x in tail.splitlines() if x.strip() and not re.fullmatch(r"session_id: \S*", x.strip())]
-    m = VERDICT_RE.fullmatch(lines[-1]) if lines else None
-    if m:
-        return m.group(1) == "failed"
+    if lines and lines[-1] in {f"{tag}: {v}" for v in ok}:
+        return False
+    if lines and lines[-1].startswith(f"{tag}: "):
+        return True
     return not bump_running(log_dir)
 
 
@@ -899,7 +903,7 @@ def recurring_lines(status):
     return out
 
 
-def brief(store, digest, at=None, digest_failed=False, bump_log_dir=None, recurring=None, recurring_failed=False):
+def brief(store, digest, at=None, digest_failed=False, bump_log_dir=None, recurring=None, recurring_failed=False, jobs=None):
     """The morning brief: (text, notice ids shown). Empty text = nothing
     to send. Notices beyond BRIEF_NOTICES stay for the next brief.
     Only decisions that cleared the bar (needs_dave) are listed; the
@@ -951,6 +955,12 @@ def brief(store, digest, at=None, digest_failed=False, bump_log_dir=None, recurr
         if parts:
             parts.append("")
         parts.append("Nightly nixpkgs bump failed last night (~/nixpkgs-bump in infra-space).")
+    for j in jobs or []:
+        if j["logDir"] == bump_log_dir or not job_failed(j["logDir"], j["verdictTag"], j["okVerdicts"], at):
+            continue
+        if parts:
+            parts.append("")
+        parts.append(f"{j['name']} failed in its last run ({j['logDir']} in infra-space).")
     rec = recurring_lines(recurring)
     if rec or recurring_failed:
         # always, all fresh included: the line is the proof they ran
@@ -1134,6 +1144,8 @@ def main(argv=None, store_dir=DIR):
     br.add_argument("--bump-log-dir", metavar="DIR", help="the nightly bump's logs: a line when last night's failed")
     br.add_argument("--recurring-json", metavar="FILE", help="the recurring tasks' freshness (recurring-tasks status)")
     br.add_argument("--recurring-failed", action="store_true", help="say the recurring tasks' status could not be read")
+    br.add_argument("--jobs-json", metavar="FILE",
+                    help='the agent jobs [{"name", "logDir", "verdictTag", "okVerdicts"}]: a line per failed last run')
     br.add_argument("--json", action="store_true", help='{"text": ..., "notices": [ids shown], "send": "send" | "send-nostamp"}')
 
     args = p.parse_args(argv)
@@ -1451,8 +1463,15 @@ def run(st, args, by, ingested):
             except (OSError, ValueError) as e:
                 print(f"decision: recurring status unreadable, left out: {e}", file=sys.stderr)
                 rec_failed = True
+        jobs = None
+        if args.jobs_json:
+            try:
+                with open(args.jobs_json) as f:
+                    jobs = json.load(f)
+            except (OSError, ValueError) as e:
+                print(f"decision: jobs list unreadable, left out: {e}", file=sys.stderr)
         text, ids = brief(st, digest, digest_failed=failed, bump_log_dir=args.bump_log_dir,
-                          recurring=recurring, recurring_failed=rec_failed)
+                          recurring=recurring, recurring_failed=rec_failed, jobs=jobs)
         if args.json:
             # send: "send" stamps the day on edi (its own 09:30 digest is
             # skipped); only a brief that really carries the digest may.

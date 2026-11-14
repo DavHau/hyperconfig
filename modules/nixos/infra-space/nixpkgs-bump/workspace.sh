@@ -1,6 +1,8 @@
 # nixpkgs-bump-workspace: creates and removes the nightly bump's jj
 # workspace (../nixpkgs-bump/SKILL.md steps 1 and 6), so the run never
-# parses jj's output to decide whether it has one.
+# parses jj's output to decide whether it has one. The security jobs
+# (../security-jobs.nix) build the same helper under their own name and
+# prefix (workspace.nix's `name` and `prefix`; its defaults are the bump's).
 #
 #   nixpkgs-bump-workspace create [NAME]
 #   nixpkgs-bump-workspace alive NAME
@@ -92,15 +94,15 @@
 
 repo=@repo@
 logDir=@logDir@
-prefix=hyperconfig-nixpkgs-bump-
+prefix=@prefix@
 
-say() { echo "nixpkgs-bump-workspace: $*" >&2; }
+say() { echo "@name@: $*" >&2; }
 die() {
   say "FAIL: $*"
   exit 1
 }
 usage() {
-  echo "usage: nixpkgs-bump-workspace create [NAME] | alive NAME | remove NAME" >&2
+  echo "usage: @name@ create [NAME] | alive NAME | remove NAME" >&2
   exit 2
 }
 
@@ -433,7 +435,7 @@ case "$cmd" in
     for n in $earlier; do
       if out=$(takeover "$n" 2>&1); then
         echo "$out"
-        b=$(sed -n 's/^nixpkgs-bump-workspace: TAKEOVER: .* archived as \([^ ]*\)$/\1/p' <<<"$out")
+        b=$(sed -n 's/^@name@: TAKEOVER: .* archived as \([^ ]*\)$/\1/p' <<<"$out")
         # names sort by date: the last one archived is the newest night's
         [ -z "$b" ] || archive=$b
       else

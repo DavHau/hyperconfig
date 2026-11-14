@@ -1,0 +1,18 @@
+[
+  {"id": "claude-code", "names": ["claude-code", "@anthropic-ai/claude-code", "anthropics/claude-code"], "upstream": "npm @anthropic-ai/claude-code; GitHub anthropics/claude-code", "where": "afk/omp and agents on amy, som, vit (pkgs via nixpkgs or an input)"},
+  {"id": "hermes-agent", "names": ["hermes-agent", "NousResearch/hermes-agent"], "upstream": "GitHub NousResearch/hermes-agent (hyperhermes input)", "where": "som agents, infra-space"},
+  {"id": "home-assistant", "names": ["homeassistant", "home-assistant", "home-assistant/core"], "upstream": "pip homeassistant; GitHub home-assistant/core", "where": "cm-pi"},
+  {"id": "esphome", "names": ["esphome", "esphome/esphome"], "upstream": "pip esphome (firmware of the Voice PE, IR blasters, sensors)", "where": "ESPHome devices on the home LAN; tool on som"},
+  {"id": "searxng", "names": ["searxng", "searx", "searxng/searxng"], "upstream": "GitHub searxng/searxng", "where": "som"},
+  {"id": "pocket-id", "names": ["pocket-id", "pocket-id/pocket-id", "github.com/pocket-id/pocket-id"], "upstream": "GitHub pocket-id/pocket-id (Go)", "where": "edi (the fleet's OIDC login)"},
+  {"id": "openwrt", "names": ["openwrt", "openwrt/openwrt", "luci", "dropbear", "dnsmasq", "uhttpd", "odhcpd"], "upstream": "OpenWrt (base of the GL.iNet firmware)", "where": "GL.iNet routers (Beryl), tools/router-*"},
+  {"id": "glinet", "names": ["gl-inet", "gl.inet", "glinet", "gl-mt3000", "gl-axt1800", "gl-mt6000", "beryl"], "upstream": "GL.iNet firmware advisories", "where": "home routers"},
+  {"id": "zerotier", "names": ["zerotierone", "zerotier-one", "zerotier"], "upstream": "ZeroTier One", "where": "every machine; controller on edi"},
+  {"id": "tailscale", "names": ["tailscale"], "upstream": "Tailscale", "where": "where enabled"},
+  {"id": "nextcloud", "names": ["nextcloud", "nextcloud/server"], "upstream": "Nextcloud server and apps", "where": "bam"},
+  {"id": "grafana", "names": ["grafana", "mimir", "loki", "alloy"], "upstream": "Grafana Labs", "where": "edi monitoring"},
+  {"id": "openssh", "names": ["openssh", "openssh-portable"], "upstream": "OpenSSH", "where": "every machine (protected: mitigate, never take down)"},
+  {"id": "nix", "names": ["nix", "nixos/nix", "lix"], "upstream": "Nix", "where": "every machine; som's daemon builds for tenants"},
+  {"id": "nginx", "names": ["nginx"], "upstream": "nginx", "where": "som, edi, bam"},
+  {"id": "linux", "names": ["linux", "linux_kernel", "kernel"], "upstream": "Linux kernel", "where": "every machine"}
+]

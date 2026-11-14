@@ -53,7 +53,7 @@ line already states a fact, confirm it with at most one grep and move on.
 | `modules/nixos/dave.nix` | Dave's desktops/workstations: amy, som, vit (huge import list) |
 | `modules/clan/<svc>/` | our own clan services (nix-cache incl. ncro, oidc/pocket-id, wireguard, remote-building, cctl) |
 | `hyperhermes/` | own flake (input `hyperhermes`): hermes agent modules, `lib/` (mkAgentSkill, sso), `checks/` |
-| `modules/nixos/infra-space/` | the fleet-admin container on som+amy and its hermes (skills, nightly bump) |
+| `modules/nixos/infra-space/` | the fleet-admin container on som+amy and its hermes (skills, nightly bump, security jobs) |
 | `modules/nixos/spaces/` | named agent spaces (geninf-space) |
 | `machines/som/hermes-*.nix` | som's hermes agents |
 | `vars/per-machine/<m>/<gen>/`, `vars/shared/<gen>/` | clan vars, public values only (secrets: external age store) |
@@ -119,6 +119,13 @@ the named owner and leave the copies to their unification.
 - substituters, ncro, nix-cache keys: `modules/clan/nix-cache/default.nix`.
 - nightly bump: `modules/nixos/infra-space/nixpkgs-bump{.nix,/}` (guard.sh
   denylists `denied_paths`/`denied_opts`; check `nixpkgs-bump-guard`).
+  Timer/unit/verdict runner shared by all agent jobs: `infra-space/agent-job.nix`.
+- security jobs (cve-watch daily 02:30, hygiene-report Sat 03:30,
+  security-audit Sun 03:30, Asia/Bangkok; all wait for the bump's lock):
+  `infra-space/security-jobs{.nix,/}` (Dave's policy + asking bar
+  `policy.md`, shared rules `common.md`, guard + check `sec-job-guard`,
+  decisions through the registry's `decision` CLI); takedowns as data
+  in `modules/nixos/security-takedown/takedowns.nix`.
 - skills shipped to agents: infra-space `infra-space/hermes.nix`
   (`nixSkills`), som agents `machines/som/hermes-agents.nix` (`skillDirs`),
   afk `hyper.afk.extraSkills`, personal `modules/nixos/skills/`.

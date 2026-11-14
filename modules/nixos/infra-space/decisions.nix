@@ -39,8 +39,8 @@
       decision daily: hands work items back, verifies "only Dave can"
       claims, obsoletes, merges, refreshes, re-ranks). A done run's
       session is archived: Dave sees nothing of it. Its bound is the
-      prompt plus its toolsets: `-t terminal,file` (no skills, no
-      delegation, no memory); terminal is still the agent's full shell
+      prompt plus its toolsets: `-t terminal,file,no_mcp` (no skill,
+      delegation or memory tools, no MCP servers); terminal is still the agent's full shell
       with the fleet root key, so the prompt and skill are what keep it
       to the registry.
     - decisions-brief.timer, 09:00 Asia/Bangkok: a script, no agent.
@@ -48,7 +48,8 @@
       open questions that cleared the bar (urgent first), a "decided for
       you since yesterday" count with two examples, the warning digest (space.decisions.digestCommand;
       a line when it could not be read), a line when last night's
-      nixpkgs bump failed (nobody is paged for that), "Recurring: N/M
+      nixpkgs bump or any other agent job failed (infraSpace.agentJobs,
+      ./agent-job.nix; besides its OnFailure= notice), "Recurring: N/M
       fresh" with a line per stale task, its age against its SLO
       (space.decisions.recurringCommand: edi's `recurring-json`, Mimir's
       view of ../recurring-tasks; always there, so the brief goes out
@@ -108,6 +109,11 @@ let
     ln -s ${cli} $out
   '';
   bin = "${decision}/bin/decision";
+  # Every unattended agent job (./agent-job.nix registers itself): the
+  # brief reports a failed or crashed last run of any of them.
+  jobsJson = pkgs.writeText "agent-jobs.json" (
+    builtins.toJSON (lib.mapAttrsToList (name: j: { inherit name; } // j) config.infraSpace.agentJobs)
+  );
 
   verdictOf = pkgs.writeShellScript "decisions-curate-verdict" ''
     last=$(${pkgs.gnugrep}/bin/grep -v -e '^[[:space:]]*$' -e '^session_id: [^ ]*$' "$1" | ${pkgs.coreutils}/bin/tail -n 1 || true)
@@ -138,8 +144,9 @@ let
     query=${curateDir}/last-prompt
     { cat ${curatePrompt}; echo "LOCAL_DATE=$(TZDIR=${pkgs.tzdata}/share/zoneinfo TZ=Asia/Bangkok date +%F)"; } >"$query"
     # Toolsets: the registry needs a shell and files; no skills (it must
-    # not patch any), no delegation (no children to bound).
-    /run/current-system/sw/bin/hermes chat -Q -s decisions-curate -t terminal,file --max-turns 400 \
+    # not patch any), no delegation (no children to bound), no MCP
+    # servers (no_mcp: hermes drops every configured one).
+    /run/current-system/sw/bin/hermes chat -Q -s decisions-curate -t terminal,file,no_mcp --max-turns 400 \
       --in ${curateDir} --query-file "$query" 2>&1 | tee "$log"
     rc=''${PIPESTATUS[0]}
     ls -1t ${curateDir}/*.log | tail -n +31 | xargs -r rm -f
@@ -187,7 +194,7 @@ let
         recurring=(--recurring-failed)
       fi
     ''}
-    ${bin} --by morning-brief brief --json --bump-log-dir ${home}/nixpkgs-bump "''${digest[@]}" "''${recurring[@]}" >"$tmp/brief.json" || exit 1
+    ${bin} --by morning-brief brief --json --bump-log-dir ${home}/nixpkgs-bump --jobs-json ${jobsJson} "''${digest[@]}" "''${recurring[@]}" >"$tmp/brief.json" || exit 1
     jq -r .text "$tmp/brief.json" >"$tmp/text"
     if ! grep -q '[^[:space:]]' "$tmp/text"; then
       echo "decisions-brief: nothing to say, nothing sent"

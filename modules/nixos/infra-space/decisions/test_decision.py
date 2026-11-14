@@ -858,6 +858,25 @@ class Registry(unittest.TestCase):
         self.assertFalse(decision.bump_failed(logs, at + timedelta(days=2)))
         self.assertFalse(decision.bump_failed(os.path.join(self.dir, "missing"), at))
 
+    def test_job_failed_lines(self):
+        at = datetime(2026, 11, 15, 2, 0, tzinfo=timezone.utc)
+        jobs = []
+        for name, tag, verdict in [("cve-watch", "CVE-WATCH", "quiet"), ("security-audit", "SECURITY-AUDIT", "failed"),
+                                   ("hygiene-report", "HYGIENE", None)]:
+            d = os.path.join(self.dir, name)
+            os.makedirs(d)
+            with open(os.path.join(d, "2026-11-14T2000Z.log"), "w") as f:
+                f.write("report\n" + (f"{tag}: {verdict}\n" if verdict else "") + "session_id: x\n")
+            jobs.append({"name": name, "logDir": d, "verdictTag": tag, "okVerdicts": ["quiet", "all-clear", "clean"]})
+        st = decision.Store(self.dir)
+        with st:
+            text, _ = decision.brief(st, None, at=at, jobs=jobs)
+        self.assertNotIn("cve-watch", text)
+        self.assertIn("security-audit failed in its last run", text)
+        # no verdict, no lock holder: crashed
+        self.assertIn("hygiene-report failed in its last run", text)
+        self.assertFalse(decision.job_failed(jobs[0]["logDir"], "CVE-WATCH", ["quiet"], at + timedelta(days=2)))
+
     def test_new_marker(self):
         st = decision.Store(self.dir)
         with st:

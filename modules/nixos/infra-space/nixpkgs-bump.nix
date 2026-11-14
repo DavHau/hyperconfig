@@ -30,7 +30,7 @@
   websocket (a keepalive timeout under load, a gateway restart) does not
   end the run either: the unit then follows the session in the agent's
   state.db until its turn ends, and resumes it when a restart cut it off
-  (`follow` below). Ending the run means stopping this unit first (or
+  (./agent-job-follow.sh, run by ./agent-job.nix). Ending the run means stopping this unit first (or
   the follower resumes the session), then ending the turn in the
   gateway (the dashboard, or restarting hermes-agent-infra, which this
   unit no longer follows, see below). What keeps a stray turn
@@ -48,11 +48,17 @@
   `NIXPKGS-BUMP: merged` or `unchanged` (hermes' trailing `session_id:`
   line aside), and nothing on main.
 
-  Known gap: nothing alerts on that failed unit. The fleet's
-  fleet-unit-failed alert (../monitoring-alerts.nix) reads the host's node
-  exporter, which sees som's units, not the container's; the guest runs
-  no exporter. Until there is a bridge, a failed night is seen in the
-  dashboard (sessions, source `oneshot`), the log, or by main not moving.
+  A failed unit shows as a stale recurring task (../recurring-tasks reads
+  the guest's units from som's host), OnFailure= files a notice for the
+  09:00 brief, and the brief says when the last run failed
+  (./agent-job.nix).
+
+  The run's toolsets are `-t terminal,file,todo,delegation,no_mcp`
+  (./agent-job.nix): no skill or memory tools and no MCP servers. Its
+  terminal can still write files as the infra user; this narrows, not
+  forbids, persistence into later sessions. The session's cwd
+  is ~/nixpkgs-bump (agent-job.nix's `--in`, the job's log dir), no
+  longer ~.
 
   Resources: the run's nix commands go through `nixpkgs-bump-nix`, nix
   with the bump's own max-jobs and cores, so som's nix.settings and
@@ -127,66 +133,6 @@ let
     repo = checkout;
   };
 
-  # The run's verdict: the report's last non-empty line, nothing earlier.
-  # `hermes chat -Q` ends its output with `session_id: <id>` (on stderr,
-  # which the log captures too): that line is hermes', not the report's.
-  # On the guest's PATH for ./test.nix, which checks it on sample logs.
-  verdict = pkgs.writeShellApplication {
-    name = "nixpkgs-bump-verdict";
-    runtimeInputs = [
-      pkgs.coreutils
-      pkgs.gnugrep
-    ];
-    text = ''
-      [ $# = 1 ] || { echo "usage: nixpkgs-bump-verdict <log>" >&2; exit 2; }
-      last=$(grep -v -e '^[[:space:]]*$' -e '^session_id: [^ ]*$' "$1" | tail -n 1 || true)
-      echo "''${last:-none}"
-      case "$last" in
-        "NIXPKGS-BUMP: merged" | "NIXPKGS-BUMP: unchanged") exit 0 ;;
-      esac
-      exit 1
-    '';
-  };
-
-  # The client is only a viewer of the turn (see the header): it ends
-  # with "Gateway disconnected; turn outcome is unknown" when the
-  # gateway drops its websocket (keepalive ping timeout under load:
-  # 2026-11-19 09:53, som at load ~100 from the agent's and fleet-bump's
-  # builds at once) or restarts, while the turn goes on, or is cut off by
-  # the restart and never re-run. Then the unit follows the session
-  # itself (./nixpkgs-bump/follow.sh): it waits for the turn in the
-  # agent's state.db, takes the report from the session, or resumes the
-  # session (`hermes chat --resume`) when the turn was cut off. The unit
-  # stays active all the while, so fleet-bump keeps waiting.
-  follow = pkgs.writeShellApplication {
-    name = "nixpkgs-bump-follow";
-    runtimeInputs = [
-      pkgs.coreutils
-      pkgs.gnugrep
-      pkgs.sqlite
-      config.systemd.package
-    ];
-    # No errexit: a failed resume or discard must not end the follower
-    # (it retries). The script's SQL holds the (validated) session id in
-    # single quotes.
-    bashOptions = [
-      "nounset"
-      "pipefail"
-    ];
-    text =
-      builtins.replaceStrings
-        [ "@hermesHome@" "@gatewayUnit@" "@maxResumes@" "@pollSec@" "@maxDbErrors@" "@verdict@" ]
-        [
-          (inputs.hyperhermes.lib.lockedHermesHome user)
-          "hermes-agent-${user}.service"
-          "3"
-          "30"
-          "20"
-          (lib.getExe verdict)
-        ]
-        (builtins.readFile ./nixpkgs-bump/follow.sh);
-  };
-
   # som has 32 threads: at most two builds of eight cores each, half the
   # machine. Plain nix sends the guest's own (max-jobs auto = 32, cores 0:
   # all); the daemon's nix.conf values never apply to daemon clients.
@@ -214,102 +160,55 @@ let
     exit $rc
   '';
 
-  run = pkgs.writeShellScript "nixpkgs-bump" ''
-    set -uo pipefail
-    umask 077
-    mkdir -p ${logDir}
-    # One client at a time, also when started by hand during a run.
-    exec 9>${logDir}/.lock
-    if ! flock -n 9; then
-      echo "nixpkgs-bump: another run holds ${logDir}/.lock" >&2
-      exit 1
-    fi
-    log=${logDir}/$(date -u +%FT%H%MZ).log
-    echo "nixpkgs-bump: report in $log"
-    cm_pi=0
-    if [ "$(TZDIR=${pkgs.tzdata}/share/zoneinfo TZ=Asia/Bangkok date +%u)" = 6 ]; then
-      cm_pi=1
-    fi
-    if [ -e ${cmPiFlag} ]; then
-      cm_pi=1
-      rm -f ${cmPiFlag}
-    fi
-    query=${logDir}/last-prompt
-    { cat ${prompt}; echo "CM_PI_BUILD=$cm_pi"; } >"$query"
-    # Logs of the last 60 runs.
-    ls -1t ${logDir}/*.log | tail -n +61 | xargs -r rm -f
-    # The agent's shim (core's agents.nix): HERMES_HOME and the gateway's
-    # environment, as in Dave's sessions. Hours of polling a mass rebuild
-    # outlast hermes' default of 500 tool calls per turn. --in is home,
-    # not the checkout: the run never works in the main checkout.
-    /run/current-system/sw/bin/hermes chat -Q -s nixpkgs-bump --max-turns 3000 \
-      --in ${home} --query-file "$query" 2>&1 | tee "$log"
-    rc=''${PIPESTATUS[0]}
-    last=$(${lib.getExe verdict} "$log") && [ "$rc" = 0 ] && exit 0
-    # No report at all: the client lost the turn (see `follow` above), or
-    # the turn was cut off. Wait for the session, resume it if it was cut
-    # off, and judge the report it ends with. A report that says failed
-    # is the run's verdict as it stands.
-    sid=$(grep -o '^session_id: [A-Za-z0-9_-]*$' "$log" | tail -n 1 | cut -d' ' -f2 || true)
-    case "$last" in "NIXPKGS-BUMP: "*) sid= ;; esac
-    if [ -n "$sid" ]; then
-      ${lib.getExe follow} "$sid" "$log" && exit 0
-      last=$(${lib.getExe verdict} "$log")
-      rc=resumed
-    fi
-    echo "nixpkgs-bump: failed (hermes exit $rc, last line: $last); see $log" >&2
-    exit 1
-  '';
-in
-{
-  # On the system PATH, which the gateway's commands (and subagents) end in.
-  environment.systemPackages = [
-    guard
-    workspace
-    verdict
-    follow
-    bumpNix
-    searxng
-  ];
-
-  systemd.services.nixpkgs-bump = {
+  # The timer, unit, log and verdict (`nixpkgs-bump-verdict`, on the
+  # guest's PATH for ./test.nix): ./agent-job.nix, shared with the security
+  # jobs (./security-jobs.nix). The log of the last 60 runs is kept.
+  job = import ./agent-job.nix { inherit config inputs lib pkgs; } {
+    name = "nixpkgs-bump";
     description = "Nightly nixpkgs-unstable bump of hyperconfig by the infra agent";
-    # wants, not requires: a gateway restart must not restart (re-run) the
-    # bump. Nor does a switch start one.
-    wants = [ "hermes-agent-${user}.service" ];
-    after = [ "hermes-agent-${user}.service" ];
-    restartIfChanged = false;
-    # The repository is cloned at boot once GitHub answers (./guest.nix).
-    unitConfig.ConditionPathExists = checkout;
-    path = [
-      pkgs.coreutils
-      pkgs.findutils
-      pkgs.gnugrep
-      pkgs.util-linux # flock
+    # 01:30 at Dave's (+07): the guest has no time zone of its own (UTC),
+    # so the calendar names it; systemd reads the zone from tzdata.
+    # nixpkgs-unstable has usually advanced by then, and the run is done
+    # by morning.
+    calendar = "*-*-* 01:30:00 Asia/Bangkok";
+    prompt = builtins.readFile prompt;
+    promptHook = ''
+      cm_pi=0
+      if [ "$(TZDIR=${pkgs.tzdata}/share/zoneinfo TZ=Asia/Bangkok date +%u)" = 6 ]; then
+        cm_pi=1
+      fi
+      if [ -e ${cmPiFlag} ]; then
+        cm_pi=1
+        rm -f ${cmPiFlag}
+      fi
+      echo "CM_PI_BUILD=$cm_pi" >>"$query"
+    '';
+    verdictTag = "NIXPKGS-BUMP";
+    okVerdicts = [
+      "merged"
+      "unchanged"
     ];
-    serviceConfig = {
-      Type = "oneshot";
-      User = user;
-      Group = user;
-      WorkingDirectory = home;
-      ExecStart = run;
-      # A mass rebuild of every machine takes hours; past this the client
-      # gives up. The turn itself goes on in the gateway (see above).
-      TimeoutStartSec = "16h";
-    };
+    # A mass rebuild of every machine takes hours; past this the client
+    # gives up. The turn itself goes on in the gateway (see above).
+    timeout = "16h";
+    # Hours of polling a mass rebuild outlast hermes' default of 500 tool
+    # calls per turn.
+    maxTurns = 3000;
+    # the follower's continue message (./agent-job-follow.sh)
+    resumeNote = " Never deploy.";
   };
-
-  systemd.timers.nixpkgs-bump = {
-    wantedBy = [ "timers.target" ];
-    timerConfig = {
-      # 01:30 at Dave's (+07): the guest has no time zone of its own (UTC),
-      # so the calendar names it; systemd reads the zone from tzdata.
-      # nixpkgs-unstable has usually advanced by then, and the run is done
-      # by morning.
-      OnCalendar = "*-*-* 01:30:00 Asia/Bangkok";
-      # A night som was down runs at the next boot.
-      Persistent = true;
-      RandomizedDelaySec = "15min";
-    };
-  };
-}
+in
+lib.mkMerge [
+  {
+    # On the system PATH, which the gateway's commands (and subagents) end in.
+    # The security jobs (./security-jobs.nix) wait for the bump's
+    # ~/nixpkgs-bump/.lock before they start, so their builds never overlap.
+    environment.systemPackages = [
+      guard
+      workspace
+      bumpNix
+      searxng
+    ];
+  }
+  job
+]

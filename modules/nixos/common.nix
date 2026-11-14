@@ -13,6 +13,7 @@
     ./fast-nix-gc.nix
     ./ghostty-terminfo.nix
     ./no-ca-derivations.nix
+    ./security-takedown
   ];
   users.mutableUsers = false;
 

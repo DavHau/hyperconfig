@@ -430,6 +430,11 @@
         fleet-bump = import ./modules/nixos/infra-space/fleet-bump/test.nix {
           pkgs = nixpkgs.legacyPackages.x86_64-linux;
         };
+        # The security jobs' pre-push guard and decision inbox CLI
+        # (scratch repo with a local origin, no network).
+        sec-job-guard = import ./modules/nixos/infra-space/security-jobs/guard-test.nix {
+          pkgs = nixpkgs.legacyPackages.x86_64-linux;
+        };
       };
     };
 }
