@@ -70,6 +70,10 @@ exactly unfortunately of course right sorry light living room bedroom kitchen ti
 """.split())
 NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 MAX_TEXT = 2000
+# hermes_conversation appends an invisible random marker to every reply so
+# HA's in-memory TTS cache (keyed by text) can't replay a soundbar reply's
+# silent placeholder; strip it (and stray zero-width marks at the end).
+MARKER = re.compile("[\u200b-\u200d\u2060-\u2064\ufeff\\s]+$")
 
 
 def guess_lang(text, spoken=None):
@@ -568,7 +572,7 @@ class Handler(AsyncEventHandler):
             return True
         t_req = time.perf_counter()
         syn = Synthesize.from_event(event)
-        text = " ".join(syn.text.split())
+        text = " ".join(MARKER.sub("", syn.text).split())
         lang = guess_lang(text, s.cat.last_spoken())
         v = await loop.run_in_executor(None, s.cat.voice_for, lang)
         bt = s.bt is not None and await loop.run_in_executor(None, s.bt.use)

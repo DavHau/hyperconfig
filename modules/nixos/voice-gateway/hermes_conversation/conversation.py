@@ -1,6 +1,7 @@
 """The conversation entity: one POST per turn to the voice-gateway."""
 
 import logging
+import secrets
 from pathlib import Path
 from typing import Literal
 
@@ -17,6 +18,26 @@ from .const import CONF_SECRET_FILE, CONF_URL
 
 _LOGGER = logging.getLogger(__name__)
 PARALLEL_UPDATES = 0
+
+# Invisible characters for the per-reply marker below; speech-tts on vit
+# strips a trailing run of them before synthesis (tts.py MARKER).
+_MARK = ("\u200b", "\u200c", "\u2060", "\u2063")
+
+
+def uncacheable(speech: str) -> str:
+    """Append an invisible random marker so no two replies share a text.
+
+    HA keeps synthesized speech in memory (>= 60 s, not configurable away)
+    keyed by the message text. With the soundbar as output speech-tts plays
+    the reply itself and hands HA a silent placeholder, so a repeated
+    sentence ("Okay, I'm listening.") came from that cache: silent. A
+    unique text is the one cache-key part every HA version keeps, and it
+    needs no HA internals.
+    """
+    if not speech.strip():
+        return speech
+    n = secrets.randbits(24)
+    return speech + "".join(_MARK[(n >> (2 * i)) & 3] for i in range(12))
 
 
 async def async_setup_entry(
@@ -79,7 +100,7 @@ class HermesConversationEntity(conversation.ConversationEntity, conversation.Abs
             _LOGGER.warning("voice-gateway failed: %s", e)
             speech, listen = "Sorry, the assistant is not reachable.", False
         chat_log.async_add_assistant_content_without_tools(
-            conversation.AssistantContent(agent_id=user_input.agent_id, content=speech)
+            conversation.AssistantContent(agent_id=user_input.agent_id, content=uncacheable(speech))
         )
         result = conversation.async_get_result_from_chat_log(user_input, chat_log)
         # The gateway decides whether the satellite reopens its microphone
