@@ -200,7 +200,7 @@ def wifi_out(iwinfo=IWINFO, brports=BRPORTS, **flags):
 
 IWINFO_BEFORE = wifi_out()
 # After the change: ra2 up with the iot SSID.
-IWINFO_AFTER_IW = IWINFO.replace('ra2       ESSID: unknown', 'ra2       ESSID: "BearHouse-Devices"')
+IWINFO_AFTER_IW = IWINFO.replace('ra2       ESSID: unknown', 'ra2       ESSID: "Macro"')
 AFTER_BRPORTS = (*BRPORTS, "ra2")
 IWINFO_AFTER = wifi_out(IWINFO_AFTER_IW, AFTER_BRPORTS, ra2="0x1303")
 # 7-Eleven's 2.4 GHz did not come back after `wifi reload`, though
@@ -225,7 +225,7 @@ IOT = {
     "netmask": "255.255.255.0",
     "wifiIface": "iot2g",
     "offIfaces": ["iot5g"],
-    "ssid": "BearHouse-Devices",
+    "ssid": "Macro",
     "encryption": "psk2+ccmp",
     "pskVar": "router-cm-beryl-iot/psk",
     "hosts": {"printer": {"ip": "192.168.18.20", "mac": None}},
@@ -700,7 +700,7 @@ class DesiredIot(unittest.TestCase):
         # (operstate 'unknown' does not matter); apcli0 is a client.
         self.assertEqual(apply.parse_wifi_up(IWINFO_BEFORE), {"ra0": "7-Eleven", "rax0": "7-Eleven"})
         self.assertEqual(apply.parse_wifi_up(IWINFO_AFTER),
-                         {"ra0": "7-Eleven", "ra2": "BearHouse-Devices", "rax0": "7-Eleven"})
+                         {"ra0": "7-Eleven", "ra2": "Macro", "rax0": "7-Eleven"})
 
     def test_down_slots_changing_essid_no_revert(self):
         router, wants = plan(self.uci, iwinfo=(IWINFO_BEFORE, IWINFO_DOWN_SLOTS_CHANGED))
@@ -725,7 +725,7 @@ class DesiredIot(unittest.TestCase):
         with mock.patch.object(apply.time, "monotonic", side_effect=iter(range(0, 10000, 30))):
             _, disarmed, err = self._apply(router, wants)
         self.assertEqual(disarmed, [])
-        self.assertRegex(str(err), "not broadcast: BearHouse-Devices")
+        self.assertRegex(str(err), "not broadcast: Macro")
 
     def test_radio_back_within_window_disarms(self):
         # Down on the first look after the reload, back on the second.

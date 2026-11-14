@@ -89,7 +89,7 @@
         # GL's prepared wifi-iface sections: 2.4 GHz on, 5 GHz stays off.
         wifiIface = "iot2g";
         offIfaces = [ "iot5g" ];
-        ssid = "BearHouse-Devices";
+        ssid = "Macro";
         # WPA2-PSK AES only, no PMF: the MF272dw has no WPA3.
         encryption = "psk2+ccmp";
         pskVar = "router-cm-beryl-iot/psk";
