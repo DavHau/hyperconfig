@@ -48,6 +48,11 @@
         # only the fallback should key login ever be refused.
         passwordVar = "router-cm-beryl/password";
       };
+      # Static DHCP leases on the Beryl, set by hand (uci dhcp host +
+      # dnsmasq reload; apply.py does not converge dhcp yet), pool .100-.249:
+      #   - tv: 38:26:56:72:7a:9a -> 192.168.8.204 (TCL Google TV; HA's
+      #     binary_sensor.tv_screen probes its port 6466 at this address)
+      #   - (pre-existing, unnamed) D8:BC:38:58:E7:C0 -> 192.168.8.10
       lan.ipv4 = "192.168.8.0/24";
       lan.ipv6 = null; # relayed provider prefix, no ULA
       routeLan = false;
