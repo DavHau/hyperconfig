@@ -365,6 +365,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/flake-parts/apps.site-routers-apply.nix — `nix run .#site-routers-apply -- [--dry-run] [home/playa/casa/<router> ...]`:
 - modules/flake-parts/clan-tests.nix — Clan service tests, exposed as checks.<system>.<name> via clan-core's test harness (container tests;
 - modules/flake-parts/hermes-onboard.nix — -
+- modules/flake-parts/hygiene.nix — Repo hygiene lint (../../tools/hygiene, rules in ../../CONVENTIONS.md):
 - modules/flake-parts/nixosConfigurations.nix — -
 - modules/flake-parts/porkbun-dns.nix — -
 - modules/flake-parts/repo-map.nix — The hyperconfig-map agent skill's generated part (../../skills/hyperconfig-map, ../../tools/repo-map):

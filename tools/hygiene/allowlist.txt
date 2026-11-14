@@ -1,0 +1,41 @@
+# Deliberate exceptions to tools/hygiene/hygiene.py (CONVENTIONS.md).
+# <kind> <path glob> [<detail glob>]   # reason
+# Every line must match a current violation (the check fails on stale
+# lines); sshkey-admin (a copy of an admin key) can never be allowed.
+# Unlike baseline.txt (debt to pay down), these stay.
+
+# ssh keys: registries of other people's / other hosts' keys, and test fixtures.
+sshkey machines/som/hermes-agents.nix               # tenants' own keys (pinpox, ...), per agent owner
+sshkey modules/nixos/users/*                        # per-person user modules are the registry for those people
+sshkey modules/github-host-keys.nix                 # host key registry (GitHub)
+sshkey modules/nixos/spaces/forge-host-keys.nix     # host key registry (forges)
+sshkey modules/nixos/spaces/geninf-space.nix        # geninf's CA and its own deploy keys (another clan)
+sshkey modules/nixos/storagebox.nix                 # Hetzner Storage Box host key
+sshkey machines/nas/users.nix                       # nas' own root and the old grmpf-nix backup client
+sshkey hyperhermes/checks/*                         # test keys
+sshkey *-test.nix                                   # test keys
+
+# dangling: fixture paths inside tests, sibling checkouts named in comments.
+dangling modules/nixos/infra-space/nixpkgs-bump/*-test.nix   # paths inside the test's scratch repo
+dangling modules/nixos/infra-space/test.nix ../testbox       # VM-side path
+dangling modules/nixos/entity-storage/test.nix *             # VM-side path
+dangling modules/nixos/afk.nix ../afk                        # sibling checkout ~/afk (flake input)
+dangling modules/nixos/ntop.nix ../ntop                      # sibling checkout ~/ntop (flake input)
+dangling modules/nixos/teamclaude-gateway/default.nix ../geninf/project-zero  # sibling checkout
+dangling * ./target                                          # cargo's ./target dir, prose
+dangling * ./target/*                                        # cargo's ./target dir, prose
+dangling machines/*/disko.nix ./secret.key                   # an installer CLI argument, prose
+dangling modules/nixos/hyprspace/default.nix ./config.json   # generator script's cwd
+dangling modules/nixos/nvidia-patchelf-split.nix ./builder.sh  # nixpkgs mkDerivation idiom, prose
+dangling modules/nixos/afk.nix ./forge-prs-skill             # literalExpression example
+dangling modules/flake-parts/nixvim/default.nix ./dev        # nixvim's own flake partition
+dangling modules/home-manager/firefox.nix ./blank.html       # commented-out setting
+dangling hyperhermes/modules/core/locked-config.nix ./.hermes/plugins  # path inside the agent's home
+dangling hyperhermes/modules/sso.nix ./A-Za-z0-9             # a regex character class
+dangling hyperhermes/pkgs/hermes-desktop/* *                 # paths inside the hermes-desktop source tree
+dangling machines/som/hermes-agents.nix ./hyperhermes        # the repo's hyperhermes/ dir, prose
+
+# generators: names that guard existing secrets; renaming means moving the
+# secret (CONVENTIONS.md: never rename a var that guards a disk).
+generator modules/nixos/infra-space/nixpkgs-bump/guard-test.nix x  # test fixture
+sshkey modules/nixos/agent-user.nix                 # defines the agent@amy key (the fleet `agent` user's registry)

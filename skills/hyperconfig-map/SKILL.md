@@ -65,6 +65,30 @@ for agents), bam (vault NFS server, nextcloud, inference VM), edi (cloud:
 pocket-id, grafana, zerotier controller), sgp (lends IPv4 to som), nas,
 joy, cm-pi (aarch64, Home Assistant), installer.
 
+## Mechanisms (concern -> THE module -> how to extend)
+
+If a feature resembles a row, extend that module: a new instance is data
+there, never a second copy (`CONVENTIONS.md`; a new mechanism needs a
+reason in the commit body). Rows marked *dup* still have copies: extend
+the named owner and leave the copies to their unification.
+
+| concern | owner | how to extend |
+|---|---|---|
+| disk unlock (zfs/luks root, tang, remote unlock) | `modules/nixos/zfs-remote-unlock/`, `luks-unlock/` + `tang-client.nix` (servers, `clevisPolicy`), `clan-unlock/`, `unlock-target.nix`; *dup*: nas's own tang bind, bam's `vault-key` keyfile | import the backend for the disk type, set `hyper.tangClient.servers`; vars `zfs-key`/`zfs-tang` or `luks-key`/`luks-tang`; never regenerate or rename them |
+| provider API keys for harnesses (afk/omp) | `modules/nixos/teamclaude-api-key.nix` pattern; *dup*: `openrouter-api-key.nix`, `inference-api-key.nix` | copy the teamclaude shape until the provider-key merge lands: `<name>-api-key` command, group of desktop user + `agent`, sbox bind in `sbox.nix`, `roFiles` in `houses-grmpf.nix`; reuse `openrouter/apikey` |
+| textfile metrics -> Mimir | `modules/nixos/monitoring-zfs-pools.nix` (timer -> `.prom.tmp` -> mv, `/etc/alloy/*.alloy`); *dup*: `teamclaude-gateway/metrics.nix`, `exec-usage/` | follow zfs-pools' shape; alert rules `monitoring-alerts.nix` |
+| per-owner loopback gate (`meta skuid`) on multi-tenant som | `modules/nixos/infra-space/default.nix` (`hyper.infraSpace` allow rules); *dup*: `spaces/host.nix`, `voice-gateway`, `zt-eu-lan-guard`, `mullvad-egress`, `nix-sandbox-strict`, hyperhermes `slots` | add a rule to the module guarding that port; any new 127.0.0.1 service on som gets one |
+| containers for agents/people | spaces: `modules/nixos/spaces/` (`registry.nix` = one entry per space); infra-space: `modules/nixos/infra-space/`; agent slots: `hyperhermes/modules/container-slots.nix` (`slotIds` in som's config); GUI from a container: `space-gui/` | a new space = an entry in `spaces/registry.nix` + `spaces/<name>.nix`; never a new container kind |
+| Dave's desktop apps and desktop user | `modules/nixos/dave-desktop/` (`hyper.daveDesktop.user`, amy: grmpf) | read `hyper.daveDesktop.user`, never `if users ? grmpf` |
+| SSO / pocket-id clients and users | `hyperhermes/lib/sso.nix` (`oidcClients`: clients as data) -> `services.hyperhermes.sso.oidcClients` (`hyperhermes/modules/sso.nix`); oidc instance in `modules/flake-parts/nixosConfigurations.nix` (users, groups); `modules/clan/oidc/` | add a client through `lib.sso.oidcClients` / `services.hyperhermes.sso.oidcClients`; *dup*: `wyoming-local-speech/voices-sso.nix` |
+| uid/gid registry | ladder in `modules/nixos/vault-ids.nix` header; agents `machines/som/hermes-agents-data.nix` | take the next free id from the ladder, list retired ones there |
+| subnet / index / port registry | `home-networks/sites.nix` (subnet claims), `spaces/registry.nix` (10.235.0 index, sshPort), `dave-desktop/apps.nix` (10.235.1 index), som `slotIds` (10.43.<id>) | claim it in the registry file first, never reuse a retired one |
+| ssh keys | Dave's: `modules/admin-ssh-keys.nix`; others: `modules/nixos/users/<name>.nix`, agent owners in `machines/som/hermes-agents.nix`; host keys `modules/github-host-keys.nix`, `spaces/forge-host-keys.nix` | import the registry file, never paste a key (`checks.hygiene` flags copies) |
+| hermes agent onboarding on som | `references/hermes-agents.md` (6 files today), `tools/hermes-onboard` | follow that list; the planned single agent entry will replace it |
+| secrets restarting their units | `modules/nixos/clan-vars-restart-units.nix` | set `restartUnits`; nothing else |
+| fleet-wide defaults | `modules/nixos/common.nix` (`lib.mkDefault`) | add there, not per machine |
+| substituters, cache keys | `modules/clan/nix-cache/` | its settings |
+
 ## Where concerns live (one line each)
 
 - afk/omp defaults: `modules/nixos/afk.nix` (`hyper.afk.defaultModel`,
@@ -111,8 +135,13 @@ joy, cm-pi (aarch64, Home Assistant), installer.
 - A new generator (prompted or not) blocks every deploy until generated.
 - som's toplevel drvPath changes on any repo edit (nginx references the
   source): don't treat that as a behaviour change.
-- New module = new file in `modules/nixos/` imported where needed; don't
-  inline features into existing files (repo rule).
+- New *mechanism* = new file in `modules/nixos/` imported where needed;
+  a new *instance* of an existing mechanism (Mechanisms table) is data in
+  its module, not a copy (`CONVENTIONS.md`).
+- `checks.x86_64-linux.hygiene` (`tools/hygiene/`, no eval) fails on new
+  unimported modules, dangling paths, off-scheme generator names, pasted
+  ssh keys and grown machine files; `nix run .#hygiene -- --report` lists
+  all current ones.
 - Exclude `.sbox/` from repo-wide greps (vendored state).
 - After adding/moving/renaming a module or changing its header's first
   line: `nix run .#repo-map` and commit `skills/hyperconfig-map/references/map-*.md`
