@@ -64,8 +64,9 @@ let
   withRoot = "env SSL_CERT_FILE=${pebbleRoot} REQUESTS_CA_BUNDLE=${pebbleRoot}";
 in
 pkgs.testers.runNixOSTest (
-  { nodes, ... }:
+  { containers, ... }:
   let
+    nodes = containers;
     serverIP = nodes.server.networking.primaryIPAddress;
     dnsIP = nodes.dnsserver.networking.primaryIPAddress;
     dnsHook = pkgs.writeShellScript "dns-hook" ''
@@ -80,7 +81,9 @@ pkgs.testers.runNixOSTest (
   {
     name = "hyperhermes-public";
 
-    nodes = {
+    # Container tests (systemd-nspawn, no VM): DNS, ACME, nginx and the
+    # logins need no kernel of their own.
+    containers = {
       dnsserver = {
         networking.firewall.allowedTCPPorts = [
           8055
@@ -104,9 +107,10 @@ pkgs.testers.runNixOSTest (
       server =
         { config, ... }:
         {
-          imports = [ self.nixosModules.default ];
-          virtualisation.memorySize = 4096;
-          virtualisation.diskSize = 8192;
+          imports = [
+            self.nixosModules.default
+            ../container-pam.nix
+          ];
           networking.nameservers = lib.mkForce [ dnsIP ];
           # lego talks to pebble's API under the test CA's own certificate.
           security.pki.certificateFiles = [ nodes.acme.test-support.acme.caCert ];
