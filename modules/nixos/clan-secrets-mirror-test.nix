@@ -6,7 +6,7 @@
 pkgs.testers.runNixOSTest {
   name = "clan-secrets-mirror";
 
-  nodes.machine = { lib, ... }: {
+  containers.machine = { lib, ... }: {
     imports = [ ./clan-secrets-mirror.nix ];
     # What clan would provide: the generator declaration is ignored here,
     # and a file:// remote needs no deploy key.
