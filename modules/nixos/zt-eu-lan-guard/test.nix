@@ -8,8 +8,10 @@ pkgs.testers.runNixOSTest {
   name = "zt-eu-lan-guard";
   globalTimeout = 600;
 
-  # 192.168.1.2 / 2001:db8:1::2 (nodes are numbered by name).
-  nodes.site = {
+  # Container tests (systemd-nspawn, no VM): the guard is an nftables
+  # table, which works in a container's own netns on the host kernel.
+  # 192.168.1.2 / 2001:db8:1::2 (machines are numbered by name).
+  containers.site = {
     networking.firewall.enable = false;
     networking.interfaces.eth1.ipv4.addresses = [
       {
@@ -32,7 +34,7 @@ pkgs.testers.runNixOSTest {
     };
   };
 
-  nodes.client =
+  containers.client =
     { pkgs, ... }:
     {
       imports = [ ./default.nix ];
