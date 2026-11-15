@@ -14,17 +14,62 @@
 # directory is gone, in the container and here; another user cannot run
 # the helper.
 #
+# Light/dark (./color-scheme.py): a stand-in for alice's session portal
+# (Settings, value from /tmp/host-scheme) says dark, then light; an app run
+# through space-gui sees it in the run's portal (ReadOne), its env and its
+# gtk settings.ini, nothing else of the portal; a running app's run follows
+# a change; dark when alice's session
+# has no portal, and a real Electron app's nativeTheme starts in the host's
+# scheme, dark and light.
+#
 # The container is set up like the isolated hermes desktops
 # (../dave-desktop/isolated-apps.nix): through ../spaces/host.nix with
 # hostNixDaemon = false, so this test also checks that the guest has no
 # way to the host's nix-daemon (no socket, no nix, a daemon client
 # refused) while the host's own client reaches it.
 { pkgs }:
+let
+  # The host session's portal Settings (the stand-in for alice's
+  # xdg-desktop-portal: same interface and replies, the value from
+  # /tmp/host-scheme), on alice's session bus.
+  colorScheme = pkgs.writeShellScript "color-scheme" ''
+    exec ${pkgs.python3.withPackages (p: [ p.dbus-fast ])}/bin/python3 ${./color-scheme.py} "$@"
+  '';
+  # What an app in the container sees of the light/dark preference:
+  # the run's portal, its env, its gtk settings.ini.
+  probe = pkgs.writeShellScript "scheme-probe" ''
+    out=$HOME/scheme-$1
+    {
+      echo "portal=$(${pkgs.systemd}/bin/busctl --user call org.freedesktop.portal.Desktop \
+        /org/freedesktop/portal/desktop org.freedesktop.portal.Settings ReadOne ss \
+        org.freedesktop.appearance color-scheme)"
+      echo "env=$SPACE_GUI_COLOR_SCHEME"
+      for d in ''${XDG_CONFIG_DIRS//:/ }; do
+        [ -f "$d/gtk-3.0/settings.ini" ] && echo "gtk3=$(grep prefer-dark "$d/gtk-3.0/settings.ini")" && break
+      done
+    } > $out.tmp
+    mv $out.tmp $out
+  '';
+  # A real Electron app: nativeTheme.shouldUseDarkColors once it is
+  # ready, to ~/electron-theme, then it quits.
+  electronApp = pkgs.writeTextDir "main.js" ''
+    const { app, nativeTheme } = require("electron");
+    const fs = require("fs");
+    app.whenReady().then(() => setTimeout(() => {
+      fs.writeFileSync(process.env.HOME + "/electron-theme", nativeTheme.shouldUseDarkColors ? "dark" : "light");
+      app.exit(0);
+    }, 1500));
+  '';
+  electronRun = pkgs.writeShellScript "electron-theme" ''
+    rm -f $HOME/electron-theme
+    exec ${pkgs.electron}/bin/electron --no-sandbox --disable-gpu --ozone-platform=wayland ${electronApp}/main.js
+  '';
+in
 pkgs.testers.runNixOSTest {
   name = "space-gui";
 
   nodes.machine =
-    { pkgs, ... }:
+    { lib, pkgs, ... }:
     let
       opener = pkgs.writeShellScript "test-opener" ''
         printf '%s\n' "$1" >> /tmp/opened
@@ -70,7 +115,25 @@ pkgs.testers.runNixOSTest {
         # the container's own user namespace needs an idmappable store
         (import ../spaces/test-daemon.nix { inherit pkgs; }).hostModule
       ];
-      virtualisation.memorySize = 2048;
+      virtualisation.memorySize = 3072;
+      # used by the test script only
+      system.extraDependencies = [
+        probe
+        electronRun
+      ];
+      # alice's session portal (Settings only), started by the test script
+      # and the only one: sway's default xdg-desktop-portal would be
+      # D-Bus activated by the helper's first read and own the name
+      xdg.portal.enable = lib.mkForce false;
+      systemd.user.services.host-portal = {
+        environment.SPACE_GUI_COLOR_SCHEME_FILE = "/tmp/host-scheme";
+        serviceConfig = {
+          ExecStart = "${colorScheme} portal";
+          # `systemctl start` returns once the name is owned
+          Type = "dbus";
+          BusName = "org.freedesktop.portal.Desktop";
+        };
+      };
       users.users.alice = {
         isNormalUser = true;
         uid = 1000;
@@ -255,6 +318,63 @@ pkgs.testers.runNixOSTest {
         )
         assert rc != 0, f"the guest built through the host's nix-daemon: {out}"
         print(out)
+
+    with subtest("light/dark: the host session's preference, dark by default, followed live"):
+        home = "/var/lib/gui-space/home"
+        def seen(word):
+            machine.succeed(f"rm -f {home}/scheme-{word}")
+            as_alice(f"space-gui gui ${probe} {word}")
+            out = machine.succeed(f"cat {home}/scheme-{word}")
+            print(word, out)
+            return out
+        def expect(out, dark):
+            assert f"portal=v u {1 if dark else 2}" in out, out
+            assert f"env={'dark' if dark else 'light'}" in out, out
+            assert f"gtk3=gtk-application-prefer-dark-theme={int(dark)}" in out, out
+        machine.succeed("echo dark > /tmp/host-scheme && chmod 644 /tmp/host-scheme")
+        as_alice("systemctl --user start host-portal")
+        def host_says(word):
+            # the stand-in reads its file once a second
+            machine.succeed(f"echo {word} > /tmp/host-scheme")
+            n = 1 if word == "dark" else 2
+            machine.wait_until_succeeds(
+                "su alice -c 'XDG_RUNTIME_DIR=/run/user/1000 busctl --user call org.freedesktop.portal.Desktop "
+                "/org/freedesktop/portal/desktop org.freedesktop.portal.Settings ReadOne ss "
+                f"org.freedesktop.appearance color-scheme' | grep -qx 'v u {n}'", timeout=30)
+        host_says("dark")
+        expect(seen("dark"), True)
+        host_says("light")
+        expect(seen("light"), False)
+        # the running flower run (started before alice's portal) follows
+        # every change: its file, which the run's portal serves and
+        # announces
+        machine.wait_until_succeeds(f"grep -qx light /run/space-gui/gui/{run}/color-scheme", timeout=15)
+        host_says("dark")
+        machine.wait_until_succeeds(f"grep -qx dark /run/space-gui/gui/{run}/color-scheme", timeout=15)
+        host_says("light")
+        machine.wait_until_succeeds(f"grep -qx light /run/space-gui/gui/{run}/color-scheme", timeout=15)
+        # the run's portal answers only that key
+        rc, out = machine.execute(
+            "su alice -c 'XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=$(cd /run/user/1000 && ls wayland-? | head -1) "
+            "space-gui gui ${pkgs.systemd}/bin/busctl --user call org.freedesktop.portal.Desktop "
+            "/org/freedesktop/portal/desktop org.freedesktop.portal.Settings ReadOne ss org.gnome.desktop.interface gtk-theme' 2>&1"
+        )
+        assert rc != 0, out
+        # no portal on the host: dark
+        as_alice("systemctl --user stop host-portal")
+        expect(seen("fallback"), True)
+
+        # A real Electron app starts in the host's scheme (Electron reads
+        # GTK's prefer-dark setting, not the portal: no live follow).
+        as_alice("systemctl --user start host-portal")
+        for word in ["dark", "light"]:
+            host_says(word)
+            machine.succeed(f"rm -f {home}/electron-theme")
+            try:
+                as_alice("space-gui gui ${electronRun}", timeout=120)
+                machine.succeed(f"grep -qx {word} {home}/electron-theme")
+            finally:
+                print(machine.execute(f"cat {home}/electron-theme; journalctl -M gui -o cat --no-pager | tail -15")[1])
 
     with subtest("the run is cleaned up when the client exits"):
         machine.succeed("systemctl stop flower")

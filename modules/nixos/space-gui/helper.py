@@ -23,6 +23,7 @@ into the container with:
 
 import json
 import os
+import pwd
 import re
 import secrets
 import signal
@@ -52,6 +53,82 @@ def log(msg: str) -> None:
 
 def run(*args: str, check: bool = True, **kw) -> subprocess.CompletedProcess:
     return subprocess.run(list(args), check=check, **kw)
+
+
+class ColorScheme:
+    """The host session's light/dark preference for the run (dark unless the
+    host says light). ./color-scheme.py host-watch runs as the host user on
+    their session bus and prints the portal's value and every change; each
+    one goes to the run directory's `color-scheme` file, which the run's own
+    portal in the container (./color-scheme.py portal) serves and announces.
+    The run's settings.ini (gtk-3.0, gtk-4.0) under xdg/ carries the value
+    at launch for apps that read no portal."""
+
+    def __init__(self, host_dir: Path):
+        self.host_dir = host_dir
+        self.word = "dark"
+        self.lock = threading.Lock()
+        self.ready = False
+        self.proc: subprocess.Popen | None = None
+        bus = f"/run/user/{CONF['hostUid']}/bus"
+        first = threading.Event()
+        if os.path.exists(bus):
+            try:
+                self.proc = subprocess.Popen(
+                    [CONF["colorScheme"], "host-watch"],
+                    user=CONF["hostUid"], group=pwd.getpwuid(CONF["hostUid"]).pw_gid, extra_groups=[],
+                    env={"DBUS_SESSION_BUS_ADDRESS": f"unix:path={bus}", "PATH": "/var/empty"},
+                    cwd="/", stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                    text=True,
+                )
+            except OSError as e:
+                log(f"cannot read the session's color scheme: {e}")
+        if self.proc:
+            threading.Thread(target=self.follow, args=(first,), daemon=True).start()
+            first.wait(3)  # no answer by then: dark, and a later one still counts
+        with self.lock:
+            self.ready = True
+            self.write(self.word)
+            self.write_settings()
+
+    def follow(self, first: threading.Event) -> None:
+        out = self.proc.stdout if self.proc else None
+        assert out
+        # short reads: the watcher runs as the host user, nothing it
+        # prints but `dark` or `light` counts
+        for line in iter(lambda: out.readline(16), ""):
+            word = line.strip()
+            if word in ("dark", "light"):
+                with self.lock:
+                    self.word = word
+                    if self.ready:
+                        self.write(word)
+                first.set()
+        first.set()
+
+    def _put(self, path: Path, text: str) -> None:
+        tmp = path.with_name(f".{path.name}.tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        os.replace(tmp, path)
+
+    def write(self, word: str) -> None:
+        self._put(self.host_dir / "color-scheme", word + "\n")
+
+    def write_settings(self) -> None:
+        dark = int(self.word == "dark")
+        for gtk in ("gtk-3.0", "gtk-4.0"):
+            d = self.host_dir / "xdg" / gtk
+            d.mkdir(parents=True, mode=0o755)
+            self._put(d / "settings.ini", f"[Settings]\ngtk-application-prefer-dark-theme={dark}\n")
+
+    def close(self) -> None:
+        if self.proc:
+            self.proc.kill()
+            self.proc.wait()
+        with self.lock:  # a follow thread mid-write can't recreate a file now
+            self.ready = False
 
 
 def leader(container: str) -> str:
@@ -306,8 +383,12 @@ def main() -> int:
 
     user_env = {"WAYLAND_DISPLAY": display}
     broker = Broker(container, c, pid, host_dir / "open.sock", user_env)
+    scheme: ColorScheme | None = None
     rc = 1
     try:
+        # inside the try: a stop during its up-to-3 s wait still cleans up
+        scheme = ColorScheme(host_dir)
+        log(f"{CONF['hostUser']}'s session prefers {scheme.word}")
         log(f"running {argv[0]} in {container} as {c['user']} ({unit})")
         rc = run(
             "systemd-run", "-M", container, f"--uid={c['user']}", f"--unit={unit}", "--collect", "--wait",
@@ -318,13 +399,22 @@ def main() -> int:
             "-E", f"SPACE_GUI_OPEN={guest_dir}/open.sock",
             "-E", f"PATH={CONF['shim']}/bin:/run/wrappers/bin:/etc/profiles/per-user/{c['user']}/bin:/run/current-system/sw/bin",
             "-E", f"HOME={c['home']}",
+            # the host session's light/dark preference (ColorScheme): the
+            # run's portal (started in front of the command) serves and
+            # follows the file; the env and the run's gtk settings.ini
+            # carry the launch-time value for apps that ask no portal
+            "-E", f"SPACE_GUI_COLOR_SCHEME={scheme.word}",
+            "-E", f"SPACE_GUI_COLOR_SCHEME_FILE={guest_dir}/color-scheme",
+            "-E", f"XDG_CONFIG_DIRS={guest_dir}/xdg:/etc/xdg:/etc/profiles/per-user/{c['user']}/etc/xdg:/run/current-system/sw/etc/xdg",
             "--", CONF["dbusRunSession"], f"--dbus-daemon={CONF['dbusDaemon']}",
-            f"--config-file={CONF['dbusSessionConf']}", "--", *argv,
+            f"--config-file={CONF['dbusSessionConf']}", "--", CONF["colorScheme"], "portal", "--", *argv,
             check=False,
         ).returncode
     except KeyboardInterrupt:
         run("systemctl", "-M", container, "stop", f"{unit}.service", check=False)
     finally:
+        if scheme:
+            scheme.close()
         broker.close()
         os.close(close_w)  # the compositor stops accepting on the socket
         shutil.rmtree(host_dir, ignore_errors=True)

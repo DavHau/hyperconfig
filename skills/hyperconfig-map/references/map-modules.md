@@ -298,6 +298,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/short-videos/short-videos.sh — !/usr/bin/env bash List video files in DIR (default: <- m/short-videos/default.nix
 - modules/nixos/skills/external-scripts/SKILL.md — >
 - modules/nixos/skills/project-init/SKILL.md — >
+- modules/nixos/space-gui/color-scheme.py — - <- m/space-gui/default.nix, m/space-gui/test.nix
 - modules/nixos/space-gui/default.nix — space-gui: GUI apps of a space container (infra-space, a hyper.spaces container, ...) on the host user's Wayland sessio… <- m/dave-desktop/default.nix, m/dave-desktop/isolated-apps.nix, m/space-gui/hermes-app.nix, m/space-gui/test.nix
 - modules/nixos/space-gui/helper.py — - <- m/space-gui/default.nix
 - modules/nixos/space-gui/hermes-app.nix — The hermes desktop app as a space-gui command (./default.nix): <- m/dave-desktop/isolated-apps.nix

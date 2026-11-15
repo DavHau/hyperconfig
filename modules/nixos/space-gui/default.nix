@@ -32,6 +32,28 @@
   XDG_RUNTIME_DIR, the user's HOME, and a private D-Bus session
   (dbus-run-session; no host bus).
 
+  Light/dark: the run follows the host session's preference, dark when it
+  cannot be read (./color-scheme.py, ./helper.py's ColorScheme). The helper
+  reads org.freedesktop.appearance color-scheme from the session's
+  xdg-desktop-portal as the host user (a watcher process on the host
+  user's bus, outside the container), and writes it to the run
+  directory's `color-scheme` file, again on every change. In the
+  container the run's private bus gets, before the command starts, a
+  minimal org.freedesktop.portal.Desktop (the command runs as its child)
+  that has only the Settings interface and
+  only that key, serves the file's value and announces its changes, so
+  apps that follow the portal (GTK 4/libadwaita, Qt 6) start in the
+  host's scheme and follow it live. Electron (43, the hermes desktop app)
+  does not ask the portal: it takes GTK's prefer-dark setting at launch,
+  which the run's gtk-3.0/gtk-4.0 settings.ini carries
+  (gtk-application-prefer-dark-theme, first on XDG_CONFIG_DIRS; the
+  user's own ~/.config overrides it), so it starts in the host's scheme
+  and changes with the next launch. The value is also in
+  SPACE_GUI_COLOR_SCHEME. Nothing flows from the container to the host:
+  the file is written by root, read-only in the guest, and only `dark` or
+  `light` from the watcher counts. An app's own persisted theme (e.g.
+  hermes-desktop's native-theme.json, set from its settings) still wins.
+
   What the opening gives a container: one restricted Wayland connection
   point. No X11, no PulseAudio/PipeWire, no host D-Bus, no /run/user, no
   /dev/dri (apps render in software: Electron with --disable-gpu or
@@ -70,12 +92,19 @@ let
 
   dbus = pkgs.dbus;
 
+  # The light/dark preference (./color-scheme.py): `host-watch` as the host
+  # user on their session bus, `portal` in the container on the run's bus.
+  colorScheme = pkgs.writeShellScript "space-gui-color-scheme" ''
+    exec ${pkgs.python3.withPackages (p: [ p.dbus-fast ])}/bin/python3 ${./color-scheme.py} "$@"
+  '';
+
   helperConfig = pkgs.writeText "space-gui.json" (
     builtins.toJSON {
       inherit (cfg) hostUser;
       hostUid = config.users.users.${cfg.hostUser}.uid;
       opener = cfg.opener;
       shim = "${shim}";
+      colorScheme = "${colorScheme}";
       dbusRunSession = "${dbus}/bin/dbus-run-session";
       dbusDaemon = "${dbus}/bin/dbus-daemon";
       dbusSessionConf = "${dbus}/share/dbus-1/session.conf";
