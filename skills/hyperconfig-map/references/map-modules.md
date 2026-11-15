@@ -226,7 +226,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/infra-space/decisions/SKILL.md — Walk Dave through the open decisions of the fleet's registry one at a time (urgent first), record his short answers and  <- m/infra-space/decisions.nix, m/infra-space/hermes.nix
 - modules/nixos/infra-space/decisions/decision.py — - <- m/infra-space/decisions.nix
 - modules/nixos/infra-space/decisions/test_decision.py — - <- m/infra-space/decisions.nix
-- modules/nixos/infra-space/decisions/curate/SKILL.md — The daily 08:00 curation of the decision registry - re-check every open decision, obsolete what no longer applies, merge <- m/infra-space/decisions.nix, m/infra-space/hermes.nix
+- modules/nixos/infra-space/decisions/curate/SKILL.md — The daily 08:00 curation of the decision registry - decide what does not need Dave, re-check every open decision, obsole <- m/infra-space/decisions.nix, m/infra-space/hermes.nix
 - modules/nixos/infra-space/hermes-skill/SKILL.md — Manage Dave's NixOS fleet from infra-space - change hyperconfig, push it, deploy machines with clan, reach the other inf <- m/infra-space/agent-tools.nix, m/infra-space/guest.nix, m/infra-space/hermes.nix
 - modules/nixos/infra-space/nixpkgs-bump/SKILL.md — The nightly nixpkgs-unstable bump of hyperconfig - update nixpkgs, build every machine, fix, review, guard, merge to mai <- m/infra-space/hermes.nix, m/infra-space/nixpkgs-bump.nix
 - modules/nixos/infra-space/nixpkgs-bump/guard-test.nix — ./guard.sh against a scratch repository, without network: <- flake.nix

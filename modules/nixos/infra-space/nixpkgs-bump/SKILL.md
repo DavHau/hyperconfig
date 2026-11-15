@@ -201,8 +201,8 @@ stripped sequence), the update is held back. Its last line:
   `read_file` strips or refuses, a character or mixed-script word the
   code rules hold, or `read_file` would show a part changed (the
   reason is in its output: put it in the report); it put the pin back
-  and filed (or refiled, with tonight's range and reason) a decision
-  for Dave. Skip 2b, go to 2c.
+  and recorded (or refiled, with tonight's range and reason) a decision,
+  decided with its recommendation. Skip 2b, go to 2c.
 - `FAIL`, or anything else: put nothing on the pin yourself; a failed
   night (as a failed gate).
 
@@ -297,8 +297,8 @@ again. Its last line:
 
 A line `SEARXNG-STUCK: ...` (from any SearXNG step: the third night in
 a row held back, or staying because upstream force-pushed away the aged
-tips) goes into the report verbatim, near the top; a decision
-for Dave is filed with it.
+tips) goes into the report verbatim, near the top; a decision is
+recorded with it (decided with its recommendation).
 
 Never edit the `searxng` node by hand, never write its files
 (`~/nixpkgs-bump/<workspace>.searxng-*`) yourself: the guard lets a
@@ -556,16 +556,22 @@ of the message is exactly one of
 
 with nothing after it. Anything else counts as failed.
 
-## Decisions for Dave
+## Decisions
 
-Anything only Dave can decide (a new machine to gate, a fix that needs a
-denied path, a workspace left for him) goes to the decision registry as
-well as into the report, so the morning brief carries it:
+End the report with your recommendation. A choice you made or recommend
+(a fix that needs a denied path, a workspace left over, a machine to
+gate) is recorded as decided, so the morning brief lists it under
+"decided for you" and a session dispatches the follow-up:
 
-    decision --by nixpkgs-bump add --title "<plain words, what he decides>" \
-      --why "<one or two lines>" --option "a) ..." --option "b) ..." \
-      --recommendation "<yours>" --still-relevant-if "<a checkable fact>" \
+    decision --by nixpkgs-bump decided --title "<plain words, what was decided>" \
+      --chose "<your recommendation>" --why "<one line>" \
       --source nixpkgs-bump --link ~/nixpkgs-bump/<log>
 
-The same title again only refiles the open one. A failed night by
-itself is not a decision; the report and the log cover it.
+Ask Dave (`decision add --needs-dave "<criterion>: <why>" --title ...
+--why ... --option "a) ..." --recommendation ... --still-relevant-if
+...`) only when it clears the bar, naming the criterion: money,
+identity, irreversible, access, noticeable (a change he will notice
+daily that he did not ask for) or conflict (with something he said);
+`decision add --help` lists them. Without one, `add` refuses. The same
+title again only refiles. A failed night by itself is not a decision;
+the report and the log cover it.

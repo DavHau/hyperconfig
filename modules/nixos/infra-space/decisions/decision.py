@@ -23,6 +23,21 @@ inbox lines to inbox.rejected.jsonl), log.jsonl rotated at LOG_MAX_BYTES
 (one old generation, log.jsonl.1), a bad inbox line of any kind is
 rejected alone and never stops the rest.
 
+The bar (Dave): only a question that needs something only he has is
+asked. `add` requires `--needs-dave "<criterion>: <why>"`, criterion one
+of NEEDS_DAVE; without it the caller decides itself and records that
+with `decided` (status answered, answer.auto: visible in the brief's
+"decided for you" line, never asked). An inbox line (untrusted: jobs
+read CVE feeds, changelogs) without needs_dave is decided only when it
+is not urgent, has a recommendation and no malformed needs_dave field;
+then its recommendation is the answer, by "inbox", marked unvetted (a
+session re-judges it before acting; its `chose` is ignored). Any other
+such line stays open without needs_dave ("unsorted", a line in the
+brief) until the curator sorts it: a missing or broken classification
+falls back to asking, never to deciding. `decide-default` turns an
+open question that does not clear the bar into a decided record, and
+vets an unvetted answer (the curator's and /decisions' tool).
+
 The store's path is fixed at build (@DIR@): no flag or variable points
 the CLI elsewhere; the unit tests call main(argv, store_dir=...).
 
@@ -37,6 +52,7 @@ import os
 import re
 import sys
 import time
+import unicodedata
 from datetime import datetime, timedelta, timezone
 
 DIR = "@DIR@"
@@ -59,6 +75,23 @@ BRIEF_NOTICES = 6
 # dates outside this are junk (and 0001-01-01 / 9999-12-31 overflow on
 # a time-zone shift)
 YEARS = (2000, 2200)
+# The bar for asking Dave at all: the only reasons a question reaches him.
+NEEDS_DAVE = {
+    "money": "spends his money or signs up in his name",
+    "identity": "exposes his identity or private data to a third party",
+    "irreversible": "irreversibly destroys data he may care about, no backup or undo",
+    "access": "gives another person access",
+    "noticeable": "a change he will notice in daily use that he did not ask for",
+    "conflict": "a real conflict with something he said",
+}
+# the brief: example titles in the "decided for you" line
+BRIEF_DECIDED_EXAMPLES = 2
+CRITERIA = "; ".join(f"{k} ({v})" for k, v in NEEDS_DAVE.items())
+DECIDE_YOURSELF = (
+    "this does not clear the bar for asking Dave. Decide it yourself with common sense and record it:\n"
+    "  decision decided --title '<what>' --chose '<what you chose>' --why '<one line>' --source <you>\n"
+    f"Ask Dave only with --needs-dave '<criterion>: <why>', criterion one of: {CRITERIA}"
+)
 
 
 class Fail(Exception):
@@ -87,8 +120,11 @@ def clean(value, kind):
         return ""
     if not isinstance(value, str):
         value = json.dumps(value) if isinstance(value, (dict, list)) else str(value)
-    # no control characters but newlines and tabs
-    value = "".join(c for c in value if c in "\n\t" or (ord(c) >= 32 and ord(c) != 127))
+    # no control characters but newlines and tabs, no format characters
+    # (bidi overrides could display a title reversed)
+    value = "".join(
+        c for c in value if c in "\n\t" or (ord(c) >= 32 and ord(c) != 127 and unicodedata.category(c) != "Cf")
+    )
     value = value.strip()
     if kind == "title":
         value = " ".join(value.split())
@@ -133,6 +169,25 @@ def parse_options(raw):
         for i, o in enumerate(out):
             o["key"] = "abcdefgh"[i]
     return out
+
+
+def parse_needs_dave(raw, why=None):
+    """{criterion, why} from a criterion plus `why`, "<criterion>: <why>"
+    or a dict; None when it does not name a criterion of NEEDS_DAVE with
+    a reason."""
+    if isinstance(raw, dict):
+        crit, why = raw.get("criterion"), raw.get("why")
+    elif isinstance(raw, str):
+        crit = raw
+        if not why and ":" in raw:
+            crit, _, why = raw.partition(":")
+    else:
+        return None
+    crit = str(crit or "").strip().lower()
+    why = clean(why, "short")
+    if crit not in NEEDS_DAVE or not why:
+        return None
+    return {"criterion": crit, "why": why}
 
 
 def parse_links(raw):
@@ -226,23 +281,94 @@ class Store:
 
     # -- creating -------------------------------------------------------
 
-    def create(self, fields, by, force_new=False):
-        """fields: a loose dict (CLI or inbox). Returns (decision, created?)."""
+    def create(self, fields, by, force_new=False, auto=False, inbox=False):
+        """fields: a loose dict (CLI or inbox). Returns (decision, created?).
+
+        A question for Dave needs a valid needs_dave (see NEEDS_DAVE).
+        Without one:
+          - auto=True (`decided`, a vetted caller): recorded as decided,
+            answered with fields["chose"] or its recommendation;
+          - inbox=True (a job's line: untrusted): decided only when it
+            is not urgent, has a recommendation and no malformed
+            needs_dave field (a refile also only while the registry's
+            copy is not urgent and not answered by Dave), answered with its recommendation by
+            "inbox", marked unvetted (a session re-judges it before
+            acting); `chose` is ignored. Anything else stays open
+            without needs_dave (unsorted: the curator sorts it);
+          - else Fail."""
         f = {re.sub(r"[-\s]+", "_", str(k).strip().lower()): v for k, v in fields.items()}
+        needs = parse_needs_dave(f.get("needs_dave"), f.get("needs_dave_why"))
+        if needs is None and not (auto or inbox):
+            raise Fail(DECIDE_YOURSELF)
+        # a needs_dave that is there but not valid ('money' without a
+        # why, an unknown criterion): a classification gone wrong, so
+        # it falls back to asking (open, unsorted), never to deciding
+        malformed = needs is None and any(f.get(k) not in (None, "") for k in ("needs_dave", "needs_dave_why"))
         title = clean(f.get("title"), "title")
         if not title:
             raise Fail("a decision needs a title")
-        urgency = str(f.get("urgency") or f.get("severity") or "normal").lower()
-        urgency = {"critical": "urgent", "high": "urgent", "medium": "normal", "info": "low"}.get(urgency, urgency)
+        # urgency and severity both count; the more urgent one wins (GHSA
+        # and CVSS spellings map onto ours)
+        level = {"critical": "urgent", "high": "urgent", "medium": "normal", "moderate": "normal", "info": "low"}
+        given = [str(f.get(k)).strip().lower() for k in ("urgency", "severity") if f.get(k) not in (None, "")]
+        given = [level.get(u, u) for u in given] or ["normal"]
+        urgency = next((u for u in URGENCIES if u in given), given[0])
         if urgency not in URGENCIES:
             raise Fail(f"urgency must be one of {URGENCIES}")
         source = clean(f.get("source") or f.get("source_job") or f.get("job") or by, "title")
         links = parse_links(f.get("links") or f.get("link"))
+        rec = clean(f.get("recommendation"), "short")
+        if inbox:
+            # only CLI `decided` names a choice; a job's line answers
+            # with its recommendation or not at all
+            f.pop("chose", None)
+            decides = needs is None and not malformed and urgency != "urgent" and bool(rec)
+            if malformed:
+                why_bad = f"needs_dave given but not valid ({clean(f.get('needs_dave'), 'title')!r}): left open for curation"
+            elif urgency == "urgent":
+                why_bad = "urgent without needs_dave: left open for curation, not decided"
+            else:
+                why_bad = "no needs_dave and no recommendation: left open for curation"
+        else:
+            decides = needs is None
         if not force_new:
             dup = self.find_duplicate(title)
             if dup:
                 dup["seen"] = dup.get("seen", 1) + 1
                 dup["updated"] = now()
+                a = dup.get("answer") or {}
+                if needs and not dup.get("needs_dave"):
+                    # now filed as a real question: one decided for him
+                    # (or filed before the bar) becomes his to answer
+                    dup["needs_dave"] = needs
+                    if a.get("auto"):
+                        self.note(dup, by, f"earlier decided by {a['by']} without asking: {a['text']}")
+                        dup["status"], dup["answer"] = "open", None
+                elif not needs and not dup.get("needs_dave") and (dup["status"] == "open" or a.get("auto")):
+                    if auto:
+                        # `decided` (vetted): its choice replaces an open
+                        # question's or an earlier automatic answer
+                        chose = clean(f.get("chose") or rec or "the default (no recommendation given)", "long")
+                        if dup["status"] == "open" or a.get("text") != chose or a.get("unvetted"):
+                            dup["answer"] = {"text": chose, "by": by, "at": now(), "auto": True}
+                            dup["status"] = "answered"
+                            self.note(dup, by, "common sense, not asked (decided on refile)")
+                    elif inbox and decides and dup["urgency"] != "urgent" and (dup["status"] == "open" or a.get("unvetted")):
+                        # tonight's recommendation is the answer (a new
+                        # one is unvetted again; the same one stays as
+                        # is)
+                        if dup["status"] == "open" or a.get("text") != rec:
+                            if a.get("text"):
+                                self.note(dup, by, f"automatic answer was ({a['by']}): {a['text']}")
+                            dup["answer"] = {"text": rec, "by": "inbox", "at": now(), "auto": True, "unvetted": True}
+                            dup["status"] = "answered"
+                    elif inbox and (malformed or urgency == "urgent" or dup["urgency"] == "urgent"):
+                        # refiled as urgent or with a broken needs_dave:
+                        # back to open, for the curator to sort
+                        if a.get("auto"):
+                            self.note(dup, by, f"earlier decided by {a['by']} without asking: {a['text']}")
+                            dup["status"], dup["answer"] = "open", None
+                        self.note(dup, by, why_bad if malformed or urgency == "urgent" else "urgent without needs_dave: left open for curation, not decided")
                 if source and source not in dup["sources"]:
                     dup["sources"].append(source)
                 for link in links:
@@ -255,9 +381,10 @@ class Store:
                 # the stale ones, the old value kept in a note (whole up to
                 # the long cap, else marked cut). A date stamp `(as of
                 # <date>)` alone is no news: no note, no change. An
-                # answered decision keeps what Dave answered.
-                for k, kind in (("why", "long"), ("still_relevant_if", "short"), ("range", "short")):
-                    if dup["status"] != "open":
+                # answered decision keeps what Dave answered (one decided
+                # without asking him keeps taking fresh facts).
+                for k, kind in (("why", "long"), ("still_relevant_if", "short"), ("range", "short"), ("recommendation", "short")):
+                    if dup["status"] != "open" and not (dup.get("answer") or {}).get("auto"):
                         break
                     v = clean(f.get(k), kind)
                     if not v or undated(v) == undated(dup.get(k) or ""):
@@ -278,7 +405,7 @@ class Store:
             "question": clean(f.get("question") or title, "short"),
             "why": clean(f.get("why") or f.get("why_it_matters"), "long"),
             "options": parse_options(f.get("options")),
-            "recommendation": clean(f.get("recommendation"), "short"),
+            "recommendation": rec,
             "urgency": urgency,
             "source": source,
             "sources": [source],
@@ -295,8 +422,29 @@ class Store:
             "notes": [],
             "seen": 1,
         }
+        if needs:
+            d["needs_dave"] = needs
+            self.put(d)
+            self.log("add", d["id"], by, source=source, title=title, needs_dave=needs["criterion"])
+            return d, True
+        if not decides:
+            # an inbox line that may not be decided automatically: open,
+            # unsorted (no needs_dave), counted in the brief until the
+            # curator sorts it
+            self.note(d, by, why_bad)
+            self.put(d)
+            self.log("add", d["id"], by, source=source, title=title, unsorted=True)
+            return d, True
+        if inbox:
+            # a job's recommendation, unvetted: a session re-judges it
+            # against the bar before acting on it
+            d["answer"] = {"text": rec, "by": "inbox", "at": now(), "auto": True, "unvetted": True}
+        else:
+            chose = clean(f.get("chose") or rec or "the default (no recommendation given)", "long")
+            d["answer"] = {"text": chose, "by": by, "at": now(), "auto": True}
+        d["status"] = "done" if f.get("done") and not inbox else "answered"
         self.put(d)
-        self.log("add", d["id"], by, source=source, title=title)
+        self.log("decided", d["id"], by, source=source, title=title, answer=d["answer"]["text"])
         return d, True
 
     def note(self, d, by, text, kind="short"):
@@ -383,7 +531,7 @@ class Store:
                 if obj.get("kind") == "notice":
                     self.add_notice(obj.get("text"), obj.get("source") or obj.get("source job") or by)
                     continue
-                results.append(self.create(obj, by))
+                results.append(self.create(obj, by, inbox=True))
             except Exception as e:  # one poison line must never wedge the registry
                 rejected.append({"error": f"{type(e).__name__}: {e}"[:200], "line": raw[:2000].decode("utf-8", "replace")})
         if rest_dropped:
@@ -454,6 +602,9 @@ def local(ts):
 
 def render(d):
     lines = [f"{d['id']} [{d['urgency']}, {d['status']}] {d['title']}"]
+    if d.get("needs_dave"):
+        nd = d["needs_dave"]
+        lines.append(f"Needs Dave ({nd['criterion']}): {nd['why']}")
     if d["question"] and d["question"] != d["title"]:
         lines.append(f"Question: {d['question']}")
     if d["why"]:
@@ -475,7 +626,10 @@ def render(d):
         lines.append(f"Deferred until {local(d['snooze_until'])}")
     if d["answer"]:
         a = d["answer"]
-        lines.append(f"Answer ({a['by']}, {local(a['at'])}): {a['text']}")
+        how = ", decided without asking Dave" if a.get("auto") else ""
+        if a.get("unvetted"):
+            how += "; a job's recommendation, unvetted: re-judge it before acting"
+        lines.append(f"Answer ({a['by']}, {local(a['at'])}{how}): {a['text']}")
     for n in d["notes"][-5:]:
         lines.append(f"Note ({n['by']}, {local(n['at'])}): {n['text']}")
     return "\n".join(lines)
@@ -538,12 +692,39 @@ def bump_running(log_dir):
         os.close(fd)
 
 
+def asks_dave(d):
+    """An open decision that cleared the bar (the only kind he is asked)."""
+    return d["status"] == "open" and bool(d.get("needs_dave"))
+
+
+def unsorted(d):
+    """An open decision without needs_dave: the curator has not sorted it
+    yet (decide it or name the criterion)."""
+    return d["status"] == "open" and not d.get("needs_dave")
+
+
+def decided_for_him(store, at, hours=24):
+    """Decisions agents made without asking, in the last `hours`, newest first."""
+    out = []
+    for d in store.all():
+        a = d.get("answer") or {}
+        t = parse_time(a.get("at") or "") if a.get("auto") else None
+        if t and timedelta(0) <= at - t <= timedelta(hours=hours):
+            out.append(((t, int(d["id"][1:])), d))
+    return [d for _, d in sorted(out, key=lambda x: x[0], reverse=True)]
+
+
 def brief(store, digest, at=None, digest_failed=False, bump_log_dir=None):
     """The morning brief: (text, notice ids shown). Empty text = nothing
-    to send. Notices beyond BRIEF_NOTICES stay for the next brief."""
+    to send. Notices beyond BRIEF_NOTICES stay for the next brief.
+    Only decisions that cleared the bar (needs_dave) are listed; the
+    ones agents decided for him are one line with a count, open ones
+    without needs_dave (not yet sorted by the curator) another."""
     at = at or datetime.now(timezone.utc)
-    open_ = sorted([d for d in store.all() if d["status"] == "open"], key=sort_key)
+    open_ = sorted([d for d in store.all() if asks_dave(d)], key=sort_key)
     shown = [d for d in open_ if d["urgency"] == "urgent" or not snoozed(d, at)][:3]
+    decided = decided_for_him(store, at)
+    n_unsorted = sum(1 for d in store.all() if unsorted(d))
     notices = store.notices()
     warnings = digest_lines(digest)
     parts = []
@@ -557,6 +738,12 @@ def brief(store, digest, at=None, digest_failed=False, bump_log_dir=None):
             parts.append(f"- {tag}{d['title']}{fresh}")
         if n > len(shown):
             parts.append(f"- and {n - len(shown)} more")
+    if decided:
+        ex = ", ".join(undated(d["title"]) for d in decided[:BRIEF_DECIDED_EXAMPLES])
+        parts.append(f"Decided for you since yesterday: {len(decided)} (e.g. {ex}; ask to see all)")
+    if n_unsorted:
+        # nothing hides when the curation failed or has not run yet
+        parts.append(f"{n_unsorted} unsorted (curation pending)")
     if warnings:
         if parts:
             parts.append("")
@@ -628,8 +815,12 @@ def main(argv=None, store_dir=DIR):
                    help="who acts (dave, curator, a job's name); default $DECISION_BY or 'agent'")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    a = sub.add_parser("add", help="file a decision (same title as an open one: refiles that one)")
+    a = sub.add_parser("add", help="ask Dave (only with --needs-dave; anything else: `decided`)")
     a.add_argument("--title", help="plain words, one line, what Dave decides")
+    a.add_argument("--needs-dave", metavar="CRITERION",
+                   help=f"why only Dave can answer, one of: {', '.join(NEEDS_DAVE)}; "
+                   "with --needs-why, or as 'criterion: why'. Without it, add refuses")
+    a.add_argument("--needs-why", help="one line: how this question meets the criterion")
     a.add_argument("--question")
     a.add_argument("--why", help="why it matters / what it costs to wait")
     a.add_argument("--option", action="append", dest="options", help="repeatable: 'a) text'")
@@ -642,9 +833,26 @@ def main(argv=None, store_dir=DIR):
     a.add_argument("--json", dest="json_in", metavar="FILE", help="read the fields as a JSON object from FILE ('-' = stdin)")
     a.add_argument("--force-new", action="store_true", help="never merge into an open one of the same title")
 
+    dd = sub.add_parser("decided", help="record a decision you made yourself (visible in the brief, never asked)")
+    dd.add_argument("--title", required=True, help="plain words, one line, what was decided")
+    dd.add_argument("--chose", required=True, help="what you chose")
+    dd.add_argument("--why", required=True, help="one line: why that is the sane choice")
+    dd.add_argument("--option", action="append", dest="options", help="repeatable: the alternatives, 'a) text'")
+    dd.add_argument("--source", help="job, agent or session id")
+    dd.add_argument("--link", action="append", dest="links", help="repeatable: commit, report path, file")
+    dd.add_argument("--follow-up", help="what still has to happen")
+    dd.add_argument("--done", action="store_true", help="nothing left to do (status done, not answered)")
+
+    dg = sub.add_parser("decide-default", help="an open question that does not clear the bar: answer it with its recommendation; "
+                        "also vets an unvetted automatic answer (a job's recommendation) after re-judging it")
+    dg.add_argument("id")
+    dg.add_argument("--note", help="default 'common sense, not asked'; REQUIRED when the decision carries needs_dave: "
+                    "why that criterion does not apply")
+
     ls = sub.add_parser("list", help="list decisions, urgent first")
-    ls.add_argument("--status", default="open", choices=STATUSES + ["all", "pending"],
-                    help="pending = open + answered (default: open)")
+    ls.add_argument("--status", default="open", choices=STATUSES + ["all", "pending", "decided", "unvetted"],
+                    help="pending = open + answered, decided = decided without asking Dave, "
+                    "unvetted = answered with a job's recommendation nobody re-judged yet (default: open)")
     ls.add_argument("--json", action="store_true")
     ls.add_argument("--count", action="store_true")
 
@@ -671,6 +879,8 @@ def main(argv=None, store_dir=DIR):
     ro = sub.add_parser("reopen", help="back to open (answer kept in the notes)")
     ro.add_argument("id")
     ro.add_argument("--note", default="")
+    ro.add_argument("--needs-dave", metavar="'CRITERION: WHY'",
+                    help="make it a question for Dave (one decided without asking him that he wants to answer himself)")
 
     up = sub.add_parser("update", help="refresh fields (curator)")
     up.add_argument("id")
@@ -679,6 +889,8 @@ def main(argv=None, store_dir=DIR):
     up.add_argument("--urgency", choices=URGENCIES)
     up.add_argument("--options-json", help='replace the options: a JSON list, e.g. ["a) x", "b) y"]')
     up.add_argument("--add-link", action="append", default=[])
+    up.add_argument("--needs-dave", metavar="'CRITERION: WHY'",
+                    help="set why only Dave can answer (curator: an old question that clears the bar)")
     up.add_argument("--note", help="why it changed")
 
     mg = sub.add_parser("merge", help="duplicate: mark DUP obsolete, fold its sources/links into KEEP")
@@ -724,20 +936,71 @@ def run(st, args, by, ingested):
                 raise Fail("the JSON must be an object")
         else:
             fields = {}
-        for k in ("title", "question", "why", "options", "recommendation", "source", "still_relevant_if", "links", "follow_up"):
+        for k in ("title", "question", "why", "options", "recommendation", "source", "still_relevant_if", "links", "follow_up", "needs_dave"):
             v = getattr(args, k)
             if v:
                 fields[k] = v
+        if args.needs_why:
+            fields["needs_dave_why"] = args.needs_why
         if args.urgency != "normal" or "urgency" not in fields:
             fields["urgency"] = args.urgency
         d, created = st.create(fields, by, force_new=args.force_new)
         print(d["id"] if created else f"{d['id']} (already open: refiled)", file=out)
         return 0
 
+    if args.cmd == "decided":
+        fields = {"chose": args.chose, "done": args.done}
+        for k in ("title", "why", "options", "source", "links", "follow_up"):
+            v = getattr(args, k)
+            if v:
+                fields[k] = v
+        fields["recommendation"] = args.chose
+        dup = st.find_duplicate(clean(args.title, "title"))
+        if dup and dup["status"] == "answered" and not (dup.get("answer") or {}).get("auto"):
+            # Dave (or someone by hand) answered it: his answer stays
+            print(f"{dup['id']} is already answered by {dup['answer']['by']}: {dup['answer']['text'][:80]}; not decided", file=out)
+            return 1
+        d, created = st.create(fields, by, auto=True)
+        if d["status"] == "open":
+            # same title as a question that cleared the bar: stays his
+            print(f"{d['id']} is open as a question for Dave ({d['needs_dave']['criterion']}); not decided", file=out)
+            return 1
+        print(d["id"] if created else f"{d['id']} (same title: refiled)", file=out)
+        return 0
+
+    if args.cmd == "decide-default":
+        d = st.get(args.id)
+        a = d.get("answer") or {}
+        vetting = d["status"] == "answered" and a.get("unvetted")
+        if d["status"] != "open" and not vetting:
+            raise Fail(f"{d['id']} is {d['status']}")
+        if d.get("needs_dave") and not (args.note or "").strip():
+            nd = d["needs_dave"]
+            raise Fail(f"{d['id']} was filed as needing Dave ({nd['criterion']}: {nd['why']}); "
+                       "say with --note why that criterion does not apply")
+        if not d["recommendation"]:
+            raise Fail(f"{d['id']} has no recommendation: decide it yourself with `decision answer {d['id']} <choice>`")
+        if vetting and a.get("text") != d["recommendation"]:
+            st.note(d, by, f"automatic answer was ({a['by']}): {a['text']}")
+        d["answer"] = {"text": d["recommendation"], "by": by, "at": now(), "auto": True}
+        d["status"], d["snooze_until"] = "answered", None
+        note = args.note or ("common sense, vetted" if vetting else "common sense, not asked")
+        args.note = note
+        st.note(d, by, note)
+        d["updated"] = now()
+        st.put(d)
+        st.log("decide-default", d["id"], by, answer=d["recommendation"], note=clean(args.note, "short"))
+        print(f"{d['id']}: answered ({d['recommendation']})", file=out)
+        return 0
+
     if args.cmd == "list":
         ds = st.all()
         if args.status == "pending":
             ds = [d for d in ds if d["status"] in ("open", "answered")]
+        elif args.status == "decided":
+            ds = [d for d in ds if (d.get("answer") or {}).get("auto")]
+        elif args.status == "unvetted":
+            ds = [d for d in ds if d["status"] == "answered" and (d.get("answer") or {}).get("unvetted")]
         elif args.status != "all":
             ds = [d for d in ds if d["status"] == args.status]
         ds.sort(key=lambda d: (snoozed(d) and d["urgency"] != "urgent",) + sort_key(d))
@@ -749,6 +1012,10 @@ def run(st, args, by, ingested):
         else:
             for d in ds:
                 flag = " (deferred)" if snoozed(d) else ""
+                if d["status"] == "open" and not d.get("needs_dave"):
+                    flag += " (unsorted, no needs-dave: decide-default it or name the criterion)"
+                elif (d.get("answer") or {}).get("auto"):
+                    flag += f" (decided by {d['answer']['by']}{', unvetted' if d['answer'].get('unvetted') else ''}: {d['answer']['text'][:60]})"
                 print(f"{d['id']:>5}  {d['urgency']:<6}  {d['status']:<8}  {d['title']}{flag}", file=out)
         return 0
 
@@ -789,6 +1056,11 @@ def run(st, args, by, ingested):
             if d["answer"]:
                 st.note(d, by, f"earlier answer ({d['answer']['by']}): {d['answer']['text']}")
             d["status"], d["answer"], d["snooze_until"] = "open", None, None
+            if args.needs_dave:
+                needs = parse_needs_dave(args.needs_dave)
+                if needs is None:
+                    raise Fail("--needs-dave: '<criterion>: <why>', criterion one of " + ", ".join(NEEDS_DAVE))
+                d["needs_dave"] = needs
             if args.note:
                 st.note(d, by, args.note)
             detail = {"note": args.note}
@@ -806,6 +1078,11 @@ def run(st, args, by, ingested):
                 except ValueError as e:
                     raise Fail(f"bad --options-json: {e}")
                 detail["options"] = d["options"]
+            if args.needs_dave:
+                needs = parse_needs_dave(args.needs_dave)
+                if needs is None:
+                    raise Fail("--needs-dave: '<criterion>: <why>', criterion one of " + ", ".join(NEEDS_DAVE))
+                d["needs_dave"] = detail["needs_dave"] = needs
             for link in parse_links(args.add_link):
                 if link not in d["links"] and len(d["links"]) < MAX_LINKS:
                     d["links"].append(link)

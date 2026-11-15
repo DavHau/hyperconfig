@@ -20,8 +20,8 @@
 #     minified assets and translations excluded by extension, their diff
 #     shown after the code, capped) over @maxDiffLines@ or code bytes over
 #     @maxDiffBytes@, a searx/data diff too big to show whole, or a symlink
-#     in the new tree that escapes the counted diff: the pin goes back, a
-#     decision for Dave is filed. The pick file holds old, new, the diff
+#     in the new tree that escapes the counted diff: the pin goes back and
+#     a decision is recorded (decided with its recommendation, see decide). The pick file holds old, new, the diff
 #     file's hash and the parts' (count, hash), which review and the guard
 #     check. When the aged tip holds, the pick walks back over master's
 #     first-parent commits between the pin and that tip (GitHub's
@@ -119,8 +119,11 @@ revert() {
 
 # One JSON line for the decision registry (its inbox; the registry's
 # curation takes it in), or a pending file when the registry is not there.
-# The same title refiles the open decision with this night's why,
-# still_relevant_if and range (decision.py: a refile updates them).
+# No needs_dave: none of these clears the bar for asking Dave (a review
+# to have done, a pin to keep), so the registry records each as decided
+# with its recommendation, shown in the brief's "decided for you" line,
+# and a session dispatches the follow-up. The same title refiles it with
+# this night's why, still_relevant_if and range (decision.py).
 decide() { # title why recommendation still-relevant-if range option...
   local title=$1 why=$2 rec=$3 still=$4 range=$5 inbox=@decisionInbox@ line
   shift 5
@@ -129,10 +132,10 @@ decide() { # title why recommendation still-relevant-if range option...
     '{title: $t, why: $w, options: $ARGS.positional, recommendation: $r,
       source: $src, date: $d, still_relevant_if: $s, range: $g}' --args "$@")
   if [ -d "$(dirname "$inbox")" ] && echo "$line" >>"$inbox"; then
-    say "decision filed for Dave: $title"
+    say "decision recorded (decided by default: $rec): $title"
   else
     echo "$line" >>"$logDir/decisions-pending.jsonl"
-    say "decision for Dave NOT in the registry (no $(dirname "$inbox")), kept in $logDir/decisions-pending.jsonl: $title"
+    say "decision NOT in the registry (no $(dirname "$inbox")), kept in $logDir/decisions-pending.jsonl: $title"
   fi
 }
 

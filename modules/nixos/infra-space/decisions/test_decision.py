@@ -31,6 +31,10 @@ class Registry(unittest.TestCase):
         self.assertEqual(rc, 0, err)
         return out
 
+    def ask(self, *argv, **kw):
+        """`add` of a question that clears the bar"""
+        return self.ok("add", "--needs-dave", "money: test", *argv, **kw)
+
     def inbox(self, *objs, raw=None):
         with open(os.path.join(self.dir, "inbox.jsonl"), "a") as f:
             for o in objs:
@@ -46,7 +50,7 @@ class Registry(unittest.TestCase):
         return json.loads(self.ok("show", did, "--json"))
 
     def test_add_show_answer_close(self):
-        did = self.ok("add", "--title", "Buy a proxy", "--option", "a) Decodo", "--option", "b) Evomi",
+        did = self.ask("--title", "Buy a proxy", "--option", "a) Decodo", "--option", "b) Evomi",
                       "--recommendation", "a", "--urgency", "low", "--source", "research").strip()
         self.assertEqual(did, "D1")
         d = self.show("D1")
@@ -66,8 +70,8 @@ class Registry(unittest.TestCase):
         self.assertEqual([json.loads(x)["action"] for x in log], ["add", "answer", "close"])
 
     def test_same_title_refiles(self):
-        self.ok("add", "--title", "Backup of dave-hermes?", "--source", "a")
-        out = self.ok("add", "--title", "backup of DAVE-hermes", "--source", "b", "--urgency", "urgent")
+        self.ask("--title", "Backup of dave-hermes?", "--source", "a")
+        out = self.ask("--title", "backup of DAVE-hermes", "--source", "b", "--urgency", "urgent")
         self.assertIn("refiled", out)
         d = self.show("D1")
         self.assertEqual(d["sources"], ["a", "b"])
@@ -90,16 +94,16 @@ class Registry(unittest.TestCase):
         self.assertIn("range was: aaaa..bbbb", notes)
         self.assertIn("Range: aaaa..cccc", self.ok("show", "D1"))
         # a refile without them keeps them
-        self.ok("add", "--title", t, "--source", "x")
+        self.ask("--title", t, "--source", "x")
         self.assertEqual(self.show("D1")["range"], "aaaa..cccc")
 
     def test_refile_date_only_long_why_and_answered(self):
         t = "SearXNG update held back from the nightly review"
         long_why = "x" * 3000 + " (as of 2026-11-14) end"
-        self.inbox({"title": t, "why": long_why, "range": "a..b"})
+        self.inbox({"title": t, "why": long_why, "range": "a..b", "recommendation": "keep"})
         self.ok("list")
         # only the `(as of <date>)` part changed: no note, why kept
-        self.inbox({"title": t, "why": long_why.replace("2026-11-14", "2026-11-15"), "range": "a..b"})
+        self.inbox({"title": t, "why": long_why.replace("2026-11-14", "2026-11-15"), "range": "a..b", "recommendation": "keep"})
         self.ok("list")
         d = self.show("D1")
         self.assertEqual((d["why"], d["notes"]), (long_why, []))
@@ -108,6 +112,7 @@ class Registry(unittest.TestCase):
         self.ok("list")
         d = self.show("D1")
         self.assertIn(f"why was: {long_why}", [n["text"] for n in d["notes"]])
+        self.assertEqual((d["status"], d["answer"]["text"]), ("answered", "keep"))
         # over the long cap: the note says it was cut
         self.inbox({"title": t, "why": "y" * 3999})
         self.ok("list")
@@ -126,7 +131,7 @@ class Registry(unittest.TestCase):
         self.inbox(
             {"id": "abc", "title": "Take down X?", "why": "CVE", "options": ["a) yes", "b) no"],
              "recommendation": "a", "source": "cve-watch", "severity": "critical",
-             "date": "2026-11-14", "still_relevant_if": "X still runs"},
+             "date": "2026-11-14", "still_relevant_if": "X still runs", "needs_dave": "noticeable: X goes away"},
             {"kind": "notice", "text": "stopped foo.service on bam (CVE-1)", "source": "cve-watch"},
             [1, 2],
             raw="{not json\n" + "x" * (decision.INBOX_MAX_LINE + 1) + "\n",
@@ -144,10 +149,10 @@ class Registry(unittest.TestCase):
 
     def test_ingest_caps_new_entries(self):
         self.inbox(*[{"title": f"t{i}"} for i in range(decision.MAX_ITEMS_PER_INGEST + 5)])
-        self.assertEqual(self.ok("list", "--count").strip(), str(decision.MAX_ITEMS_PER_INGEST))
+        self.assertEqual(self.ok("list", "--status", "all", "--count").strip(), str(decision.MAX_ITEMS_PER_INGEST))
 
     def test_caps_and_control_chars(self):
-        self.ok("add", "--title", "a\x1b[31m" + "t" * 500, "--why", "w" * 10000)
+        self.ask("--title", "a\x1b[31m" + "t" * 500, "--why", "w" * 10000)
         d = self.show("D1")
         self.assertNotIn("\x1b", d["title"])
         self.assertLessEqual(len(d["title"]), decision.CAP["title"])
@@ -160,8 +165,8 @@ class Registry(unittest.TestCase):
             self.assertIn("not a decision id", err)
 
     def test_obsolete_merge_reopen_defer_update(self):
-        self.ok("add", "--title", "one")
-        self.ok("add", "--title", "two", "--source", "s2", "--link", "L")
+        self.ask("--title", "one")
+        self.ask("--title", "two", "--source", "s2", "--link", "L")
         self.ok("merge", "D2", "D1")
         self.assertEqual(self.show("D2")["status"], "obsolete")
         self.assertEqual(self.show("D1")["links"], ["L"])
@@ -176,11 +181,266 @@ class Registry(unittest.TestCase):
         rc, _, _ = self.cli("update", "D1")
         self.assertEqual(rc, 1)
 
+    def test_add_without_needs_dave_refused(self):
+        rc, out, err = self.cli("add", "--title", "Test priming dictation?", "--option", "a) measure first",
+                                "--recommendation", "a")
+        self.assertEqual(rc, 1)
+        self.assertIn("decision decided --title", err)
+        self.assertIn("decide it yourself", err.lower())
+        # an unknown criterion or one without a reason is no better
+        for bad in (["--needs-dave", "convenience: nicer"], ["--needs-dave", "money"], ["--needs-dave", "money:  "]):
+            rc, _, err = self.cli("add", "--title", "x", *bad)
+            self.assertEqual(rc, 1, bad)
+            self.assertIn("does not clear the bar", err)
+        self.assertEqual(self.ok("list", "--status", "all", "--count").strip(), "0")
+        # both spellings of a valid one
+        self.ok("add", "--title", "Buy a proxy?", "--needs-dave", "money", "--needs-why", "20 USD a month")
+        self.ok("add", "--title", "Give Adam ssh to bam?", "--needs-dave", "access: another person on bam")
+        d = self.show("D1")
+        self.assertEqual(d["needs_dave"], {"criterion": "money", "why": "20 USD a month"})
+        self.assertEqual(d["status"], "open")
+        self.assertIn("Needs Dave (money): 20 USD a month", self.ok("show", "D1"))
+        self.assertEqual(self.show("D2")["needs_dave"]["criterion"], "access")
+
+    def test_decided_subcommand(self):
+        out = self.ok("decided", "--title", "Keep SearXNG engines off", "--chose", "no change",
+                      "--why", "nothing asked for them", "--source", "research", by="infra")
+        self.assertEqual(out.strip(), "D1")
+        d = self.show("D1")
+        self.assertEqual(d["status"], "answered")
+        self.assertEqual((d["answer"]["text"], d["answer"]["by"], d["answer"]["auto"]), ("no change", "infra", True))
+        self.assertNotIn("needs_dave", d)
+        self.assertIn("decided without asking Dave", self.ok("show", "D1"))
+        # never asked: not in the open list, nor in the brief's questions
+        self.assertEqual(self.ok("list").strip(), "")
+        self.assertIn("Keep SearXNG engines off", self.ok("list", "--status", "decided"))
+        self.ok("decided", "--title", "Move rebuildable data", "--chose", "symlinks", "--why", "reversible", "--done")
+        self.assertEqual(self.show("D2")["status"], "done")
+        # the same title as a real open question stays his
+        self.ask("--title", "Buy a proxy?")
+        rc, out, _ = self.cli("decided", "--title", "Buy a proxy?", "--chose", "a", "--why", "cheap")
+        self.assertEqual(rc, 1)
+        self.assertIn("question for Dave", out)
+        self.assertEqual(self.show("D3")["status"], "open")
+        log = [json.loads(x)["action"] for x in self.read("log.jsonl").splitlines()]
+        self.assertEqual(log[:2], ["decided", "decided"])
+        # Dave wants to answer one himself: reopened as his question
+        self.ok("reopen", "D1", "--needs-dave", "conflict: Dave asked to decide it")
+        d = self.show("D1")
+        self.assertEqual((d["status"], d["needs_dave"]["criterion"]), ("open", "conflict"))
+        self.assertEqual([n["text"] for n in d["notes"]], ["earlier answer (infra): no change"])
+
+    def test_ingest_without_needs_dave_is_decided(self):
+        self.inbox(
+            {"title": "SearXNG update held back", "why": "too big", "recommendation": "a) review it and take it",
+             "options": ["a) review", "b) keep"], "source": "nixpkgs-bump (main)"},
+            {"title": "Take down foo?", "recommendation": "a", "source": "cve-watch",
+             "needs_dave": "noticeable: foo stops for him", "severity": "critical"},
+            {"title": "Junk reason", "recommendation": "b", "needs_dave": "because: I said so"},
+        )
+        self.assertEqual(self.ok("list").split("\n")[0].split()[-3:], ["Take", "down", "foo?"])
+        d1 = self.show("D1")
+        self.assertEqual(d1["status"], "answered")
+        self.assertEqual(d1["answer"]["text"], "a) review it and take it")
+        self.assertEqual((d1["answer"]["by"], d1["answer"]["auto"], d1["answer"]["unvetted"]), ("inbox", True, True))
+        self.assertEqual(d1["source"], "nixpkgs-bump (main)")
+        # an invalid criterion is a broken classification: asked, not decided
+        d3 = self.show("D3")
+        self.assertEqual((d3["status"], d3["answer"], d3.get("needs_dave")), ("open", None, None))
+        self.assertEqual(self.show("D2")["status"], "open")
+        # the nightly refile of the decided one: new facts, still not asked
+        self.inbox({"title": "SearXNG update held back", "why": "still too big", "source": "nixpkgs-bump (main)"})
+        d1 = self.show("D1")
+        self.assertEqual((d1["status"], d1["why"], d1["seen"]), ("answered", "still too big", 2))
+        # an open question from before the bar, refiled without one: decided
+        st = decision.Store(self.dir)
+        with st:
+            old = st.get("D2")
+            del old["needs_dave"]
+            old["title"], old["urgency"] = "Old question", "normal"
+            st.put(old)
+        self.inbox({"title": "Old question", "source": "cve-watch"})
+        self.assertEqual(self.show("D2")["status"], "open")  # no recommendation in the line: stays open
+        self.inbox({"title": "Old question", "source": "cve-watch", "recommendation": "a"})
+        d2 = self.show("D2")
+        self.assertEqual((d2["status"], d2["answer"]["text"], d2["answer"]["by"]), ("answered", "a", "inbox"))
+        # ... and a refile WITH a reason makes a decided one his question
+        self.inbox({"title": "Old question", "needs_dave": "access: now another person", "source": "x"})
+        d2 = self.show("D2")
+        self.assertEqual((d2["status"], d2["answer"]), ("open", None))
+        self.assertIn("earlier decided by", d2["notes"][-1]["text"])
+
+    def test_decide_default(self):
+        st = decision.Store(self.dir)
+        with st:  # a question filed before the bar existed: no needs_dave
+            d, _ = st.create({"title": "Test priming dictation", "recommendation": "a) measure first",
+                              "needs_dave": "money: x"}, "t")
+            del d["needs_dave"]
+            st.put(d)
+        self.assertIn("decide-default it", self.ok("list"))
+        # one that does clear the bar gets its reason instead (and the brief lists it)
+        self.ok("add", "--title", "pre-bar but real", "--force-new", "--needs-dave", "money: x")
+        st = decision.Store(self.dir)
+        with st:
+            d2 = st.get("D2")
+            del d2["needs_dave"]
+            st.put(d2)
+        self.assertEqual(self.ok("brief"), "2 unsorted (curation pending)\n")
+        self.ok("update", "D2", "--needs-dave", "money: 20 USD a month", by="curator")
+        self.assertIn("pre-bar but real", self.ok("brief"))
+        self.assertIn("1 unsorted (curation pending)", self.ok("brief"))
+        rc, _, _ = self.cli("update", "D2", "--needs-dave", "nice: x")
+        self.assertEqual(rc, 1)
+        self.ok("obsolete", "D2", "--reason", "test")
+        out = self.ok("decide-default", "D1", by="curator")
+        self.assertIn("answered", out)
+        d = self.show("D1")
+        self.assertEqual((d["status"], d["answer"]["text"], d["answer"]["by"]), ("answered", "a) measure first", "curator"))
+        self.assertTrue(d["answer"]["auto"])
+        self.assertEqual(d["notes"][-1]["text"], "common sense, not asked")
+        # only open ones, and only with a recommendation
+        rc, _, err = self.cli("decide-default", "D1")
+        self.assertEqual(rc, 1)
+        self.ask("--title", "no rec")
+        rc, _, err = self.cli("decide-default", "D3", "--note", "no money involved after all")
+        self.assertEqual(rc, 1)
+        self.assertIn("no recommendation", err)
+
+    def test_decide_default_needs_note_when_needs_dave(self):
+        self.ask("--title", "Buy a proxy?", "--recommendation", "a) the free tier")
+        rc, _, err = self.cli("decide-default", "D1", by="curator")
+        self.assertEqual(rc, 1)
+        self.assertIn("--note", err)
+        self.assertIn("money: test", err)
+        self.assertEqual(self.show("D1")["status"], "open")
+        rc, _, err = self.cli("decide-default", "D1", "--note", "  ", by="curator")
+        self.assertEqual(rc, 1)
+        self.ok("decide-default", "D1", "--note", "the free tier costs nothing", by="curator")
+        d = self.show("D1")
+        self.assertEqual((d["status"], d["answer"]["text"], d["notes"][-1]["text"]),
+                         ("answered", "a) the free tier", "the free tier costs nothing"))
+
+    def test_inbox_gating(self):
+        # untrusted lines without a valid needs_dave: only a calm one
+        # with a recommendation and no broken needs_dave is decided
+        self.inbox(
+            {"title": "critical", "severity": "critical", "recommendation": "stop it"},
+            {"title": "high", "severity": "high", "recommendation": "stop it"},
+            {"title": "urgent", "urgency": "urgent", "recommendation": "stop it"},
+            {"title": "money without why", "needs_dave": "money", "recommendation": "buy"},
+            {"title": "why without criterion", "needs_dave_why": "costs 20 USD", "recommendation": "buy"},
+            {"title": "no recommendation"},
+            {"title": "mixed", "urgency": "normal", "severity": "critical", "recommendation": "stop it"},
+            {"title": "spaced", "severity": " High ", "recommendation": "stop it"},
+            {"title": "calm", "recommendation": "keep", "chose": "rm -rf / --no-preserve-root"},
+            {"title": "ghsa moderate", "severity": "MODERATE", "recommendation": "bump"},
+            {"title": "bidi \u202eevil", "recommendation": "keep"},
+        )
+        self.ok("list")
+        by_title = {d["title"]: d for d in json.loads(self.ok("list", "--status", "all", "--json"))}
+        for t in ("critical", "high", "urgent", "money without why", "why without criterion", "no recommendation",
+                  "mixed", "spaced"):
+            d = by_title[t]
+            self.assertEqual((d["status"], d["answer"], d.get("needs_dave")), ("open", None, None), t)
+            self.assertIn("left open for curation", d["notes"][-1]["text"], t)
+        self.assertIn("not valid", by_title["money without why"]["notes"][-1]["text"])
+        # GHSA's MODERATE is normal (decided, not rejected); bidi overrides dropped
+        self.assertEqual(by_title["ghsa moderate"]["status"], "answered")
+        self.assertIn("bidi evil", by_title)
+        # chose ignored: the recommendation is the (unvetted) answer
+        calm = by_title["calm"]
+        self.assertEqual((calm["status"], calm["answer"]["text"], calm["answer"]["by"], calm["answer"]["unvetted"]),
+                         ("answered", "keep", "inbox", True))
+        self.assertNotIn("rm -rf", json.dumps(calm))
+        self.assertIn("unvetted: re-judge it before acting", self.ok("show", calm["id"]))
+        self.assertEqual(self.ok("list", "--status", "unvetted").count("\n"), 3)
+        # a session vets it after re-judging: no longer unvetted
+        self.ok("decide-default", calm["id"], by="infra")
+        a = self.show(calm["id"])["answer"]
+        self.assertEqual((a["by"], a.get("unvetted"), a["text"]), ("infra", None, "keep"))
+        self.assertEqual(self.show(calm["id"])["notes"][-1]["text"], "common sense, vetted")
+        # the brief counts the unsorted ones (8) so none hides
+        self.assertIn("8 unsorted (curation pending)", self.ok("brief"))
+
+    def test_inbox_refile_updates_auto_answer(self):
+        t = "SearXNG update held back"
+        self.inbox({"title": t, "recommendation": "keep the pin"})
+        self.ok("list")
+        self.assertEqual(self.show("D1")["answer"]["text"], "keep the pin")
+        self.inbox({"title": t, "recommendation": "take it after review"})
+        self.ok("list")
+        d = self.show("D1")
+        self.assertEqual((d["status"], d["recommendation"], d["answer"]["text"], d["answer"]["by"], d["seen"]),
+                         ("answered", "take it after review", "take it after review", "inbox", 2))
+        self.assertIn("automatic answer was (inbox): keep the pin", [n["text"] for n in d["notes"]])
+        # a vetted answer (a session re-judged it) is not undone by job text
+        self.ok("decide-default", "D1", by="infra")
+        self.inbox({"title": t, "recommendation": "drop the pin"})
+        self.ok("list")
+        a = self.show("D1")["answer"]
+        self.assertEqual((a["text"], a["by"], a.get("unvetted")), ("take it after review", "infra", None))
+        self.assertEqual(self.show("D1")["recommendation"], "drop the pin")
+        # refiled as critical: back to open for the curator, not decided
+        self.inbox({"title": t, "recommendation": "drop the pin", "severity": "critical"})
+        self.ok("list")
+        d = self.show("D1")
+        self.assertEqual((d["status"], d["answer"], d["urgency"]), ("open", None, "urgent"))
+        # Dave's answer is never replaced by a refile
+        self.ok("answer", "D1", "keep it")
+        self.inbox({"title": t, "recommendation": "something else"})
+        self.ok("list")
+        d = self.show("D1")
+        self.assertEqual((d["answer"]["text"], d["answer"]["by"], d["recommendation"]), ("keep it", "dave", "drop the pin"))
+
+    def test_decided_on_dave_answered_title(self):
+        self.ask("--title", "Buy a proxy?")
+        self.ok("answer", "D1", "b) no proxy")
+        rc, out, _ = self.cli("decided", "--title", "buy a PROXY", "--chose", "a", "--why", "cheap", by="infra")
+        self.assertEqual(rc, 1)
+        self.assertIn("answered by dave", out)
+        d = self.show("D1")
+        self.assertEqual((d["status"], d["answer"]["text"], d["answer"]["by"], d["seen"]), ("answered", "b) no proxy", "dave", 1))
+        # one answered without needs_dave by hand (`answer`) is kept too
+        self.ok("decided", "--title", "Keep engines off", "--chose", "off", "--why", "w", by="infra")
+        self.ok("answer", "D2", "on, please")
+        rc, out, _ = self.cli("decided", "--title", "Keep engines off", "--chose", "off", "--why", "w", by="infra")
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.show("D2")["answer"]["text"], "on, please")
+
+    def test_brief_shows_decided_count(self):
+        self.ask("--title", "Buy a proxy?")
+        self.ok("decided", "--title", "Keep SearXNG engines off", "--chose", "no change", "--why", "w")
+        self.ok("decided", "--title", "Move rebuildable data (as of 2026-11-14)", "--chose", "symlinks", "--why", "w")
+        self.ok("decided", "--title", "Test priming dictation", "--chose", "measure first", "--why", "w", "--done")
+        # an open question without a reason (pre-bar) is not listed
+        st = decision.Store(self.dir)
+        with st:
+            d, _ = st.create({"title": "pre-bar question", "needs_dave": "money: x"}, "t")
+            del d["needs_dave"]
+            st.put(d)
+            # decided 2 days ago: not "since yesterday"
+            old = st.get("D2")
+            old["answer"]["at"] = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+            st.put(old)
+        text = json.loads(self.ok("brief", "--json"))["text"]
+        lines = text.splitlines()
+        self.assertEqual(lines[0], "1 decision waiting for you (type /decisions in infra-space):")
+        self.assertEqual(lines[1], "- Buy a proxy? (new)")
+        self.assertEqual(lines[2], "Decided for you since yesterday: 2 (e.g. Test priming dictation, "
+                                   "Move rebuildable data; ask to see all)")
+        self.assertEqual(lines[3], "1 unsorted (curation pending)")
+        self.assertNotIn("pre-bar", text)
+        self.assertNotIn("SearXNG", text)
+        self.assertEqual(len(lines), 4)
+        # only decided ones: the line alone is still worth the message
+        self.ok("answer", "D1", "a")
+        self.assertTrue(self.ok("brief").startswith("Decided for you since yesterday: 2"))
+
     def test_brief(self):
         self.assertEqual(self.ok("brief"), "")  # nothing to say: nothing printed
         for i, (t, u) in enumerate([("low one", "low"), ("urgent one", "urgent"), ("normal one", "normal"),
                                     ("normal two", "normal"), ("normal three", "normal")]):
-            self.ok("add", "--title", t, "--urgency", u)
+            self.ask("--title", t, "--urgency", u)
         self.ok("defer", "D3")
         digest = os.path.join(self.dir, "digest.json")
         with open(digest, "w") as f:
@@ -212,7 +472,7 @@ class Registry(unittest.TestCase):
             json.dump(["plain text warning"], f)
         self.assertEqual(self.ok("brief", "--digest-json", digest).strip(),
                          "Warnings since yesterday:\n- plain text warning")
-        self.ok("add", "--title", "x")
+        self.ask("--title", "x")
         self.assertIn("could not be read", self.ok("brief", "--digest-failed"))
         self.ok("close", "D1")
         with open(digest, "w") as f:
@@ -236,7 +496,7 @@ class Registry(unittest.TestCase):
             {"title": "fine", "options": {"key": [1]}, "links": {"x": 1}},
             {"title": "after the poison"},
         )
-        out = self.ok("list")
+        out = self.ok("list", "--status", "all")
         self.assertIn("after the poison", out)
         # dates out of range are dropped (created = now), not fatal
         for t in ("year one", "year max", "aware max"):
@@ -251,14 +511,14 @@ class Registry(unittest.TestCase):
         # any exception from one line (not only Fail/ValueError) is a reject
         orig = decision.Store.create
 
-        def boom(st, obj, by, force_new=False):
+        def boom(st, obj, by, force_new=False, auto=False, inbox=False):
             if obj.get("title") == "boom":
                 raise OverflowError("date value out of range")
-            return orig(st, obj, by, force_new)
+            return orig(st, obj, by, force_new, auto, inbox)
         decision.Store.create = boom
         try:
             self.inbox({"title": "boom"}, {"title": "ok one"})
-            self.assertIn("ok one", self.ok("list"))
+            self.assertIn("ok one", self.ok("list", "--status", "all"))
         finally:
             decision.Store.create = orig
         rej = self.read("inbox.rejected.jsonl")
@@ -280,13 +540,13 @@ class Registry(unittest.TestCase):
             got = [d["title"] for d, _ in st.ingest(inbox)]
         self.assertEqual(got, ["first"])
         self.assertIn("during ingest", self.read("inbox.jsonl"))
-        self.assertIn("during ingest", self.ok("list"))
+        self.assertIn("during ingest", self.ok("list", "--status", "all"))
 
     def test_leftover_ingesting_file_taken_in(self):
         with open(os.path.join(self.dir, "inbox.jsonl.ingesting"), "w") as f:
             f.write(json.dumps({"title": "from a crashed run"}) + "\n")
         self.inbox({"title": "new"})
-        out = self.ok("list")
+        out = self.ok("list", "--status", "all")
         self.assertIn("from a crashed run", out)
         self.assertIn("new", out)
         self.assertFalse(os.path.exists(os.path.join(self.dir, "inbox.jsonl.ingesting")))
@@ -318,7 +578,7 @@ class Registry(unittest.TestCase):
         self.assertEqual(json.loads(self.ok("brief", "--json", "--digest-json", digest))["send"], "send")
         with open(digest, "w") as f:
             f.write("[]")
-        self.ok("add", "--title", "x")
+        self.ask("--title", "x")
         self.assertEqual(json.loads(self.ok("brief", "--json", "--digest-json", digest))["send"], "send")
         self.assertEqual(json.loads(self.ok("brief", "--json", "--digest-failed"))["send"], "send-nostamp")
         # no digest configured at all: edi's own digest must still run
@@ -360,15 +620,15 @@ class Registry(unittest.TestCase):
         decision.MAX_PENDING = 3
         try:
             for i in range(3):
-                self.ok("add", "--title", f"t{i}")
-            rc, _, err = self.cli("add", "--title", "one too many")
+                self.ask("--title", f"t{i}")
+            rc, _, err = self.cli("add", "--needs-dave", "money: t", "--title", "one too many")
             self.assertEqual(rc, 1)
             self.assertIn("registry full", err)
             self.inbox({"title": "inbox too many"})
             self.ok("list")
             self.assertIn("registry full", self.read("inbox.rejected.jsonl"))
             self.ok("close", "D1")
-            self.ok("add", "--title", "room again")
+            self.ask("--title", "room again")
         finally:
             decision.MAX_PENDING = old
 
@@ -377,7 +637,7 @@ class Registry(unittest.TestCase):
         decision.LOG_MAX_BYTES = 300
         try:
             for i in range(10):
-                self.ok("add", "--title", f"title number {i}")
+                self.ask("--title", f"title number {i}")
         finally:
             decision.LOG_MAX_BYTES = old
         log = os.path.join(self.dir, "log.jsonl")
@@ -421,8 +681,8 @@ class Registry(unittest.TestCase):
     def test_new_marker(self):
         st = decision.Store(self.dir)
         with st:
-            st.create({"title": "old", "created": "2026-01-01T00:00:00+00:00"}, "t")
-            st.create({"title": "fresh"}, "t")
+            st.create({"title": "old", "created": "2026-01-01T00:00:00+00:00", "needs_dave": "money: x"}, "t")
+            st.create({"title": "fresh", "needs_dave": "money: x"}, "t")
             text, _ = decision.brief(st, None, at=datetime.now(timezone.utc) + timedelta(hours=1))
         self.assertIn("- fresh (new)", text)
         self.assertIn("- old\n", text + "\n")

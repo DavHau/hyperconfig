@@ -922,10 +922,14 @@ pkgs.testers.runNixOSTest {
           assert out is not None and "Nightly nixpkgs bump failed last night" in out, out
           guest(memberA, "rm -r /home/infra/nixpkgs-bump")
           # a job's inbox line, a takedown notice, a warning
-          guest(memberA, """printf '%s\\n' '{"title": "Take down foo?", "severity": "critical", "options": ["a) yes", "b) no"], "source": "cve-watch"}' '{"kind": "notice", "text": "stopped foo.service on bam", "source": "cve-watch"}' >> /var/lib/infra-space/decisions/inbox.jsonl""")
-          guest(memberA, "decision add --title 'Buy a proxy?' --urgency low --source test")
+          guest(memberA, """printf '%s\\n' '{"title": "Take down foo?", "severity": "critical", "options": ["a) yes", "b) no"], "source": "cve-watch", "needs_dave": "noticeable: foo stops"}' '{"title": "Keep engines off", "recommendation": "no change", "source": "research"}' '{"title": "Urgent without a reason", "severity": "critical", "recommendation": "stop it", "source": "cve-watch"}' '{"kind": "notice", "text": "stopped foo.service on bam", "source": "cve-watch"}' >> /var/lib/infra-space/decisions/inbox.jsonl""")
+          guest(memberA, "decision add --title 'Buy a proxy?' --urgency low --source test --needs-dave 'money: 20 USD'")
+          # without a reason to ask Dave: refused, decide it yourself
+          code, out = guest(memberA, "decision add --title 'Measure first?' 2>&1", check=False)
+          assert code != 0 and "decision decided" in out, (code, out)
+          guest(memberA, "decision decided --title 'Move data with symlinks' --chose symlinks --why reversible --source test")
           out = guest(memberA, "decision list")
-          assert "urgent" in out and "Take down foo?" in out, out
+          assert "urgent" in out and "Take down foo?" in out and "Keep engines off" not in out, out
           managed.succeed("""echo '[{"alert": "Disk almost full", "host": "vit", "state": "firing", "fired": 2}]' > ${briefState}/digest.json""")
           # Telegram refused (exit 1): failed, retried later, notices kept
           managed.succeed("echo 1 > ${briefState}/send-rc")
@@ -949,6 +953,9 @@ pkgs.testers.runNixOSTest {
           print(out)
           assert out.startswith("2 decisions waiting"), out
           assert "- URGENT: Take down foo?" in out, out
+          assert "Decided for you since yesterday: 2 (e.g. Move data with symlinks, Keep engines off; ask to see all)" in out, out
+          # urgent inbox line without needs_dave: neither decided nor hidden
+          assert "1 unsorted (curation pending)" in out, out
           assert "vit: Disk almost full, 2x" in out, out
           assert "stopped foo.service on bam" in out, out
           # the notice went out once

@@ -226,20 +226,45 @@ A timer starts you on @MEMBER@ every night with the `nixpkgs-bump` skill
 every machine, reviews, merge to main, no deploy. Its reports are in
 `~/nixpkgs-bump/`. When Dave asks for a bump, follow that skill.
 
-## Decisions for Dave: the registry
+## Decisions: decide yourself, ask Dave only past the bar
 
-Every decision only Dave can make goes to the registry (`decision`,
+Ask Dave only when the answer needs something only he has: **money**
+(spending his money, signing up in his name), **identity** (exposing his
+identity or private data to a third party), **irreversible**
+(destroying data he may care about, no backup or undo), **access**
+(giving another person access), **noticeable** (a change he will notice
+in daily use that he didn't ask for), **conflict** (a real conflict with
+something he said). Everything else, including "which of these sane
+options", measure-first, keep-as-is, reversible cleanups and a child's
+recommendation, you decide with common sense, record and dispatch:
+`decision decided --title ... --chose ... --why ... --source <job or
+session>` (the brief lists it under "decided for you"; never asked). If
+unsure whether it clears the bar, it doesn't.
+
+A question that clears it goes to the registry (`decision`,
 `modules/nixos/infra-space/decisions.nix`), not into a chat list:
-`decision add --title ... --why ... --option "a) ..." --recommendation
-... --still-relevant-if ... --source <job or session>` (`decision add
---help`). Jobs without the CLI append a JSON line to
-`/var/lib/infra-space/decisions/inbox.jsonl`, one line per single
+`decision add --needs-dave "<criterion>: <why>" --title ... --why ...
+--option "a) ..." --recommendation ... --still-relevant-if ... --source
+<job or session>` (`decision add --help`; without `--needs-dave` it
+refuses). Jobs without the CLI append a JSON line to
+`/var/lib/infra-space/decisions/inbox.jsonl` (a `needs_dave` field
+"<criterion>: <why>" for a real question; a line without one is
+recorded as decided with its `recommendation`, unvetted, only if it is
+not urgent/critical/high and has a recommendation; otherwise it stays
+open "unsorted" for the curation; `chose` is ignored there), one line per single
 write in append mode (`>>`; never rewrite or truncate the file); a service taken down
 overnight is `decision notice "<what, where, how to undo>"`. 08:00 a
-run curates it (`decisions-curate` skill), 09:00 Dave gets one short
-Telegram brief (open count, top titles, warnings, notices), and he
-answers with /decisions (the `decisions` skill). Ask in chat only when
-it is urgent and he is active right now; file it as well.
+run curates it (`decisions-curate` skill: decides what fails the bar),
+09:00 Dave gets one short Telegram brief (open questions, a "decided for
+you" count, warnings, notices), and he answers with /decisions (the
+`decisions` skill). Ask in chat only when it is urgent and he is active
+right now; file it as well.
+
+Subagent briefs end with: "End with your recommendation; mark a
+question for Dave only if it clears the bar (money, identity,
+irreversible, access, noticeable, conflict), naming which criterion."
+Never "end with decisions for Dave": a child's recommendation is the
+default answer, not a question.
 
 ## The other instance
 

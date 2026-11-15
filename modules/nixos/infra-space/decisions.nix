@@ -2,8 +2,15 @@
   The fleet's decision registry: decisions only Dave can make, filed by
   every job and agent into one place, curated every morning, summed up
   in one short Telegram message, answered one at a time through
-  /decisions. A guest module of ./hermes.nix, so it exists only where
-  the agent runs (som).
+  /decisions. Only a question that clears the bar reaches him: `add`
+  needs `--needs-dave <criterion>` (money, identity, irreversible,
+  access, noticeable, conflict); everything else is recorded as decided
+  by the agent (`decided`, a calm inbox line without needs_dave that
+  carries a recommendation, recorded unvetted until a session re-judges
+  it, the curator's `decide-default`) and shown as one "decided for
+  you" line; any other inbox line stays open as "unsorted" (a count in
+  the brief) until the curation sorts it. A guest module of
+  ./hermes.nix, so it exists only where the agent runs (som).
 
   Pieces:
     - `decision` (./decisions/decision.py, tested by
@@ -31,8 +38,9 @@
       with the fleet root key, so the prompt and skill are what keep it
       to the registry.
     - decisions-brief.timer, 09:00 Asia/Bangkok: a script, no agent.
-      `decision brief` renders the open count, the top three titles
-      (urgent first), the warning digest (space.decisions.digestCommand;
+      `decision brief` renders the count and top three titles of the
+      open questions that cleared the bar (urgent first), a "decided for
+      you since yesterday" count with two examples, the warning digest (space.decisions.digestCommand;
       a line when it could not be read), a line when last night's
       nixpkgs bump failed (nobody is paged for that) and the night's
       notices (six; the rest wait); nothing to say, nothing sent. It is
