@@ -41,6 +41,11 @@
 #   - macOS-only lanes (LLDB call tracing, native UI, Swift) do not apply.
 #   - Electron scenarios launch the app named in the request; no Electron
 #     is supplied.
+#   - Desktop build tasks (6.9.0's build computer: start_build_computer,
+#     start_build_capture, check_build_task, ...): they need Docker,
+#     agentenv (REA_AGENT_ENV_COMMAND) and a packed REA archive
+#     (REA_BUILD_COMPUTER_REA_ARCHIVE), none of which an agent has; the
+#     tools are listed but refuse.
 {
   config,
   lib,
@@ -96,6 +101,12 @@ let
     REA_WAKARU_COMMAND = lib.getExe wakaru;
     REA_JAVASCRIPT_PRLIMIT_COMMAND = prlimit;
     REA_BROWSER_EXECUTABLE = lib.getExe pkgs.chromium;
+    # 6.9.0 turned Chromium's sandbox on (6.8.0 got Playwright's default
+    # --no-sandbox). It can't start in the agents' units (RestrictNamespaces,
+    # NoNewPrivileges, no setuid helper), so the browser lanes would fail.
+    # Off keeps 6.8.0's behaviour; the renderer stays confined by the unit's
+    # hardening like every other tool the agent runs.
+    REA_BROWSER_NO_SANDBOX = "true";
     REA_ILSPY_CMD_PATH = lib.getExe pkgs.ilspycmd;
   };
 
@@ -144,7 +155,7 @@ in
     rea.package = lib.mkOption {
       type = lib.types.package;
       default = pkgs.callPackage ../../pkgs/rea-agents { };
-      defaultText = lib.literalMD "rea-agents 6.8.0 (../../pkgs/rea-agents)";
+      defaultText = lib.literalMD "rea-agents 6.9.0 (../../pkgs/rea-agents)";
       description = "The rea-agents package (the `rea` CLI and MCP server).";
     };
 

@@ -231,7 +231,8 @@ let
       && !(lib.hasInfix "hermes-desktop-" desktop.config.programs.ssh.extraConfig);
 
     rea-evaluates = evaluates rea && failedAssertions rea == [ ];
-    # node on REA's entry script; every tool setting is a store path.
+    # node on REA's entry script; every tool setting is a store path (the
+    # provider name and the browser sandbox flag are plain values).
     rea-mcp-server =
       lib.hasSuffix "/bin/node" reaServer.command
       && reaServer.args == [
@@ -239,8 +240,9 @@ let
         "mcp"
       ]
       && reaServer.env.GHIDRA_INSTALL_DIR == "${pkgs.ghidra}/lib/ghidra"
+      && reaServer.env.REA_BROWSER_NO_SANDBOX == "true"
       && lib.all (lib.hasPrefix builtins.storeDir) (
-        lib.attrValues (removeAttrs reaServer.env [ "REA_ANALYSIS_PROVIDER" ])
+        lib.attrValues (removeAttrs reaServer.env [ "REA_ANALYSIS_PROVIDER" "REA_BROWSER_NO_SANDBOX" ])
       );
     rea-skill-and-cli =
       lib.any (d: lib.hasSuffix "-agent-skill-reverse-engineer-anything/share/skills" d) (agentCfg rea "alice").skillDirs

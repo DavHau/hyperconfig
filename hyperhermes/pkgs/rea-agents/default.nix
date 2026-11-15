@@ -5,8 +5,11 @@
 # repo's turbo artifact pipeline), with a vendored lock: the tarball has
 # none, so ./package-lock.json is upstream's repo lock pruned to the
 # runtime dependencies (`npm install --package-lock-only` on the
-# postPatch package.json below). Update: bump version and hash, redo the
-# lock that way, refresh npmDepsHash.
+# postPatch package.json below). Since 6.9.0 the tarball also carries
+# npm-shrinkwrap.json and the bundled node_modules (bundleDependencies,
+# every platform's prebuilds, frida's chain in the shrinkwrap); both go,
+# as npm would prefer the shrinkwrap over our lock. Update: bump version
+# and hash, redo the lock that way, refresh npmDepsHash.
 #
 # Left out: the optional `frida` dependency. Its install script downloads
 # a prebuilt binding (or the frida-core devkit to build one), which a
@@ -36,23 +39,25 @@ let
 in
 buildNpmPackage (finalAttrs: {
   pname = "rea-agents";
-  version = "6.8.0";
+  version = "6.9.0";
 
   src = fetchurl {
     url = "https://registry.npmjs.org/rea-agents/-/rea-agents-${finalAttrs.version}.tgz";
-    hash = "sha256-jVQux2qcs1BYS2CmycCIcG/4EtW7WwlMIMlbbcJWmLs=";
+    hash = "sha256-MiM4oVBeJVdwKhYBLn1Gq9tXKWQdmJOGYnYt+/t5Jio=";
   };
-  npmDepsHash = "sha256-XoxPtBW6tpQCiHS2Iq3dMNf/D1ThcFe/7aWNlAfNuBI=";
+  npmDepsHash = "sha256-YGyG5NSbxKfMb8oCxZzGtF+vOhHSXZkZsQC64Khix0Y=";
 
   inherit nodejs;
 
   # Runtime dependencies only: the dev tooling, its overrides and the
   # repo scripts (prepare/prepack) are not part of an installed package,
-  # and frida is dropped (see above).
+  # and frida is dropped (see above). The bundled tree and its shrinkwrap
+  # are replaced by our lock's install.
   postPatch = ''
-    ${lib.getExe jq} 'del(.devDependencies, .scripts, .optionalDependencies, .allowScripts, ."lint-staged", .overrides)' \
+    ${lib.getExe jq} 'del(.devDependencies, .scripts, .optionalDependencies, .allowScripts, ."lint-staged", .overrides, .bundleDependencies)' \
       package.json > package.json.new
     mv package.json.new package.json
+    rm -r node_modules npm-shrinkwrap.json
     cp ${./package-lock.json} package-lock.json
   '';
 

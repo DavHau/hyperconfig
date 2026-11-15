@@ -1,4 +1,4 @@
-# Node.js for REA: rea-agents 6.8.0 declares engines
+# Node.js for REA: rea-agents 6.9.0 (as 6.8.0) declares engines
 # `^22.23.4 || ^24.22.1 || >=26.12.1` (the 2026-10-21 security releases);
 # its doctor fails and `rea setup` refuses an older runtime. nixpkgs ships
 # 24.21.0, so this is nixpkgs' own nodejs_24 recipe on the 24.22.1
