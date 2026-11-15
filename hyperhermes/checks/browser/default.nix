@@ -61,12 +61,14 @@ in
 pkgs.testers.runNixOSTest {
   name = "hyperhermes-browser";
 
-  nodes.machine = {
+  # A container test (systemd-nspawn, no VM): the per-agent servers'
+  # isolation is users, ports and the owner-match rules, no own kernel.
+  containers.machine = {
     imports = [
       self.nixosModules.core
       self.nixosModules.browser
+      ../container-pam.nix
     ];
-    virtualisation.memorySize = 3072;
 
     services.hyperhermes = {
       agents.alice.uid = aliceUid;
@@ -118,9 +120,9 @@ pkgs.testers.runNixOSTest {
   };
 
   testScript =
-    { nodes, ... }:
+    { containers, ... }:
     let
-      hermes = nodes.machine.services.hyperhermes.package;
+      hermes = containers.machine.services.hyperhermes.package;
       driverOf = driverScript hermes;
       driver = driverOf ./downloads.py;
       captchaDriver = driverOf ./captcha.py;

@@ -53,13 +53,20 @@ let
   ];
 in
 pkgs.testers.runNixOSTest (
-  { nodes, ... }:
+  { containers, ... }:
+  let
+    nodes = containers;
+  in
   {
     name = "hyperhermes-publish";
 
-    nodes.machine = {
-      imports = [ self.nixosModules.default ];
-      virtualisation.memorySize = 2048;
+    # A container test (systemd-nspawn, no VM): nginx, dex and the
+    # owner-only sockets need no kernel of their own.
+    containers.machine = {
+      imports = [
+        self.nixosModules.default
+        ../container-pam.nix
+      ];
       environment.systemPackages = [
         pkgs.curl
         python
