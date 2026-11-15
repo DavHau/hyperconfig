@@ -51,13 +51,14 @@ in
 pkgs.testers.runNixOSTest {
   name = "hyperhermes-wallet";
 
-  nodes.machine = {
+  # A container test (systemd-nspawn, no VM): nothing here needs a kernel
+  # of its own.
+  containers.machine = {
     imports = [
       self.nixosModules.core
       self.nixosModules.wallet
+      ../container-pam.nix
     ];
-    virtualisation.memorySize = 3072;
-    virtualisation.cores = 2;
 
     services.hyperhermes = {
       # The agents' pip venv without the default data-science set: the
@@ -86,11 +87,11 @@ pkgs.testers.runNixOSTest {
   };
 
   testScript =
-    { nodes, ... }:
+    { containers, ... }:
     let
       lnwallet = pkgs.lib.findFirst (
         p: p.name == "lnwallet"
-      ) (throw "alice has no lnwallet") nodes.machine.services.hyperhermes.agents.alice.extraPackages;
+      ) (throw "alice has no lnwallet") containers.machine.services.hyperhermes.agents.alice.extraPackages;
     in
     ''
       machine.wait_for_unit("phoenixd.service")

@@ -37,10 +37,13 @@ in
 pkgs.testers.runNixOSTest {
   name = "hyperhermes-resume";
 
-  nodes.machine = {
-    imports = [ self.nixosModules.core ];
-    virtualisation.memorySize = 4096;
-    virtualisation.cores = 2;
+  # A container test (systemd-nspawn, no VM): unit restarts, no kernel of
+  # its own.
+  containers.machine = {
+    imports = [
+      self.nixosModules.core
+      ../container-pam.nix
+    ];
 
     services.hyperhermes = {
       pythonPackages = _: [ ];
