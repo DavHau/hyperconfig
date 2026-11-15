@@ -209,6 +209,9 @@ in {
               module.input = "clan-core";
               roles.server.machines.nas = {};
               roles.client.machines.amy = {};
+              # som: the hermes agents' homes and state, nightly
+              # (modules/nixos/hermes-agents-backup).
+              roles.client.machines.som = {};
               roles.client.settings.exclude = import ../backup-exclude.nix;
               roles.server.settings.directory = "/pool11/enc/clan-backup";
             };

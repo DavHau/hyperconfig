@@ -198,6 +198,8 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/exec-usage/default.nix — Exec usage: which installed programs get run, so the config can be slimmed. <- m/dave.nix
 - modules/nixos/exec-usage/infra-unused.py — - <- m/exec-usage/default.nix
 - modules/nixos/exec-usage/tracer.py — - <- m/exec-usage/default.nix
+- modules/nixos/hermes-agents-backup/default.nix — Nightly off-host backup of som's hermes agents to nas, through the clan `dave-backup` borgbackup instance (som is a cli… <- machines/som/hermes-agents.nix
+- modules/nixos/hermes-agents-backup/state-dump.py — - <- m/hermes-agents-backup/default.nix
 - modules/nixos/infra-space/afk.nix — afk in the infra-space container, for Dave's interactive sessions as `infra` (hermes never starts it): <- m/infra-space/default.nix, m/spaces/afk.nix
 - modules/nixos/infra-space/age-recipients.nix — The clan vars' age recipients (vars.settings.recipients.default in ../../flake-parts/nixosConfigurations.nix): <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/default.nix, m/infra-space/guest.nix, m/spaces/default.nix
 - modules/nixos/infra-space/agent-tools-guest.nix — The infra agent's side of ./agent-tools.nix (the host serves; <- m/infra-space/agent-tools.nix, m/infra-space/hermes.nix
@@ -386,7 +388,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/flake-parts/hermes-onboard.nix — -
 - modules/flake-parts/hermes-one.nix — -
 - modules/flake-parts/hygiene.nix — Repo hygiene lint (../../tools/hygiene, rules in ../../CONVENTIONS.md):
-- modules/flake-parts/nixosConfigurations.nix — -
+- modules/flake-parts/nixosConfigurations.nix — - <- m/hermes-agents-backup/default.nix
 - modules/flake-parts/porkbun-dns.nix — -
 - modules/flake-parts/repo-map.nix — The hyperconfig-map agent skill's generated part (../../skills/hyperconfig-map, ../../tools/repo-map):
 - modules/flake-parts/router-ais.nix — -

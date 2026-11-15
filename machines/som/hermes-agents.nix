@@ -75,6 +75,8 @@ in
     ./hermes-inference.nix
     inputs.hyperhermes.nixosModules.browser
     ../../modules/nixos/searxng-canary
+    # Nightly borg backup of the agents' homes and state to nas.
+    ../../modules/nixos/hermes-agents-backup
     inputs.hyperhermes.nixosModules.publish
     inputs.hyperhermes.nixosModules.wallet
     # The infra-space agent's mailbox, browser and wallet, from the modules
