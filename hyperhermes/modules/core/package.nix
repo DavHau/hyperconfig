@@ -47,6 +47,7 @@ let
     ./patches/hermes-delegate-reject-at-capacity.patch
     ./patches/hermes-delegate-collapse-duplicate-tasks.patch
     ./patches/hermes-memory-background-consolidation.patch
+    ./patches/hermes-openrouter-exclude-native.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {

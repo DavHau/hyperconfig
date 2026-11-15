@@ -428,6 +428,24 @@ in
         # hermes' curated picks, not only the curated manifest
         # (patches/hermes-openrouter-all-models.patch).
         model_catalog.openrouter_all_models = lib.mkDefault true;
+        # OpenRouter never serves a Claude model to an agent that has a
+        # working anthropic provider (TeamClaude): those rows leave every
+        # model picker, and an OpenRouter request for one (delegate_task,
+        # delegation.provider, cron, auxiliary, fallback, /model) runs on
+        # anthropic with the same model instead, logged as a warning.
+        # "Working" means a key is present: an API key or the OAuth /
+        # TeamClaude pair ANTHROPIC_TOKEN + ANTHROPIC_BASE_URL; it is not
+        # a health check. A rate-limited or failing anthropic provider
+        # does NOT fall back to OpenRouter's Claude; an agent stays alive
+        # through a non-Claude fallback model. Model-less OpenRouter uses
+        # (image/video generation, the credits display) keep OpenRouter.
+        # Whether the key is there is cached for 60 s: after it is removed,
+        # OpenRouter Claude requests still go to anthropic and fail with an
+        # auth error (no OpenRouter fallback) for up to 60 s; after it is
+        # added, they stay on OpenRouter for up to 60 s more.
+        # Agents without an Anthropic credential keep OpenRouter's Claude
+        # (patches/hermes-openrouter-exclude-native.patch).
+        model_catalog.openrouter_exclude_native = lib.mkDefault [ "anthropic" ];
 
         # Shared metrics off, and the offer answered "No thanks", so no
         # surface asks (the dashboard banner, Desktop's "Share usage

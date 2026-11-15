@@ -1,0 +1,753 @@
+hermes v0.23.0: model_catalog.openrouter_exclude_native keeps OpenRouter off
+models the agent can reach through their own vendor's provider.
+
+Claude via OpenRouter costs far more than the same model through the
+`anthropic` provider (TeamClaude). An agent once set
+`delegation.provider: openrouter` + `delegation.model:
+anthropic/claude-opus-5.5` itself (`hermes config set`) and every subagent
+billed OpenRouter. With `model_catalog.openrouter_exclude_native:
+[anthropic]` and a working Anthropic credential:
+
+- catalog: OpenRouter's anthropic/* rows leave fetch_openrouter_models
+  (so model_ids, provider_model_ids, /api/model/options, TUI and messaging
+  /model, `hermes model`) and drop_unofferable_model_ids filters the
+  openrouter picker row; the state is part of _credential_fingerprint
+  ("openrouter") so provider_models_cache.json follows the credential;
+- resolution: an OpenRouter request for such a model is REWRITTEN to the
+  native provider with the same model (anthropic/claude-opus-5.5 ->
+  claude-opus-5-5) and logged as a WARNING at each chokepoint:
+  resolve_runtime_provider (main model, delegation.provider, cron jobs),
+  delegate_tool_config._resolve_child_runtime (delegate_task children,
+  delegation routes, inherited OpenRouter parents with a model override),
+  init_agent (backstop for every AIAgent constructor, plus its fallback
+  chain), agent switch_model and model_switch.switch_model (/model),
+  bind_route_entry (fallback activation), resolve_provider_client and
+  the auxiliary OpenRouter lane.
+
+"OpenRouter" = provider openrouter, any base_url at openrouter.ai, or a
+named custom provider whose configured base_url is (is_openrouter_route).
+Only provider+model pairs are rewritten: a model-less
+resolve_runtime_provider(requested="openrouter") (image_gen/video_gen
+openrouter plugins, account_usage credits) and any call with an explicit
+api_key/base_url keep OpenRouter's key and URL; without a target_model,
+model.default counts only for the main runtime (requested unset/"auto")
+and only when model.provider is itself OpenRouter.
+An agent already on anthropic whose model string is an OpenRouter id
+(gateway, cron and CLI build the main agent from model.default) gets the
+same id mapping in init_agent/switch_model (native_id_fixup).
+
+Ids: a `:<variant>` suffix (:thinking, :beta, :nitro, :floor, :extended)
+is dropped; `-fast` ids (anthropic/claude-opus-5-fast) run the base model
+with {"speed": "fast"} request overrides where the base model accepts
+fast mode (agent.model_metadata), for that model only: the agent records
+the route (_native_fast_route) and effective_request_overrides drops the
+speed on any other model (fallback activation, /model), and never sends
+speed to a non-Anthropic-messages wire or a model without fast mode; `~anthropic/...-latest` aliases and
+undated short ids resolve through _PROVIDER_MODELS["anthropic"] (exact id,
+else its newest dated snapshot, else for -latest the newest listed id of
+that family); otherwise the plain normalized id, logged.
+
+"Working credential" = resolve_runtime_provider(requested=<vendor>)
+returns that provider with a key (cached 60 s per HERMES_HOME). Without
+it, nothing changes: agents with only an OpenRouter key keep its Claude.
+Unset/empty (the default): upstream behaviour.
+
+Tests: no upstream pytest file ships with this patch; the offline check
+hyperhermes/checks/openrouter-native runs the assertions against the
+built package.
+
+Upstream status: not reported; hyperhermes-only option.
+
+diff --git a/agent/agent_init.py b/agent/agent_init.py
+index 241f094..a2d6d76 100644
+--- a/agent/agent_init.py
++++ b/agent/agent_init.py
+@@ -2153,6 +2153,30 @@ def init_agent(
+         fallback_model = {}
+     _install_safe_stdio()
+ 
++    # model_catalog.openrouter_exclude_native: never construct an agent that bills OpenRouter for a
++    # model its vendor serves natively here (backstop for every constructor; resolvers rewrite first).
++    from hermes_cli.openrouter_native import log_rewrite, native_runtime, native_target_full, rewrite_fallback_entries
++    fallback_model = rewrite_fallback_entries(fallback_model)
++    from hermes_cli.openrouter_native import native_id_fixup
++    agent._native_fast_route = None
++    _native = native_target_full(provider, model, base_url)
++    if _native is not None:
++        _vendor, _native_model, _native_overrides = _native
++        _rt = native_runtime(_vendor, _native_model)
++        log_rewrite("agent", model, _vendor, _native_model)
++        provider = requested_provider = _vendor
++        model, base_url, api_key, api_mode = _native_model, _rt.get("base_url"), _rt.get("api_key"), _rt.get("api_mode")
++        acp_command, acp_args, command, args = None, None, None, None
++    elif (_fixed := native_id_fixup(provider, model)) is not None:
++        # Already native, but the configured model string is an OpenRouter id (gateway/cron/CLI main agent).
++        logger.info("openrouter_exclude_native: %s model %r runs as %r", provider, model, _fixed[0])
++        model, _native_overrides = _fixed
++    else:
++        _native_overrides = None
++    if _native_overrides:  # an OpenRouter -fast id: the base model with fast mode on, for that model only
++        request_overrides = {**(request_overrides or {}), **_native_overrides}
++        agent._native_fast_route = (model, dict(_native_overrides))
++
+     _params = locals()
+     for _name in _PASSTHROUGH_PARAMS:
+         setattr(agent, _name, _params[_name])
+diff --git a/agent/agent_runtime_helpers.py b/agent/agent_runtime_helpers.py
+index d628c12..933ca68 100644
+--- a/agent/agent_runtime_helpers.py
++++ b/agent/agent_runtime_helpers.py
+@@ -2391,6 +2391,17 @@ def switch_model(
+     compressor). Mirrors ``_try_activate_fallback()`` but also updates ``_primary_runtime`` so
+     the change persists across turns. A failed swap/rebuild rolls back to the pre-switch
+     snapshot and re-raises (callers catch)."""
++    from hermes_cli.openrouter_native import log_rewrite, native_runtime, native_target_full
++    from hermes_cli.openrouter_native import native_id_fixup, set_native_fast_route
++    _native = native_target_full(new_provider, new_model, base_url)
++    _native_overrides = None
++    if _native is not None:  # model_catalog.openrouter_exclude_native
++        _rt = native_runtime(*_native[:2])
++        log_rewrite("model switch", new_model, *_native[:2])
++        new_provider, new_model, _native_overrides = _native
++        api_key, base_url, api_mode = _rt.get("api_key") or "", _rt.get("base_url") or "", _rt.get("api_mode") or ""
++    elif (_fixed := native_id_fixup(new_provider, new_model)) is not None:
++        new_model, _native_overrides = _fixed
+     old_model = agent.model
+     old_provider = agent.provider
+     # ── Reload credential pool for the new provider (issue #52727) ── Without this,
+@@ -2442,6 +2453,8 @@ def switch_model(
+     # short-circuiting the freshly selected healthy provider.
+     from agent.chat_completion_helpers import _reset_stale_streak
+     _reset_stale_streak(agent)
++    # A -fast id's speed belongs to this model only; any earlier mapping's keys go (before the snapshot).
++    set_native_fast_route(agent, new_model, _native_overrides)
+     agent._primary_runtime = _build_primary_runtime_snapshot(agent, api_mode)
+     _finish_switch(agent, new_provider, old_norm, new_norm)
+     logger.info(
+diff --git a/agent/auxiliary_client.py b/agent/auxiliary_client.py
+index a4c282b..1414646 100644
+--- a/agent/auxiliary_client.py
++++ b/agent/auxiliary_client.py
+@@ -2297,6 +2297,11 @@ def _try_openrouter(explicit_api_key: Optional[str | Callable[[], str]] = None,
+                     explicit_base_url: Optional[str] = None) -> tuple[Optional[OpenAI], Optional[str]]:
+     free_only, cfg_model = _aux_openrouter_settings()
+     or_model = model or cfg_model
++    from hermes_cli.openrouter_native import log_rewrite, native_target
++    _native = native_target("openrouter", or_model)
++    if _native is not None:  # model_catalog.openrouter_exclude_native
++        log_rewrite("auxiliary openrouter lane", or_model, *_native)
++        return resolve_provider_client(_native[0], _native[1])
+     if free_only and not _is_free_model(or_model):
+         logger.warning(
+             "Auxiliary client: auxiliary.free_only is enabled but the OpenRouter fallback model %r is "
+@@ -5329,6 +5334,15 @@ def resolve_provider_client(
+     # (e.g. "kimi" → "kimi-coding") is still reachable via the named-custom branch.
+     original_provider = (provider or "").strip().lower()
+     provider = _normalize_aux_provider(provider)
++    from hermes_cli.openrouter_native import log_rewrite, native_target
++    _native = native_target(provider, model, explicit_base_url)
++    if _native is not None:  # model_catalog.openrouter_exclude_native
++        log_rewrite(f"auxiliary {task or 'client'}", model, *_native)
++        original_provider, model = _native
++        provider = _normalize_aux_provider(original_provider)
++        explicit_base_url = explicit_api_key = None
++        if api_mode and api_mode != "anthropic_messages":
++            api_mode = None
+     api_mode = _canonical_api_mode(str(api_mode or "")).lower() or None
+     # MoA chokepoint: "moa" is not an HTTP provider; resolve to the aggregator so direct callers don't
+     # dead-end in unknown-provider. Unresolvable preset → leave untouched for the normal diagnostic.
+diff --git a/agent/fast_mode.py b/agent/fast_mode.py
+index 3afb258..15c9fe0 100644
+--- a/agent/fast_mode.py
++++ b/agent/fast_mode.py
+@@ -88,6 +88,9 @@ def effective_request_overrides(agent: Any) -> dict[str, Any]:
+         )
+     if "speed" in overrides and getattr(agent, "model", None) in (getattr(agent, "_fast_mode_unavailable_models", None) or ()):
+         overrides.pop("speed", None)
++    # model_catalog.openrouter_exclude_native: a -fast id's speed stays with the model it was mapped for.
++    from hermes_cli.openrouter_native import strip_foreign_native_fast
++    strip_foreign_native_fast(agent, overrides)
+     from agent.codex_service_tiers import apply_daybreak, negotiate_request_tier
+     negotiate_request_tier(agent, overrides)
+     apply_daybreak(agent, overrides)
+diff --git a/agent/route_binding.py b/agent/route_binding.py
+index b554d84..28f8898 100644
+--- a/agent/route_binding.py
++++ b/agent/route_binding.py
+@@ -25,6 +25,10 @@ def bind_route_entry(agent: Any, entry: dict[str, Any], provider: str, model: st
+         _reresolve_fallback_reasoning_config, _rescope_fallback_extra_body, _update_fallback_context_compressor,
+     )
+     from hermes_cli.fallback_config import resolve_entry_api_key
++    from hermes_cli.openrouter_native import rewrite_fallback_entries
++    _native_entry = rewrite_fallback_entries(entry)  # model_catalog.openrouter_exclude_native
++    if _native_entry is not entry:
++        entry, provider, model = _native_entry, _native_entry["provider"], _native_entry["model"]
+     # Pass the entry's base_url/api_key so custom endpoints (Ollama Cloud) resolve instead
+     # of falling through to OpenRouter defaults.
+     base_url_hint = (entry.get("base_url") or "").strip() or None
+diff --git a/hermes_cli/config_defaults.py b/hermes_cli/config_defaults.py
+index a265cf2..a1ac4a8 100644
+--- a/hermes_cli/config_defaults.py
++++ b/hermes_cli/config_defaults.py
+@@ -2030,6 +2030,10 @@ DEFAULT_CONFIG = {
+         # true: the OpenRouter picker lists the curated models above first, then every other model
+         # of OpenRouter's live catalog that supports tool calling (sorted by id).
+         "openrouter_all_models": False,
++        # Vendors whose models OpenRouter must never serve while the native provider of that name
++        # has a working credential, e.g. [anthropic]: their OpenRouter rows are hidden from every
++        # picker and an OpenRouter request for one runs on the native provider instead.
++        "openrouter_exclude_native": [],
+         # Per-provider override URLs for self-hosted curation lists using the same schema, e.g.
+         # providers: {openrouter: {url: https://example.com/my-curation.json}}.
+         "providers": {},
+diff --git a/hermes_cli/model_switch.py b/hermes_cli/model_switch.py
+index 53222ab..ebd8589 100644
+--- a/hermes_cli/model_switch.py
++++ b/hermes_cli/model_switch.py
+@@ -1236,6 +1236,7 @@ class _Switch:
+     validation_headers: dict = field(default_factory=dict)
+     suppress_ollama_headers: bool = False
+     validation: dict = field(default_factory=dict)
++    native_overrides: dict = field(default_factory=dict)  # model_catalog.openrouter_exclude_native (-fast)
+ 
+     def fail(self, message: str, **fields) -> ModelSwitchResult:
+         return ModelSwitchResult(success=False, is_global=self.is_global, error_message=message, **fields)
+@@ -1743,6 +1744,20 @@ def model_derived_api_mode(provider: str, model: str, api_key: str = "") -> Opti
+     return override(key, model, api_key) if override is not None else None
+ 
+ 
++def _native_instead_of_openrouter(st: _Switch) -> Optional[ModelSwitchResult]:
++    """``model_catalog.openrouter_exclude_native``: ``/model`` onto an OpenRouter model whose vendor
++    serves it natively here switches to the native provider with the same model instead."""
++    from hermes_cli.openrouter_native import log_rewrite, native_target_full
++    target = native_target_full(st.target_provider, st.new_model,
++                                st.current_base_url if st.target_provider == st.current_provider else None)
++    if target is not None:
++        log_rewrite("/model", st.new_model, *target[:2])
++        st.target_provider, st.new_model, st.native_overrides = target
++        st.explicit_provider = target[0] if st.explicit_provider else st.explicit_provider
++        st.resolved_alias = ""
++    return None
++
++
+ def _build_switch_result(st: _Switch) -> ModelSwitchResult:
+     """COMMON PATH part 3: final api_mode / base_url shaping, metadata, warnings."""
+     derived = model_derived_api_mode(st.target_provider, st.new_model, st.api_key)
+@@ -1781,7 +1796,7 @@ def _build_switch_result(st: _Switch) -> ModelSwitchResult:
+     return ModelSwitchResult(
+         success=True, new_model=st.new_model, target_provider=st.target_provider,
+         provider_changed=st.provider_changed, api_key=st.api_key, base_url=st.base_url, api_mode=st.api_mode,
+-        request_overrides=dict(request_overrides or {}), warning_message=" | ".join(warnings) if warnings else "",
++        request_overrides={**(request_overrides or {}), **st.native_overrides}, warning_message=" | ".join(warnings) if warnings else "",
+         usage_notice=usage_notice, provider_label=st.provider_label, resolved_via_alias=st.resolved_alias, capabilities=capabilities,
+         runtime_capabilities={
+             k: v for k, v in runtime_capabilities.items() if isinstance(k, str) and isinstance(v, bool)},
+@@ -1804,7 +1819,7 @@ def switch_model(
+         explicit_provider=explicit_provider, user_providers=user_providers, custom_providers=custom_providers,
+         new_model=raw_input.strip(), target_provider=current_provider)
+     route = _route_explicit_provider if explicit_provider else _route_from_model_input
+-    for step in (route, _resolve_switch_credentials, _validate_switch):
++    for step in (route, _native_instead_of_openrouter, _resolve_switch_credentials, _validate_switch):
+         fail = step(st)
+         if fail is not None:
+             return fail
+diff --git a/hermes_cli/models.py b/hermes_cli/models.py
+index 1959203..a9849f7 100644
+--- a/hermes_cli/models.py
++++ b/hermes_cli/models.py
+@@ -668,6 +668,13 @@ def _fetch_live_catalog_index(url: str, timeout: float, opener) -> Optional[tupl
+ 
+ 
+ def fetch_openrouter_models(
++    timeout: float = 8.0, *, force_refresh: bool = False, cache_only: bool = False) -> list[tuple[str, str]]:
++    """The OpenRouter picker list without the vendors ``model_catalog.openrouter_exclude_native`` serves natively."""
++    from hermes_cli.openrouter_native import filter_catalog
++    return filter_catalog(_fetch_openrouter_models_all(timeout, force_refresh=force_refresh, cache_only=cache_only))
++
++
++def _fetch_openrouter_models_all(
+     timeout: float = 8.0, *, force_refresh: bool = False, cache_only: bool = False) -> list[tuple[str, str]]:
+     """Return the curated OpenRouter picker list, refreshed from the live catalog when possible.
+ 
+@@ -1989,6 +1996,9 @@ def _credential_fingerprint(provider: str) -> str:
+         # The cached catalog is model_ids()' list, whose shape this option decides: flipping it must
+         # not keep serving the other list from provider_models_cache.json for up to a week.
+         parts.append(f"model_catalog.openrouter_all_models={_openrouter_all_models_enabled()}")
++        # Rows of natively served vendors are hidden only while that native credential works.
++        from hermes_cli.openrouter_native import fingerprint_part
++        parts.append(fingerprint_part())
+ 
+     blob = "|".join(parts).encode("utf-8", errors="replace")
+     # blake2b, not sha256: fingerprint only (collisions = a harmless cache miss), and CodeQL's
+diff --git a/hermes_cli/models_validate.py b/hermes_cli/models_validate.py
+index e3da968..c1b2c26 100644
+--- a/hermes_cli/models_validate.py
++++ b/hermes_cli/models_validate.py
+@@ -238,15 +238,20 @@ def offered_model_ids(models, provider: Optional[str], base_url: Optional[str] =
+ 
+ 
+ def drop_unofferable_model_ids(rows: list) -> None:
+-    """In-place: picker rows must not offer an id ``validate_requested_model`` will refuse for whitespace."""
++    """In-place: picker rows must not offer an id ``validate_requested_model`` will refuse for whitespace,
++    nor an OpenRouter id of a vendor served natively (``model_catalog.openrouter_exclude_native``)."""
++    from hermes_cli.openrouter_native import filter_catalog, is_openrouter_route
+     for row in rows:
+         if not isinstance(row, dict):
+             continue
+         provider = row.get("slug")
+         base_url = row.get("api_url") or row.get("base_url")
+         models = row.get("models")
++        native_filter = is_openrouter_route(provider, base_url)
++        if native_filter and isinstance(row.get("featured_models"), list):
++            row["featured_models"] = filter_catalog(row["featured_models"])
+         if isinstance(models, list):
+-            filtered = offered_model_ids(models, provider, base_url)
++            filtered = offered_model_ids(filter_catalog(models) if native_filter else models, provider, base_url)
+             removed = len(models) - len(filtered)
+             if removed:
+                 row["models"] = filtered
+diff --git a/hermes_cli/openrouter_native.py b/hermes_cli/openrouter_native.py
+new file mode 100644
+index 0000000..3fe1d9f
+--- /dev/null
++++ b/hermes_cli/openrouter_native.py
+@@ -0,0 +1,348 @@
++"""``model_catalog.openrouter_exclude_native``: OpenRouter never serves a model the agent can reach natively.
++
++A list of vendor ids (e.g. ``[anthropic]``). For each listed vendor that has a working native provider
++of the same name (a credential ``resolve_runtime_provider(requested=<vendor>)`` accepts), OpenRouter's
++``<vendor>/*`` models are:
++
++- dropped from the OpenRouter catalog (``hermes_cli.models.fetch_openrouter_models`` and so every
++  picker: desktop/dashboard model options, TUI and messaging ``/model``, ``hermes model``);
++- rewritten to the native provider wherever a provider+model pair is resolved: the runtime
++  resolver (main model, ``delegation.provider``, cron jobs), the agent constructor (delegated
++  children, fallback chains), live model switches, fallback activation and auxiliary clients.
++
++The rewrite keeps the work running on the same model and logs a warning; it is never silently
++billed to OpenRouter. An agent without the native credential keeps OpenRouter's models.
++Empty or unset (upstream default): nothing changes.
++
++Model ids (``native_model``): an OpenRouter ``:<variant>`` suffix (``:thinking``, ``:beta``,
++``:nitro``, ``:floor``, ``:extended``) is dropped; a ``-fast`` id is the base model with fast mode
++on (``{"speed": "fast"}`` request overrides, only where the base model accepts it);
++``~vendor/...-latest`` aliases and undated short ids resolve through the vendor's curated model
++list (``_PROVIDER_MODELS``): the exact id, else its (newest) dated snapshot, else (``-latest``) the
++newest listed id of that family; anything else keeps the plain normalized id, logged.
++
++Only provider+model pairs are rewritten: a model-less ``resolve_runtime_provider(requested=
++"openrouter")`` (image/video generation, the credits display) and any resolution with an explicit
++key or base_url want OpenRouter's own key and URL and are left alone.
++
++An agent already on the native provider whose model string is still an OpenRouter id (the gateway,
++cron and CLI build the main agent from the configured ``model.default`` after the runtime was
++rewritten) gets the same id mapping (``native_id_fixup``).
++
++Fast mode from a ``-fast`` id belongs to that one model: ``agent._native_fast_route`` records
++``(model, overrides)`` and ``agent.fast_mode.effective_request_overrides`` drops those keys while
++the agent runs any other model (fallback activation, ``/model``); a later switch replaces them.
++
++Availability is cached 60 s per profile: after the native key is removed, OpenRouter requests for
++the vendor's models still go native (and fail with an auth error) for up to 60 s; after it is
++added, they stay on OpenRouter for up to 60 s.
++"""
++
++from __future__ import annotations
++
++import logging
++import re
++import threading
++import time
++from typing import Any, Optional
++
++logger = logging.getLogger(__name__)
++
++_AVAILABLE_TTL_SECONDS = 60.0
++_available_cache: dict[tuple[str, str], tuple[float, bool]] = {}
++_available_lock = threading.Lock()
++_in_probe = threading.local()
++
++
++def excluded_vendors() -> frozenset[str]:
++    """Vendor ids listed in ``model_catalog.openrouter_exclude_native`` (lower-case)."""
++    try:
++        from hermes_cli.config import load_config_readonly
++        raw = (load_config_readonly() or {}).get("model_catalog")
++    except Exception:
++        return frozenset()
++    value = raw.get("openrouter_exclude_native") if isinstance(raw, dict) else None
++    if isinstance(value, str):
++        value = [value]
++    if not isinstance(value, (list, tuple)):
++        return frozenset()
++    return frozenset(str(v).strip().lower() for v in value if str(v or "").strip())
++
++
++def is_openrouter_route(provider: Any, base_url: Any = None) -> bool:
++    """True for provider ``openrouter``, any route whose base_url is at openrouter.ai, and a named
++    custom provider (``providers:`` / ``custom_providers:``) whose configured base_url is."""
++    from utils import base_url_host_matches
++    name = str(provider or "").strip().lower()
++    if name == "openrouter":
++        return True
++    if base_url:
++        return base_url_host_matches(str(base_url), "openrouter.ai")
++    if name in {"", "auto", "custom"}:
++        return False
++    try:
++        from hermes_cli.runtime_provider_custom import _get_named_custom_provider
++        entry = _get_named_custom_provider(name, resolve_credentials=False) or {}
++    except Exception:
++        return False
++    url = str(entry.get("base_url") or "").strip()
++    return bool(url) and base_url_host_matches(url, "openrouter.ai")
++
++
++def model_vendor(model: Any) -> Optional[str]:
++    """``anthropic`` for ``anthropic/claude-…`` / ``~anthropic/…`` / bare ``claude-…``; else the slug prefix."""
++    name = str(model or "").strip().lstrip("~")
++    if not name:
++        return None
++    if "/" in name:
++        return name.split("/", 1)[0].strip().lower() or None
++    try:
++        from hermes_cli.model_normalize import detect_vendor
++        return detect_vendor(name)
++    except Exception:
++        return None
++
++
++def _profile_key() -> str:
++    try:
++        from hermes_constants import get_hermes_home
++        return str(get_hermes_home())
++    except Exception:
++        return ""
++
++
++def native_available(vendor: str) -> bool:
++    """Whether the native provider ``vendor`` resolves with a credential (cached ~60 s per profile)."""
++    key = (vendor, _profile_key())
++    now = time.monotonic()
++    with _available_lock:
++        hit = _available_cache.get(key)
++        if hit is not None and now - hit[0] < _AVAILABLE_TTL_SECONDS:
++            return hit[1]
++    if getattr(_in_probe, "active", False):
++        return False
++    _in_probe.active = True
++    try:
++        from hermes_cli.runtime_provider import resolve_runtime_provider
++        runtime = resolve_runtime_provider(requested=vendor)
++        ok = (str(runtime.get("provider") or "").lower() == vendor and bool(runtime.get("api_key")))
++    except Exception as exc:
++        logger.debug("openrouter_exclude_native: native provider %s unavailable: %s", vendor, exc)
++        ok = False
++    finally:
++        _in_probe.active = False
++    with _available_lock:
++        _available_cache[key] = (now, ok)
++    return ok
++
++
++def reset_cache() -> None:
++    with _available_lock:
++        _available_cache.clear()
++
++
++_VARIANT_SUFFIX = re.compile(r":[A-Za-z0-9._-]+$")
++_DATED = re.compile(r"-\d{8}$")
++
++
++def _canon(model_id: str) -> str:
++    return model_id.strip().lower().replace(".", "-")
++
++
++def _curated_ids(vendor: str) -> list[str]:
++    try:
++        from hermes_cli.models_catalog_static import _PROVIDER_MODELS
++        return [str(m) for m in (_PROVIDER_MODELS.get(vendor) or [])]
++    except Exception:
++        return []
++
++
++def native_model(vendor: str, model: Any) -> tuple[str, dict[str, Any]]:
++    """``(native id, request overrides)`` for an OpenRouter id of ``vendor`` (see module doc)."""
++    raw = str(model or "").strip()
++    alias = raw.startswith("~")
++    name = raw.lstrip("~")
++    head, sep, tail = name.rpartition("/")
++    name = head + sep + _VARIANT_SUFFIX.sub("", tail)
++    overrides: dict[str, Any] = {}
++    fast = name.lower().endswith("-fast")
++    if fast:
++        name = name[: -len("-fast")]
++    latest = name.lower().endswith("-latest")
++    if latest:
++        name = name[: -len("-latest")]
++    try:
++        from hermes_cli.model_normalize import normalize_model_for_provider
++        base = normalize_model_for_provider(name, vendor)
++    except Exception:
++        base = name.split("/", 1)[-1]
++    curated = _curated_ids(vendor)
++    key = _canon(base)
++    exact = [m for m in curated if _canon(m) == key]
++    dated = [m for m in curated if _canon(m).startswith(key + "-") and _DATED.fullmatch(_canon(m)[len(key):])]
++    family = [m for m in curated if _canon(m).startswith(key + "-")]
++    if exact and not latest:
++        resolved = exact[0]
++    elif dated and not latest:
++        resolved = max(dated, key=lambda m: _canon(m)[-8:])  # newest snapshot
++    elif latest and (exact or family):
++        resolved = (exact or family)[0]  # the curated list is newest-first
++    else:
++        resolved = base
++        if alias or latest or fast or not _DATED.search(base):
++            logger.info("openrouter_exclude_native: %r has no unique match in the %s model list; using %r",
++                        raw, vendor, base)
++    if fast:
++        try:
++            from hermes_cli.models import resolve_fast_mode_overrides
++            overrides = resolve_fast_mode_overrides(resolved, provider=vendor) or {}
++        except Exception:
++            overrides = {}
++        if not overrides:
++            logger.warning("openrouter_exclude_native: %r asks for fast mode, which %r on %s does not offer; "
++                           "running at normal speed", raw, resolved, vendor)
++    return resolved, overrides
++
++
++def _looks_openrouter_id(raw: str) -> bool:
++    low = raw.lower()
++    return "/" in raw or raw.startswith("~") or ":" in raw or low.endswith("-fast") or low.endswith("-latest")
++
++
++def native_id_fixup(provider: Any, model: Any) -> Optional[tuple[str, dict[str, Any]]]:
++    """``(native id, overrides)`` when ``provider`` already IS an excluded vendor's native provider but
++    ``model`` is still an OpenRouter-style id of that vendor (``anthropic/claude-opus-5-fast``,
++    ``...:thinking``, ``~anthropic/...-latest``, undated ``claude-sonnet-4``); else None."""
++    raw = str(model or "").strip()
++    name = str(provider or "").strip().lower()
++    if not raw or not name:
++        return None
++    vendors = excluded_vendors()
++    if name not in vendors or model_vendor(raw) != name:
++        return None
++    resolved, overrides = native_model(name, raw)
++    if _looks_openrouter_id(raw):
++        return resolved, overrides
++    # A bare native-style id: only an undated short id that the curated list pins to a snapshot.
++    if resolved != raw and _DATED.search(resolved) and not _DATED.search(raw):
++        return resolved, overrides
++    return None
++
++
++def native_target(provider: Any, model: Any, base_url: Any = None) -> Optional[tuple[str, str]]:
++    """``(native_provider, native_model)`` when this OpenRouter request must go native instead, else None."""
++    full = native_target_full(provider, model, base_url)
++    return None if full is None else (full[0], full[1])
++
++
++def native_target_full(provider: Any, model: Any, base_url: Any = None) -> Optional[tuple[str, str, dict[str, Any]]]:
++    """:func:`native_target` plus the request overrides the id implies (``-fast`` -> speed fast)."""
++    if not str(model or "").strip():
++        return None
++    vendors = excluded_vendors()
++    if not vendors:
++        return None
++    vendor = model_vendor(model)
++    if not vendor or vendor not in vendors or not is_openrouter_route(provider, base_url):
++        return None
++    if not native_available(vendor):
++        return None
++    resolved, overrides = native_model(vendor, model)
++    return vendor, resolved, overrides
++
++
++def hidden_vendors() -> frozenset[str]:
++    """Excluded vendors whose native provider works here (their OpenRouter rows are hidden)."""
++    return frozenset(v for v in excluded_vendors() if native_available(v))
++
++
++def filter_catalog(rows: list) -> list:
++    """Drop OpenRouter catalog rows (ids or ``(id, desc)`` tuples) of hidden vendors."""
++    hidden = hidden_vendors()
++    if not hidden:
++        return rows
++    out = []
++    for row in rows:
++        mid = row[0] if isinstance(row, (tuple, list)) else row
++        if model_vendor(mid) in hidden:
++            continue
++        out.append(row)
++    return out
++
++
++def fingerprint_part() -> str:
++    """Cache-key part for provider_models_cache.json's OpenRouter row."""
++    return "openrouter_exclude_native=" + ",".join(sorted(hidden_vendors()))
++
++
++def native_runtime(vendor: str, model: str) -> dict[str, Any]:
++    """The native provider's resolved runtime for ``model`` (raises like resolve_runtime_provider)."""
++    from hermes_cli.runtime_provider import resolve_runtime_provider
++    return resolve_runtime_provider(requested=vendor, target_model=model)
++
++
++def log_rewrite(where: str, model: Any, vendor: str, native_model: str) -> None:
++    logger.warning(
++        "openrouter_exclude_native: %s asked for %r via OpenRouter; running %r on the native %s provider "
++        "instead (model_catalog.openrouter_exclude_native)", where, model, native_model, vendor)
++
++
++def rewrite_fallback_entries(entries: Any) -> Any:
++    """Fallback chain (dict or list of dicts) with OpenRouter entries of hidden vendors made native."""
++    if isinstance(entries, dict):
++        return (rewrite_fallback_entries([entries]) or [None])[0]
++    if not isinstance(entries, list):
++        return entries
++    out = []
++    for entry in entries:
++        if isinstance(entry, dict):
++            target = native_target(entry.get("provider"), entry.get("model"), entry.get("base_url"))
++            if target is not None:
++                log_rewrite("fallback entry", entry.get("model"), *target)  # (a -fast id runs at normal speed)
++                entry = {k: v for k, v in entry.items() if k not in {"base_url", "api_key", "key_env", "api_key_env"}}
++                entry["provider"], entry["model"] = target
++            else:
++                fixed = native_id_fixup(entry.get("provider"), entry.get("model"))
++                if fixed is not None and fixed[0] != entry.get("model"):
++                    entry = {**entry, "model": fixed[0]}  # (a -fast id runs at normal speed)
++        out.append(entry)
++    return out
++
++
++def set_native_fast_route(agent: Any, model: Any, overrides: Optional[dict[str, Any]]) -> None:
++    """Replace the fast-mode keys a previous ``-fast`` mapping put into ``agent.request_overrides``
++    with ``overrides`` for ``model`` (none: just drop the old ones)."""
++    current = dict(getattr(agent, "request_overrides", None) or {})
++    previous = getattr(agent, "_native_fast_route", None)
++    if previous:
++        for key, value in (previous[1] or {}).items():
++            if current.get(key) == value:
++                current.pop(key, None)
++    if overrides:
++        current.update(overrides)
++        agent._native_fast_route = (str(model or ""), dict(overrides))
++    else:
++        agent._native_fast_route = None
++    agent.request_overrides = current
++
++
++def strip_foreign_native_fast(agent: Any, overrides: dict[str, Any]) -> None:
++    """In place: drop the ``-fast`` mapping's keys while ``agent`` runs a model other than the one
++    they were set for (a fallback or another model; restoring the primary brings them back)."""
++    route = getattr(agent, "_native_fast_route", None)
++    if route and getattr(agent, "model", None) != route[0]:
++        for key, value in (route[1] or {}).items():
++            if overrides.get(key) == value:
++                overrides.pop(key, None)
++    # Paths that carry the mapping only as request_overrides (gateway /model session overrides,
++    # delegate children) have no route record: ``speed`` never goes to a model or wire that has
++    # no Anthropic fast mode (a non-Claude fallback, chat_completions to OpenRouter).
++    if overrides.get("speed") == "fast" and excluded_vendors():
++        try:
++            from hermes_cli.models import _is_anthropic_fast_model
++            fast_ok = (getattr(agent, "api_mode", None) == "anthropic_messages"
++                       and _is_anthropic_fast_model(getattr(agent, "model", None)))
++        except Exception:
++            fast_ok = False
++        if not fast_ok:
++            overrides.pop("speed", None)
+diff --git a/hermes_cli/runtime_provider.py b/hermes_cli/runtime_provider.py
+index a31d4f8..f2cf316 100644
+--- a/hermes_cli/runtime_provider.py
++++ b/hermes_cli/runtime_provider.py
+@@ -1090,7 +1090,41 @@ def resolve_runtime_provider(*, requested: Optional[str] = None, explicit_api_ke
+     from hermes_cli.runtime_provider_missing_key import raise_if_declared_key_missing
+     raise_if_declared_key_missing(requested_provider, runtime, _get_model_config(), _FROZEN_RUNTIME_CONFIG.get(),
+                                   explicit_api_key=explicit_api_key)
+-    return runtime
++    return _native_instead_of_openrouter(runtime, target_model, requested, explicit_api_key, explicit_base_url)
++
++
++def _native_instead_of_openrouter(runtime: dict[str, Any], target_model: Optional[str], requested: Optional[str],
++                                  explicit_api_key: Optional[str], explicit_base_url: Optional[str]) -> dict[str, Any]:
++    """``model_catalog.openrouter_exclude_native``: an OpenRouter runtime for a model whose vendor
++    serves it natively here resolves to the native provider instead (``runtime["model"]`` carries
++    the native id). Main model, ``delegation.provider`` and cron jobs all resolve through here.
++    Only with a model to run: ``target_model``, or ``model.default`` for the main runtime
++    (``requested`` unset/``auto``) when the configured main provider is OpenRouter. Returned as
++    is: a model-less named request (``requested="openrouter"``: image/video gen, the credits
++    display) and any call with an explicit key or base_url (account_usage): they want exactly
++    that provider's key and URL. Agents built from such a runtime are still rewritten by the
++    ``init_agent`` backstop."""
++    if explicit_api_key or explicit_base_url:
++        return runtime
++    from hermes_cli.openrouter_native import is_openrouter_route, log_rewrite, native_runtime, native_target_full
++    model = target_model
++    if not model:
++        if str(requested or "").strip().lower() not in {"", "auto"}:
++            return runtime
++        cfg = _get_model_config()
++        if not is_openrouter_route(cfg.get("provider"), cfg.get("base_url")):
++            return runtime
++        model = cfg.get("default") or ""
++    target = native_target_full(runtime.get("provider"), model, runtime.get("base_url"))
++    if target is None:
++        return runtime
++    vendor, native_model, overrides = target
++    native = native_runtime(vendor, native_model)
++    log_rewrite("runtime resolution", model, vendor, native_model)
++    out = {**native, "model": native_model, "requested_provider": vendor}
++    if overrides:
++        out["request_overrides"] = {**(native.get("request_overrides") or {}), **overrides}
++    return out
+ 
+ 
+ def _raise_for_credentialless_bare_custom(requested_provider: str, runtime: dict[str, Any]) -> None:
+diff --git a/tools/delegate_tool.py b/tools/delegate_tool.py
+index 62df913..f103dbd 100644
+--- a/tools/delegate_tool.py
++++ b/tools/delegate_tool.py
+@@ -288,6 +288,8 @@ def _build_child_agent(
+             request_overrides = dict(override_request_overrides)
+         else:
+             request_overrides = {} if override_provider else dict(getattr(parent_agent, "request_overrides", {}) or {})
++        # model_catalog.openrouter_exclude_native: an OpenRouter -fast id runs natively with fast mode.
++        request_overrides = {**request_overrides, **(rt.pop("native_request_overrides", None) or {})}
+         parent_sid = getattr(parent_agent, "session_id", None)
+         child_session_db = _open_child_session_db(parent_agent)
+         with delegated_child_context():
+diff --git a/tools/delegate_tool_config.py b/tools/delegate_tool_config.py
+index c68e57e..a582899 100644
+--- a/tools/delegate_tool_config.py
++++ b/tools/delegate_tool_config.py
+@@ -662,4 +662,26 @@ def _resolve_child_runtime(
+     child_max_tokens = getattr(parent_agent, "max_tokens", None)
+     if isinstance(child_max_tokens, int):
+         kwargs["max_tokens"] = child_max_tokens
++    return _native_child_runtime(kwargs)
++
++
++def _native_child_runtime(kwargs: dict[str, Any]) -> dict[str, Any]:
++    """``model_catalog.openrouter_exclude_native``: a child bound for OpenRouter with a model its
++    vendor serves natively here (inherited OpenRouter parent + model override, a delegation route,
++    an OpenRouter ``delegation.provider``) runs on the native provider with the same model."""
++    from hermes_cli.openrouter_native import log_rewrite, native_runtime, native_target_full, rewrite_fallback_entries
++    kwargs["fallback_model"] = rewrite_fallback_entries(kwargs.get("fallback_model"))
++    target = native_target_full(kwargs.get("provider"), kwargs.get("model"), kwargs.get("base_url"))
++    if target is None:
++        return kwargs
++    vendor, native_model, overrides = target
++    if overrides:  # a -fast id: merged into the child's request_overrides by delegate_tool
++        kwargs["native_request_overrides"] = overrides
++    native = native_runtime(vendor, native_model)
++    log_rewrite("delegate_task child", kwargs.get("model"), vendor, native_model)
++    kwargs.update(
++        model=native_model, provider=vendor, requested_provider=vendor, base_url=native.get("base_url"),
++        api_key=native.get("api_key"), api_mode=native.get("api_mode"), acp_command=None, acp_args=[],
++        **{a: d for a, d in _ROUTING_FILTER_DEFAULTS},
++    )
+     return kwargs
