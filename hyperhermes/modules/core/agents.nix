@@ -171,8 +171,10 @@ let
       # 30 s for all of them together (the unit's start timeout is 90 s);
       # a failure or timeout never blocks the start.
       replayMemoryHomes = pkgs.writeShellScript "hermes-replay-memory-pending" ''
+        shopt -s nullglob
         for memory_home in "$1" "$1"/profiles/*; do
-          compgen -G "$memory_home/pending/memory/*.json" > /dev/null || continue
+          pending=("$memory_home"/pending/memory/*.json)
+          [ ''${#pending[@]} -gt 0 ] || continue
           HERMES_HOME="$memory_home" ${ac.hermesPackage.hermesVenv}/bin/python3 ${./replay-memory-pending.py} "$memory_home" \
             || echo "hermes: replaying staged memory writes in $memory_home failed" >&2
         done
