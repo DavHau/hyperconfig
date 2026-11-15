@@ -43,5 +43,13 @@ in
     hyper.spacesClient.herdrUser = cfg.user;
     # Every dictation take kept for replay (../voxtype-archive.nix).
     hyper.voxtypeArchive.enable = lib.mkDefault true;
+    # Whisper initial prompt for Dave's dictation (spaces-os voxtype.nix;
+    # VAD and the rest stay at its defaults). Measured against the spaces-os
+    # default on 20 real takes + TTS glossary sentences with the production
+    # small model: term accuracy 21% -> 56%, jargon WER en 16.7 -> 5.8,
+    # de 31.1 -> 19.4, no glossary insertions into control sentences or
+    # real takes, same latency; only regression one German control word.
+    # Evaluation: /var/lib/hermes/infra/home/cache/scratch/stt-eval/ (prompt C).
+    spaces.voxtype.initialPrompt = "Dave dictates to his Claude Codes about hyperconfig, his NixOS fleet. Glossary: Grafana, Mimir, SearXNG, Nextcloud, pocket-id, OIDC, Mullvad, Tailscale, WireGuard, ZeroTier, Yggdrasil, nftables, tang, Clevis, LUKS, ZFS, nspawn, sudo, systemd, nixpkgs, flake.lock, Home Assistant, ESPHome, Wyoming, Whisper, voxtype, OpenRouter, TeamClaude, Claude, afk, omp, Ghostty, Noctalia, niri, jj, clan vars, hyperhermes, infra-space, dave-hermes. Machines: amy, vit, som, bam, edi, sgp, nas, joy, cm-pi.";
   };
 }
