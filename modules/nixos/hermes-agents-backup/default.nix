@@ -145,6 +145,6 @@ in
     # Each given path stays on its own filesystem: datasets mounted
     # inside a home are skipped even without a pattern.
     extraCreateArgs = [ "--one-file-system" ];
-    startAt = lib.mkForce "*-*-* 04:30:00";
+    startAt = lib.mkForce "*-*-* 04:30:00 Asia/Bangkok"; # som runs on UTC
   };
 }
