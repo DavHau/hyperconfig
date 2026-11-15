@@ -2,6 +2,9 @@
 # standing in for GitHub: an empty remote is fine, then the first clone, a
 # fast-forward, a force push (old tip kept under refs/backup/, main follows)
 # and an unreachable remote (unit fails, mirror untouched).
+#
+# A container test (systemd-nspawn, no VM): git, a timer and a bare repo
+# need no kernel of their own.
 { pkgs }:
 pkgs.testers.runNixOSTest {
   name = "clan-secrets-mirror";

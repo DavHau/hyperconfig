@@ -108,12 +108,8 @@ pkgs.testers.runNixOSTest {
       # The sandbox allows no setuid bits, so pam_unix's helper can't
       # run and tunneled's lingering manager wouldn't start: test-only
       # systemd-user PAM stack.
-      security.pam.services.systemd-user.text = lib.mkForce ''
-        account sufficient ${pkgs.linux-pam}/lib/security/pam_permit.so
-        session optional ${pkgs.systemd}/lib/security/pam_systemd.so
-        session sufficient ${pkgs.linux-pam}/lib/security/pam_permit.so
-      '';
       imports = [
+        ../../../hyperhermes/checks/container-pam.nix
         ./egress.nix
         ./dns.nix
       ];

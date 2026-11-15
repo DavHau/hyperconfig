@@ -5,7 +5,7 @@
 # A container test (systemd-nspawn, no VM): a unit's restart policy needs
 # no kernel of its own. The Nix sandbox allows no setuid bits, so
 # pam_unix's helper (unix_chkpwd) can't run and the systemd-user PAM stack
-# is reduced to permit + pam_systemd here (test only). The user bus is
+# is reduced to permit + pam_systemd (hyperhermes/checks/container-pam.nix). The user bus is
 # dialled as the user at /run/user/1000/bus: `systemctl --user -M alice@`
 # goes through machined, which the container doesn't run.
 { pkgs }:
@@ -15,16 +15,14 @@ pkgs.testers.runNixOSTest {
   containers.machine =
     { lib, pkgs, ... }:
     {
-      imports = [ ./default.nix ];
+      imports = [
+        ./default.nix
+        ../../../hyperhermes/checks/container-pam.nix
+      ];
       users.users.alice = {
         isNormalUser = true;
         linger = true;
       };
-      security.pam.services.systemd-user.text = lib.mkForce ''
-        account sufficient ${pkgs.linux-pam}/lib/security/pam_permit.so
-        session optional ${pkgs.systemd}/lib/security/pam_systemd.so
-        session sufficient ${pkgs.linux-pam}/lib/security/pam_permit.so
-      '';
     };
 
   testScript = ''
