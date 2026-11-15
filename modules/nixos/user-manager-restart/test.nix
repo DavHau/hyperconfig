@@ -1,17 +1,31 @@
 # A lingering user's manager killed with SIGKILL (as the OOM killer does)
 # comes back on its own, with a reachable user bus; a clean stop stays
 # stopped.
+#
+# A container test (systemd-nspawn, no VM): a unit's restart policy needs
+# no kernel of its own. The Nix sandbox allows no setuid bits, so
+# pam_unix's helper (unix_chkpwd) can't run and the systemd-user PAM stack
+# is reduced to permit + pam_systemd here (test only). The user bus is
+# dialled as the user at /run/user/1000/bus: `systemctl --user -M alice@`
+# goes through machined, which the container doesn't run.
 { pkgs }:
 pkgs.testers.runNixOSTest {
   name = "user-manager-restart";
 
-  nodes.machine = {
-    imports = [ ./default.nix ];
-    users.users.alice = {
-      isNormalUser = true;
-      linger = true;
+  containers.machine =
+    { lib, pkgs, ... }:
+    {
+      imports = [ ./default.nix ];
+      users.users.alice = {
+        isNormalUser = true;
+        linger = true;
+      };
+      security.pam.services.systemd-user.text = lib.mkForce ''
+        account sufficient ${pkgs.linux-pam}/lib/security/pam_permit.so
+        session optional ${pkgs.systemd}/lib/security/pam_systemd.so
+        session sufficient ${pkgs.linux-pam}/lib/security/pam_permit.so
+      '';
     };
-  };
 
   testScript = ''
     import datetime
@@ -21,6 +35,8 @@ pkgs.testers.runNixOSTest {
     def main_pid():
         return machine.succeed("systemctl show -P MainPID user@1000.service").strip()
 
+    user_bus = "runuser -u alice -- env XDG_RUNTIME_DIR=/run/user/1000 systemctl --user show-environment"
+
     with subtest("a killed manager restarts and serves its bus again"):
         old = main_pid()
         machine.succeed(f"kill -KILL {old}")
@@ -29,9 +45,7 @@ pkgs.testers.runNixOSTest {
             f"[ \"$pid\" != 0 ] && [ \"$pid\" != {old} ] && systemctl is-active user@1000.service",
             timeout=datetime.timedelta(seconds=60),
         )
-        machine.wait_until_succeeds(
-            "systemctl --user -M alice@ show-environment", timeout=datetime.timedelta(seconds=60)
-        )
+        machine.wait_until_succeeds(user_bus, timeout=datetime.timedelta(seconds=60))
 
     with subtest("a clean stop stays stopped"):
         machine.succeed("systemctl stop user@1000.service")
