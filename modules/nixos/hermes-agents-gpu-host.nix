@@ -68,7 +68,6 @@ in
     lib.mapAttrsToList (name: a: ''
       if [ "$(${pkgs.coreutils}/bin/id -u)" = "${toString a.uid}" ]; then
         export PATH="${(venvOf name).venv}/bin:$PATH"
-        export LD_LIBRARY_PATH="${pythonVenv.wheelLibraryPath}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
       fi
     '') agents
   );

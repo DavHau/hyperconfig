@@ -229,17 +229,12 @@ let
           ${hermesHome}/memories ${workspace}
         ${pruneMovedBundledSkills} ${ac.hermesPackage}/share/hermes-agent/skills ${hermesHome}/skills
       '';
-      openShimCaseArm =
-        let
-          env = lib.filterAttrs (n: _: n != "LD_LIBRARY_PATH") unitEnv;
-        in
-        ''
+      openShimCaseArm = ''
           ${user})
             ${lib.concatStringsSep "\n    " (
-              lib.mapAttrsToList (n: v: "export ${n}=${lib.escapeShellArg v}") env
+              lib.mapAttrsToList (n: v: "export ${n}=${lib.escapeShellArg v}") unitEnv
             )}
             export PATH=${lib.escapeShellArg (lib.makeBinPath rt.path)}:"$PATH"
-            export LD_LIBRARY_PATH=${lib.escapeShellArg rt.env.LD_LIBRARY_PATH}"''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             cd ${lib.escapeShellArg workspace}
             ;;
         '';
@@ -257,16 +252,12 @@ let
             lib.filterAttrs (
               n: v:
               v != null
-              && !lib.elem n [
-                "PATH"
-                "LD_LIBRARY_PATH"
-              ]
+              && n != "PATH"
             ) unit
             // {
               USER = user;
               LOGNAME = user;
               PATH = "${lib.makeBinPath rt.path}:/run/wrappers/bin:/run/current-system/sw/bin";
-              LD_LIBRARY_PATH = rt.env.LD_LIBRARY_PATH;
             };
         in
         ''
@@ -302,23 +293,21 @@ let
 
       # Hermes' terminal tool runs every command in one snapshot of
       # `bash -l`. On NixOS /etc/profile rebuilds PATH, so the unit's
-      # PATH and LD_LIBRARY_PATH do not reach that shell. Export them
-      # again for the owner's login shells only. The uid is
+      # PATH does not reach that shell. Export it again for the owner's
+      # login shells only. The uid is
       # runtime-allocated, so the guard compares it at shell start.
       # The bare hermes package stays out: an ssh login must reach the
       # `hermes` shim, which sets HERMES_HOME.
       loginInit = ''
         if [ "$(${pkgs.coreutils}/bin/id -u)" = "$(${pkgs.coreutils}/bin/id -u ${user} 2>/dev/null)" ]; then
           export PATH="${lib.makeBinPath (lib.remove ac.hermesPackage rt.path)}:$PATH"
-          export LD_LIBRARY_PATH="${pythonVenv.wheelLibraryPath}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
         fi
       '';
 
       # The CLI runs the agent package with the environment and PATH of
       # the gateway unit: same HERMES_HOME, venv first on PATH, skill
       # CLIs, HOME and per-setting locks. HOME is the account home, so the
-      # shim enters the workspace by path. LD_LIBRARY_PATH prepends rather
-      # than replaces the caller's.
+      # shim enters the workspace by path.
       shimCaseArm = if locked then lockedShimCaseArm else openShimCaseArm;
 
       services = venv.services // {

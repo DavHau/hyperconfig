@@ -321,6 +321,14 @@
           pkgs = nixpkgs.legacyPackages.x86_64-linux;
           hermesPackage = self.nixosConfigurations.som.config.services.hyperhermes.package;
         };
+        # hyperhermes' wheel-libs container check with som's own nix
+        # (input `nix`, its own nixpkgs): an agent's terminal runs it,
+        # which the venv's wheel libraries in the environment broke.
+        hermes-wheel-libs = import "${inputs.hyperhermes}/checks/wheel-libs" {
+          pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          self = inputs.hyperhermes;
+          nixPackage = self.nixosConfigurations.som.config.nix.package;
+        };
         # infra-space's containers on two members, root on a third machine.
         infra-space =
           import ./modules/nixos/infra-space/test.nix {

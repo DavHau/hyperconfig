@@ -8,9 +8,6 @@
   hlib,
   cfg,
 }:
-let
-  pythonVenv = import ../../lib/python-venv.nix { inherit lib pkgs; };
-in
 rec {
   hermesPackage = cfg.package;
 
@@ -116,9 +113,9 @@ rec {
 
         # Skills read this to tell a sandboxed agent from a native one.
         HERMES_SANDBOX = "none";
-        # The nix-built interpreter loads pip-installed manylinux extension
-        # modules. Their NEEDED libs resolve through LD_LIBRARY_PATH.
-        LD_LIBRARY_PATH = pythonVenv.wheelLibraryPath;
+        # No LD_LIBRARY_PATH: only the venv's interpreter gets the wheel
+        # libs, from its own wrapper (../../lib/python-venv.nix); here it
+        # would reach every program the agent runs.
         # execute_code runs its scripts with the VIRTUAL_ENV python, else
         # with hermes' own sealed interpreter, which lacks the venv's
         # libraries (tools/code_execution_env.py, _resolve_child_python).

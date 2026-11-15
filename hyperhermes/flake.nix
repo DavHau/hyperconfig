@@ -136,6 +136,10 @@
 
       checks.${system} = {
         core = import ./checks/core { inherit pkgs self; };
+        # A systemd-nspawn container, no VM: the venv's wheel libraries
+        # reach its interpreter only, not the gateway, its terminal
+        # commands or a login shell.
+        wheel-libs = import ./checks/wheel-libs { inherit pkgs self; };
         # A dashboard restart drains, keeps the interrupted chat turn and
         # continues it without a client; a user Stop is not continued.
         resume = import ./checks/resume { inherit pkgs self; };
