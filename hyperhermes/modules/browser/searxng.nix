@@ -123,9 +123,12 @@ in
               inactive = true;
             }
           ]
-          # Not loaded while general.contact_url is unset (below). The
-          # Wikimedia two are slow from the egress (the 3 s default times
-          # out): 6 s, for when they come back.
+          # Wikipedia and Wikidata stay off (Dave, 2026-11): not loaded.
+          # The Wikimedia two are slow from the egress (the 3 s default
+          # times out): 6 s, for when they come back. OSM's map results
+          # still ask the Wikidata SPARQL endpoint for images and links
+          # (searx.wikidata.send_wikidata_query, a library call that needs
+          # neither engine loaded) with the contact in its User-Agent.
           ++ [
             {
               name = "wikipedia";
@@ -137,9 +140,21 @@ in
               inactive = true;
               timeout = 6.0;
             }
+          ]
+          # OpenStreetMap (Nominatim), stock: category `map` only, so it
+          # answers only `categories=map` or `!osm`, never the general
+          # searches hermes sends (its provider passes no categories).
+          # Nominatim allows 1 request/s; SearXNG has no per-engine rate
+          # limit, so one connection at a time, and map searches are rare.
+          ++ [
             {
               name = "openstreetmap";
-              inactive = true;
+              disabled = false;
+              categories = [ "map" ];
+              max_connections = 1;
+              # Nominatim plus, in the same step, the Wikidata SPARQL call
+              # for images: the 3 s default times out from the egress.
+              timeout = 6.0;
             }
           ];
         # Dave's default country is Singapore. With "all" Bing sends no
@@ -147,18 +162,17 @@ in
         # en-SG it and DuckDuckGo answer on topic. Engines without
         # regions use the language part.
         search.default_lang = "en-SG";
-        # No general.contact_url on purpose: upstream master (since
-        # 38929d14, 2026-11-12, newer than the pin; the nightly bump takes
-        # it) puts it into the User-Agent of Wikipedia, Wikidata and OSM
-        # (Wikimedia's User-Agent policy) and logs an error on every query
-        # of theirs without one, and no contact in this repo is
-        # neutral (the agents' mail domain and the instance URL both name
-        # their owner). Those three engines are off instead (engine list
-        # above, `inactive`: not even loaded, so no error per query); they
-        # gave agents no relevant results anyway (2026-11).
-        # To turn them on: set general.contact_url to a role address that
-        # identifies no one (or SEARXNG_CONTACT_URL in environmentFile)
-        # and drop their `inactive` entries.
+        # Upstream master (since 38929d14, 2026-11-12) loads Wikipedia,
+        # Wikidata and OSM only with a contact, and puts it into the
+        # User-Agent of its Wikimedia requests (Wikimedia's User-Agent
+        # policy): for OSM that is the Wikidata SPARQL call for images;
+        # Nominatim gets no contact. A role address on a domain that
+        # names no one: the Porkbun mail forward search-bot@agentic-nix.com
+        # (set up through the shared `porkbun` API key, not Nix-managed;
+        # check or recreate it with Porkbun's email-forward API) to the
+        # infra agent's receive-only mailbox (infra@<mail domain>; unknown
+        # senders land in its quarantine).
+        general.contact_url = "mailto:search-bot@agentic-nix.com";
       };
       # Bot detection reads limiter.toml even with the limiter off, and
       # warns when it is missing. The file only has to exist (the module
