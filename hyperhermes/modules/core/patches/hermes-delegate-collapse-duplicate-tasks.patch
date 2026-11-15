@@ -1,0 +1,539 @@
+hermes v0.23.0: a delegate_task whose `tasks` array repeats one entry
+spawns one child per copy, and one empty stray entry fails the whole
+batch.
+
+Symptom (som, claude-opus-5-5 via anthropic/TeamClaude): dave-hermes sent
+`tasks` with the same goal 20 times (20 children hammered one TV), 3 times
+(two goal-only copies + the same goal with 5 KB of context) and twice;
+daniel twice; 8 of dave-hermes' 15 multi-task calls in 4 days had
+repeated goals. adam lost a batch to "Task 1 is missing a 'goal'" from an
+empty stray entry.
+
+Root cause: the model. The stored tool-call arguments are one valid JSON
+object with the copies inside (`{"tasks": [{...}, {...}, ...]}`), and the
+Anthropic path cannot repeat array elements: the anthropic SDK's
+MessageStream accumulates each tool_use block's input_json_delta and
+get_final_message() returns its parsed input
+(agent/chat_completion_helpers.py _call_anthropic;
+relay_llm.AnthropicStreamAccumulator only appends partial_json per block
+index and parses it once in finalize()); a dropped stream raises
+EmptyStreamError and the request is retried from scratch, never
+continued into the same block. Upstream allows identical goals on purpose
+(tools/delegate_tool_tasks.py _validate_batch_tasks: best-of-N fan-outs,
+#81141 follow-up) and has no dedupe; #57767 (idempotency key) is about
+one call dispatched twice, not repeated entries.
+
+Fix (tools/delegate_tool_tasks.py _collapse_duplicate_tasks, called from
+delegate_task before _normalize_task_list):
+- entries collapse to ONE, at the first copy's position, only when the
+  normalized goal (stripped, whitespace collapsed; case kept) AND every
+  other model-supplied field except `group` and `context` are equal as
+  canonical JSON (toolsets, model, provider, output_schema, images, role,
+  backend task params, anything else; null counts as absent). Copies with
+  contexts equal after whitespace normalization collapse; copies with
+  different non-empty contexts all stay; a bare copy (empty context) folds
+  into the first copy carrying context ([G, G+ctxA, G+ctxB] -> G+ctxA,
+  G+ctxB), or, with no context copy, into the first bare copy;
+- only entirely empty entries (null, "", {}, or an object whose values are
+  all empty) are dropped, while one other entry remains; a goal-less entry
+  with any content (`{"context": "x"}`) still fails the batch with the
+  usual "Task i is missing a 'goal'";
+- not on a restart re-dispatch (`_RESUME_META` set,
+  tui_gateway/session_auto_continue.py): its tasks are the original
+  call's, aligned with the resume indexes `_resume_remap` maps back;
+- the tool result's `note` names the dropped tasks 0-based, like
+  upstream's errors ("dropped Tasks 1, 4 (same task as Task 0); dropped
+  empty Task 2; 2 of 5 kept (Task <i> = 0-based index in your tasks array,
+  as in errors). To run identical copies on purpose, number the goals
+  ..."), prepended to any note dispatch adds, and attached to a validation
+  error too;
+- error `Task i` labels are mapped back to the model's original array
+  (_map_task_indexes): each error string is mapped on its own, only its
+  leading `Task i`, BEFORE several are joined (the all-routes-refused
+  error) - never a `Task i` inside a backend message or a quoted goal. A
+  partially refused task's entry keeps this run's task_index (result
+  order, transcripts and async/resume bookkeeping index the collapsed
+  list); its error names the original task.
+Identical runs on purpose stay possible with distinct goals.
+
+Test: tests/tools/test_delegate_task_dedup.py (20 identical -> 1 with the
+positions in the note; goal-only copies + one with context -> the context
+one; whitespace-equal contexts collapse, different contexts stay
+separate and bare copies fold into the first context copy; different
+toolsets / output_schema vs images / model / provider
+/ role / backend params stay separate; group and key order don't matter;
+null/{}/""/blank strays dropped; `{"context": "x"}` fails the batch;
+error index maps to the original array and carries the note; only a
+string's leading label maps ('boom Task 2', quoted 'a. Task 1 b' stay);
+all-routes-refused errors mapped before joining; a refused entry's error
+names the original task; resume path
+not collapsed; JSON-string tasks collapse).
+tests/tools/test_delegate_batch_validation.py's exact-duplicate case now
+expects one child and the note (its case-variant case is unchanged).
+
+Generated against v0.23.0 with every earlier patch of
+modules/core/package.nix applied.
+
+diff --git a/tests/tools/test_delegate_batch_validation.py b/tests/tools/test_delegate_batch_validation.py
+index d3d57e61..39302bb6 100644
+--- a/tests/tools/test_delegate_batch_validation.py
++++ b/tests/tools/test_delegate_batch_validation.py
+@@ -51,22 +51,22 @@ GOOD_B = "Write regression tests for the session expiry watcher"
+ 
+ 
+ class TestBatchDuplicateGoalsAllowed(unittest.TestCase):
+-    """Identical-goal fan-outs are legitimate (best-of-N / ensemble sampling).
+-
+-    The original gate from #81141 rejected duplicates; the post-merge audit
+-    downgraded that — duplicates must pass validation.
++    """Identical-goal fan-outs are legitimate (best-of-N / ensemble sampling), but
++    with distinct goals: entries repeating one normalized goal are model emission
++    slips and collapse to one (hyperhermes patch); case variants stay distinct.
+     """
+ 
+     def _completed(self, idx):
+         return {"task_index": idx, "status": "completed", "summary": "ok",
+                 "api_calls": 1, "duration_seconds": 1.0, "_child_role": None}
+ 
+-    def test_exact_duplicate_goals_accepted(self):
++    def test_exact_duplicate_goals_collapse_to_one(self):
+         with patch("tools.delegate_tool._run_single_child") as mock_run:
+-            mock_run.side_effect = [self._completed(0), self._completed(1)]
++            mock_run.side_effect = [self._completed(0)]
+             result = _call([{"goal": GOOD_A}, {"goal": GOOD_A}])
+         self.assertNotIn("error", result)
+-        self.assertEqual(len(result["results"]), 2)
++        self.assertEqual(len(result["results"]), 1)
++        self.assertIn("dropped Task 1 (same task as Task 0)", result["note"])
+ 
+     def test_case_whitespace_variant_duplicates_accepted(self):
+         with patch("tools.delegate_tool._run_single_child") as mock_run:
+diff --git a/tests/tools/test_delegate_task_dedup.py b/tests/tools/test_delegate_task_dedup.py
+new file mode 100644
+index 00000000..9539c80a
+--- /dev/null
++++ b/tests/tools/test_delegate_task_dedup.py
+@@ -0,0 +1,196 @@
++"""delegate_task collapses repeated task entries (same normalized goal and every other field but group/context) and
++drops entirely empty strays before anything spawns, and tells the model in the result's ``note`` (hyperhermes patch)."""
++
++import json
++import threading
++from unittest.mock import MagicMock, patch
++
++from tools.delegate_tool_tasks import _collapse_duplicate_tasks, _map_task_indexes
++
++GOAL = "Make a TV panel show a full-screen, correctly scaled image from our GOP graphics layer"
++OTHER = "Write regression tests for the session expiry watcher"
++
++
++def _parent():
++    parent = MagicMock()
++    parent.base_url, parent.api_key, parent.provider = "https://openrouter.ai/api/v1", "k", "openrouter"
++    parent.api_mode, parent.model, parent.platform = "chat_completions", "anthropic/claude-sonnet-4", "cli"
++    parent.providers_allowed = parent.providers_ignored = parent.providers_order = parent.provider_sort = None
++    parent._session_db, parent._delegate_depth, parent._active_children = None, 0, []
++    parent._active_children_lock = threading.Lock()
++    parent._print_fn = parent.tool_progress_callback = parent.thinking_callback = None
++    return parent
++
++
++def _spawn(tasks, run_result=None):
++    """``(tool result, task_list the batch was built with)``; nothing runs."""
++    batches = []
++    with patch("tools.delegate_tool._run_batch",
++               side_effect=lambda batch, background: batches.append(batch) or json.dumps(run_result or {"status": "built"})):
++        from tools.delegate_tool import delegate_task
++        result = json.loads(delegate_task(tasks=tasks, parent_agent=_parent()))
++    return result, (batches[0].task_list if batches else None)
++
++
++def test_twenty_identical_entries_spawn_one_child():
++    result, task_list = _spawn([{"goal": GOAL} for _ in range(20)])
++    assert task_list == [{"goal": GOAL}]
++    assert result["status"] == "built"
++    assert result["note"].startswith(
++        "dropped Tasks " + ", ".join(str(i) for i in range(1, 20)) + " (same task as Task 0); 1 of 20 kept")
++    assert "number the goals" in result["note"]
++
++
++def test_goal_only_copies_collapse_into_the_copy_with_context_whatever_its_position():
++    with_ctx = {"goal": "  " + GOAL.replace(" ", "  ") + "\n", "context": "5 KB of findings"}
++    result, task_list = _spawn([{"goal": GOAL}, {"goal": GOAL, "context": ""}, with_ctx])
++    assert task_list == [with_ctx]
++    assert result["note"].startswith("dropped Tasks 0, 1 (same task as Task 2); 1 of 3 kept")
++
++
++def test_contexts_equal_after_whitespace_normalization_collapse():
++    tasks = [{"goal": GOAL, "context": "line one\nline two"}, {"goal": GOAL, "context": "  line one line   two "}]
++    assert _collapse_duplicate_tasks(tasks)[0] == [tasks[0]]
++
++
++def test_different_contexts_stay_separate():
++    tasks = [{"goal": GOAL, "context": "TV in the living room"}, {"goal": GOAL, "context": "TV in the bedroom"}]
++    assert _collapse_duplicate_tasks(tasks) == (tasks, None, None)
++    # bare copies fold into the first context copy; copies with different contexts all stay
++    tasks = [{"goal": GOAL}, {"goal": GOAL, "context": "ctx A"}, {"goal": GOAL, "context": "ctx B"}]
++    kept, note, origin = _collapse_duplicate_tasks(tasks)
++    assert kept == tasks[1:] and origin == [1, 2] and note.startswith("dropped Task 0 (same task as Task 1); 2 of 3")
++    tasks = [{"goal": GOAL, "context": "A"}, {"goal": GOAL}, {"goal": GOAL, "context": "A"},
++             {"goal": GOAL, "context": "B"}, {"goal": GOAL, "context": None}]
++    kept, note, origin = _collapse_duplicate_tasks(tasks)
++    assert kept == [tasks[0], tasks[3]] and origin == [0, 3]
++    assert note.startswith("dropped Tasks 1, 2, 4 (same task as Task 0); 2 of 5 kept")
++    # the first context copy is the context group appearing first, not the bigger one
++    tasks = [{"goal": GOAL, "context": "B"}, {"goal": GOAL, "context": "A"}, {"goal": GOAL, "context": "A"}, {"goal": GOAL}]
++    kept, note, origin = _collapse_duplicate_tasks(tasks)
++    assert origin == [0, 1] and "dropped Task 3 (same task as Task 0); dropped Task 2 (same task as Task 1)" in note
++
++
++def test_entries_differing_in_any_other_field_stay_separate():
++    for a, b in [
++        ({"toolsets": ["terminal"]}, {"toolsets": ["web"]}),
++        ({"output_schema": {"type": "object"}}, {"images": ["/tmp/a.png"]}),
++        ({"model": "a"}, {"model": "b"}),
++        ({"model": "a"}, {}),
++        ({"provider": "x"}, {"provider": "y"}),
++        ({"role": "leaf"}, {"role": "orchestrator"}),
++        ({"reasoning_effort": "low"}, {"reasoning_effort": "high"}),
++        ({"anything_else": 1}, {"anything_else": 2}),
++    ]:
++        tasks = [{"goal": GOAL, **a}, {"goal": GOAL, **b}]
++        assert _collapse_duplicate_tasks(tasks) == (tasks, None, None), (a, b)
++
++
++def test_group_and_key_order_do_not_prevent_a_collapse():
++    a = {"goal": GOAL, "group": "g1", "toolsets": ["web", "terminal"], "output_schema": {"a": 1, "b": 2}}
++    b = {"output_schema": {"b": 2, "a": 1}, "toolsets": ["web", "terminal"], "goal": GOAL, "group": "g2"}
++    assert _collapse_duplicate_tasks([a, b])[0] == [a]
++
++
++def test_empty_strays_are_dropped_instead_of_failing_the_batch():
++    result, task_list = _spawn([{"goal": GOAL}, {}, None, {"goal": "   ", "context": ""}, "", {"goal": OTHER}])
++    assert "error" not in result
++    assert task_list == [{"goal": GOAL}, {"goal": OTHER}]
++    assert result["note"] == "dropped empty Tasks 1, 2, 3, 4; 2 of 6 kept (Task <i> = 0-based index in your tasks array, as in errors)."
++
++
++def test_a_goalless_entry_with_content_still_fails_the_batch():
++    result, task_list = _spawn([{"goal": GOAL}, {"context": "x"}])
++    assert task_list is None and result["error"] == "Task 1 is missing a 'goal'."
++
++
++def test_error_indexes_refer_to_the_original_array_and_carry_the_note():
++    result, task_list = _spawn([{"goal": GOAL}, {"goal": GOAL}, {}, {"goal": OTHER}, {"goal": "TODO"}])
++    assert task_list is None
++    assert result["error"].startswith("Task 4 has a placeholder goal")
++    assert result["note"].startswith("dropped Task 1 (same task as Task 0); dropped empty Task 2; 3 of 5 kept")
++    result, _ = _spawn([{}, {"goal": GOAL}, {"context": "x"}])
++    assert result["error"] == "Task 2 is missing a 'goal'." and result["note"].startswith("dropped empty Task 0;")
++
++
++def test_map_task_indexes_rewrites_only_sentence_leading_labels():
++    origin = [0, 3, 7]
++    assert _map_task_indexes("Task 1: bad effort.", origin) == "Task 3: bad effort."
++    assert _map_task_indexes("Task 2 is missing a 'goal'.", origin) == "Task 7 is missing a 'goal'."
++    # only the label opening the string: never one inside a backend's message or a quoted goal
++    assert _map_task_indexes("Task 1: backend x failed: boom Task 2: other", origin) == \
++        "Task 3: backend x failed: boom Task 2: other"
++    assert _map_task_indexes("Task 2 has a placeholder goal ('a. Task 1 b'). Replace", origin) == \
++        "Task 7 has a placeholder goal ('a. Task 1 b'). Replace"
++    assert _map_task_indexes("x. Task 1: later", origin) == "x. Task 1: later"
++    assert _map_task_indexes("Task 10: out of range", origin) == "Task 10: out of range"
++    assert _map_task_indexes("Task 1: x", None) == "Task 1: x"
++
++
++def _routes(errors):
++    from tools.delegate_tool_routes import TaskRoute
++    return [TaskRoute({}, {}, backend="b", error=e) for e in errors]
++
++
++def test_all_routes_refused_maps_each_error_before_joining():
++    """Every route refused: each error is mapped on its own, so a 'Task <i>' inside one backend message is never
++    taken for a label once the errors are joined."""
++    tasks = [{"goal": GOAL}, {"goal": GOAL}, {"goal": OTHER}, {"goal": OTHER + " twice"}]
++    errors = ["Task 0: backend b failed: boom Task 2", "Task 1: backend b failed: a. Task 0 b", "Task 2: no"]
++    with patch("tools.delegate_tool._routes_for", return_value=(_routes(errors), None)):
++        result, task_list = _spawn(tasks)
++    assert task_list is None
++    assert result["error"] == ("Task 0: backend b failed: boom Task 2 Task 2: backend b failed: a. Task 0 b "
++                               "Task 3: no")
++    assert result["note"].startswith("dropped Task 1 (same task as Task 0); 3 of 4 kept")
++
++
++def test_partially_refused_entry_names_the_original_task():
++    from tools.delegate_tool_routes import TaskRoute
++    tasks = [{"goal": GOAL}, {"goal": GOAL}, {"goal": OTHER}]
++    ok = TaskRoute({}, {}, backend="b")
++    routes = [ok, *_routes(["Task 1: backend b failed: boom Task 0"])]
++    with patch("tools.delegate_tool._routes_for", return_value=(routes, None)), \
++         patch("tools.delegate_tool._build_children", return_value=([], None), create=True):
++        batches = []
++        with patch("tools.delegate_tool._run_batch", side_effect=lambda b, bg: batches.append(b) or json.dumps({})):
++            from tools.delegate_tool import delegate_task
++            delegate_task(tasks=tasks, parent_agent=_parent())
++    [entry] = batches[0].refused
++    # task_index indexes this run's (collapsed) task list like every result entry; the error names the model's task
++    assert entry["task_index"] == 1 and entry["error"] == "Task 2: backend b failed: boom Task 0"
++
++
++def test_distinct_goals_are_untouched_and_get_no_note():
++    tasks = [{"goal": f"Attempt {i}: {GOAL}"} for i in range(1, 4)] + [{"goal": OTHER, "context": "c"}]
++    result, task_list = _spawn(tasks)
++    assert task_list == tasks and "note" not in result
++    assert _collapse_duplicate_tasks(tasks) == (tasks, None, None)
++
++
++def test_the_note_is_prepended_to_an_existing_note():
++    result, _ = _spawn([{"goal": GOAL}, {"goal": GOAL}], run_result={"status": "dispatched", "note": "Running in background."})
++    assert result["note"] == ("dropped Task 1 (same task as Task 0); 1 of 2 kept (Task <i> = 0-based index in your tasks "
++                              "array, as in errors). To run identical copies on purpose, number the goals (e.g. 'Attempt 2: ...'). "
++                              "Running in background.")
++
++
++def test_only_strays_still_fail_with_the_usual_error():
++    result, task_list = _spawn([{}, {"goal": ""}])
++    assert task_list is None and "missing a 'goal'" in result["error"] and "note" not in result
++
++
++def test_a_restart_re_dispatch_is_not_collapsed():
++    from tools.async_delegation import _RESUME_META
++    tasks = [{"goal": GOAL}, {"goal": GOAL}, {"goal": OTHER}]
++    token = _RESUME_META.set({"indexes": [0, 2, 5], "carried": []})
++    try:
++        result, task_list = _spawn(tasks)
++    finally:
++        _RESUME_META.reset(token)
++    assert task_list == tasks and "note" not in result
++
++
++def test_json_string_tasks_are_collapsed_too():
++    kept, note, origin = _collapse_duplicate_tasks(json.dumps([{"goal": GOAL}, {"goal": GOAL}]))
++    assert kept == [{"goal": GOAL}] and origin == [0] and note.startswith("dropped Task 1 (same task as Task 0)")
+diff --git a/tools/delegate_tool.py b/tools/delegate_tool.py
+index 6ef24139..62df9138 100644
+--- a/tools/delegate_tool.py
++++ b/tools/delegate_tool.py
+@@ -11,6 +11,7 @@ the delegation call and the summary result, never the child's intermediate
+ tool calls or reasoning.
+ """
+ 
++import json
+ import logging
+ import time
+ import weakref
+@@ -48,7 +49,8 @@ from tools.delegate_tool_registry import (
+     steer_subagent,
+ )
+ from tools.delegate_tool_tasks import (
+-    _MAX_TASK_IMAGES, _coerce_task_images, _coerce_task_schemas, _normalize_task_images, _normalize_task_list,
++    _MAX_TASK_IMAGES, _coerce_task_images, _coerce_task_schemas, _collapse_duplicate_tasks, _map_task_indexes,
++    _normalize_task_images, _normalize_task_list,
+ )
+ from tools.delegate_tool_tuning import pin_child_service_tier
+ from tools.delegate_tool_toolsets import (
+@@ -600,6 +602,17 @@ def delegate_task(
+             max_iterations, default_max_iter,
+         )
+     max_children = _get_max_concurrent_children()
++    # Models sometimes repeat one entry (20 identical goals -> 20 children on one device) or leave an empty stray
++    # entry that would fail the whole batch: collapse them before validation and tell the model in the result. Not
++    # on a restart re-dispatch: its tasks are the original call's, aligned with the resume indexes (_resume_remap).
++    from tools.async_delegation import _RESUME_META
++    dedup_note, dedup_origin = None, None
++    if not _RESUME_META.get():
++        tasks, dedup_note, dedup_origin = _collapse_duplicate_tasks(tasks)
++
++    def _fail(message: str, mapped: bool = False) -> str:  # error in the model's indexes + what the collapse dropped
++        return _with_dedup_note(tool_error(message if mapped else _map_task_indexes(message, dedup_origin)), dedup_note)
++
+     task_list, err = _normalize_task_list(goal, context, tasks, output_schema, top_role, max_children)
+     if not err:
+         task_schemas, err = _coerce_task_schemas(task_list, output_schema)
+@@ -612,19 +625,22 @@ def delegate_task(
+         # preflight failures (e.g. pinned delegation.command missing from PATH) refuse the spawn loudly (#80450).
+         routes, err = _routes_for(task_list, cfg, credentials_cfg, parent_agent)
+     if err:
+-        return tool_error(err)
++        return _fail(err)
+     # Fail closed per task: a task its backend cannot route is refused alone (its entry carries the error); the call
+     # is a tool error only when no task can run.
+     runnable = [r for r in routes if not r.error]
+     if not runnable:
+-        return tool_error(" ".join(dict.fromkeys(r.error for r in routes)))
+-    refused = [r.refused_entry(i) for i, r in enumerate(routes) if r.error]
++        return _fail(" ".join(dict.fromkeys(_map_task_indexes(r.error, dedup_origin) for r in routes)), mapped=True)
++    # A refused entry's error names its task in the model's array; task_index stays this run's index (transcripts,
++    # result order and the async/resume bookkeeping all index the collapsed list).
++    refused = [{**r.refused_entry(i), "error": _map_task_indexes(r.error, dedup_origin)}
++               for i, r in enumerate(routes) if r.error]
+     # Batch-level model/provider labels (transcript headers, completion block): blank when tasks took different
+     # routes, so each child reports what it actually runs on.
+     creds = runnable[0].creds if all(r.creds == runnable[0].creds for r in runnable) else dict.fromkeys(runnable[0].creds)
+     err = _oneshot_spawn_budget(parent_agent, len(runnable))
+     if err:
+-        return tool_error(err)
++        return _fail(err)
+ 
+     overall_start = time.monotonic()
+     # Live transcripts: cache/delegation/live/<id>/task-<n>.log per task, a side channel with zero effect on message
+@@ -656,13 +672,27 @@ def delegate_task(
+         live_deleg_id=live_deleg_id, live_writers=live_writers, task_images=task_images,
+     )
+     if err:
+-        return tool_error(err)
++        return _fail(err)
+     batch = _Batch(
+         task_list, children, parent_agent, creds, context, top_role, max_children,
+         live_deleg_id, live_writers, live_paths, *origin, overall_start,
+         live_home=_live_home, refused=refused,
+     )
+-    return _run_batch(batch, background)
++    return _with_dedup_note(_run_batch(batch, background), dedup_note)
++
++
++def _with_dedup_note(result: str, note: Optional[str]) -> str:
++    """*result* (tool result JSON) with *note* prepended to its ``note`` (unchanged when there is none)."""
++    if not note:
++        return result
++    try:
++        payload = json.loads(result)
++    except (TypeError, ValueError):
++        return result
++    if not isinstance(payload, dict):
++        return result
++    payload["note"] = f"{note} {payload['note']}" if payload.get("note") else note
++    return json.dumps(payload, ensure_ascii=False)
+ 
+ 
+ # ── OpenAI function-calling schema ──────────────────────────────────────────
+diff --git a/tools/delegate_tool_tasks.py b/tools/delegate_tool_tasks.py
+index 56a90f48..28872438 100644
+--- a/tools/delegate_tool_tasks.py
++++ b/tools/delegate_tool_tasks.py
+@@ -33,6 +33,125 @@ def _recover_tasks_from_json_string(tasks: Any) -> tuple[Optional[list[dict[str,
+         return None, f"tasks must be a JSON array of task objects; parsed {type(parsed).__name__} instead."
+     return parsed, None
+ 
++def _task_goal_key(task: Any) -> str:
++    """Normalized goal of a model-supplied task entry ('' when missing, blank or not a string)."""
++    goal = task.get("goal") if isinstance(task, dict) else None
++    return " ".join(goal.split()) if isinstance(goal, str) else ""
++
++
++def _is_empty_value(value: Any) -> bool:
++    return value is None or value in ([], {}) or (isinstance(value, str) and not value.strip())
++
++
++def _is_empty_task(task: Any) -> bool:
++    """An entirely empty entry: null, "", {} or an object whose values are all empty (a goal-less entry with any
++    non-empty field is NOT empty: validation must still reject it)."""
++    if isinstance(task, dict):
++        return all(_is_empty_value(v) for v in task.values())
++    return _is_empty_value(task)
++
++
++# Fields that may differ between copies of one entry: `group` only changes how results are delivered; `context` is
++# reconciled separately (identical after whitespace normalization, or empty in all but one copy).
++_COLLAPSE_IGNORED_FIELDS = frozenset({"goal", "group", "context"})
++
++
++def _task_identity(task: dict) -> str:
++    """Normalized goal + canonical JSON of every other model-supplied field except group/context (null = absent)."""
++    rest = {k: v for k, v in task.items() if k not in _COLLAPSE_IGNORED_FIELDS and v is not None}
++    return json.dumps([_task_goal_key(task), rest], sort_keys=True, ensure_ascii=False, default=repr)
++
++
++def _context_key(context: Any) -> str:
++    if _is_empty_value(context):
++        return ""
++    if isinstance(context, str):
++        return " ".join(context.split())
++    return json.dumps(context, sort_keys=True, ensure_ascii=False, default=repr)
++
++
++def _labels(indexes: list[int]) -> str:
++    return ("Task " if len(indexes) == 1 else "Tasks ") + ", ".join(map(str, indexes))
++
++
++def _collapse_duplicate_tasks(tasks: Any) -> tuple[Any, Optional[str], Optional[list[int]]]:
++    """``(tasks, note, origin)``: a model-supplied ``tasks`` array with repeated entries collapsed and entirely
++    empty strays dropped. Copies are the same task when the normalized goal (stripped, whitespace collapsed; case
++    kept) AND every other field except ``group`` and ``context`` are equal as canonical JSON. Copies whose contexts
++    are equal after whitespace normalization collapse to one; copies with different non-empty contexts all stay; a
++    bare copy (empty context) folds into the first copy carrying context, or, when no copy carries context, into
++    the first bare copy. The kept entry sits at the first copy's position. Entirely empty entries (null, "", {},
++    all values empty) are dropped while one other entry remains. ``note`` numbers tasks 0-based like the errors
++    (``Task <i>`` = index in the model's array); ``origin[i]`` is the original index of kept entry ``i`` (map error
++    indexes back with ``_map_task_indexes``). Nothing changed: ``(tasks, None, None)`` with ``tasks`` as passed.
++    Identical runs on purpose stay possible with distinct goals."""
++    recovered, error = _recover_tasks_from_json_string(tasks)
++    items = recovered if recovered is not None and not error else tasks
++    if not isinstance(items, list) or len(items) < 2:
++        return tasks, None, None
++    empty = [i for i, t in enumerate(items) if _is_empty_task(t)]
++    if len(empty) == len(items):
++        return tasks, None, None  # nothing to run: the normal validation reports it
++
++    # Bucket identical entries: identity -> {context key -> [original indexes]}.
++    buckets: dict[str, dict[str, list[int]]] = {}
++    for i, task in enumerate(items):
++        if i not in empty and isinstance(task, dict) and _task_goal_key(task):
++            buckets.setdefault(_task_identity(task), {}).setdefault(_context_key(task.get("context")), []).append(i)
++    survivor: dict[int, int] = {}  # first copy's index -> index of the copy kept there
++    dropped: dict[int, list[int]] = {}  # index of the copy kept -> indexes of the copies dropped
++    for by_context in buckets.values():
++        bare = by_context.pop("", [])
++        groups = sorted((sorted(g) for g in by_context.values()), key=lambda g: g[0])
++        if groups:  # bare copies fold into the first copy carrying context (the first context group's head)
++            groups[0] = [groups[0][0], *sorted(groups[0][1:] + bare)]
++        elif bare:
++            groups = [bare]
++        for group in groups:
++            if len(group) < 2:
++                continue
++            keep = group[0]  # the first context copy (or, all bare, the first copy)
++            survivor[min(group)] = keep
++            dropped[keep] = [i for i in group if i != keep]
++    if not dropped and not empty:
++        return tasks, None, None
++
++    skip = set(empty) | {i for keep, copies in dropped.items() for i in (keep, *copies)}  # copies sit at survivor
++    kept: list[Any] = []
++    origin: list[int] = []
++    for i, task in enumerate(items):
++        if i in survivor:  # the first copy's slot holds the copy kept
++            kept.append(items[survivor[i]])
++            origin.append(survivor[i])
++        elif i not in skip:
++            kept.append(task)
++            origin.append(i)
++    parts = [f"dropped {_labels(copies)} (same task as Task {keep})"
++             for keep, copies in sorted(dropped.items(), key=lambda kv: min(kv[0], *kv[1]))]
++    if empty:
++        parts.append(f"dropped empty {_labels(empty)}")
++    note = (f"{'; '.join(parts)}; {len(kept)} of {len(items)} kept (Task <i> = 0-based index in your tasks array, "
++            f"as in errors).")
++    if dropped:
++        note += " To run identical copies on purpose, number the goals (e.g. 'Attempt 2: ...')."
++    return kept, note, origin
++
++
++_TASK_INDEX_RE = re.compile(r"\ATask (\d+)(?=[ :])")
++
++
++def _map_task_indexes(message: str, origin: Optional[list[int]]) -> str:
++    """One error string with its leading ``Task <i>`` (index into the collapsed list) mapped back to the model's
++    original array. Only the label opening the string is rewritten, never a ``Task <i>`` later in it (quoted from a
++    goal or a backend's message): map every error separately BEFORE joining several."""
++    if not origin or not isinstance(message, str):
++        return message
++    def _sub(m: re.Match) -> str:
++        i = int(m.group(1))
++        return f"Task {origin[i]}" if 0 <= i < len(origin) else m.group(0)
++    return _TASK_INDEX_RE.sub(_sub, message, count=1)
++
++
+ def _validate_batch_tasks(task_list: list[dict[str, Any]]) -> Optional[str]:
+     """Batch-only quality gate beyond per-task goal presence; actionable error or None. No minimum count: a one-entry
+     array is the canonical single-task shape (legacy top-level `goal` is wrapped into one). Duplicate goals are
