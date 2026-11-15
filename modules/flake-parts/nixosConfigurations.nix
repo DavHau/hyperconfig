@@ -268,6 +268,9 @@ in {
                   momentum = { displayName = "Momentum"; groups = [ "hermes" ]; };
                   roman = { displayName = "Roman"; groups = [ "hermes" ]; };
                   daniel = { displayName = "Daniel"; groups = [ "hermes" ]; };
+                  # Shared by dave and adam for the agent fpv: each enrolls a
+                  # passkey of his own on it (pocket-id-enroll fpv on edi).
+                  fpv = { displayName = "FPV"; groups = [ "hermes" ]; };
                   nico = { displayName = "Nico"; groups = [ "apps" ]; };
                   # The coding agent's account for end-to-end login tests
                   # (`pocket-id-enroll agent` on edi gives it a one-time

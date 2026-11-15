@@ -39,5 +39,9 @@
     daniel = "daniel";
     daniel-meli = "daniel";
     voice = "dave";
+    # Project FPV: dave and adam share the account `fpv` (one passkey each
+    # on it), since an agent maps to exactly one account. It also confirms
+    # fpv's mail allowlist requests.
+    fpv = "fpv";
   };
 }

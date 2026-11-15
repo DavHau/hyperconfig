@@ -31,6 +31,9 @@
   b3x.uid = 1112;
   joe.uid = 1113;
   daniel.uid = 1117;
+  # Project FPV, shared by dave and adam (one pocket-id account `fpv`,
+  # ./hermes-dashboards.nix).
+  fpv.uid = 1120;
   thaigersprint = {
     uid = 1114;
     vault = false;

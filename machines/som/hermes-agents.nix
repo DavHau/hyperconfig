@@ -234,6 +234,19 @@ in
         teamclaude.enable = true;
       };
 
+      # fpv: Project FPV, shared by dave and adam. Both sign in to its
+      # dashboard and serve ports with the shared pocket-id account `fpv`
+      # (./hermes-dashboards.nix), each with his own passkey; ssh with
+      # dave's admin keys and adam's key.
+      fpv = {
+        description = "fpv - Project FPV, dave's and adam's shared agent";
+        sshKeys = adminKeys ++ config.services.hyperhermes.agents.adam.sshKeys;
+        # Claude through the TeamClaude gateway, as client `fpv`.
+        teamclaude.enable = true;
+        # The shared OpenRouter key as OPENROUTER_API_KEY (./hermes-inference.nix).
+        openrouter = true;
+      };
+
       # roman: Roman's agent for his two Home Assistant instances (MCP:
       # ./roman-home-assistant.nix). Not in ./hermes-agents-data.nix:
       # no vault-ro, wallet, REA or account on vit, so its uid is pinned

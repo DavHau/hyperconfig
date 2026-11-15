@@ -522,13 +522,13 @@ in
         joe = 16;
         thaigersprint = 17;
         # 18: retired (was bumper, removed); never reuse.
-        # roman is not in hermes-agents-data.nix (./hermes-agents.nix),
-        # added below.
+        # roman: not in hermes-agents-data.nix (./hermes-agents.nix), added below.
         roman = 19;
         daniel = 20;
         # not in hermes-agents-data.nix either, added below.
         daniel-meli = 21;
         voice = 22;
+        fpv = 23;
       };
       # Container names are capped at 11 chars (nspawn veth names,
       # hyperhermes container-slots); longer agent names get a short one
