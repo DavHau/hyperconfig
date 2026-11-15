@@ -20,10 +20,13 @@ in
 pkgs.testers.runNixOSTest {
   name = "hyperhermes-core";
 
-  nodes.machine = {
-    imports = [ self.nixosModules.core ];
-    virtualisation.memorySize = 3072;
-    virtualisation.cores = 2;
+  # A container test (systemd-nspawn, no VM): nothing here needs a kernel
+  # of its own; the owner-match rules are iptables-nft on the host kernel.
+  containers.machine = {
+    imports = [
+      self.nixosModules.core
+      ../container-pam.nix
+    ];
 
     services.hyperhermes = {
       # The agents' pip venv without the default data-science set: the
