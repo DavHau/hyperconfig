@@ -24,26 +24,35 @@
 */
 { lib, options, pkgs, ... }:
 let
+  # Per cache, i.e. per sbox project or per user; sccache evicts LRU
+  # entries itself.
+  cacheSize = "30G";
   common = {
     RUSTC_WRAPPER = "${pkgs.sccache}/bin/sccache";
-    # Per cache, i.e. per sbox project; sccache evicts LRU entries itself.
-    SCCACHE_CACHE_SIZE = "30G";
+    SCCACHE_CACHE_SIZE = cacheSize;
   };
 in
 {
-  # Hermes agents (no PAM session, so no /etc/set-environment) get the
-  # build dir only, through their .env: a shared sccache would need a
-  # per-agent server socket, and the default TCP one would be one cache
-  # for all of them. The option exists only with hyperhermes imported.
+  # Hermes agents (no PAM session) get the build dir through their .env.
+  # Their terminal tool runs `bash -l`, which still sources
+  # /etc/set-environment (RUSTC_WRAPPER, one sccache per agent on its own
+  # socket), so their sccache cap rides in the .env too: smaller, since an
+  # agent's cache lives in its scratch quota next to its work (8G ~ a few
+  # projects' dependencies). The option exists only with hyperhermes.
   config = lib.optionalAttrs (options ? services.hyperhermes.homeEnvironment) {
-    services.hyperhermes.homeEnvironment.CARGO_BUILD_BUILD_DIR = "$HOME/.cache/cargo-build{workspace-root}";
+    services.hyperhermes.homeEnvironment = {
+      CARGO_BUILD_BUILD_DIR = "$HOME/.cache/cargo-build{workspace-root}";
+      SCCACHE_CACHE_SIZE = lib.mkDefault "8G";
+    };
   } // {
   environment.systemPackages = [ pkgs.sccache ];
 
   # /etc/set-environment exports these in double quotes: $HOME and
   # $XDG_RUNTIME_DIR expand per user; {workspace-root} is a cargo path
-  # template and stays literal.
+  # template and stays literal. The cache size keeps a value already in
+  # the environment (the agents' .env above).
   environment.variables = common // {
+    SCCACHE_CACHE_SIZE = "\${SCCACHE_CACHE_SIZE:-${cacheSize}}";
     CARGO_BUILD_BUILD_DIR = "$HOME/.cache/cargo-build{workspace-root}";
     SCCACHE_SERVER_UDS = "$XDG_RUNTIME_DIR/sccache.sock";
   };

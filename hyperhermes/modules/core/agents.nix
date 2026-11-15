@@ -289,6 +289,17 @@ let
         "d ${stateDir} 0700 ${user} users - -"
         "d ${hlib.hermesDir user} 0755 ${user} users - -"
         "d ${workspace} 0755 ${user} users - -"
+      ]
+      # Agent-written bulk under HERMES_HOME (the system disk, outside the
+      # owner's quotas): hermes' task scratch and browser screenshots,
+      # its profiles' too, go after 14 unused days (systemd-tmpfiles-clean,
+      # daily). `e` only ages existing directories; tmpfiles refuses to
+      # follow an owner's symlink out of them (unsafe path transition).
+      ++ map (p: "e ${hermesHome}/${p} - - - 14d") [
+        "cache/scratch"
+        "browser_screenshots"
+        "profiles/*/cache/scratch"
+        "profiles/*/browser_screenshots"
       ];
 
       # Hermes' terminal tool runs every command in one snapshot of
