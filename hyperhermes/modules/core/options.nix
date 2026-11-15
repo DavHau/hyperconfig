@@ -345,6 +345,12 @@ in
         # lib.mkForce.
         skills.disabled = [ "maps" ];
 
+        # A message sent while the agent works is injected after the
+        # current step (steer) instead of cutting the turn (upstream's
+        # interrupt), which left deploys and result handling half done.
+        # /queue and /busy still pick another behaviour per message.
+        display.busy_input_mode = lib.mkDefault "steer";
+
         # No approval gate. Cron runs and subagents have nobody to answer
         # it: a flagged command ended BLOCKED or parked as pending_approval.
         # Every command gate (tools/approval.py: check_all_command_guards,
