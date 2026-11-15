@@ -170,14 +170,15 @@ let
       # (./replay-memory-pending.py). For the home and each named profile,
       # 30 s for all of them together (the unit's start timeout is 90 s);
       # a failure or timeout never blocks the start.
+      replayMemoryHomes = pkgs.writeShellScript "hermes-replay-memory-pending" ''
+        for memory_home in "$1" "$1"/profiles/*; do
+          compgen -G "$memory_home/pending/memory/*.json" > /dev/null || continue
+          HERMES_HOME="$memory_home" ${ac.hermesPackage.hermesVenv}/bin/python3 ${./replay-memory-pending.py} "$memory_home" \
+            || echo "hermes: replaying staged memory writes in $memory_home failed" >&2
+        done
+      '';
       replayMemoryPending = ''
-        ${pkgs.coreutils}/bin/timeout 30s ${pkgs.bash}/bin/bash -c '
-          for memory_home in "$1" "$1"/profiles/*; do
-            compgen -G "$memory_home/pending/memory/*.json" > /dev/null || continue
-            HERMES_HOME="$memory_home" "$2" "$3" "$memory_home" \
-              || echo "hermes: replaying staged memory writes in $memory_home failed" >&2
-          done
-        ' replay ${hermesHome} ${ac.hermesPackage.hermesVenv}/bin/python3 ${./replay-memory-pending.py} \
+        ${pkgs.coreutils}/bin/timeout 30s ${replayMemoryHomes} ${hermesHome} \
           || echo "hermes: replaying staged memory writes failed or timed out; starting anyway" >&2
       '';
       # Opt-in hardening of both units (options.nix, hardening).
