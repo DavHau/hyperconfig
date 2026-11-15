@@ -5,9 +5,12 @@
 # and to hermes, and a deployment with its own identity provider (e.g. a
 # clan inventory declaring pocket-id clients) declares exactly these clients.
 #
-# accounts: agent -> login account. One account may own several agents.
-# Every agent gets a confidential PKCE client hermes-<agent> that admits the
-# group hermes-<agent>, and the owning account joins that group. With a
+# accounts: agent -> its owning login account, or a list of them (an agent
+# several people share: each signs in with his own account, so his one
+# issuer session in a browser stays his for all his other clients). One
+# account may own several agents. Every agent gets a confidential PKCE
+# client hermes-<agent> that admits the group hermes-<agent>, and every
+# owning account joins that group. With a
 # front door (sso.frontDoor.host), its oauth2-proxy is the confidential
 # PKCE client `hermes`, admitting the group `hermes`. With published ports
 # (the publish module), their oauth2-proxy is the confidential PKCE client
@@ -21,6 +24,10 @@ rec {
   frontDoorGroup = "hermes";
   publishClientId = "hermes-serve";
   publishLoginPrefix = "/.hermes-serve-login";
+
+  # An agent's owning accounts as a list, whether `accounts` gives one
+  # account or several.
+  ownersOf = account: lib.unique (lib.toList account);
 
   # clientId -> { name, callbackURLs, pkce, allowedGroups }
   #
@@ -83,7 +90,9 @@ rec {
   accountGroups =
     accounts:
     lib.foldlAttrs (
-      acc: agent: account:
-      acc // { ${account} = (acc.${account} or [ ]) ++ [ (groupOf agent) ]; }
+      acc: agent: owners:
+      lib.foldl' (a: account: a // { ${account} = (a.${account} or [ ]) ++ [ (groupOf agent) ]; }) acc (
+        ownersOf owners
+      )
     ) { } accounts;
 }

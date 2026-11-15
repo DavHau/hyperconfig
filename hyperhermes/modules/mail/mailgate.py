@@ -1335,7 +1335,7 @@ def csrf_ok(account: str, token: str) -> bool:
 
 
 def owned(account: str) -> list[str]:
-    return [a for a, c in AGENTS.items() if account and c.get("owner") == account]
+    return [a for a, c in AGENTS.items() if account and account in c.get("owners", [])]
 
 
 def e(s) -> str:

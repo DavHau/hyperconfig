@@ -234,10 +234,11 @@ in
         teamclaude.enable = true;
       };
 
-      # fpv: Project FPV, shared by dave and adam. Both sign in to its
-      # dashboard and serve ports with the shared pocket-id account `fpv`
-      # (./hermes-dashboards.nix), each with his own passkey; ssh with
-      # dave's admin keys and adam's key.
+      # fpv: Project FPV, shared by dave and adam. Both own it
+      # (./hermes-dashboards.nix lists both accounts): each signs in to its
+      # dashboard and serve ports with his own pocket-id account, and either
+      # confirms its mail allowlist requests; ssh with dave's admin keys and
+      # adam's key.
       fpv = {
         description = "fpv - Project FPV, dave's and adam's shared agent";
         sshKeys = adminKeys ++ config.services.hyperhermes.agents.adam.sshKeys;

@@ -462,7 +462,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyperhermes/modules/wallet/skill/SKILL.md — Send and receive bitcoin over Lightning (invoices, Lightning addresses, offers, LNURL) or on-chain, check the balance an <- hyperhermes/modules/wallet/default.nix
 ### tools/hermes-onboard
 - tools/hermes-onboard/default.nix — - <- modules/flake-parts/hermes-onboard.nix
-- tools/hermes-onboard/hermes-onboard.sh — hermes-onboard <machine> <agent> <- tools/hermes-onboard/default.nix
+- tools/hermes-onboard/hermes-onboard.sh — hermes-onboard <machine> <agent> [account] <- tools/hermes-onboard/default.nix
 ### tools/porkbun-dns
 - tools/porkbun-dns/default.nix — - <- modules/flake-parts/porkbun-dns.nix
 - tools/porkbun-dns/porkbun-dns.sh — porkbun-dns - manage DNS records on porkbun. <- tools/porkbun-dns/default.nix

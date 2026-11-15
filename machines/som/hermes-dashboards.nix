@@ -4,11 +4,16 @@
 # clients hyperhermes' lib.sso.oidcClients derives from it (one
 # confidential client hermes-<agent> per entry, the front door's `hermes`,
 # and the private serve ports' client hermes-serve with one callback
-# pattern per agent) plus the group hermes-<agent> the account joins; som
+# pattern per agent) plus the group hermes-<agent> its accounts join; som
 # publishes each dashboard at https://<agent>.<domain>/ and its serve ports
-# at https://<port>.<agent>.<domain>/ for that account (hyperhermes'
-# dashboards and publish modules). The account also confirms its agent's
+# at https://<port>.<agent>.<domain>/ for those accounts (hyperhermes'
+# dashboards and publish modules). Any of them also confirms its agent's
 # mail allowlist requests.
+#
+# An agent has one owning account (a string) or several (a list): a shared
+# agent lists each person's own account rather than one shared login, since
+# pocket-id keeps one session per browser and a shared login there would
+# lock its user out of every client only his own account may use.
 #
 # domain is the agents' own site, apart from davhau.com (hyperhermes'
 # dashboards module says why); frontDoor is the oauth2-proxy front door on
@@ -19,7 +24,7 @@
   domain = "davhau.fyi";
   frontDoor = "hermes.davhau.com";
 
-  # agent -> pocket-id account
+  # agent -> pocket-id account, or a list of them
   accounts = {
     stefan = "stefan";
     pinpox = "pinpox";
@@ -39,9 +44,10 @@
     daniel = "daniel";
     daniel-meli = "daniel";
     voice = "dave";
-    # Project FPV: dave and adam share the account `fpv` (one passkey each
-    # on it), since an agent maps to exactly one account. It also confirms
-    # fpv's mail allowlist requests.
-    fpv = "fpv";
+    # Project FPV, owned by dave and adam, each with his own account.
+    fpv = [
+      "dave"
+      "adam"
+    ];
   };
 }

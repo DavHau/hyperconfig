@@ -204,9 +204,16 @@ in
     };
 
     accounts = lib.mkOption {
-      type = lib.types.attrsOf lib.types.str;
+      type = lib.types.attrsOf (lib.types.either lib.types.str (lib.types.nonEmptyListOf lib.types.str));
       default = { };
-      description = "agent -> the login account that owns it.";
+      example = {
+        alice = "alice";
+        shared = [
+          "alice"
+          "bob"
+        ];
+      };
+      description = "agent -> the login account that owns it, or a list of accounts that each own it.";
     };
 
     clients = lib.mkOption {
@@ -275,7 +282,7 @@ in
           message = "services.hyperhermes.sso.clients must give the secret of exactly the clients ${toString (lib.attrNames clients)}.";
         }
         {
-          assertion = !local || lib.all (a: cfg.dex.users ? ${a}) (lib.attrValues cfg.accounts);
+          assertion = !local || lib.all (a: cfg.dex.users ? ${a}) (lib.concatMap ssoLib.ownersOf (lib.attrValues cfg.accounts));
           message = "services.hyperhermes.sso.dex.users must declare every account of services.hyperhermes.sso.accounts.";
         }
         {

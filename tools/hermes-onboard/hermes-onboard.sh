@@ -1,4 +1,4 @@
-# hermes-onboard <machine> <agent>
+# hermes-onboard <machine> <agent> [account]
 #
 # Prints the welcome message for the person behind one published hermes
 # agent (services.hyperhermes.dashboards), ready to paste: a one-time link to
@@ -16,13 +16,17 @@
 # admin API with the oidc server's static API key (clan var
 # pocket-id/api_key). Each run mints a new one, valid LINK_DAYS days
 # (default 7, pocket-id caps it at 31), good for one sign-in.
+#
+# An agent with several owning accounts (sso.accounts.<agent> a list)
+# needs the account to onboard as the third argument.
 
-[ $# -eq 2 ] || {
-  echo "usage: hermes-onboard <machine> <agent>" >&2
+[ $# -eq 2 ] || [ $# -eq 3 ] || {
+  echo "usage: hermes-onboard <machine> <agent> [account]" >&2
   exit 2
 }
 machine=$1
 agent=$2
+want_account=${3:-}
 repo=${HYPERCONFIG:-.}
 link_days=${LINK_DAYS:-7}
 
@@ -41,7 +45,7 @@ let
     in if builtins.length p > 2 then builtins.elemAt p 2 else "(no comment)";
 in
 if !published then null else {
-  account = h.sso.accounts.$agent;
+  accounts = if builtins.isList h.sso.accounts.$agent then h.sso.accounts.$agent else [ h.sso.accounts.$agent ];
   front = h.sso.frontDoor.host;
   issuer = c.hyper.oidc.issuer;
   keys = map comment c.users.users.$agent.openssh.authorizedKeys.keys;
@@ -52,7 +56,16 @@ EOF
 [ "$facts" != null ] || die "no published hermes agent '$agent' on $machine"
 
 get() { jq -r ".$1" <<<"$facts"; }
-account=$(get account)
+owners=$(jq -r '.accounts | join(" ")' <<<"$facts")
+if [ -n "$want_account" ]; then
+  jq -e --arg a "$want_account" '.accounts | index($a)' <<<"$facts" >/dev/null ||
+    die "'$want_account' does not own $agent (owners: $owners)"
+  account=$want_account
+elif [ "$(jq '.accounts | length' <<<"$facts")" -eq 1 ]; then
+  account=$owners
+else
+  die "$agent has several owning accounts ($owners); name one as the third argument"
+fi
 front=$(get front)
 issuer=$(get issuer)
 

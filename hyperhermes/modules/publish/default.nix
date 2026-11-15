@@ -11,7 +11,7 @@
 # * 100 .. +99, disjoint per uid and below the ephemeral range, which this
 # module moves to 49152-65535 (the window reaches past the kernel's
 # default 32768). The first 50 are PRIVATE: a login per host, and only the
-# agent's own account (sso.accounts.<agent>) gets through. The last 50 are
+# agent's own account(s) (sso.accounts.<agent>) get through. The last 50 are
 # PUBLIC: no login. `extraPortWindows` adds more windows of the same shape
 # (a deployment keeping an older layout's ports up). The agent picks the
 # mode by picking the port; the URL cannot upgrade a private port to
@@ -179,7 +179,7 @@ let
       to = lib.foldl' lib.max 0 (map (w: w.to) windows);
     };
   allPorts = lib.concatMap (name: (portsOf name).private ++ (portsOf name).public) names;
-  accountOf = name: sso.accounts.${name};
+  ownersOf = name: ssoLib.ownersOf sso.accounts.${name};
   hostOf = name: port: "${toString port}.${name}.${domain}";
   certOf = name: "hermes-publish-${name}";
   # What nginx dials for a port: a root-held socket whose connections a
@@ -574,7 +574,10 @@ in
             ${lib.concatMapStrings (
               name:
               lib.concatMapStrings (
-                port: "  \"${hostOf name port} ${accountOf name}\" ${backendOf (toString port)};\n"
+                port:
+                lib.concatMapStrings (
+                  account: "  \"${hostOf name port} ${account}\" ${backendOf (toString port)};\n"
+                ) (ownersOf name)
               ) (portsOf name).private
             ) names}}
           ''

@@ -201,10 +201,12 @@ let
   vhostOf = agent: "hermes-dashboard-${agent}";
   hostOf = agent: "${agent}.${exposure.domain}";
   urlOf = agent: exposure.urlOf (hostOf agent);
-  # Agents per front-door account.
+  # Agents per front-door account: every owning account of an agent owns it.
   agentsOf = lib.foldlAttrs (
-    acc: agent: account:
-    acc // { ${account} = (acc.${account} or [ ]) ++ [ agent ]; }
+    acc: agent: owners:
+    lib.foldl' (a: account: a // { ${account} = (a.${account} or [ ]) ++ [ agent ]; }) acc (
+      ssoLib.ownersOf owners
+    )
   ) { } (lib.filterAttrs (agent: _: agents ? ${agent}) sso.accounts);
   # nginx vhosts other than the dashboard's own that answer <agent>'s name.
   otherVhostsFor =

@@ -15,7 +15,7 @@
   # som's hermes agents (machines/som/hermes-dashboards.nix): the pocket-id
   # clients hyperhermes' lib.sso.oidcClients derives (one confidential
   # client and one group per agent for its dashboard at
-  # https://<agent>.<domain>/, joined by the agent's account, the front
+  # https://<agent>.<domain>/, joined by the agent's account(s), the front
   # door's client `hermes`, and the confidential client hermes-serve for
   # every agent's private serve ports, https://<port>.<agent>.<domain>/,
   # with a host-wildcard callback per agent; hyperhermes' dashboards and
@@ -52,7 +52,9 @@
   ];
   withDashboardGroups = users:
     let
-      unknown = lib.filter (a: !(users ? ${a})) (lib.attrValues somDashboards.accounts);
+      unknown = lib.filter (a: !(users ? ${a})) (
+        lib.concatMap hermesSso.ownersOf (lib.attrValues somDashboards.accounts)
+      );
     in
       assert lib.assertMsg (unknown == [ ])
         "machines/som/hermes-dashboards.nix names accounts the oidc instance does not declare: ${toString unknown}";
@@ -268,9 +270,6 @@ in {
                   momentum = { displayName = "Momentum"; groups = [ "hermes" ]; };
                   roman = { displayName = "Roman"; groups = [ "hermes" ]; };
                   daniel = { displayName = "Daniel"; groups = [ "hermes" ]; };
-                  # Shared by dave and adam for the agent fpv: each enrolls a
-                  # passkey of his own on it (pocket-id-enroll fpv on edi).
-                  fpv = { displayName = "FPV"; groups = [ "hermes" ]; };
                   nico = { displayName = "Nico"; groups = [ "apps" ]; };
                   # The coding agent's account for end-to-end login tests
                   # (`pocket-id-enroll agent` on edi gives it a one-time

@@ -6,7 +6,7 @@ Agents run natively on som via hyperhermes (`services.hyperhermes.agents.<name>`
 |---|---|
 | `machines/som/hermes-agents.nix` | per-agent entry: description, `sshKeys`, `teamclaude.enable`, `openrouter`, `mail.enable`, skillDirs; host-wide hermes settings; deny-ACL assertion |
 | `machines/som/hermes-agents-data.nix` | plain data read by som AND vit: `<name>.uid` (+ `vault = false`) for agents with vault/GPU account |
-| `machines/som/hermes-dashboards.nix` | agent -> pocket-id account (`accounts`), `domain` davhau.fyi, front door |
+| `machines/som/hermes-dashboards.nix` | agent -> pocket-id account, or a list of owning accounts (`accounts`), `domain` davhau.fyi, front door |
 | `machines/som/hermes-inference.nix` | models/providers (p0 Qwen, auxiliary vision/titles) |
 | `machines/som/configuration.nix` | `slotIds.<name>` (never reuse; 18 retired), `slotNames` (>11 chars), set `hermes-agents-data.nix // { roman = {}; ... }` for non-data agents |
 | `modules/flake-parts/nixosConfigurations.nix` | pocket-id users (oidc instance, `roles.server.machines.edi.settings.users`), `groups = [ "hermes" ]`; clients derived via `hyperhermes.lib.sso.oidcClients` |

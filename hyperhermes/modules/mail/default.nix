@@ -71,6 +71,8 @@ let
   # The sso module is optional; the owner page needs its front door.
   sso = config.services.hyperhermes.sso or null;
   frontDoorHost = if sso == null || !sso.enable then null else sso.frontDoor.host;
+  # An owner: one login account, or several that each may confirm.
+  ownerType = lib.types.either lib.types.str (lib.types.nonEmptyListOf lib.types.str);
   # Agent name -> its mailbox (agents.<name>.mail), for the agents that
   # have one.
   # Plus the remote ones (remoteMailboxes): a host system user standing for
@@ -169,7 +171,7 @@ let
       lmtpUser = "stalwart";
       hookUser = "stalwart";
       agents = lib.mapAttrs (_: a: {
-        inherit (a) owner;
+        owners = lib.unique (lib.toList a.owner);
         allowlist = map lib.toLower a.allowlist;
         allowDomains = a.allowDomains or true;
       }) mailboxes;
@@ -363,8 +365,8 @@ in
           types.submodule {
             options = {
               owner = mkOption {
-                type = types.str;
-                description = "Login account that confirms this mailbox's allowlist requests on the owner page.";
+                type = ownerType;
+                description = "Login account (or list of accounts, any of them) that confirms this mailbox's allowlist requests on the owner page.";
               };
               allowlist = mkOption {
                 type = types.listOf types.str;
@@ -481,10 +483,10 @@ in
                 description = "A mailbox <agent>@<mail.domain>: the `mailgate` and `himalaya` CLIs and the mailgate skill.";
               };
               owner = mkOption {
-                type = types.str;
+                type = ownerType;
                 default = if sso == null then name else sso.accounts.${name} or name;
                 defaultText = literalExpression "services.hyperhermes.sso.accounts.<agent>, else the agent's name";
-                description = "Login account that confirms this agent's allowlist requests on the owner page.";
+                description = "Login account (or list of accounts, any of them) that confirms this agent's allowlist requests on the owner page.";
               };
               allowlist = mkOption {
                 type = types.listOf types.str;

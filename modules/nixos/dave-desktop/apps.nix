@@ -25,8 +25,8 @@
   dave-hermes.label = "dave-hermes";
   joe.label = "joe";
   thaigersprint.label = "thaigersprint";
-  # Project FPV, shared with adam (sign-in: the shared pocket-id account
-  # fpv, not dave's).
+  # Project FPV, shared with adam (dave is one of its owning accounts, so
+  # his own sign-in works).
   fpv.label = "fpv";
   # The Voice PE's untrusted agent (../../../machines/som/hermes-agents.nix).
   voice = {

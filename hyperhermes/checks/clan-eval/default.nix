@@ -115,7 +115,8 @@ let
   ];
 
   # The published ports (local mode, so no issuer to name): their cookie
-  # secret from clan, the client secret's restart.
+  # secret from clan, the client secret's restart. bob is shared: owned by
+  # the accounts bob and alice.
   published = evalWith [
     self.nixosModules.default
     agents
@@ -126,7 +127,10 @@ let
           enable = true;
           accounts = {
             alice = "alice";
-            bob = "bob";
+            bob = [
+              "bob"
+              "alice"
+            ];
           };
           clients = lib.genAttrs [ "hermes-alice" "hermes-bob" "hermes-serve" ] (id: {
             secretFile = "/run/secrets/${id}";
@@ -245,6 +249,23 @@ let
       && (gens published).hermes-serve-oauth2-proxy.files.cookie_secret.restartUnits == [
         "oauth2-proxy-serve.service"
       ];
+    # Every owner of a shared agent gets its group, the front door's
+    # choices and its private ports.
+    shared-agent-owners =
+      let
+        nginx = published.config.services.nginx.appendHttpConfig;
+        hasLine = re: lib.any (l: builtins.match re l != null) (lib.splitString "\n" nginx);
+      in
+      self.lib.sso.accountGroups (hyper published).sso.accounts == {
+        alice = [
+          "hermes-alice"
+          "hermes-bob"
+        ];
+        bob = [ "hermes-bob" ];
+      }
+      && hasLine ''.*"[0-9]+\.bob\.[^ ]* alice".*''
+      && hasLine ''.*"[0-9]+\.bob\.[^ ]* bob".*''
+      && !hasLine ''.*"[0-9]+\.alice\.[^ ]* bob".*'';
     publish-client-secret-restarts =
       (gens published).oidc-client-hermes-serve.files.secret.restartUnits == [
         "oauth2-proxy-serve.service"

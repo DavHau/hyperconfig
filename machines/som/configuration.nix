@@ -600,8 +600,8 @@ in
   users.users.searx.uid = lib.mkIf (mullvadStage >= 2) 986;
 
   # zt-eu routes Roman's site LANs to every member, som included
-  # (../../home-networks). Of the agents only Roman's and Dave's own (by
-  # their dashboard account, ./hermes-dashboards.nix) may reach them; the
+  # (../../home-networks). Of the agents only those all of whose dashboard
+  # accounts (./hermes-dashboards.nix) are roman or dave may reach them; the
   # human logins, root and system services keep them too.
   hyper.ztEuLanGuard.refusedUsers =
     let
@@ -609,10 +609,10 @@ in
     in
     lib.filter (
       a:
-      !lib.elem (accounts.${a} or null) [
-        "roman"
-        "dave"
-      ]
+      !(
+        accounts ? ${a}
+        && lib.all (o: lib.elem o [ "roman" "dave" ]) (lib.toList accounts.${a})
+      )
       # the Voice PE's untrusted agent: only its HA, never the home LANs
       || a == "voice"
     ) agents;

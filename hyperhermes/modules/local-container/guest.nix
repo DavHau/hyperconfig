@@ -37,6 +37,7 @@
 }:
 let
   hh = config.services.hyperhermes;
+  ssoLib = import ../../lib/sso.nix { inherit lib; };
   agents = hh.agents;
   slotAgents = lib.filterAttrs (_: a: a.slot.enable) agents;
   slotsOn = slotAgents != { };
@@ -167,7 +168,7 @@ in
         sso = {
           enable = lib.mkDefault true;
           accounts = lib.mapAttrs (name: _: lib.mkDefault name) agents;
-          dex.users = lib.genAttrs (lib.unique (lib.attrValues hh.sso.accounts)) (_: { });
+          dex.users = lib.genAttrs (lib.unique (lib.concatMap ssoLib.ownersOf (lib.attrValues hh.sso.accounts))) (_: { });
           clients = lib.mapAttrs (id: _: {
             secretFile = lib.mkDefault "${secretsDir}/clients/${id}";
           }) hh.sso.oidcClients;
