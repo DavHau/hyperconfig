@@ -21,7 +21,9 @@ pkgs.testers.runNixOSTest {
   name = "mullvad-egress";
   globalTimeout = 900;
 
-  nodes.relay = {
+  # Container tests (systemd-nspawn, no VM): WireGuard links, nftables
+  # and policy routing live in each container's own netns.
+  containers.relay = {
     networking.firewall.enable = false;
     networking.wireguard.interfaces.wg0 = {
       # Plus the "public" addresses: local, so reached both through the
@@ -100,9 +102,17 @@ pkgs.testers.runNixOSTest {
     };
   };
 
-  nodes.client =
-    { pkgs, ... }:
+  containers.client =
+    { lib, pkgs, ... }:
     {
+      # The sandbox allows no setuid bits, so pam_unix's helper can't
+      # run and tunneled's lingering manager wouldn't start: test-only
+      # systemd-user PAM stack.
+      security.pam.services.systemd-user.text = lib.mkForce ''
+        account sufficient ${pkgs.linux-pam}/lib/security/pam_permit.so
+        session optional ${pkgs.systemd}/lib/security/pam_systemd.so
+        session sufficient ${pkgs.linux-pam}/lib/security/pam_permit.so
+      '';
       imports = [
         ./egress.nix
         ./dns.nix
@@ -122,6 +132,7 @@ pkgs.testers.runNixOSTest {
       boot.kernel.sysctl."net.ipv4.conf.all.rp_filter" = 1;
       # The host's own resolver, as on som; the relay is its upstream.
       services.resolved.enable = true;
+      networking.useHostResolvConf = false;
       networking.nameservers = [ "192.168.1.2" ];
       networking.hosts."192.168.1.77" = [ "internal.example" ];
 
