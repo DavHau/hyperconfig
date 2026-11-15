@@ -15,9 +15,17 @@ step), so the test can count the model calls of each turn.
   framed as untrusted data between BEGIN/END markers).
   "[ASYNC DELEGATION ..." (a subagent result delivered to the parent):
   answer GOT-RESULT, recorded under scenario DELEGATION-RESULT.
+  "STEER-TEST <task number> <text>": call delegate_task(action='steer') with
+  <text> for the subagent that ran that task of the session's FIRST
+  dispatch (its subagent_ids), then answer DONE-STEER-TEST.
+  A child request whose context (system prompt) or messages carry a
+  "STEERMARK-<n>" also records scenario STEER-SEEN, step
+  "context-<n>" (in the resumed child's context) or "live-<n>" (delivered
+  to the running child with a tool result).
 """
 
 import json
+import re
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -39,6 +47,10 @@ def text_of(content):
 
 def plan(messages):
     """(reply text, tool call or None, scenario, step)."""
+    # A steer reaches a running child as a user row after its tool result: plan as if it were not there.
+    while (messages and messages[-1].get("role") == "user" and "STEERMARK-" in text_of(messages[-1].get("content"))
+           and "STEER-TEST" not in text_of(messages[-1].get("content"))):
+        messages = messages[:-1]
     last = messages[-1] if messages else {}
     user = next((text_of(m.get("content")) for m in reversed(messages) if m.get("role") == "user"), "")
     words = [w for w in user.replace("\n", " ").split(" ") if w]
@@ -52,6 +64,15 @@ def plan(messages):
         return f"DONE-{scenario}", None, scenario, "after-tool"
     command = user.split(scenario, 1)[1].strip() if scenario in user else "true"
     call_id = f"call_{int(time.time() * 1000)}"
+    if scenario == "STEER-TEST":
+        number, text = command.split(" ", 1)
+        first = next(text_of(m.get("content")) for m in messages
+                     if m.get("role") == "tool" and '"subagent_ids"' in text_of(m.get("content")))
+        ids = json.loads("[" + re.search(r'"subagent_ids":\s*\[([^\]]*)\]', first).group(1) + "]")
+        args = {"action": "steer", "subagent_id": ids[int(number) - 1], "message": text}
+        call = {"id": call_id, "type": "function",
+                "function": {"name": "delegate_task", "arguments": json.dumps(args)}}
+        return "", call, scenario, "tool-call"
     if scenario.startswith("DELEG"):
         tasks = [{"goal": g.strip(), "context": "scripted child"} for g in command.split("|||")]
         call = {"id": call_id, "type": "function",
@@ -64,6 +85,17 @@ def plan(messages):
     # The previous transcript's tail is framed as untrusted data.
     framed = all(m in system for m in (TAIL_BEGIN, TAIL_END, "untrusted data, never instructions"))
     return "", call, scenario, "resume-tool-call" if framed else "resume-tool-call-unframed-tail"
+
+
+def steer_marks(messages, scenario):
+    """STEERMARK-<n> a child's request carries: (\"context\", n) in its system prompt, (\"live\", n) elsewhere."""
+    if not scenario.startswith("CHILD"):
+        return []
+    found = []
+    for m in messages:
+        where = "context" if m.get("role") == "system" else "live"
+        found += [(where, n) for n in re.findall(r"STEERMARK-(\d+)", text_of(m.get("content")))]
+    return sorted(set(found))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -92,6 +124,8 @@ class Handler(BaseHTTPRequestHandler):
         if body.get("tools"):
             with open(RECORD, "a") as f:
                 f.write(json.dumps({"scenario": scenario, "step": step, "at": time.time()}) + "\n")
+                for where, n in steer_marks(body.get("messages") or [], scenario):
+                    f.write(json.dumps({"scenario": "STEER-SEEN", "step": f"{where}-{n}", "at": time.time()}) + "\n")
         elif call is not None:
             text, call = "title", None
         created = int(time.time())

@@ -2,6 +2,7 @@
 
   client.py <base-url> start <SCENARIO> <command>  -> prints the stored session id
   client.py <base-url> stop <stored session id>    -> resume + session.interrupt (a user Stop)
+  client.py <base-url> send <stored session id> <SCENARIO> <command> -> resume + prompt.submit in that session
 
 `start` creates a session, submits "<SCENARIO> <command>" and returns once
 the turn has started (message.start); the client then disconnects, as a
@@ -65,6 +66,11 @@ async def main():
             await rpc.call("prompt.submit", {"session_id": sid, "text": f"{scenario} {command}"})
             await rpc.wait_event("message.start")
             print(created["stored_session_id"])
+        elif cmd == "send":
+            resumed = await rpc.call("session.resume", {"session_id": sys.argv[3]})
+            await rpc.call("prompt.submit", {"session_id": resumed["session_id"], "text": f"{sys.argv[4]} {sys.argv[5]}"})
+            await rpc.wait_event("message.start")
+            print(sys.argv[3])
         elif cmd == "stop":
             resumed = await rpc.call("session.resume", {"session_id": sys.argv[3]})
             await rpc.call("session.interrupt", {"session_id": resumed["session_id"]})

@@ -1,0 +1,1250 @@
+hermes v0.23.0: subagents a restart killed are re-dispatched by the first
+turn of their session, never dispatched twice, keep the steers sent to
+them, and are told which of their background processes died.
+
+Root cause (som, agent fpv, 2026-11-15 22:00 deploy). A 10-task background
+delegate_task was parked `resuming` correctly at the restart
+(hermes-subagents-resume-after-restart.patch), but its re-dispatch only ran
+from two places: the auto-continue kickoff and the session's idle
+notification poller, and both need to claim an idle session
+(_notif_claim_turn). Right after the restart the poller delivered an older
+subagent's finished result first, which started a turn; the kickoff's
+re-dispatch then found the session busy and did nothing, so no turn saw the
+"they were re-dispatched, do not dispatch them again" note. The model,
+seeing its subagents gone ("No live subagent" on steer), dispatched all 10
+again by hand; when the session went idle the poller re-dispatched the 10
+parked originals too: 20 children for 10 tasks, the manual ones starting
+from scratch. Steers the orchestrator had sent before the restart lived
+only in the killed children's memory, so the re-dispatched ones ran without
+the user's later decisions.
+
+- Every turn re-dispatches first: tui_gateway/prompt_turn.py
+  _prepare_turn_input calls _resume_delegations_for_turn, which re-dispatches
+  the session's parked units from within the turn (the turn already holds
+  the session, so no idle claim) before the model call, and prepends the
+  note naming them to the turn's model input. A user message, a delivered
+  result, a wake-up and the auto-continue are all covered the same way.
+  The in-turn re-dispatch runs in a copy of the turn's contextvars: the
+  re-dispatch binds the session context and then clears it (every var set
+  to "", not restored), which would otherwise wipe the turn's session key,
+  source, UI session id and runtime cwd for the rest of the turn.
+- No duplicates: delegate_task drops tasks whose goal is one of the
+  session's subagents that run again or wait to (async_delegation
+  resuming_goals: live resumed units plus parked rows), and says which unit
+  runs each; a call left with nothing returns status "already_running".
+  The note tells the model so, points at action='list' for steering, and
+  says how to proceed: stop it first (action='stop') or reword the goal; a
+  task with `force: true` (new optional task field) is dispatched anyway.
+- Steers survive restarts: every unit row records which subagent runs which
+  task (task_json.task_subagents). Every delegate_task(action='steer') to a
+  ledger task is also stored on the row that runs the task now
+  (task_json.steers, by original task index), carried through every
+  re-dispatch (resume meta "steers") and put into the re-dispatched child's
+  context as binding instructions. A steer to a subagent id that is no
+  longer live (killed by a restart) is routed along the chain of
+  re-dispatches (same root) to the task's current child, or stored for the
+  re-dispatch while the unit is parked, instead of "No live subagent".
+  Steers stored between building a re-dispatch plan and its dispatch are
+  forwarded to the new unit (session_auto_continue _forward_late_steers).
+  The carried list is capped per task across all attempts (newest 20,
+  16000 chars in total).
+  Ownership: a top-level conversation (depth 0) finds ledger tasks by its
+  session id and session key; a delegated orchestrator child inherits the
+  parent's session key, so it only finds rows whose parent session is its
+  own session id (no steering or storing into a sibling's task).
+- N restarts, one child per task: a resume of a resume keeps the original
+  unit as root and counts attempts; a task is only ever run by the latest
+  row of its root, and the duplicate drop covers every attempt.
+- Visibility: action='list' marks re-dispatched children "resumed from
+  deleg_X (attempt N)" with the original delegation id, and lists units
+  still parked (with their previous subagent ids and queued steers).
+- Dead background processes: at the shutdown stop, each unit records the
+  running background processes of each child (command redacted with
+  force=True, plus whole-value masking of sshpass -p, mysql -pPW, openssl
+  -k/-pass, --password=/--token=, and *KEY/TOKEN/SECRET/PASS*=... vars) on
+  its ledger row (task_json.dead_processes); the re-dispatch note lists
+  them for the child that owned them, so it can check and restart them.
+
+Synchronous delegations: top-level model delegations always run in the
+background (run_agent forces background at depth 0), so only an
+orchestrator subagent's own workers join inline; those resume as part of
+their parent's re-dispatch (the parent re-runs from its transcript), not on
+their own.
+
+Tests: tests/tools/test_subagents_resume_every_turn.py and
+test_subagents_resume_steer_restarts.py are shipped in this patch but NOT
+run by the package build (hermes' test suite is not part of it); run them
+by hand against the patched tree. The CI guard is the container check
+hyperhermes/checks/resume (checks.x86_64-linux.resume), which fails
+without this patch.
+
+Generated against v0.23.0 with every earlier patch of
+hyperhermes/modules/core/package.nix applied first.
+
+diff --git a/tests/tools/test_subagents_resume_every_turn.py b/tests/tools/test_subagents_resume_every_turn.py
+new file mode 100644
+index 00000000..b0873328
+--- /dev/null
++++ b/tests/tools/test_subagents_resume_every_turn.py
+@@ -0,0 +1,164 @@
++"""hyperhermes: subagents a restart killed are re-dispatched by whichever turn of their session runs first, a model
++copy of them is dropped, and the re-dispatched child learns which of its background processes died."""
++
++import json
++import time
++
++import pytest
++
++from tools import async_delegation as ad
++
++
++@pytest.fixture(autouse=True)
++def _clean_state():
++    ad._reset_for_tests()
++    yield
++    ad._reset_for_tests()
++
++
++def _park(conn, delegation_id, goals, parent="sess-1", dead=None, attempt=None):
++    task = {"goals": goals, "is_batch": True, "task_specs": [{"goal": g} for g in goals]}
++    if dead:
++        task["dead_processes"] = dead
++    conn.execute("""INSERT INTO async_delegations (delegation_id, origin_session, origin_ui_session_id,
++                    parent_session_id, state, dispatched_at, updated_at, delivery_state, delivery_attempts,
++                    task_json, origin_session_id) VALUES (?, 'key-1', '', ?, 'resuming', ?, ?, 'pending', 0, ?, '')""",
++                 (delegation_id, parent, time.time(), time.time(), json.dumps(task)))
++
++
++def test_resuming_goals_lists_parked_unfinished_tasks_of_the_session():
++    with ad._DB_LOCK, ad._transaction() as conn:
++        _park(conn, "deleg_a", ["goal one", "goal two"])
++        _park(conn, "deleg_b", ["other session"], parent="sess-2")
++    goals = ad.resuming_goals("sess-1")
++    assert goals == {"goal one": "deleg_a", "goal two": "deleg_a"}
++    assert ad.resuming_goals("sess-3") == {}
++
++
++def test_resume_plan_tells_the_child_which_background_processes_died():
++    dead = {"1": [{"command": "nix build .#x", "cwd": "/work", "started_at": 1.0}]}
++    with ad._DB_LOCK, ad._transaction() as conn:
++        _park(conn, "deleg_c", ["first", "second"], dead=dead)
++    plans = ad.take_resuming_delegations(lambda origin, parent: parent == "sess-1")
++    assert len(plans) == 1
++    first, second = plans[0]["tasks"]
++    assert "nix build .#x" not in (first.get("context") or "")
++    assert "background processes of yours" in second["context"] and "'nix build .#x' (cwd /work)" in second["context"]
++
++
++def test_shutdown_records_the_running_processes_of_each_child():
++    with ad._DB_LOCK, ad._transaction() as conn:
++        conn.execute("""INSERT INTO async_delegations (delegation_id, origin_session, origin_ui_session_id,
++                        parent_session_id, state, dispatched_at, updated_at, delivery_state, delivery_attempts,
++                        task_json, origin_session_id) VALUES ('deleg_d', 'k', '', 's', 'running', 1, 1, 'pending', 0,
++                        '{}', '')""")
++    ad._record_dead_processes({"delegation_id": "deleg_d"},
++                              lambda: {"0": [{"command": "sleep 300", "cwd": "/w", "started_at": 1.0}]})
++    with ad._DB_LOCK, ad._transaction() as conn:
++        task = json.loads(conn.execute("SELECT task_json FROM async_delegations WHERE delegation_id='deleg_d'")
++                          .fetchone()[0])
++    assert task["dead_processes"]["0"][0]["command"] == "sleep 300"
++
++
++def test_delegate_task_drops_copies_of_resuming_subagents(monkeypatch):
++    from tools import delegate_tool
++
++    class Parent:
++        session_id = "sess-1"
++
++    monkeypatch.setattr(ad, "resuming_goals", lambda *a, **k: {"goal one": "deleg_a"})
++    tasks, goal, note = delegate_tool._drop_resuming_copies(
++        [{"goal": "goal one"}, {"goal": "new goal"}], None, Parent())
++    assert tasks == [{"goal": "new goal"}] and goal is None
++    assert "goal one" in note and "deleg_a" in note and "Not dispatched again" in note
++    tasks, goal, note = delegate_tool._drop_resuming_copies([{"goal": "new goal"}], None, Parent())
++    assert note is None and tasks == [{"goal": "new goal"}]
++    out = json.loads(delegate_tool.delegate_task(tasks=[{"goal": "goal one"}], parent_agent=Parent()))
++    assert out["status"] == "already_running" and "deleg_a" in out["note"]
++
++
++def test_a_turn_that_wins_the_race_re_dispatches_and_tells_the_model(monkeypatch):
++    """The fpv incident: a delivered subagent result started a turn right after the restart, ahead of the
++    auto-continue kickoff and the idle poller, which then could not claim the busy session. That turn must
++    re-dispatch the parked units itself and carry the note, so the model does not dispatch them again."""
++    from tui_gateway import server
++    calls = []
++
++    def fake_resume(sid, session, *, in_turn=False):
++        calls.append(in_turn)
++        session.setdefault("_resumed_delegations", []).append({"of": "deleg_x", "as": "deleg_y", "tasks": [1, 2]})
++        return 1
++
++    monkeypatch.setattr(server, "_resume_session_delegations", fake_resume)
++    session = {"running": True}
++    note = server._resume_delegations_for_turn("sid", session)
++    assert calls == [True]
++    assert "deleg_x (task(s) 1, 2) now runs as deleg_y" in note and "Do not dispatch them again" in note
++    assert server._resume_delegations_for_turn("sid", session) == "" or calls == [True, True]
++
++
++def test_in_turn_resume_does_not_need_the_idle_claim(monkeypatch):
++    from tui_gateway import server
++    from tools import async_delegation
++
++    class Agent:
++        session_id = "sess-1"
++
++    session = {"running": True, "agent": Agent(), "session_key": "key-1", "history_lock": __import__("threading").Lock()}
++    monkeypatch.setattr(async_delegation, "has_resuming_delegations", lambda home: True)
++    monkeypatch.setattr(async_delegation, "async_pool_full", lambda n: False)
++    taken = []
++    monkeypatch.setattr(async_delegation, "take_resuming_delegations", lambda m: taken.append(m) or [])
++    monkeypatch.setattr(server, "_session_home", lambda s: "/nonexistent")
++    monkeypatch.setattr(server, "_session_uses_compute_host", lambda s: False)
++    assert server._resume_session_delegations("sid", session) == 0 and taken == []  # busy: the poller backs off
++    server._resume_session_delegations("sid", session, in_turn=True)
++    assert len(taken) == 1  # the running turn itself claims the parked units
++    assert session["running"] is True  # and leaves its own turn's claim alone
++
++
++def test_in_turn_resume_keeps_the_running_turns_session_context(monkeypatch):
++    """Review finding: _redispatch_delegation binds the session context and then CLEARS it (every var set to ""),
++    which wiped the running turn's source / session key / UI session id / runtime cwd for the rest of the first turn
++    after a restart. The in-turn resume runs in a copy of the context: the turn's binding is unchanged afterwards,
++    and a delegate_task later in that turn still records the right source and origin UI session."""
++    from gateway.session_context import clear_session_vars, get_session_env, set_session_vars
++    from agent import runtime_cwd
++    from tools import delegate_tool, delegate_tool_dispatch
++    from tui_gateway import server
++
++    class Agent:
++        session_id = "sess-1"
++
++    session = {"running": True, "agent": Agent(), "session_key": "key-1", "history_lock": __import__("threading").Lock()}
++    plan = {"delegation_id": "deleg_old", "tasks": [{"goal": "g"}],
++            "meta": {"indexes": [0], "attempt": 1, "steers": {}}}
++    monkeypatch.setattr(ad, "has_resuming_delegations", lambda home: True)
++    monkeypatch.setattr(ad, "async_pool_full", lambda n: False)
++    monkeypatch.setattr(ad, "take_resuming_delegations", lambda m: [plan])
++    monkeypatch.setattr(ad, "finish_resume", lambda old, new: None)
++    monkeypatch.setattr(ad, "late_steers", lambda *a: {})
++    monkeypatch.setattr(server, "_session_home", lambda s: "/nonexistent")
++    monkeypatch.setattr(server, "_session_uses_compute_host", lambda s: False)
++    seen = {}
++
++    def fake_delegate(**kw):
++        seen["key"] = get_session_env("HERMES_SESSION_KEY")
++        return json.dumps({"status": "dispatched", "delegation_id": "deleg_new"})
++
++    monkeypatch.setattr(delegate_tool, "delegate_task", fake_delegate)
++    names = ("HERMES_SESSION_SOURCE", "HERMES_SESSION_KEY", "HERMES_UI_SESSION_ID", "HERMES_SESSION_ID")
++    tokens = set_session_vars(source="desktop", session_key="key-1", session_id="sess-1", ui_session_id="ui-7",
++                              cwd="/work/turn")
++    try:
++        before = {n: get_session_env(n) for n in names}
++        assert before["HERMES_SESSION_SOURCE"] == "desktop" and before["HERMES_UI_SESSION_ID"] == "ui-7"
++        note = server._resume_delegations_for_turn("ui-7", session)
++        assert "deleg_old" in note and "deleg_new" in note and seen["key"] == "key-1"
++        assert {n: get_session_env(n) for n in names} == before
++        assert runtime_cwd.scoped_session_cwd() == "/work/turn"
++        # A delegate_task the model makes later in this turn captures the turn's own origin.
++        assert delegate_tool_dispatch._capture_origin()[1] == "ui-7"
++        assert get_session_env("HERMES_SESSION_SOURCE") == "desktop"
++    finally:
++        clear_session_vars(tokens)
+diff --git a/tests/tools/test_subagents_resume_steer_restarts.py b/tests/tools/test_subagents_resume_steer_restarts.py
+new file mode 100644
+index 00000000..d9400f53
+--- /dev/null
++++ b/tests/tools/test_subagents_resume_steer_restarts.py
+@@ -0,0 +1,239 @@
++"""hyperhermes: a task keeps ONE live child and its steers across repeated restarts.
++
++Two consecutive restarts of the backend that runs a delegated unit, a manual re-dispatch attempt by the model in
++between, and steers sent to the task's ORIGINAL subagent id while the unit is parked and while its first
++re-dispatch runs: every steer reaches the task's current child (live, or in its resume context), the resume of a
++resume keeps the original identity, and exactly one child per task is live at the end."""
++
++import json
++import threading
++import time
++
++import pytest
++
++from tools import async_delegation as ad
++from tools import delegate_tool, delegate_tool_registry as reg
++
++DEAD_PID = 2 ** 22 + 12345  # beyond pid_max on test hosts: never alive
++GOALS = ["build the thing", "migrate the data"]
++
++
++@pytest.fixture(autouse=True)
++def _clean_state(monkeypatch):
++    ad._reset_for_tests()
++    monkeypatch.setattr(ad, "_resume_config", lambda: (True, 3))
++    yield
++    ad._reset_for_tests()
++    with reg._active_subagents_lock:
++        reg._active_subagents.clear()
++
++
++class Parent:
++    session_id = "sess-1"
++
++
++class FakeChild:
++    def __init__(self):
++        self.steers = []
++
++    def steer(self, text):
++        self.steers.append(text)
++        return True
++
++
++def _sql(query, args=()):
++    with ad._DB_LOCK, ad._transaction() as conn:
++        return conn.execute(query, args).fetchall()
++
++
++def _seed():
++    with ad._DB_LOCK, ad._transaction() as conn:
++        cols = {r[1]: r for r in conn.execute("PRAGMA table_info(sessions)")}
++        need = [c for c, r in cols.items() if r[3] and r[4] is None and c not in ("id", "source")]
++        conn.execute(f"INSERT INTO sessions (id, source{''.join(', ' + c for c in need)}) VALUES "
++                     f"('sess-1', 'desktop'{', 0' * len(need)})")
++        task = {"goals": GOALS, "is_batch": True, "task_specs": [{"goal": g} for g in GOALS],
++                "task_subagents": {"0": "sa-0-a", "1": "sa-1-a"}}
++        conn.execute("""INSERT INTO async_delegations (delegation_id, origin_session, origin_ui_session_id,
++                        parent_session_id, state, dispatched_at, updated_at, delivery_state, delivery_attempts,
++                        owner_pid, task_json, origin_session_id)
++                        VALUES ('deleg_A', 'key-1', '', 'sess-1', 'running', 1, 1, 'pending', 0, ?, ?, '')""",
++                     (DEAD_PID, json.dumps(task)))
++
++
++def _redispatch(plan, suffix, release):
++    """What tui_gateway's _redispatch_delegation does, with registered fake children instead of real agents."""
++    children = {}
++    for row_i, orig in enumerate(plan["meta"]["indexes"]):
++        sid = f"sa-{orig}-{suffix}"
++        children[str(row_i)] = sid
++        reg._register_subagent({"subagent_id": sid, "agent": FakeChild(), "owner_agent_session_id": "sess-1",
++                                "goal": GOALS[orig], "delegation_id": f"deleg_{suffix}"})
++    token = ad._RESUME_META.set(plan["meta"])
++    try:
++        out = ad.dispatch_async_delegation_batch(
++            goals=[t["goal"] for t in plan["tasks"]], context=None, toolsets=None, role="leaf", model=None,
++            session_key="key-1", parent_session_id="sess-1", runner=lambda: release.wait(30) and {"results": []},
++            delegation_id=f"deleg_{suffix}", task_specs=plan["tasks"], task_subagents=children)
++    finally:
++        ad._RESUME_META.reset(token)
++    assert out["status"] == "dispatched"
++    ad.finish_resume(plan["delegation_id"], out["delegation_id"])
++    return out["delegation_id"]
++
++
++def _restart(delegation_id):
++    """The backend dies: its in-memory units and children are gone, the row's owner is dead."""
++    _sql("UPDATE async_delegations SET owner_pid=? WHERE delegation_id=?", (DEAD_PID, delegation_id))
++    with ad._records_lock:
++        ad._records.clear()
++    with reg._active_subagents_lock:
++        reg._active_subagents.clear()
++    ad.recover_abandoned_delegations()
++
++
++def _steer(sid, text):
++    return json.loads(reg._handle_control_action("steer", sid, text, Parent()))
++
++
++def _live_runs(task):
++    rows = _sql("SELECT delegation_id, state, task_json FROM async_delegations WHERE state IN "
++                "('running','resuming','resume_claimed')")
++    return [d for d, _s, t in rows if task in ad._row_indexes(json.loads(t))]
++
++
++def test_two_restarts_one_child_per_task_and_steers_survive():
++    release = threading.Event()
++    try:
++        _seed()
++        # Restart 1 kills deleg_A: parked, visible in action='list'.
++        ad.recover_abandoned_delegations()
++        assert _sql("SELECT state FROM async_delegations WHERE delegation_id='deleg_A'") == [("resuming",)]
++        listed = json.loads(reg._handle_control_action("list", None, None, Parent()))
++        assert [p["delegation_id"] for p in listed["parked"]] == ["deleg_A"]
++        assert [t["previous_subagent_id"] for t in listed["parked"][0]["tasks"]] == ["sa-0-a", "sa-1-a"]
++
++        # A steer to the dead child (old id) while parked: kept, not "No live subagent".
++        out = _steer("sa-1-a", "STEER-ONE use the staging db")
++        assert out["status"] == "stored_for_resume", out
++
++        plan = ad.take_resuming_delegations(lambda origin, parent: parent == "sess-1")[0]
++        ctx = plan["tasks"][1]["context"]
++        assert "STEER-ONE use the staging db" in ctx and "binding" in ctx
++        assert "STEER-ONE" not in (plan["tasks"][0].get("context") or "")
++        b = _redispatch(plan, "B", release)
++
++        # The model dispatches the task again by hand: dropped, no second child.
++        tasks, goal, note = delegate_tool._drop_resuming_copies([{"goal": GOALS[1]}], None, Parent())
++        assert tasks == [] and b in note
++        listed = json.loads(reg._handle_control_action("list", None, None, Parent()))
++        assert "parked" not in listed
++        assert {e["subagent_id"]: e.get("resumed") for e in listed["subagents"]} == {
++            "sa-0-B": "resumed from deleg_A (attempt 1)", "sa-1-B": "resumed from deleg_A (attempt 1)"}
++
++        # A steer to the ORIGINAL id between the restarts reaches the re-dispatched child live.
++        out = _steer("sa-1-a", "STEER-TWO skip the backfill")
++        assert out["status"] == "queued" and out["routed_to"] == "sa-1-B", out
++        assert reg._active_subagents["sa-1-B"]["agent"].steers == ["STEER-TWO skip the backfill"]
++
++        # Restart 2 kills deleg_B (a resume of a resume).
++        _restart(b)
++        assert _sql("SELECT state FROM async_delegations WHERE delegation_id=?", (b,)) == [("resuming",)]
++        listed = json.loads(reg._handle_control_action("list", None, None, Parent()))
++        assert [(p["delegation_id"], p["original_delegation_id"], p["next_attempt"]) for p in listed["parked"]] == [
++            (b, "deleg_A", 2)]
++        out = _steer("sa-1-B", "STEER-THREE keep the old index")
++        assert out["status"] == "stored_for_resume", out
++        plan = ad.take_resuming_delegations(lambda origin, parent: parent == "sess-1")[0]
++        assert plan["meta"]["root"] == "deleg_A" and plan["meta"]["attempt"] == 2
++        ctx = plan["tasks"][1]["context"]
++        assert all(s in ctx for s in ("STEER-ONE", "STEER-TWO", "STEER-THREE")), ctx
++        assert ctx.index("STEER-ONE") < ctx.index("STEER-TWO") < ctx.index("STEER-THREE")
++        c = _redispatch(plan, "C", release)
++
++        # Second manual re-dispatch attempt: still dropped.
++        tasks, goal, note = delegate_tool._drop_resuming_copies(
++            [{"goal": GOALS[0]}, {"goal": GOALS[1]}], None, Parent())
++        assert tasks == [] and c in note
++        # The very first id still reaches the current child.
++        out = _steer("sa-1-a", "STEER-FOUR done soon?")
++        assert out["routed_to"] == "sa-1-C" and out["now_runs_as"] == c, out
++
++        # Exactly one live child per task, one live unit, original identity kept.
++        assert _live_runs(0) == [c] and _live_runs(1) == [c]
++        assert [r for r in ad._records.values() if r.get("status") in ad._LIVE_STATES] == [ad._records[c]]
++        assert ad._records[c]["resume"]["root"] == "deleg_A"
++        live = [e["subagent_id"] for e in json.loads(
++            reg._handle_control_action("list", None, None, Parent()))["subagents"]]
++        assert sorted(live) == ["sa-0-C", "sa-1-C"]
++    finally:
++        release.set()
++
++
++def test_steer_to_a_finished_task_says_so():
++    _seed()
++    _sql("UPDATE async_delegations SET state='completed' WHERE delegation_id='deleg_A'")
++    out = json.loads(reg._handle_control_action("steer", "sa-1-a", "late", Parent()))
++    assert "finished" in out["error"]
++
++
++def test_late_steer_reaches_the_new_unit():
++    _seed()
++    ad.recover_abandoned_delegations()
++    plan = ad.take_resuming_delegations(lambda origin, parent: parent == "sess-1")[0]
++    # Sent after the plan was built, before the new unit exists.
++    ad.persist_steer("deleg_A", 1, "LATE one")
++    assert ad.late_steers("deleg_A", plan["meta"]["steers"]) == {"1": ["LATE one"]}
++
++
++def test_orchestrator_child_cannot_steer_a_siblings_task():
++    """Review finding: a depth-1 orchestrator child inherits its parent's session key; the durable steer path looked
++    tasks up by that key too, so it could steer (and persist a steer into) a sibling's task by its sa- id. Only the
++    top-level conversation (depth 0) or the row's own parent session may route or store a steer."""
++    from tools.approval_context import reset_current_session_key, set_current_session_key
++    _seed()
++    ad.recover_abandoned_delegations()
++
++    class OrchestratorChild:
++        session_id = "sess-child-9"
++        _delegate_depth = 1
++
++    token = set_current_session_key("key-1")  # inherited from the parent's turn
++    try:
++        out = json.loads(reg._handle_control_action("steer", "sa-1-a", "HIJACK do something else",
++                                                    OrchestratorChild()))
++        assert "error" in out and out.get("status") != "stored_for_resume", out
++        listed = json.loads(reg._handle_control_action("list", None, None, OrchestratorChild()))
++        assert "parked" not in listed
++    finally:
++        reset_current_session_key(token)
++    task = json.loads(_sql("SELECT task_json FROM async_delegations WHERE delegation_id='deleg_A'")[0][0])
++    assert not task.get("steers"), task
++    # The top-level conversation itself still can.
++    assert _steer("sa-1-a", "OK from the parent")["status"] == "stored_for_resume"
++
++
++def test_carried_steers_stay_capped_across_attempts():
++    many = [f"steer {i} " + "x" * 3000 for i in range(30)]
++    base = ad._resume_base({"resume": {"indexes": [0], "steers": {"0": many[:25]}}, "steers": {"0": many[25:]}}, 0)
++    kept = base["steers"]["0"]
++    assert kept[-1] == many[-1] and len(kept) <= ad._STEER_CAP
++    assert sum(map(len, kept)) <= ad._STEER_TOTAL_CAP
++    assert ad._steers_after(kept, kept[1:] + ["new"]) == ["new"] and ad._steers_after([], ["a"]) == ["a"]
++
++
++def test_dead_process_commands_are_fully_masked():
++    from tools.delegate_tool_dispatch import _mask_command
++    for cmd, secret in [("sshpass -p hunter2 ssh h", "hunter2"), ("mysql -u r -pS3cretPW db", "S3cretPW"),
++                        ("openssl enc -k pw123 -in f", "pw123"), ("openssl enc -pass pass:abc9 -in f", "abc9"),
++                        ("MY_API_KEY=abcdef0123456789 ./run", "abcdef0123456789"), ("x --password=letmein", "letmein")]:
++        masked = _mask_command(cmd)
++        assert secret not in masked and "***" in masked, masked
++        assert not any(secret[:3] in part and part != "***" for part in masked.split() if secret[:3] in part), masked
++
++
++def test_force_true_dispatches_a_resuming_goal_anyway(monkeypatch):
++    monkeypatch.setattr(ad, "resuming_goals", lambda *a, **k: {"build the thing": "deleg_B"})
++    tasks, _goal, note = delegate_tool._drop_resuming_copies(
++        [{"goal": "build the thing", "force": True}, {"goal": "build the thing"}], None, Parent())
++    assert tasks == [{"goal": "build the thing"}] and "force: true" in note and "action='stop'" in note
+diff --git a/tools/async_delegation.py b/tools/async_delegation.py
+index 45003ee7..50650a2a 100644
+--- a/tools/async_delegation.py
++++ b/tools/async_delegation.py
+@@ -184,7 +184,7 @@ def _persist_dispatch(record: dict[str, Any]) -> None:
+     task_payload = {
+         key: record.get(key)
+         for key in ("goal", "goals", "context", "toolsets", "role", "model", "is_batch", "task_indexes", "task_transcripts",
+-                    "task_specs", "resume", *_ROUTING_KEYS)
++                    "task_specs", "resume", "task_subagents", *_ROUTING_KEYS)
+         if key in record}
+     try:  # where the children's terminals started; lets recovery add a git-state hint
+         task_payload["owner_cwd"] = os.getcwd()
+@@ -340,6 +340,7 @@ def _shutdown_interrupt(record: dict[str, Any]) -> bool:
+         return False
+     try:
+         if getattr(fn, "supports_shutdown", False) and not record.get("_user_stopped"):
++            _record_dead_processes(record, getattr(fn, "processes", None))
+             cut = fn(shutdown=True)
+             with _records_lock:
+                 record["_shutdown_cut"] = frozenset(record.get("_shutdown_cut") or ()) | frozenset(cut or ())
+@@ -351,6 +352,247 @@ def _shutdown_interrupt(record: dict[str, Any]) -> bool:
+     return True
+ 
+ 
++def _record_dead_processes(record: dict[str, Any], snapshot: Any) -> None:
++    """Persist which background processes each child of the unit had running when the shutdown stopped it
++    (``dead_processes`` on the row, by task index): they die with the backend, and the re-dispatched child is told
++    which ones to check and restart. Best-effort."""
++    if not callable(snapshot) or worker_ledger():
++        return
++    try:
++        procs = snapshot()
++        if not procs:
++            return
++        with _DB_LOCK, _transaction() as conn:
++            row = conn.execute("SELECT task_json FROM async_delegations WHERE delegation_id=? AND state='running'",
++                               (record["delegation_id"],)).fetchone()
++            if row is None:
++                return
++            task = _json_object(row[0])
++            task["dead_processes"] = {**(task.get("dead_processes") or {}), **procs}
++            conn.execute("UPDATE async_delegations SET task_json=? WHERE delegation_id=?",
++                         (json.dumps(task), record["delegation_id"]))
++    except Exception:
++        logger.debug("could not record the background processes of %s", record.get("delegation_id"), exc_info=True)
++
++
++def _dead_processes_note(procs: Any) -> Optional[str]:
++    if not isinstance(procs, list) or not procs:
++        return None
++    lines = [f"- {p.get('command')!r} (cwd {p.get('cwd') or '?'})" for p in procs if isinstance(p, dict)]
++    return ("These background processes of yours (terminal background=true) were running when the restart killed "
++            "them; check what each one had done and restart the ones still needed:\n" + "\n".join(lines))
++
++
++def resuming_goals(parent_session_id: Any, session_key: Any = None) -> dict[str, str]:
++    """Goals of this session's subagents a restart killed that run again or wait to (``goal -> delegation id``):
++    a model that dispatches one of them again would run it twice (delegate_task drops such copies)."""
++    keys = {str(k) for k in (parent_session_id, session_key) if k}
++    if not keys:
++        return {}
++    out: dict[str, str] = {}
++    with _records_lock:
++        for r in _records.values():
++            meta = r.get("resume")
++            if r.get("status") in _LIVE_STATES and isinstance(meta, dict) and (
++                    str(r.get("parent_session_id") or "") in keys or str(r.get("session_key") or "") in keys):
++                for i in meta.get("indexes") or []:
++                    goals = meta.get("goals") or []
++                    if isinstance(i, int) and 0 <= i < len(goals) and goals[i]:
++                        out[str(goals[i]).strip()] = r["delegation_id"]
++    if worker_ledger() or not _db_path().exists():
++        return out
++    try:
++        with _DB_LOCK, _transaction() as conn:
++            rows = conn.execute("""SELECT delegation_id, task_json, result_json, dispatched_at FROM async_delegations
++                   WHERE state IN ('resuming','resume_claimed') AND (parent_session_id IN (%s) OR origin_session IN (%s))"""
++                                % (",".join("?" * len(keys)), ",".join("?" * len(keys))),
++                                (*keys, *keys)).fetchall()
++        for delegation_id, task_json, result_json, dispatched_at in rows:
++            plan = _resume_plan(_json_object(task_json), result_json, dispatched_at)
++            for i in (plan or {}).get("todo") or []:
++                goals = plan.get("goals") or []
++                if 0 <= i < len(goals) and goals[i]:
++                    out.setdefault(str(goals[i]).strip(), delegation_id)
++    except Exception:
++        logger.debug("resuming goals lookup failed", exc_info=True)
++    return out
++
++
++# ── Steers across restarts (hyperhermes) ─────────────────────────────────────
++# A steer lived only in the child's memory: one queued while the child sat in a long tool call, sent to a parked
++# unit, or addressed to the id of a child a restart killed was lost (or refused with "No live subagent"), and the
++# re-dispatched child ran on its original goal only. Every steer to a ledger-tracked task is now also stored on the
++# row that currently runs the task (``task_json.steers``, by ORIGINAL task index), carried over every re-dispatch
++# (resume meta ``steers``) and put into the resumed child's context; a steer to an old subagent id reaches the
++# task's current run (the successor unit's child), however many re-dispatches lie in between.
++_STEER_CAP, _STEER_TEXT_CAP, _STEER_TOTAL_CAP = 20, 4000, 16000
++
++
++def _cap_steers(texts: list) -> list:
++    """The newest steers of a task that fit ``_STEER_CAP`` entries and ``_STEER_TOTAL_CAP`` chars in total: the list
++    merged over every attempt is carried into each re-dispatch's context and must not grow with the restarts."""
++    kept, total = [], 0
++    for text in reversed(texts[-_STEER_CAP:]):
++        total += len(text)
++        if total > _STEER_TOTAL_CAP and kept:
++            break
++        kept.append(text)
++    return kept[::-1]
++_RUN_STATES = ("running", "stalling", "finalizing", "resuming", "resume_claimed")
++
++
++def _steers_note(texts: Any) -> Optional[str]:
++    if not isinstance(texts, list) or not texts:
++        return None
++    return ("Messages your parent (the orchestrator) sent you for this task, oldest first; you may not have received "
++            "them before the restart. They are binding and override your original instructions where they "
++            "conflict:\n" + "\n".join(f"- {t}" for t in texts))
++
++
++def _row_indexes(task: dict[str, Any]) -> list:
++    """Original task indexes a row runs, in its own task order."""
++    if isinstance(meta := task.get("resume"), dict):
++        return list(meta.get("indexes") or [])
++    goals = task.get("goals") if isinstance(task.get("goals"), list) else [task.get("goal") or ""]
++    return list(task.get("task_indexes") or range(len(goals)))
++
++
++def _orig_index(task: dict[str, Any], row_index: int) -> int:
++    meta = task.get("resume")
++    row_map = meta.get("indexes") if isinstance(meta, dict) else None
++    return row_map[row_index] if row_map is not None and 0 <= row_index < len(row_map) else row_index
++
++
++def _task_subagent(task: dict[str, Any], orig: int) -> Optional[str]:
++    for k, v in (task.get("task_subagents") or {}).items():
++        if str(k).isdigit() and _orig_index(task, int(k)) == orig:
++            return v
++    return None
++
++
++def _root_of(delegation_id: str, task: dict[str, Any]) -> str:
++    meta = task.get("resume")
++    return (meta.get("root") if isinstance(meta, dict) else None) or delegation_id
++
++
++def _session_rows(conn, keys: set) -> list:
++    marks = ",".join("?" * len(keys))
++    rows = conn.execute(f"""SELECT delegation_id, state, task_json, dispatched_at, result_json FROM async_delegations
++           WHERE parent_session_id IN ({marks}) OR origin_session IN ({marks})""", (*keys, *keys)).fetchall()
++    return [(d, st, _json_object(t), at or 0, r) for d, st, t, at, r in rows]
++
++
++def locate_subagent_task(subagent_id: str, keys) -> Optional[dict[str, Any]]:
++    """The task a subagent id ran (in any attempt) and the row that runs it NOW: ``{root, orig, goal,
++    delegation_id, state, subagent_id, attempt}`` (``delegation_id`` None when no run of it is left). None when the id
++    ran no ledger task of the sessions in ``keys`` (parent session ids / session keys)."""
++    keys = {str(k) for k in keys or () if k}
++    if not keys or not subagent_id or worker_ledger() or not _db_path().exists():
++        return None
++    with _DB_LOCK, _transaction() as conn:
++        rows = _session_rows(conn, keys)
++    for did, _state, task, _at, _r in rows:
++        orig = next((_orig_index(task, int(k)) for k, v in (task.get("task_subagents") or {}).items()
++                     if v == subagent_id and str(k).isdigit()), None)
++        if orig is not None:
++            break
++    else:
++        return None
++    root = _root_of(did, task)
++    goals = (task.get("resume") or {}).get("goals") or task.get("goals") or [task.get("goal")]
++    found = {"root": root, "orig": orig, "goal": goals[orig] if 0 <= orig < len(goals) else None,
++             "delegation_id": None, "state": None, "subagent_id": None, "attempt": None}
++    runs = [r for r in rows if r[1] in _RUN_STATES and orig in _row_indexes(r[2]) and _root_of(r[0], r[2]) == root]
++    if runs:
++        did, state, task, _at, _r = max(runs, key=lambda r: (int((r[2].get("resume") or {}).get("attempt") or 0), r[3]))
++        found.update(delegation_id=did, state=state, subagent_id=_task_subagent(task, orig),
++                     attempt=int((task.get("resume") or {}).get("attempt") or 0))
++    return found
++
++
++def persist_steer(delegation_id: str, orig: int, text: str) -> bool:
++    """Store a steer for original task ``orig`` on the row that runs it (carried into every re-dispatch)."""
++    if worker_ledger() or not text or not text.strip():
++        return False
++    with _DB_LOCK, _transaction() as conn:
++        row = conn.execute("SELECT task_json FROM async_delegations WHERE delegation_id=?", (delegation_id,)).fetchone()
++        if row is None:
++            return False
++        task = _json_object(row[0])
++        steers = task.get("steers") if isinstance(task.get("steers"), dict) else {}
++        steers[str(orig)] = _cap_steers(list(steers.get(str(orig)) or []) + [text.strip()[:_STEER_TEXT_CAP]])
++        task["steers"] = steers
++        conn.execute("UPDATE async_delegations SET task_json=? WHERE delegation_id=?",
++                     (json.dumps(task), delegation_id))
++    return True
++
++
++def late_steers(delegation_id: str, known: Any) -> dict[str, list]:
++    """Steers stored on a claimed row after its re-dispatch plan was built (``known`` = the plan's steers)."""
++    if worker_ledger() or not _db_path().exists():
++        return {}
++    with _DB_LOCK, _transaction() as conn:
++        row = conn.execute("SELECT task_json FROM async_delegations WHERE delegation_id=?", (delegation_id,)).fetchone()
++    steers = _resume_base(_json_object(row[0]), None).get("steers") if row else {}
++    known = known if isinstance(known, dict) else {}
++    out = {}
++    for k, cur in (steers or {}).items():
++        new = _steers_after(list(known.get(k) or []), list(cur))
++        if new:
++            out[k] = new
++    return out
++
++
++def _steers_after(known: list, cur: list) -> list:
++    """Entries of ``cur`` appended after ``known``; both are capped lists (``_cap_steers``), so the oldest entries
++    of ``known`` may have dropped off the front of ``cur``: match ``cur``'s head against ``known``'s tail."""
++    for m in range(min(len(known), len(cur)), 0, -1):
++        if cur[:m] == known[-m:]:
++            return cur[m:]
++    return cur
++
++
++def live_subagent_of(delegation_id: str, orig: int) -> Optional[str]:
++    """This process's child running original task ``orig`` of a live unit."""
++    with _records_lock:
++        rec = _records.get(delegation_id)
++        if rec is None or rec.get("status") not in _ACTIVE_STATES:
++            return None
++        return _task_subagent({"resume": rec.get("resume"), "task_subagents": rec.get("task_subagents")}, orig)
++
++
++def resume_info(delegation_id: Any) -> Optional[dict[str, Any]]:
++    """``{of, root, attempt}`` when the live unit ``delegation_id`` is a re-dispatch after a restart."""
++    with _records_lock:
++        meta = (_records.get(str(delegation_id or "")) or {}).get("resume")
++    if not isinstance(meta, dict):
++        return None
++    return {"of": meta.get("of"), "root": meta.get("root") or meta.get("of"), "attempt": meta.get("attempt")}
++
++
++def parked_for_session(keys) -> list[dict[str, Any]]:
++    """Units of the sessions in ``keys`` a restart killed that wait for (or are in) their re-dispatch."""
++    keys = {str(k) for k in keys or () if k}
++    if not keys or worker_ledger() or not _db_path().exists():
++        return []
++    with _DB_LOCK, _transaction() as conn:
++        rows = _session_rows(conn, keys)
++    out = []
++    for did, state, task, at, result_json in rows:
++        if state not in _RESUME_STATES or (plan := _resume_plan(task, result_json, at)) is None:
++            continue
++        goals = plan.get("goals") or []
++        out.append({
++            "delegation_id": did, "original_delegation_id": plan.get("root") or did,
++            "status": ("parked: killed by a restart, re-dispatched at the session's next turn" if state == "resuming"
++                       else "re-dispatching"),
++            "next_attempt": int(plan.get("attempt") or 0) + 1,
++            "tasks": [{"task": i + 1, "goal": goals[i] if i < len(goals) else None,
++                       "previous_subagent_id": _task_subagent(task, i),
++                       "queued_steers": len((plan.get("steers") or {}).get(str(i)) or [])} for i in plan["todo"]]})
++    return out
++
++
+ def interrupt_for_shutdown() -> int:
+     """Stop every running background unit for the shutdown (after ``begin_shutdown``); see ``_shutdown_interrupt``."""
+     if not _shutting_down:
+@@ -417,11 +659,20 @@ def _resume_base(task: dict[str, Any], dispatched_at: Any) -> dict[str, Any]:
+     """The ORIGINAL call a row runs tasks of: its goals, task specs, the original indexes this unit covers, the
+     results already carried over from earlier attempts, and how this row's task_index maps onto the original's."""
+     if isinstance(prior := task.get("resume"), dict):
+-        return {**prior, "row_indexes": list(prior.get("indexes") or [])}
+-    goals = task.get("goals") if isinstance(task.get("goals"), list) else [task.get("goal") or ""]
+-    unit = task.get("task_indexes") or list(range(len(goals)))
+-    return {"root": None, "attempt": 0, "goals": goals, "specs": task.get("task_specs") or [],
+-            "unit_indexes": list(unit), "carried": [], "row_indexes": None, "dispatched_at": dispatched_at}
++        base = {**prior, "row_indexes": list(prior.get("indexes") or [])}
++    else:
++        goals = task.get("goals") if isinstance(task.get("goals"), list) else [task.get("goal") or ""]
++        unit = task.get("task_indexes") or list(range(len(goals)))
++        base = {"root": None, "attempt": 0, "goals": goals, "specs": task.get("task_specs") or [],
++                "unit_indexes": list(unit), "carried": [], "row_indexes": None, "dispatched_at": dispatched_at}
++    # Steers the parent sent to the task over every attempt (original task index -> texts, oldest first): earlier
++    # attempts' carried in the resume meta, plus this row's own (hyperhermes).
++    steers = {str(k): list(v) for k, v in (base.get("steers") or {}).items() if isinstance(v, list)}
++    for k, v in (task.get("steers") or {}).items():
++        if isinstance(v, list):
++            steers[str(k)] = steers.get(str(k), []) + list(v)
++    base["steers"] = {k: _cap_steers(v) for k, v in steers.items()}
++    return base
+ 
+ 
+ def _resume_plan(task: dict[str, Any], result_json: Optional[str], dispatched_at: Any) -> Optional[dict[str, Any]]:
+@@ -509,6 +760,13 @@ def take_resuming_delegations(matches: Callable[[Any, Any], bool]) -> list[dict[
+                         "and builds you had started died with you; check whether they finished and restart what is "
+                         "still needed; for long commands, keep their output in a file you can check after another "
+                         "restart."]
++                dead = task.get("dead_processes") or {}
++                dead_by_orig = {(row_map[int(k)] if row_map is not None and int(k) < len(row_map) else int(k)): v
++                                for k, v in dead.items() if str(k).isdigit()}
++                if dead_note := _dead_processes_note(dead_by_orig.get(i)):
++                    note.append(dead_note)
++                if steer_note := _steers_note(plan.get("steers", {}).get(str(i))):
++                    note.append(steer_note)
+                 if path := by_orig.get(i):
+                     note.append(f"Your previous run's full transcript: {path}")
+                     if tail := transcript_tail(path):
+@@ -525,7 +783,7 @@ def take_resuming_delegations(matches: Callable[[Any, Any], bool]) -> list[dict[
+                 tasks.append(spec)
+             meta = {"of": delegation_id, "root": plan.get("root") or delegation_id, "attempt": attempt,
+                     "goals": plan["goals"], "specs": plan["specs"], "unit_indexes": plan["unit_indexes"],
+-                    "carried": plan["carried"], "indexes": list(plan["todo"]),
++                    "carried": plan["carried"], "indexes": list(plan["todo"]), "steers": plan.get("steers") or {},
+                     "dispatched_at": plan.get("dispatched_at") or dispatched_at}
+             plans.append({"delegation_id": delegation_id, "tasks": tasks, "meta": meta})
+     return plans
+@@ -1246,6 +1504,7 @@ def _dispatch_admitted(
+     task_indexes: Optional[list[int]] = None,
+     task_transcripts: Optional[dict[str, str]] = None,
+     task_specs: Optional[list[dict[str, Any]]] = None,
++    task_subagents: Optional[dict[str, str]] = None,
+ ) -> dict[str, Any]:
+     """Shared dispatch core for single (``goals is None``) and batch units. Capacity check +
+     record insert happen under ONE lock hold so concurrent dispatches can't both pass the check
+@@ -1271,6 +1530,8 @@ def _dispatch_admitted(
+         **({"task_transcripts": dict(task_transcripts)} if task_transcripts else {}),
+         # What a re-dispatch after a restart needs (see _RESUME_META): every task's goal and context.
+         **({"task_specs": list(task_specs)} if task_specs else {}),
++        # Which subagent runs which of this unit's tasks: steers find the task across restarts (hyperhermes).
++        **({"task_subagents": dict(task_subagents)} if task_subagents else {}),
+         **({"resume": resume_meta} if (resume_meta := _RESUME_META.get()) else {}),
+         # Which of the call's ``goals`` this unit runs (None = all of them).
+         **({"task_indexes": list(task_indexes)} if task_indexes is not None else {}),
+@@ -1370,6 +1631,7 @@ def dispatch_async_delegation_batch(
+     task_indexes: Optional[list[int]] = None,
+     task_transcripts: Optional[dict[str, str]] = None,
+     task_specs: Optional[list[dict[str, Any]]] = None,
++    task_subagents: Optional[dict[str, str]] = None,
+ ) -> dict[str, Any]:
+     """Dispatch a fan-out unit (a whole batch, or one ``group`` of a delegate_task call) as ONE
+     background unit: ``runner`` runs its tasks and returns the combined ``{"results": [...],
+@@ -1388,6 +1650,7 @@ def dispatch_async_delegation_batch(
+         origin_ui_session_id=origin_ui_session_id, origin_session_id=origin_session_id,
+         interrupt_fn=interrupt_fn, max_async_children=max_async_children, progress_fn=progress_fn, slot_key=slot_key,
+         task_indexes=task_indexes, task_transcripts=task_transcripts, task_specs=task_specs,
++        task_subagents=task_subagents,
+         capacity_error=(
+             f"Async delegation capacity reached ({max_async_children} running). Wait for one to finish "
+             "(its result will re-enter the chat), or raise delegation.max_concurrent_children in "
+diff --git a/tools/delegate_tool.py b/tools/delegate_tool.py
+index 62df9138..291dc901 100644
+--- a/tools/delegate_tool.py
++++ b/tools/delegate_tool.py
+@@ -609,6 +609,13 @@ def delegate_task(
+     dedup_note, dedup_origin = None, None
+     if not _RESUME_META.get():
+         tasks, dedup_note, dedup_origin = _collapse_duplicate_tasks(tasks)
++        # Subagents a restart killed are re-dispatched by hermes itself (resume_after_restart); a copy the model
++        # dispatches too would run every task twice. Drop such copies and say which unit runs it (hyperhermes).
++        tasks, goal, resumed_note = _drop_resuming_copies(tasks, goal, parent_agent)
++        if resumed_note:
++            dedup_note = f"{dedup_note} {resumed_note}" if dedup_note else resumed_note
++            if not tasks and not goal:
++                return json.dumps({"status": "already_running", "note": resumed_note}, ensure_ascii=False)
+ 
+     def _fail(message: str, mapped: bool = False) -> str:  # error in the model's indexes + what the collapse dropped
+         return _with_dedup_note(tool_error(message if mapped else _map_task_indexes(message, dedup_origin)), dedup_note)
+@@ -681,6 +688,51 @@ def delegate_task(
+     return _with_dedup_note(_run_batch(batch, background), dedup_note)
+ 
+ 
++def _drop_resuming_copies(tasks: Any, goal: Optional[str], parent_agent: Any) -> tuple[Any, Optional[str], Optional[str]]:
++    """``(tasks, goal, note)`` without the tasks whose goal is one of this session's subagents a restart killed and
++    hermes re-dispatches (``async_delegation.resuming_goals``); ``note`` names them, None when nothing dropped."""
++    from tools.async_delegation import resuming_goals
++    from tools.approval_context import get_current_session_key
++    forced: set = set()  # task positions with force: true (explicit second run); the flag never reaches a child
++    if isinstance(tasks, list):
++        stripped = []
++        for i, t in enumerate(tasks):
++            if isinstance(t, dict) and "force" in t:
++                if t.get("force") is True or str(t.get("force")).strip().lower() == "true":
++                    forced.add(i)
++                t = {k: v for k, v in t.items() if k != "force"}
++            stripped.append(t)
++        tasks = stripped
++    try:
++        # the inherited session key only at depth 0 (as _session_keys): a child owns just its own session's rows
++        key = get_current_session_key("") if getattr(parent_agent, "_delegate_depth", 0) == 0 else ""
++        running = resuming_goals(getattr(parent_agent, "session_id", None), key)
++    except Exception:
++        return tasks, goal, None
++    if not running:
++        return tasks, goal, None
++    dropped: list[str] = []
++    if isinstance(tasks, list) and tasks:
++        kept = []
++        for i, t in enumerate(tasks):
++            g = str(t.get("goal") or "").strip() if isinstance(t, dict) else ""
++            if g and g in running and i not in forced:
++                dropped.append(f"{g[:60]!r} (runs as {running[g]})")
++            else:
++                kept.append(t)
++        tasks = kept
++    elif goal and str(goal).strip() in running:
++        dropped.append(f"{str(goal).strip()[:60]!r} (runs as {running[str(goal).strip()]})")
++        goal = None
++    if not dropped:
++        return tasks, goal, None
++    return tasks, goal, ("Not dispatched again: these subagents were killed by a restart and already run again, "
++                         "resumed from where they were, and their results arrive as the original call's: "
++                         + "; ".join(dropped) + ". Use delegate_task(action='list') to see or steer them. To run "
++                         "one anew instead, stop it first (action='stop') or reword the goal; to run a second copy "
++                         "next to it on purpose, set force: true on that task.")
++
++
+ def _with_dedup_note(result: str, note: Optional[str]) -> str:
+     """*result* (tool result JSON) with *note* prepended to its ``note`` (unchanged when there is none)."""
+     if not note:
+@@ -852,6 +904,12 @@ DELEGATE_TASK_SCHEMA = {
+                             "files do NOT belong here — put paths in 'context' instead.",
+                             items={"type": "string"},
+                         ),
++                        "force": _p(
++                            "boolean",
++                            "Optional. true = dispatch this task even when its goal equals a subagent of this "
++                            "conversation that a restart killed and hermes is already running again (normally "
++                            "such a copy is dropped). Leave unset otherwise.",
++                        ),
+                         "group": _p(
+                             "string",
+                             "Optional result-delivery bucket within this call (only when delegation.independent_completions "
+diff --git a/tools/delegate_tool_dispatch.py b/tools/delegate_tool_dispatch.py
+index f50d2d80..98167855 100644
+--- a/tools/delegate_tool_dispatch.py
++++ b/tools/delegate_tool_dispatch.py
+@@ -5,6 +5,7 @@ review does not wait for the slowest sibling."""
+ 
+ from __future__ import annotations
+ 
++import re
+ import contextvars
+ import json
+ import logging
+@@ -74,6 +75,24 @@ def _announce_batch(parent_agent, n_tasks: int, live_deleg_id: Optional[str]) ->
+         _hdr = f"  🔀 [{format_batch_tag(live_deleg_id, parent_agent)}] delegating {n_tasks} tasks"
+         _print_completion_line(parent_agent, getattr(parent_agent, "_delegate_spinner", None), _hdr, console_line=_hdr)
+ 
++# Secrets the generic redactor leaves in a command line; the command of a dead background process goes into a
++# re-dispatched child's context and the ledger (hyperhermes). Values are masked whole, nothing kept.
++_CMD_SECRET_PATTERNS = (
++    re.compile(r"(\bsshpass\s+(?:-\w+\s+)*-p\s*)(\S+)"),                               # sshpass -p PW / -pPW
++    re.compile(r"(\bopenssl\b[^|;&]*?\s-(?:k|pass|passin|passout)\s+)(\S+)"),             # openssl -k PW / -pass pass:PW
++    re.compile(r"(\b(?:mysql|mysqldump|mariadb|mariadb-dump)\b[^|;&]*?\s-p)(\S+)"),       # mysql -pPW
++    re.compile(r"(\s--?(?:password|passwd|pass|token|secret|api[-_]?key)(?:=|\s+))(\S+)", re.I),
++    re.compile(r"((?:^|[\s;&|(])[A-Za-z_][A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PW|AUTH|CREDENTIALS?)"
++               r"[A-Za-z0-9_]*=)(\"[^\"]*\"|'[^']*'|\S+)", re.I),                            # FOO_KEY=... (whole value)
++)
++
++
++def _mask_command(command: str) -> str:
++    for pattern in _CMD_SECRET_PATTERNS:
++        command = pattern.sub(lambda m: m.group(1) + "***", command)
++    return command
++
++
+ def _capture_origin() -> tuple[str, str, Any, Any, bool]:
+     """``(wake_sid, ui_session_id, owner_transport, owner_session_record, session_history_delivery)`` of the
+     ORIGINATING session, captured BEFORE building any child: AIAgent construction
+@@ -471,6 +490,22 @@ def _dispatch_unit(unit: _Batch, unit_id: Optional[str], slot_key: Optional[str]
+         return cut
+     setattr(_interrupt, "supports_shutdown", True)
+ 
++    def _processes() -> dict:
++        """Background processes each child has running now, by task index: the shutdown kills them, so the
++        re-dispatched child is told which ones to check and restart (hyperhermes)."""
++        from tools.process_registry import process_registry
++        from agent.redact import redact_sensitive_text
++        out = {}
++        for i, _, c in unit.children:
++            owner = getattr(c, "_subagent_id", None)
++            procs = process_registry.running_owned_by(owner) if isinstance(owner, str) and owner else []
++            if procs:
++                out[str(i)] = [{"command": _mask_command(redact_sensitive_text(
++                                    str(p.command or ""), force=True, redact_url_credentials=True))[:300],
++                                "cwd": p.cwd or "", "started_at": p.started_at} for p in procs[:20]]
++        return out
++    setattr(_interrupt, "processes", _processes)
++
+     return dispatch_async_delegation_batch(
+         # Call-wide goals: completion formatting indexes them by task_index.
+         goals=[t["goal"] for t in unit.task_list], context=unit.context,
+@@ -488,6 +523,9 @@ def _dispatch_unit(unit: _Batch, unit_id: Optional[str], slot_key: Optional[str]
+         progress_fn=lambda: _batch_progress_token(child_agents), **routing,
+         # Every task of the call (completion indexes by task_index): what a re-dispatch after a restart runs.
+         task_specs=_task_specs(unit.task_list),
++        # Which child runs which task: a steer finds its task across restarts (hyperhermes).
++        task_subagents={str(i): c._subagent_id for i, _, c in unit.children
++                        if isinstance(getattr(c, "_subagent_id", None), str) and c._subagent_id},
+     )
+ 
+ 
+diff --git a/tools/delegate_tool_registry.py b/tools/delegate_tool_registry.py
+index 6146e468..3a7679b2 100644
+--- a/tools/delegate_tool_registry.py
++++ b/tools/delegate_tool_registry.py
+@@ -251,9 +251,17 @@ def _list_payload(parent_agent: Any) -> dict[str, Any]:
+             "running_seconds": round(time.time() - started, 1) if isinstance(started, (int, float)) else None,
+             "accepting_steer": bool(r.get("accepting_steer", False)),
+             "live_transcript": getattr(r.get("agent"), "_live_transcript_path", None),
++            **_resumed_fields(r.get("delegation_id")),
+         })
+     payload: dict[str, Any] = {"action": "list", "count": len(entries), "subagents": entries}
+-    if not entries:
++    parked = _parked_units(parent_agent)
++    if parked:
++        payload["parked"] = parked
++        payload["parked_note"] = (
++            "These subagents were killed by a restart and are re-dispatched with their earlier progress at this "
++            "session's next turn (they keep their task and deliver as the original call). Do not dispatch them "
++            "again; a steer to their previous subagent_id is kept and reaches the re-dispatched child.")
++    if not entries and not parked:
+         payload["note"] = (
+             "No live subagents right now. Children that already finished "
+             "have delivered (or will deliver) their results as normal "
+@@ -261,6 +269,91 @@ def _list_payload(parent_agent: Any) -> dict[str, Any]:
+         )
+     return payload
+ 
++# ── Restart-proof steering and visibility (hyperhermes) ─────────────────────
++# See tools/async_delegation.py "Steers across restarts": every steer to a ledger-tracked task is stored with the
++# task, a steer to the id of a child a restart killed reaches the task's current run, and action='list' shows
++# re-dispatched children with where they came from plus the units still waiting for their re-dispatch.
++
++def _session_keys(parent_agent: Any) -> set:
++    """Ledger keys of the units the caller owns. A top-level conversation (depth 0) also owns rows filed under its
++    session key; a delegated child (an orchestrator at depth >= 1) inherits that key from its parent, so it owns only
++    rows whose parent session is its OWN session id: otherwise it could list, steer and persist steers into its
++    siblings' (or its parent's other) tasks."""
++    keys = {str(getattr(parent_agent, "session_id", "") or "")}
++    keys.add(_resolve_session_lineage(next(iter(keys)), parent_agent))
++    if getattr(parent_agent, "_delegate_depth", 0) > 0:
++        return {k for k in keys if k}
++    try:
++        from tools.approval_context import get_current_session_key
++        keys.add(str(get_current_session_key("") or ""))
++    except Exception:
++        pass
++    return {k for k in keys if k}
++
++
++def _resumed_fields(delegation_id: Any) -> dict[str, Any]:
++    try:
++        from tools.async_delegation import resume_info
++        info = resume_info(delegation_id)
++    except Exception:
++        return {}
++    if not info:
++        return {}
++    return {"resumed": f"resumed from {info['of']} (attempt {info['attempt']})",
++            "original_delegation_id": info["root"], "resume_attempt": info["attempt"]}
++
++
++def _parked_units(parent_agent: Any) -> list:
++    try:
++        from tools.async_delegation import parked_for_session
++        return parked_for_session(_session_keys(parent_agent))
++    except Exception:
++        logger.debug("parked delegation lookup failed", exc_info=True)
++        return []
++
++
++def _locate_task(subagent_id: str, parent_agent: Any) -> Optional[dict[str, Any]]:
++    try:
++        from tools.async_delegation import locate_subagent_task
++        return locate_subagent_task(subagent_id, _session_keys(parent_agent))
++    except Exception:
++        logger.debug("subagent task lookup for %s failed", subagent_id, exc_info=True)
++        return None
++
++
++def _durable_steer(sid: str, text: str, parent_agent: Any, *, live_ok: bool) -> Optional[str]:
++    """Store a steer with the ledger task the subagent ``sid`` ran, and deliver it to the task's current child
++    when that is a different live child of this process (``sid`` died in a restart). Returns the tool result, or
++    None when ``sid`` ran no ledger task (or nothing more is to be said after a successful live steer)."""
++    task = _locate_task(sid, parent_agent)
++    if task is None:
++        return None
++    from tools.async_delegation import live_subagent_of, persist_steer
++    if not task.get("delegation_id"):
++        return None if live_ok else tool_error(
++            f"Subagent '{sid}' and every re-dispatch of its task have finished; its result arrives (or arrived) as a "
++            "normal completion message. Re-delegate a follow-up task if more work is needed.")
++    stored = persist_steer(task["delegation_id"], task["orig"], text)
++    if live_ok:
++        return None
++    current = live_subagent_of(task["delegation_id"], task["orig"])
++    base = {"action": "steer", "subagent_id": sid, "task": task["orig"] + 1, "original_delegation_id": task["root"],
++            "now_runs_as": task["delegation_id"]}
++    if current and current != sid:
++        delivered = steer_subagent(current, text)
++        return json.dumps({**base, "status": "queued" if delivered else "stored_for_resume", "routed_to": current,
++                           "note": f"'{sid}' was killed by a restart; its task now runs as subagent '{current}' "
++                                   f"(unit {task['delegation_id']}, attempt {task.get('attempt')}), which "
++                                   + ("got the steer." if delivered else "is finishing; the steer is kept with the "
++                                      "task for a further re-dispatch.")}, ensure_ascii=False)
++    if not stored:
++        return None
++    return json.dumps({**base, "status": "stored_for_resume",
++                       "note": f"'{sid}' is not running right now (killed by a restart; unit {task['delegation_id']} "
++                               f"is {task.get('state')}). The steer is stored with its task and given to the "
++                               "re-dispatched child as binding instructions when it starts."}, ensure_ascii=False)
++
++
+ def _handle_control_action(action: str, subagent_id: Optional[str], message: Optional[str], parent_agent: Any) -> str:
+     """Synchronous control plane for delegate_task: list/steer/stop. Runs in-turn (never backgrounded) over the same
+     registry the TUI overlay drives, scoped so a conversation can only control its own spawn tree."""
+@@ -274,6 +367,9 @@ def _handle_control_action(action: str, subagent_id: Optional[str], message: Opt
+     with _active_subagents_lock:
+         record = _active_subagents.get(sid)
+     if record is None or not _owns_subagent_record(record, parent_agent):
++        if action == "steer" and (message or "").strip() and (
++                routed := _durable_steer(sid, message.strip(), parent_agent, live_ok=False)):
++            return routed
+         return tool_error(
+             f"No live subagent '{sid}' in this conversation's spawn tree. It "
+             "may have already finished (its result arrives as a normal "
+@@ -286,6 +382,11 @@ def _handle_control_action(action: str, subagent_id: Optional[str], message: Opt
+         return tool_error(f"Unknown action '{action}'. Use spawn, list, steer, or stop.")
+     status, note, failure = outcome
+     ok = interrupt_subagent(sid) if action == "stop" else steer_subagent(sid, message.strip())
++    if action == "steer":
++        # Also kept with the task: a restart before the child reaches its next boundary must not lose it.
++        routed = _durable_steer(sid, message.strip(), parent_agent, live_ok=ok)
++        if not ok and routed:
++            return routed
+     if ok:
+         return json.dumps({"action": action, "subagent_id": sid, "status": status, "note": note}, ensure_ascii=False)
+     return tool_error(failure.format(sid=sid))
+diff --git a/tui_gateway/prompt_turn.py b/tui_gateway/prompt_turn.py
+index 4be4bac0..62e8c16e 100644
+--- a/tui_gateway/prompt_turn.py
++++ b/tui_gateway/prompt_turn.py
+@@ -746,6 +746,8 @@ def _prepare_turn_input(sid: str, session: dict, st: _TurnRun, text: Any, images
+     if take_speech_interrupted():
+         run_message = _prepend_note(run_message, SPEECH_INTERRUPTED_NOTE)
+     run_message = _prepend_note(run_message, _pending_reaction_notes(session))
++    # Subagents a restart killed run again before this turn's model call, and the model is told so (hyperhermes).
++    run_message = _prepend_note(run_message, _resume_delegations_for_turn(sid, session))
+     agent._voice_turn_pending = bool(session.pop("voice_turn", False))  # auxiliary.voice_chat route
+     return prompt, _prepend_note(run_message, _hud_surface_note(session)), cols, streamer
+ 
+diff --git a/tui_gateway/session_auto_continue.py b/tui_gateway/session_auto_continue.py
+index 7c19a46f..b57a7840 100644
+--- a/tui_gateway/session_auto_continue.py
++++ b/tui_gateway/session_auto_continue.py
+@@ -162,7 +162,8 @@ def _maybe_schedule_auto_continue(sid: str, session: dict, session_key: str) ->
+ _DELEGATION_RESUME_POLL_S = 15.0
+ 
+ 
+-def _resume_session_delegations(sid: str, session: dict) -> int:
++def _resume_session_delegations(sid: str, session: dict, *, in_turn: bool = False) -> int:
++    """``in_turn``: called by the turn that already holds the session (``_prepare_turn_input``), so no claim."""
+     from tools import async_delegation as ad
+     if session.get("_finalized") or session.get("_closing") or session.get("source") == "bot_room":
+         return 0
+@@ -171,8 +172,8 @@ def _resume_session_delegations(sid: str, session: dict) -> int:
+         return 0
+     if not ad.has_resuming_delegations(_session_home(session)):
+         return 0
+-    if not _notif_claim_turn(session):
+-        return 0  # a turn is running: the poller retries once the session is idle
++    if not in_turn and not _notif_claim_turn(session):
++        return 0  # a turn is running: it re-dispatches them itself before its model call
+     resumed = 0
+     try:
+         keys = _notif_current_keys(sid, session) | {str(getattr(agent, "session_id", "") or "")}
+@@ -190,10 +191,29 @@ def _resume_session_delegations(sid: str, session: dict) -> int:
+             for plan in ad.take_resuming_delegations(matches):
+                 resumed += _redispatch_delegation(sid, session, agent, plan)
+     finally:
+-        _notif_release_turn(session)
++        if not in_turn:
++            _notif_release_turn(session)
+     return resumed
+ 
+ 
++def _resume_delegations_for_turn(sid: str, session: dict) -> str:
++    """Every turn of a session, whatever started it (a user message, a delivered result, a wake-up, the
++    auto-continue), first re-dispatches the session's parked subagents and tells the model which ones run again.
++    Before this only the auto-continue kickoff and the idle poller did: a turn that won the race against them (a
++    finished subagent's result delivered right after the restart, a user message) saw neither the subagents nor a
++    note, and the model dispatched them all again; the poller then re-dispatched the originals too.
++
++    Runs in a COPY of the turn's context: ``_redispatch_delegation`` binds the session context and then clears it
++    (``clear_session_vars`` sets every var to "" instead of restoring), which would otherwise wipe the running
++    turn's HERMES_SESSION_KEY/SOURCE/UI_SESSION_ID and runtime cwd for the rest of the turn."""
++    import contextvars
++    try:
++        contextvars.copy_context().run(_resume_session_delegations, sid, session, in_turn=True)
++    except Exception as exc:
++        _notif_log_failure("subagent re-dispatch failed", exc)
++    return _resumed_delegations_note(session).strip()
++
++
+ def _redispatch_delegation(sid: str, session: dict, agent, plan: dict) -> int:
+     """Run one claimed unit's unfinished tasks again, bound like a turn of the session that dispatched them."""
+     from tools import async_delegation as ad
+@@ -230,6 +250,7 @@ def _redispatch_delegation(sid: str, session: dict, agent, plan: dict) -> int:
+         ad.abandon_resume(old_id, error)
+         return 0
+     ad.finish_resume(old_id, new_id)
++    _forward_late_steers(old_id, new_id, plan["meta"])
+     session.setdefault("_resumed_delegations", []).append(
+         {"of": old_id, "as": new_id, "tasks": [i + 1 for i in plan["meta"]["indexes"]]})
+     logger.info("subagent re-dispatch: %s resumed as %s (tasks %s, attempt %s) for session %s", old_id, new_id,
+@@ -237,14 +258,31 @@ def _redispatch_delegation(sid: str, session: dict, agent, plan: dict) -> int:
+     return 1
+ 
+ 
++def _forward_late_steers(old_id: str, new_id: str, meta: dict) -> None:
++    """Steers stored on the old row between building the plan and the new unit's dispatch: hand them to the new
++    unit's children and keep them on its row (hyperhermes)."""
++    from tools import async_delegation as ad
++    from tools.delegate_tool_registry import steer_subagent
++    try:
++        for orig, texts in ad.late_steers(old_id, meta.get("steers")).items():
++            for text in texts:
++                ad.persist_steer(new_id, int(orig), text)
++                if child := ad.live_subagent_of(new_id, int(orig)):
++                    steer_subagent(child, text)
++    except Exception as exc:
++        _notif_log_failure("late steer forwarding failed", exc)
++
++
+ def _resumed_delegations_note(session: dict) -> str:
+     done = session.pop("_resumed_delegations", None) or []
+     if not done:
+         return ""
+     units = "; ".join(f"{d['of']} (task(s) {', '.join(map(str, d['tasks']))}) now runs as {d['as']}" for d in done)
+     return ("\n\n[System note: The restart also killed background subagents you had dispatched; they were "
+-            f"re-dispatched automatically with their original goals: {units}. Their results arrive as usual when "
+-            "they finish. Do not dispatch them again.]")
++            f"re-dispatched automatically with their original goals, their earlier progress and the list of their "
++            f"background processes that died: {units}. Their results arrive as usual when they finish, as the "
++            "original call's. Do not dispatch them again (delegate_task refuses copies of them); "
++            "delegate_task(action='list') shows them, steer them there.]")
+ 
+ 
+ # ── Server-side resume at backend start ─────────────────────────────────

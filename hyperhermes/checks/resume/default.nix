@@ -13,7 +13,11 @@
 #  - subagents (modules/core/patches/hermes-subagents-resume-after-restart.patch):
 #    background subagents a restart kills are re-dispatched and the parent
 #    gets the original call's result, for one consolidated unit (alice) and
-#    for per-task units (bob, delegation.independent_completions as on som).
+#    for per-task units (bob, delegation.independent_completions as on som);
+#    the parent dispatching a re-dispatched task again starts no second child,
+#    a steer the parent sent before the restart reaches the re-dispatched
+#    child, and a steer to the killed child's id after it reaches its
+#    successor (modules/core/patches/hermes-subagents-resume-every-turn.patch).
 { pkgs, self }:
 let
   hlib = self.lib;
@@ -201,7 +205,8 @@ pkgs.testers.runNixOSTest {
         ws = "${workspace}"
         child_a = f"CHILDA-TEST echo a >> {ws}/childa.count"
         # The first run leaves a mark and hangs until the restart kills it; the re-dispatched run finds the mark.
-        child_b = (f"CHILDB-TEST test -e {ws}/childb.mark || {{ touch {ws}/childb.mark; sleep 300; }}; "
+        # The re-dispatched run takes a while (sleep 45), so the parent can dispatch it again and steer it meanwhile.
+        child_b = (f"CHILDB-TEST if test -e {ws}/childb.mark; then sleep 45; else touch {ws}/childb.mark; sleep 300; fi; "
                    f"echo b >> {ws}/childb.count")
         sid = client("start", "DELEG-TEST", f"{child_a} ||| {child_b}")
         wait_step("CHILDA-TEST", "after-tool")
@@ -213,11 +218,46 @@ pkgs.testers.runNixOSTest {
             "sqlite3 -readonly 'file:${hermesHome}/state.db?mode=ro' "
             f"\"select 1 from messages where session_id='{sid}' and content='DONE-DELEG-TEST'\" | grep -q 1",
             timeout=60)
+        # The parent steers child B while it sits in its long command: the text waits for the command's end, which
+        # the restart prevents. The re-dispatched child must still get it (in its context).
+        client("send", sid, "STEER-TEST", "2 STEERMARK-1 use the staging db")
+        machine.wait_until_succeeds(
+            "sqlite3 -readonly 'file:${hermesHome}/state.db?mode=ro' "
+            f"\"select 1 from messages where session_id='{sid}' and content='DONE-STEER-TEST'\" | grep -q 1",
+            timeout=60)
         machine.succeed(f"systemctl restart {unit}")
         machine.fail("pgrep -u ${user} -f 'sleep 300'")
         wait_dashboard()
+        db0 = "sqlite3 -readonly 'file:${hermesHome}/state.db?mode=ro' "
+        # A turn right after the start (ahead of the idle poller's first pass) re-dispatches the parked unit itself
+        # before its model call; the turn's own session context must survive that: its terminal tool still sees
+        # the session's key and UI session id (the in-turn re-dispatch once cleared them for the rest of the turn).
+        client("send", sid, "ENV-TEST", f"echo key=$HERMES_SESSION_KEY ui=$HERMES_UI_SESSION_ID > {ws}/env.out")
+        wait_step("ENV-TEST", "after-tool", timeout=120)
+        env_out = machine.succeed(f"cat {ws}/env.out").strip()
+        print(env_out, machine.succeed("grep 'subagent re-dispatch' ${hermesHome}/logs/agent.log || true"))
+        assert f"key={sid} " in env_out and not env_out.endswith("ui="), env_out
+        # While the re-dispatched child runs, the parent's next turn dispatches the same task again (as the model
+        # did on som when the re-dispatch note never reached it): delegate_task must not start a second child
+        # (modules/core/patches/hermes-subagents-resume-every-turn.patch).
+        wait_step("CHILDB-TEST", "resume-tool-call", timeout=240)
+        client("send", sid, "DELEGR-TEST", child_b)
+        wait_step("DELEGR-TEST", "after-tool", timeout=120)
+        # A steer addressed to the killed child's id (the first dispatch's) reaches its re-dispatched successor.
+        client("send", sid, "STEER-TEST", "2 STEERMARK-2 skip the backfill")
         wait_step("CHILDB-TEST", "after-tool", timeout=240)
+        assert "context-1" in record("STEER-SEEN"), record("STEER-SEEN")
+        assert "live-2" in record("STEER-SEEN"), record("STEER-SEEN")
+        steers = machine.succeed(
+            db0 + f"\"select content from messages where session_id='{sid}' and role='tool' and content like '%steer%'\"")
+        print(steers)
+        assert "No live subagent" not in steers and "routed_to" in steers, steers
         wait_step("DELEGATION-RESULT", "result", timeout=180)
+        assert record("DELEGR-TEST") == ["tool-call", "after-tool"], record("DELEGR-TEST")
+        db = "sqlite3 -readonly 'file:${hermesHome}/state.db?mode=ro' "
+        again = machine.succeed(
+            db + f"\"select content from messages where session_id='{sid}' and role='tool' and content like '%already_running%'\"")
+        assert "Not dispatched again" in again, again
         assert record("CHILDA-TEST") == ["tool-call", "after-tool"], record("CHILDA-TEST")
         assert record("CHILDB-TEST") == ["tool-call", "resume-tool-call", "after-tool"], record("CHILDB-TEST")
         assert machine.succeed(f"cat {ws}/childa.count").split() == ["a"]

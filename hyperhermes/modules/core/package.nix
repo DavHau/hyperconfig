@@ -48,6 +48,9 @@ let
     ./patches/hermes-delegate-collapse-duplicate-tasks.patch
     ./patches/hermes-memory-background-consolidation.patch
     ./patches/hermes-openrouter-exclude-native.patch
+    # After the subagents resume patch and the duplicate collapse: it extends
+    # both (re-dispatch from every turn, no copies of resuming subagents).
+    ./patches/hermes-subagents-resume-every-turn.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {
