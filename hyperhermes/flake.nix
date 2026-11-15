@@ -178,6 +178,9 @@
         # Offline: with HERMES_GATEWAY_MANAGED_UNIT, no client or
         # `gateway run` starts a gateway beside the agent's unit.
         managed-unit = import ./checks/managed-unit { inherit pkgs hermesPackage; };
+        # Offline: memory.background_consolidation "auto" applies the
+        # background review's patch/remove with a snapshot; "stage" stages.
+        memory-consolidation = import ./checks/memory-consolidation { inherit pkgs hermesPackage; };
         # Evaluation only: teamclaude, claude-auth, desktop and rea on a
         # system without clan, secrets as runtime paths.
         client-features = import ./checks/client-features { inherit pkgs self; };

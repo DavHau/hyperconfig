@@ -359,6 +359,24 @@ in
         # (rm -rf /, mkfs, reboot, ...) still refuses.
         approvals.mode = lib.mkDefault "off";
 
+        # Memory looks after itself: when MEMORY.md/USER.md is full, the
+        # background review's consolidation (patch/remove) applies at once
+        # instead of waiting for /memory approve, to exactly the entries it
+        # matched, after a snapshot in memories/.history/ (last 30 days plus
+        # the newest 50 kept; consolidations.jsonl logs each one). One that
+        # removes more than half the entries or 40% of the characters is
+        # still staged for /memory approve. Writes staged before are settled
+        # at the next start (./replay-memory-pending.py); a record dropped
+        # there is kept whole in memories/.history/dropped/<id>.json.
+        # Restore: a consolidations.jsonl line's "backup" is the file before
+        # that consolidation; as root, $H = the agent's HERMES_HOME:
+        #   install -m600 -o <agent> -g users $H/memories/.history/<ts>-MEMORY.md \
+        #     $H/memories/MEMORY.md.new && mv $H/memories/MEMORY.md.new $H/memories/MEMORY.md
+        # Running sessions keep their prompt until their next session.
+        # patches/hermes-memory-background-consolidation.patch; "stage" is
+        # upstream's behaviour.
+        memory.background_consolidation = lib.mkDefault "auto";
+
         # Speech-to-text auto-detects the language. hermes defaults
         # stt.language to "en" (hermes_cli/config_defaults.py), which every
         # provider without its own stt.<provider>.language gets, so the

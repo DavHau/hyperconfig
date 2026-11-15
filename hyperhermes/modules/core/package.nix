@@ -46,6 +46,7 @@ let
     ./patches/hermes-no-sudo-prompt.patch
     ./patches/hermes-delegate-reject-at-capacity.patch
     ./patches/hermes-delegate-collapse-duplicate-tasks.patch
+    ./patches/hermes-memory-background-consolidation.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {

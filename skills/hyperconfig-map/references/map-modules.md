@@ -442,6 +442,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyperhermes/modules/core/options.nix — The agent registry `services.hyperhermes.agents` and the host-wide collection points every agent's config.yaml, .env an… <- hyperhermes/modules/core/default.nix
 - hyperhermes/modules/core/package.nix — The hermes package the agents run: <- hyperhermes/modules/core/options.nix
 - hyperhermes/modules/core/reap-stray-gateway.py — Run as the agent's user before its gateway unit starts (./agents.nix, preStart): <- hyperhermes/modules/core/agents.nix
+- hyperhermes/modules/core/replay-memory-pending.py — Run in the hermes venv as the agent's user before its gateway unit starts (./agents.nix, preStart), once per HERMES_HOM… <- hyperhermes/modules/core/agents.nix
 - hyperhermes/modules/dashboards/default.nix — Every agent's hermes web dashboard at its own host name, <agent>.<domain> (exposure), with hermes' own OIDC login (sso)…
 - hyperhermes/modules/desktop/connections.py — - <- hyperhermes/modules/desktop/default.nix, m/space-gui/hermes-app.nix
 - hyperhermes/modules/desktop/default.nix — Hermes launchers on a workstation for the agents of a hyperhermes host (`services.hyperhermes.desktop`):

@@ -164,6 +164,22 @@ let
         ${pkgs.python3}/bin/python3 ${./reap-stray-gateway.py} ${hermesHome} hermes-agent-${user}.service 30 \
           || echo "hermes: stray-gateway check failed; starting anyway" >&2
       '';
+      # Before every start: apply (or drop, when they no longer match)
+      # memory writes the background review staged for /memory approve,
+      # once memory.background_consolidation is "auto"
+      # (./replay-memory-pending.py). For the home and each named profile,
+      # 30 s for all of them together (the unit's start timeout is 90 s);
+      # a failure or timeout never blocks the start.
+      replayMemoryPending = ''
+        ${pkgs.coreutils}/bin/timeout 30s ${pkgs.bash}/bin/bash -c '
+          for memory_home in "$1" "$1"/profiles/*; do
+            compgen -G "$memory_home/pending/memory/*.json" > /dev/null || continue
+            HERMES_HOME="$memory_home" "$2" "$3" "$memory_home" \
+              || echo "hermes: replaying staged memory writes in $memory_home failed" >&2
+          done
+        ' replay ${hermesHome} ${ac.hermesPackage.hermesVenv}/bin/python3 ${./replay-memory-pending.py} \
+          || echo "hermes: replaying staged memory writes failed or timed out; starting anyway" >&2
+      '';
       # Opt-in hardening of both units (options.nix, hardening).
       hardening = lib.optionalAttrs cfg.hardening.enable cfg.hardening.serviceConfig;
       mounts = [
@@ -218,6 +234,7 @@ let
         ${ac.envRewriteScript stateDir}
         ${ac.modelSeedScript stateDir}
         ${pruneMovedBundledSkills} ${ac.hermesPackage}/share/hermes-agent/skills ${hermesHome}/skills
+        ${replayMemoryPending}
       '';
       # lockedConfig (./locked-config.nix): root's immutable config.yaml,
       # .env and the rest of what hermes reads are in place, and the unit
@@ -228,6 +245,7 @@ let
         mkdir -p ${hermesHome}/cron ${hermesHome}/sessions ${hermesHome}/logs \
           ${hermesHome}/memories ${workspace}
         ${pruneMovedBundledSkills} ${ac.hermesPackage}/share/hermes-agent/skills ${hermesHome}/skills
+        ${replayMemoryPending}
       '';
       openShimCaseArm = ''
           ${user})

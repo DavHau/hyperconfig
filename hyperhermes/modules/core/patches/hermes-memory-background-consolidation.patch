@@ -1,0 +1,654 @@
+hermes v0.23.0: memory.background_consolidation = "auto" lets the
+unattended background review consolidate memory without /memory approve.
+
+Upstream (tools/memory_tool.py, _background_delete_gate, #105921): the
+background-review fork may only `add`; every `patch`/`remove` it issues
+(single or in a batch) is staged in $HERMES_HOME/pending/memory for a
+human. Once MEMORY.md (2200 chars) or USER.md (1375) is full, the
+review's consolidation therefore waits until someone runs /memory
+pending + approve, and new facts stop landing. The foreground gate
+(memory.write_approval) is a separate switch and already off.
+
+New key memory.background_consolidation, default "stage" (upstream's
+behaviour, unchanged). With "auto", and only while memory.write_approval
+is off, the gate instead:
+  - pins each op to the full entry its old_text selects now
+    (_pin_matched_entries, as staging does); no match = the same error
+    the direct write returns, nothing written;
+  - removal cap: a consolidation that would remove more than 50% of the
+    store's entries, or shrink the file by more than 40% of its
+    characters, is staged as under "stage" (logged with the reason);
+  - snapshots the target file to memories/.history/<utc>-MEMORY.md
+    (or -USER.md), 0600 in a 0700 directory; no new snapshot when the
+    newest one is identical; kept: every snapshot of the last 30 days
+    plus the newest 50 per file. A failed snapshot falls back to staging;
+  - applies through apply_memory_pending (the /memory approve replay),
+    so only the pinned entries change;
+  - logs one line to the agent log and a JSON line to
+    memories/.history/consolidations.jsonl (0600).
+Foreground turns and attended (/refine) reviews are untouched.
+
+Restore: a consolidations.jsonl line's "backup" is the file as it was
+before that consolidation. As root, with $H the agent's HERMES_HOME:
+  install -m600 -o <agent> -g users $H/memories/.history/<ts>-MEMORY.md \
+    $H/memories/MEMORY.md.new && mv $H/memories/MEMORY.md.new $H/memories/MEMORY.md
+(USER.md alike). Running sessions keep the memory in their prompt until
+their next session.
+
+replay_background_pending() settles records staged before "auto" was on:
+oldest first, background_review-origin only, each replayed through
+apply_memory_pending after a snapshot. Applied records are removed. A
+record that no longer matches (stale/unpinned) is first written whole,
+payload and its adds included, to memories/.history/dropped/<id>.json
+(0600), logged, then removed; if that copy fails it stays pending.
+Kept pending for the next start: foreground records, records over the
+removal cap, and any whose snapshot, store read (an I/O error, not a
+mismatch) or write failed. A no-op unless the mode is "auto".
+hyperhermes calls it from the agent unit's preStart
+(../replay-memory-pending.py, under one 30 s timeout for all homes).
+
+Tests: tests/tools/test_memory_background_consolidation.py.
+
+diff --git a/hermes_cli/config_defaults.py b/hermes_cli/config_defaults.py
+index a265cf2e..c7fc7ebc 100644
+--- a/hermes_cli/config_defaults.py
++++ b/hermes_cli/config_defaults.py
+@@ -1301,6 +1301,10 @@ DEFAULT_CONFIG = {
+         # true = foreground writes prompt inline; background writes are staged (/memory
+         # pending|approve <id>|reject <id>). To disable memory: memory_enabled.
+         "write_approval": False,
++        # What the unattended background review may do with patch/remove (consolidation when
++        # memory is full): "stage" = wait in the pending store for /memory approve; "auto" =
++        # apply to the exact entries it matched, after a snapshot in memories/.history/.
++        "background_consolidation": "stage",
+         "memory_char_limit": 2200,   # ~800 tokens at 2.75 chars/token
+         "user_char_limit": 1375,     # ~500 tokens at 2.75 chars/token
+         # Periodic built-in memory review; 0 when an external provider auto-extracts.
+diff --git a/tests/tools/test_memory_background_consolidation.py b/tests/tools/test_memory_background_consolidation.py
+new file mode 100644
+index 00000000..bb3aecd8
+--- /dev/null
++++ b/tests/tools/test_memory_background_consolidation.py
+@@ -0,0 +1,289 @@
++"""hyperhermes: memory.background_consolidation. Under "auto" an unattended background-review
++patch/remove applies at once (pinned entries only) with a snapshot in memories/.history/ and a
++log line, unless it removes more than half the entries or 40% of the characters (then staged);
++under "stage" (upstream default) it is staged for /memory approve as before. Start-up replay
++keeps a dropped record whole in memories/.history/dropped/ and a store read failure pending."""
++
++import json
++import time
++
++import pytest
++
++from tools import memory_tool as mt
++from tools.memory_tool import MemoryStore, memory_tool, replay_background_pending
++from tools.skill_provenance import reset_current_write_origin, set_current_write_origin
++
++
++@pytest.fixture()
++def store(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    mem = tmp_path / "memories"
++    mem.mkdir()
++    monkeypatch.setattr("tools.memory_tool.get_memory_dir", lambda: mem)
++    s = MemoryStore(memory_char_limit=500, user_char_limit=300)
++    s.load_from_disk()
++    return s
++
++
++def _mode(monkeypatch, value, write_approval=False):
++    cfg = {"memory": {"write_approval": write_approval}}
++    if value is not None:
++        cfg["memory"]["background_consolidation"] = value
++    monkeypatch.setattr(mt, "get_builtin_memory_config", lambda config=None: cfg["memory"])
++    monkeypatch.setattr("tools.write_approval.write_approval_enabled", lambda sub: write_approval)
++
++
++def _bg(**kwargs):
++    token = set_current_write_origin("background_review")
++    try:
++        return json.loads(memory_tool(**kwargs))
++    finally:
++        reset_current_write_origin(token)
++
++
++def _pending():
++    from tools.write_approval import MEMORY, list_pending
++    return list_pending(MEMORY)
++
++
++def test_default_is_stage(store, monkeypatch):
++    _mode(monkeypatch, None)
++    assert mt.background_consolidation_mode() == "stage"
++    store.add("memory", "old fact to drop")
++    result = _bg(action="remove", old_text="old fact", store=store)
++    assert result["staged"] is True and result["proposal_staged"] is True
++    assert "old fact to drop" in store._entries_for("memory")
++    assert len(_pending()) == 1
++    assert not mt.history_dir().exists()
++
++
++def test_stage_mode_stages_patch(store, monkeypatch):
++    _mode(monkeypatch, "stage")
++    store.add("memory", "entry to rewrite")
++    result = _bg(action="patch", old_text="to rewrite", content="rewritten", store=store)
++    assert result["staged"] is True
++    assert "entry to rewrite" in store._entries_for("memory")
++
++
++FILLER = ["a long standing fact about the environment", "another durable convention to keep",
++          "a third entry that nobody touches"]
++
++
++def _fill(store, target="memory"):
++    for entry in FILLER:
++        store.add(target, entry)
++
++
++def test_auto_applies_remove_with_backup(store, monkeypatch):
++    _mode(monkeypatch, "auto")
++    store.add("memory", "old fact to drop")
++    store.add("memory", "fact to keep")
++    _fill(store)
++    before = mt.MemoryStore._path_for("memory").read_text()
++    result = _bg(action="remove", old_text="old fact", store=store)
++    assert result["success"] is True and not result.get("staged")
++    assert result["background_consolidation"] == "applied"
++    assert store._entries_for("memory") == ["fact to keep", *FILLER]
++    assert _pending() == []
++    snaps = sorted(mt.history_dir().glob("*-MEMORY.md"))
++    assert len(snaps) == 1 and snaps[0].read_text() == before
++    assert (snaps[0].stat().st_mode & 0o777) == 0o600
++    log = [json.loads(l) for l in (mt.history_dir() / "consolidations.jsonl").read_text().splitlines()]
++    assert log[-1]["result"] == "applied" and log[-1]["backup"] == str(snaps[0])
++
++
++def test_auto_applies_batch_patch_and_add(store, monkeypatch):
++    _mode(monkeypatch, "auto")
++    store.add("user", "Name: Alice, likes tea")
++    result = _bg(target="user", operations=[
++        {"action": "patch", "old_text": "likes tea", "content": "likes coffee"},
++        {"action": "add", "content": "Works nights"}], store=store)
++    assert result["success"] is True, result
++    assert store._entries_for("user") == ["Name: Alice, likes coffee", "Works nights"]
++    assert len(list(mt.history_dir().glob("*-USER.md"))) == 1
++
++
++def test_auto_unmatched_errors_without_backup(store, monkeypatch):
++    _mode(monkeypatch, "auto")
++    store.add("memory", "something")
++    result = _bg(action="remove", old_text="not there", store=store)
++    assert result["success"] is False
++    assert store._entries_for("memory") == ["something"]
++    assert not list(mt.history_dir().glob("*.md")) if mt.history_dir().exists() else True
++    assert _pending() == []
++
++
++def test_write_approval_on_keeps_staging(store, monkeypatch):
++    _mode(monkeypatch, "auto", write_approval=True)
++    assert mt.background_consolidation_mode() == "stage"
++
++
++def test_foreground_unaffected(store, monkeypatch):
++    _mode(monkeypatch, "auto")
++    store.add("memory", "entry a user removes")
++    result = json.loads(memory_tool(action="remove", old_text="user removes", store=store))
++    assert result["success"] is True and "background_consolidation" not in result
++    assert not mt.history_dir().exists()
++
++
++def test_history_keeps_last_n_beyond_30_days(store, monkeypatch):
++    _mode(monkeypatch, "auto")
++    _fill(store)
++    monkeypatch.setattr(mt, "HISTORY_KEEP", 3)
++    hist = mt.history_dir()
++    hist.mkdir(parents=True)
++    for day in range(1, 6):  # five snapshots from 2001: older than 30 days
++        (hist / f"200101{day:02d}T000000.000000000Z-MEMORY.md").write_text(f"old {day}")
++    recent = time.strftime("%Y%m%dT%H%M%S", time.gmtime(time.time() - 86400))
++    (hist / f"{recent}.000000000Z-MEMORY.md").write_text("recent")
++    for i in range(3):
++        store.add("memory", f"fact number {i}")
++        assert _bg(action="remove", old_text=f"fact number {i}", store=store)["success"] is True
++    names = sorted(p.name for p in hist.glob("*-MEMORY.md"))
++    # newest 3 (all made now) + every snapshot of the last 30 days (the one from yesterday)
++    assert len(names) == 4 and names[0].startswith(recent)
++    assert not any(n.startswith("2001") for n in names)
++
++
++def test_identical_snapshot_skipped(store, monkeypatch):
++    _mode(monkeypatch, "auto")
++    _fill(store)
++    first = mt.backup_memory_file("memory")
++    assert mt.backup_memory_file("memory") == first
++    assert len(list(mt.history_dir().glob("*-MEMORY.md"))) == 1
++    store.add("memory", "something new")
++    assert mt.backup_memory_file("memory") != first
++    assert len(list(mt.history_dir().glob("*-MEMORY.md"))) == 2
++
++
++def test_history_permissions(store, monkeypatch):
++    _mode(monkeypatch, "auto")
++    store.add("memory", "old fact to drop")
++    _fill(store)
++    assert _bg(action="remove", old_text="old fact", store=store)["success"] is True
++    hist = mt.history_dir()
++    assert (hist.stat().st_mode & 0o777) == 0o700
++    files = list(hist.iterdir())
++    assert files and all((f.stat().st_mode & 0o777) == 0o600 for f in files if f.is_file())
++
++
++def test_snapshot_failure_stages(store, monkeypatch):
++    _mode(monkeypatch, "auto")
++    store.add("memory", "old fact to drop")
++    _fill(store)
++
++    def boom(target):
++        raise OSError("disk full")
++    monkeypatch.setattr(mt, "backup_memory_file", boom)
++    result = _bg(action="remove", old_text="old fact", store=store)
++    assert result["staged"] is True and "snapshot failed" in result["message"]
++    assert "old fact to drop" in store._entries_for("memory")
++    pend = _pending()
++    assert len(pend) == 1 and pend[0]["payload"]["matched_entry"] == "old fact to drop"
++
++
++def test_cap_too_many_entries_stages(store, monkeypatch):
++    _mode(monkeypatch, "auto")
++    for e in ("aa", "bb", "cc", "dd"):
++        store.add("memory", e)
++    # 3 of 4 entries: over the 50% cap -> staged, file unchanged, logged.
++    result = _bg(operations=[{"action": "remove", "old_text": e} for e in ("aa", "bb", "cc")], store=store)
++    assert result["staged"] is True and "removes 3 of 4" in result["message"]
++    assert store._entries_for("memory") == ["aa", "bb", "cc", "dd"]
++    assert len(_pending()) == 1
++    log = [json.loads(l) for l in (mt.history_dir() / "consolidations.jsonl").read_text().splitlines()]
++    assert log[-1]["result"] == "staged" and "removes 3 of 4" in log[-1]["reason"]
++
++
++def test_cap_boundaries(store, monkeypatch):
++    _mode(monkeypatch, "auto")
++    entries = ["x" * 40, "y" * 40, "z" * 100, "w" * 100]  # 289 chars with delimiters
++    for e in entries:
++        store.add("memory", e)
++    # 2 of 4 entries (50%, allowed), 289 -> 203 chars (30% shrink, allowed): applied.
++    result = _bg(operations=[{"action": "remove", "old_text": "x" * 40}, {"action": "remove", "old_text": "y" * 40}],
++                 store=store)
++    assert result.get("background_consolidation") == "applied", result
++    # 1 of 2 (50%) but 203 -> 100 chars (51% shrink): staged.
++    result = _bg(action="remove", old_text="z" * 100, store=store)
++    assert result["staged"] is True and "shrinks the file" in result["message"]
++    assert store._entries_for("memory") == ["z" * 100, "w" * 100]
++
++
++def test_cap_counts_patch_shrink(store, monkeypatch):
++    _mode(monkeypatch, "auto")
++    store.add("memory", "k" * 100)
++    store.add("memory", "short")
++    result = _bg(action="patch", old_text="k" * 100, content="k", store=store)
++    assert result["staged"] is True and "shrinks the file" in result["message"]
++    assert store._entries_for("memory") == ["k" * 100, "short"]
++
++
++def test_replay_applies_matching_and_drops_stale(store, monkeypatch):
++    _mode(monkeypatch, "stage")
++    store.add("memory", "stale A")
++    store.add("memory", "stale B")
++    store.add("memory", "kept C")
++    _bg(action="remove", old_text="stale A", store=store)
++    _bg(action="patch", old_text="stale B", content="fresh B", store=store)
++    from tools.write_approval import MEMORY, stage_write
++    stage_write(MEMORY, {"action": "add", "target": "memory", "content": "fg"}, summary="fg", origin="foreground")
++    # B changes before the replay: its pinned entry no longer matches.
++    store.patch("memory", "stale B", "edited B")
++    assert len(_pending()) == 3
++    # Nothing happens while the mode is still stage.
++    assert replay_background_pending(store) == {"applied": 0, "dropped": 0, "kept": 0}
++    _mode(monkeypatch, "auto")
++    counts = replay_background_pending(store)
++    assert counts == {"applied": 1, "dropped": 1, "kept": 1}
++    assert store._entries_for("memory") == ["edited B", "kept C"]
++    left = _pending()
++    assert len(left) == 1 and left[0]["origin"] == "foreground"
++    assert len(list(mt.history_dir().glob("*-MEMORY.md"))) == 2
++
++
++def test_replay_keeps_full_dropped_record(store, monkeypatch):
++    _mode(monkeypatch, "stage")
++    store.add("memory", "stale B")
++    _fill(store)
++    _bg(operations=[{"action": "patch", "old_text": "stale B", "content": "fresh B"},
++                    {"action": "add", "content": "a new fact from the review"}], store=store)
++    (rec,) = _pending()
++    store.patch("memory", "stale B", "edited B")
++    _mode(monkeypatch, "auto")
++    assert replay_background_pending(store) == {"applied": 0, "dropped": 1, "kept": 0}
++    kept = mt.history_dir() / "dropped" / f"{rec['id']}.json"
++    assert (kept.stat().st_mode & 0o777) == 0o600
++    assert ((mt.history_dir() / "dropped").stat().st_mode & 0o777) == 0o700
++    saved = json.loads(kept.read_text())
++    assert saved["payload"]["operations"][1]["content"] == "a new fact from the review"
++    log = [json.loads(l) for l in (mt.history_dir() / "consolidations.jsonl").read_text().splitlines()]
++    assert log[-1]["result"] == "dropped" and log[-1]["dropped_record"] == str(kept)
++    assert _pending() == []
++
++
++def test_replay_read_failure_keeps_pending(store, monkeypatch):
++    _mode(monkeypatch, "stage")
++    store.add("memory", "stale A")
++    _fill(store)
++    _bg(action="remove", old_text="stale A", store=store)
++    _mode(monkeypatch, "auto")
++    monkeypatch.setattr(mt.MemoryStore, "_read_raw_checked", staticmethod(lambda path: ("", False)))
++    assert replay_background_pending(store) == {"applied": 0, "dropped": 0, "kept": 1}
++    assert len(_pending()) == 1
++    assert not (mt.history_dir() / "dropped").exists()
++
++
++def test_replay_dropped_copy_failure_keeps_pending(store, monkeypatch):
++    _mode(monkeypatch, "stage")
++    store.add("memory", "stale A")
++    _fill(store)
++    _bg(action="remove", old_text="stale A", store=store)
++    store.patch("memory", "stale A", "edited A")
++    _mode(monkeypatch, "auto")
++
++    def boom(rec):
++        raise OSError("disk full")
++    monkeypatch.setattr(mt, "_keep_dropped", boom)
++    assert replay_background_pending(store) == {"applied": 0, "dropped": 0, "kept": 1}
++    assert len(_pending()) == 1
+diff --git a/tools/memory_tool.py b/tools/memory_tool.py
+index abf8342f..6283896d 100644
+--- a/tools/memory_tool.py
++++ b/tools/memory_tool.py
+@@ -193,6 +193,8 @@ def _background_delete_gate(store, action, operations, target="memory", content=
+                {"action": action, "target": target, "content": content, "old_text": old_text})
+     if not destructive_ops(payload):
+         return None
++    if background_consolidation_mode() == "auto":
++        return _apply_background_consolidation(store, payload, action if operations is None else "batch", target)
+     detail = ("; ".join(_batch_op_line(op) for op in operations) if operations is not None
+               else _batch_op_line({"action": action, "content": content, "old_text": old_text}))
+     try:
+@@ -219,6 +221,244 @@ def _background_delete_gate(store, action, operations, target="memory", content=
+             "batch); 'add' is still available.", success=False)
+ 
+ 
++# --- Unattended consolidation (hyperhermes: memory.background_consolidation) ---
++# "stage" (upstream): the review fork's patch/remove waits in the pending store for /memory approve.
++# "auto": it applies at once, to exactly the entries it pinned, after a snapshot of the store file
++# into memories/.history/ and a log line, unless it would remove more than half of the entries or
++# shrink the file by more than 40% of its characters (then it is staged as under "stage"). The
++# foreground approval gate (memory.write_approval) still wins: with it on, background writes stage.
++# Restore: consolidations.jsonl's "backup" is the file as it was before that consolidation; copy
++# it over memories/MEMORY.md (or USER.md). Running sessions keep their prompt until the next one.
++BACKGROUND_CONSOLIDATION_MODES = ("stage", "auto")
++HISTORY_KEEP = 50                    # newest snapshots per store file always kept ...
++HISTORY_KEEP_SECONDS = 30 * 86400    # ... plus every snapshot of the last 30 days
++MAX_REMOVED_ENTRIES = 0.5            # share of the store's entries one consolidation may remove
++MAX_SHRINK_CHARS = 0.4               # share of the store's characters it may take away
++
++
++def background_consolidation_mode(config: Optional[dict[str, Any]] = None) -> str:
++    """``auto`` only for an explicit ``memory.background_consolidation: auto`` with the approval
++    gate off; anything else (unset, unknown, unreadable config) is upstream's ``stage``."""
++    section = get_builtin_memory_config(config)
++    value = section.get("background_consolidation", "stage")
++    if not (isinstance(value, str) and value.strip().lower() == "auto"):
++        return "stage"
++    try:
++        from tools import write_approval as wa
++        if wa._normalize_enabled(section.get(wa.CONFIG_KEY, False)):
++            return "stage"
++    except Exception:
++        return "stage"
++    return "auto"
++
++
++def history_dir() -> Path:
++    return get_memory_dir() / ".history"
++
++
++def _private_dir(path: Path) -> Path:
++    import os
++    path.mkdir(mode=0o700, parents=True, exist_ok=True)
++    os.chmod(path, 0o700)
++    return path
++
++
++def _snapshot_time(path: Path) -> float:
++    """UTC time encoded in a snapshot's name (<YYYYmmddTHHMMSS>.<ns>Z-FILE.md), else its mtime."""
++    import calendar
++    import time
++    try:
++        return float(calendar.timegm(time.strptime(path.name[:15], "%Y%m%dT%H%M%S")))
++    except ValueError:
++        return path.stat().st_mtime
++
++
++def backup_memory_file(target: str) -> Path:
++    """Copy the store file *target* writes to into memories/.history/<utc-timestamp>-<FILE>.md
++    (0600, directory 0700) and return it. When the newest snapshot already holds exactly these
++    bytes, no new one is made and that one is returned. Retention per store file: every
++    snapshot of the last HISTORY_KEEP_SECONDS plus the newest HISTORY_KEEP. Raises on failure:
++    no snapshot, no unattended edit."""
++    import os
++    import time
++    path = MemoryStore._path_for(target)
++    hist = _private_dir(history_dir())
++    raw = path.read_bytes() if path.exists() else b""
++    existing = sorted(hist.glob(f"*-{path.name}"))
++    if existing and existing[-1].read_bytes() == raw:
++        return existing[-1]
++    stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime()) + f".{time.time_ns() % 1_000_000_000:09d}Z"
++    dest = hist / f"{stamp}-{path.name}"
++    fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
++    with os.fdopen(fd, "wb") as fh:
++        fh.write(raw)
++    cutoff = time.time() - HISTORY_KEEP_SECONDS
++    for old in sorted(hist.glob(f"*-{path.name}"))[:-HISTORY_KEEP]:
++        try:
++            if _snapshot_time(old) < cutoff:
++                old.unlink()
++        except OSError:
++            logger.debug("Could not prune memory snapshot %s", old, exc_info=True)
++    return dest
++
++
++def _log_consolidation(event: dict[str, Any]) -> None:
++    """One JSON line per unattended consolidation in memories/.history/consolidations.jsonl,
++    plus the agent log. Best-effort."""
++    import time
++    event = {"ts": time.time(), **event}
++    logger.info("memory: unattended consolidation %s (%s on %s, backup %s%s)", event.get("result"),
++                event.get("action"), event.get("target"), event.get("backup"),
++                f", {event['reason']}" if event.get("reason") else "")
++    try:
++        log = _private_dir(history_dir()) / "consolidations.jsonl"
++        lines = log.read_text(encoding="utf-8").splitlines()[-(HISTORY_KEEP * 20 - 1):] if log.exists() else []
++        lines.append(json.dumps(event, ensure_ascii=False))
++        from utils import atomic_write_text
++        atomic_write_text(log, "\n".join(lines) + "\n", mode=0o600)
++    except Exception:
++        logger.debug("Could not append to the consolidation log", exc_info=True)
++
++
++def _removal_cap_reason(payload: dict[str, Any]) -> Optional[str]:
++    """Why a pinned consolidation is too large to apply unattended, or None. Projects the
++    payload onto the store file as it is now: over the cap when it removes more than
++    MAX_REMOVED_ENTRIES of the entries or shrinks the file by more than MAX_SHRINK_CHARS of its
++    characters. An op that no longer applies is left to the real write to report (None)."""
++    from tools.memory_tool_store import ENTRY_DELIMITER as delim
++    target = payload.get("target", "memory")
++    raw, read_ok = MemoryStore._read_raw_checked(MemoryStore._path_for(target))
++    if not read_ok:
++        return None  # the write itself refuses an unreadable file
++    before = list(dict.fromkeys(MemoryStore._parse_entries(raw)))
++    ops = (payload.get("operations") or []) if payload.get("action") == "batch" else [payload]
++    working = list(before)
++    for op in ops:
++        op = op or {}
++        act = op.get("action")
++        content, old_text = op.get("content") or op.get("new_text") or "", op.get("old_text") or ""
++        if act != "patch":
++            content, old_text = content.strip(), old_text.strip()
++        msg, *_ = MemoryStore._apply_batch_op(working, act, content, old_text, "op", op.get("matched_entry"))
++        if msg:
++            return None
++    removed = sum(1 for op in ops if (op or {}).get("action") == "remove")
++    chars_before, chars_after = len(delim.join(before)), len(delim.join(working))
++    if before and removed > MAX_REMOVED_ENTRIES * len(before):
++        return f"removes {removed} of {len(before)} entries (cap {int(MAX_REMOVED_ENTRIES * 100)}%)"
++    if chars_before and chars_before - chars_after > MAX_SHRINK_CHARS * chars_before:
++        return (f"shrinks the file from {chars_before} to {chars_after} chars "
++                f"(cap {int(MAX_SHRINK_CHARS * 100)}%)")
++    return None
++
++
++def _stage_background(payload: dict[str, Any], action: str, target: str, reason: str) -> str:
++    from tools import write_approval as wa
++    FAILURE_CLASS.set("staged")
++    record = wa.stage_write(wa.MEMORY, payload, summary=f"background review consolidation ({action} on "
++                            f"{target}); {reason}"[:200], origin=wa.current_origin())
++    return json.dumps({"success": True, "staged": True, "proposal_staged": True, "pending_id": record["id"],
++                       "message": f"The consolidation was staged for approval ({reason}); review it with "
++                                  "/memory pending."}, ensure_ascii=False)
++
++
++def _apply_background_consolidation(store: MemoryStore, payload: dict[str, Any], action: str,
++                                    target: str) -> str:
++    """Apply an unattended patch/remove (single or batch) directly: pin it to the entries it
++    selects now (no match = the same error the direct write returns), check the removal cap,
++    snapshot the store file, then replay through ``apply_memory_pending`` so only those exact
++    entries change. Over the cap, or with a failed snapshot, it is staged as upstream does."""
++    if (unmatched := _pin_matched_entries(store, payload)) is not None:
++        return unmatched
++    ops = [_batch_op_line(op) for op in destructive_ops(payload)]
++    if (reason := _removal_cap_reason(payload)) is not None:
++        _log_consolidation({"result": "staged", "action": action, "target": target, "reason": reason, "ops": ops})
++        return _stage_background(payload, action, target, reason)
++    try:
++        backup = backup_memory_file(target)
++    except Exception:
++        logger.warning("Memory snapshot failed; staging the background consolidation instead", exc_info=True)
++        return _stage_background(payload, action, target, "snapshot failed")
++    result = apply_memory_pending(payload, store)
++    _log_consolidation({"result": "applied" if result.get("success") else "failed", "action": action,
++                        "target": target, "backup": str(backup), "ops": ops,
++                        **({} if result.get("success") else {"error": result.get("error", "")})})
++    if result.get("success"):
++        result["background_consolidation"] = "applied"
++        result["backup"] = str(backup)
++    return json.dumps(result, ensure_ascii=False)
++
++
++def _keep_dropped(rec: dict[str, Any]) -> Path:
++    """Write a pending record about to be dropped, payload and all (its adds included), to
++    memories/.history/dropped/<id>.json, 0600. Raises on failure: no copy, no drop."""
++    import os
++    import re
++    rid = re.sub(r"[^A-Za-z0-9_-]", "_", str(rec.get("id") or "")) or "noid"
++    dest = _private_dir(history_dir() / "dropped") / f"{rid}.json"
++    tmp = dest.with_name(f".{dest.name}.tmp")
++    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
++    with os.fdopen(fd, "w", encoding="utf-8") as fh:
++        json.dump(rec, fh, ensure_ascii=False, indent=2)
++    os.replace(tmp, dest)
++    return dest
++
++
++def replay_background_pending(store: Optional[MemoryStore] = None) -> dict[str, int]:
++    """Settle memory writes the background review staged before ``auto`` was on: oldest first,
++    each through the /memory approve path (pinned entries only) after a snapshot. Applied
++    records are removed; ones that no longer match are copied whole to
++    memories/.history/dropped/<id>.json, then removed. Kept for the next start or /memory
++    pending: foreground records, records over the removal cap, and any whose snapshot,
++    store read or write failed (an I/O error is not a mismatch). No-op unless ``auto``."""
++    counts = {"applied": 0, "dropped": 0, "kept": 0}
++    if background_consolidation_mode() != "auto":
++        return counts
++    from tools import write_approval as wa
++    store = store or load_on_disk_store()
++    for rec in wa.list_pending(wa.MEMORY):
++        payload = rec.get("payload") or {}
++        if rec.get("origin") != "background_review" or not isinstance(payload, dict):
++            counts["kept"] += 1
++            continue
++        target = payload.get("target", "memory")
++        event = {"action": payload.get("action"), "target": target, "pending_id": rec.get("id"),
++                 "ops": [_batch_op_line(op) for op in destructive_ops(payload)]}
++        if target in ("memory", "user") and (reason := _removal_cap_reason(payload)) is not None:
++            counts["kept"] += 1
++            _log_consolidation({"result": "kept", "reason": reason, **event})
++            continue
++        try:
++            backup = str(backup_memory_file(target)) if target in ("memory", "user") else ""
++            FAILURE_CLASS.set("other")
++            result = apply_memory_pending(payload, store)
++        except Exception as exc:
++            counts["kept"] += 1
++            _log_consolidation({"result": "kept", "reason": f"error: {exc}", **event})
++            continue
++        if result.get("success"):
++            counts["applied"] += 1
++            _log_consolidation({"result": "replayed", "backup": backup, **event})
++            wa.discard_pending(wa.MEMORY, rec.get("id", ""))
++            continue
++        if FAILURE_CLASS.get() == "read_failed":
++            counts["kept"] += 1
++            _log_consolidation({"result": "kept", "reason": "store unreadable", "backup": backup,
++                                "error": result.get("error", ""), **event})
++            continue
++        try:
++            kept_at = str(_keep_dropped(rec))
++        except Exception as exc:
++            counts["kept"] += 1
++            _log_consolidation({"result": "kept", "reason": f"could not save the dropped record: {exc}", **event})
++            continue
++        counts["dropped"] += 1
++        _log_consolidation({"result": "dropped", "backup": backup, "dropped_record": kept_at,
++                            "error": result.get("error", ""), **event})
++        wa.discard_pending(wa.MEMORY, rec.get("id", ""))
++    return counts
++
++
+ def memory_tool(action: str | None = None, target: str = "memory", content: str | None = None, old_text: str | None = None,
+                 new_text: str | None = None, operations: Optional[list[dict[str, Any]]] = None,
+                 store: Optional[MemoryStore] = None) -> str:
+@@ -242,6 +482,16 @@ def _applied(result: dict[str, Any]) -> tuple[str, str]:
+     return ("success" if result.get("success") else "failed"), json.dumps(result, ensure_ascii=False)
+ 
+ 
++def _gate_outcome(result_json: str) -> str:
++    """``success`` for a consolidation the background gate applied itself (``auto``), else
++    ``rejected`` (refused, staged or invalid)."""
++    try:
++        data = json.loads(result_json)
++    except Exception:
++        return "rejected"
++    return "success" if data.get("background_consolidation") == "applied" else "rejected"
++
++
+ def _invalid(message: str) -> tuple[str, str]:
+     FAILURE_CLASS.set("invalid_args")
+     return "rejected", tool_error(message, success=False)
+@@ -262,7 +512,7 @@ def _memory_tool(action, target, content, old_text, new_text, operations, store)
+             return _invalid(_REPLACE_REMOVED)
+         denied = _background_delete_gate(store, action, operations, target)
+         if denied is not None:
+-            return "rejected", denied
++            return _gate_outcome(denied), denied
+         # Approval gate: stages (background/gateway) or prompts inline (CLI); off by default.
+         gate_result = _apply_write_gate(store, "batch", target, None, None, operations)
+         if gate_result is not None:
+@@ -285,7 +535,7 @@ def _memory_tool(action, target, content, old_text, new_text, operations, store)
+                or _background_delete_gate(store, action, None, target, content, old_text)
+                or _apply_write_gate(store, action, target, content, old_text))
+     if invalid is not None:
+-        return "rejected", invalid
++        return _gate_outcome(invalid), invalid
+     return _applied(_STORE_ACTIONS[action][0](store, target, content, old_text))
+ 
+ 
