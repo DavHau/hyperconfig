@@ -1,0 +1,1120 @@
+diff --git a/src/main/ipc/register.ts b/src/main/ipc/register.ts
+index 7c58d5e..2979635 100644
+--- a/src/main/ipc/register.ts
++++ b/src/main/ipc/register.ts
+@@ -265,7 +265,10 @@ import {
+   remoteUpdateSessionTitle,
+   type RemoteSessionConfig,
+ } from "../remote-sessions";
+-import { remoteGetSessionUsage } from "../remote-session-usage";
++import {
++  remoteGetSessionRuntimeModel,
++  remoteGetSessionUsage,
++} from "../remote-session-usage";
+ import {
+   remoteGetHermesHome,
+   remoteGetHermesVersion,
+@@ -2676,6 +2679,19 @@ export function registerIpcHandlers(context: IpcContext): void {
+       return remoteGetSessionUsage(conn, sessionId, activeSshProfile(profile));
+     },
+   );
++  // The model a stored remote session runs, for its chat's model picker.
++  ipcMain.handle(
++    "get-session-runtime-model",
++    (_event, sessionId: string, connectionId?: string, profile?: string) => {
++      const conn = sessionConnection(connectionId);
++      if (conn.mode !== "remote") return null;
++      return remoteGetSessionRuntimeModel(
++        conn,
++        sessionId,
++        activeSshProfile(profile),
++      );
++    },
++  );
+   ipcMain.handle(
+     "get-session-messages",
+     (_event, sessionId: string, connectionId?: string, profile?: string) => {
+diff --git a/src/main/remote-session-usage.ts b/src/main/remote-session-usage.ts
+index e3037ca..7b2c86d 100644
+--- a/src/main/remote-session-usage.ts
++++ b/src/main/remote-session-usage.ts
+@@ -56,3 +56,57 @@ export async function remoteGetSessionUsage(
+     return null;
+   }
+ }
++
++/** The model and provider a stored session runs: what Hermes resumes it on.
++ *  Same order as hermes (tui_gateway/agent_factory.py, SessionDB
++ *  .session_gateway_runtime): the row's `model` before `model_config.model`;
++ *  the provider from `model_config.gateway_runtime`, then its top-level
++ *  `provider`, then a routable `billing_provider`. Null when unknown. */
++export async function remoteGetSessionRuntimeModel(
++  conn: ConnectionConfig,
++  sessionId: string,
++  profile?: string,
++): Promise<{ model: string; provider: string } | null> {
++  if (!sessionId) return null;
++  try {
++    const captured = structuredClone(conn);
++    const revision = providerTargetRevision(captured);
++    const row = await remoteDashboardRequestJson<Record<string, unknown>>(
++      captured,
++      `/api/sessions/${encodeURIComponent(sessionId)}`,
++      {},
++      profile,
++    );
++    if (providerTargetRevision(captured) !== revision) return null;
++    let config: unknown = row?.model_config;
++    if (typeof config === "string") {
++      try {
++        config = JSON.parse(config);
++      } catch {
++        config = null;
++      }
++    }
++    const record =
++      config && typeof config === "object"
++        ? (config as Record<string, unknown>)
++        : {};
++    const text = (value: unknown): string =>
++      typeof value === "string" ? value.trim() : "";
++    const model = text(row?.model) || text(record.model);
++    if (!model) return null;
++    const runtime =
++      record.gateway_runtime && typeof record.gateway_runtime === "object"
++        ? (record.gateway_runtime as Record<string, unknown>)
++        : {};
++    const billing = text(row?.billing_provider);
++    const provider =
++      text(runtime.provider) ||
++      text(record.provider) ||
++      (billing && !["auto", "custom"].includes(billing.toLowerCase())
++        ? billing
++        : "");
++    return { model, provider };
++  } catch {
++    return null;
++  }
++}
+diff --git a/src/preload/index.d.ts b/src/preload/index.d.ts
+index 40e1b64..415721c 100644
+--- a/src/preload/index.d.ts
++++ b/src/preload/index.d.ts
+@@ -720,6 +720,11 @@ interface HermesAPI {
+     cacheReadTokens?: number;
+     cacheWriteTokens?: number;
+   } | null>;
++  getSessionRuntimeModel: (
++    sessionId: string,
++    connectionId?: string,
++    profile?: string,
++  ) => Promise<{ model: string; provider: string } | null>;
+   getSessionMessages: (
+     sessionId: string,
+     connectionId?: string,
+diff --git a/src/preload/index.ts b/src/preload/index.ts
+index ee20217..ad3de68 100644
+--- a/src/preload/index.ts
++++ b/src/preload/index.ts
+@@ -1033,6 +1033,18 @@ const hermesAPI = {
+   } | null> =>
+     ipcRenderer.invoke("get-session-usage", sessionId, connectionId, profile),
+ 
++  getSessionRuntimeModel: (
++    sessionId: string,
++    connectionId?: string,
++    profile?: string,
++  ): Promise<{ model: string; provider: string } | null> =>
++    ipcRenderer.invoke(
++      "get-session-runtime-model",
++      sessionId,
++      connectionId,
++      profile,
++    ),
++
+   getSessionMessages: (
+     sessionId: string,
+     connectionId?: string,
+diff --git a/src/renderer/src/screens/Chat/Chat.connection-config.test.tsx b/src/renderer/src/screens/Chat/Chat.connection-config.test.tsx
+index 9d9e7d7..eadfdf8 100644
+--- a/src/renderer/src/screens/Chat/Chat.connection-config.test.tsx
++++ b/src/renderer/src/screens/Chat/Chat.connection-config.test.tsx
+@@ -1262,3 +1262,47 @@ it("actual Chat observes its transcript and exposes Jump to latest only while re
+   expect(observer.disconnected).toBe(true);
+   vi.unstubAllGlobals();
+ });
++
++it("shows and keeps an existing session's own model, not the profile default", async () => {
++  // Profile default (getModelConfig) is gpt-x/openai; the saved chat runs
++  // DeepSeek. The picker must show DeepSeek and a send must not switch it.
++  const { api } = await fixture();
++  api.getSessionRuntimeModel = vi.fn(async () => ({
++    model: "deepseek/deepseek-v4.1-flash-1017",
++    provider: "openrouter",
++  }));
++  gateway.request.mockImplementation(async (method: string) => {
++    if (method === "session.resume")
++      return {
++        session_id: "runtime-saved",
++        resumed: "saved",
++        info: {
++          model: "deepseek/deepseek-v4.1-flash-1017",
++          provider: "openrouter",
++          lazy: true,
++        },
++      };
++    if (method === "model.options")
++      return {
++        model: "deepseek/deepseek-v4.1-flash-1017",
++        provider: "openrouter",
++        providers: [],
++      };
++    return { status: "ok" };
++  });
++  const { container } = renderChat();
++  await waitFor(() =>
++    expect(container.querySelector(".chat-model-name")?.textContent).toBe(
++      "deepseek-v4.1-flash-1017",
++    ),
++  );
++  expect(api.getSessionRuntimeModel).toHaveBeenCalledWith("saved", "a", "work");
++  await send();
++  const methods = gateway.request.mock.calls.map(([method]) => method);
++  expect(methods).not.toContain("slash.exec");
++  expect(methods).not.toContain("config.set");
++  expect(methods).not.toContain("session.create");
++  expect(container.querySelector(".chat-model-name")?.textContent).toBe(
++    "deepseek-v4.1-flash-1017",
++  );
++});
+diff --git a/src/renderer/src/screens/Chat/Chat.tsx b/src/renderer/src/screens/Chat/Chat.tsx
+index 7f09bd7..72e2ee6 100644
+--- a/src/renderer/src/screens/Chat/Chat.tsx
++++ b/src/renderer/src/screens/Chat/Chat.tsx
+@@ -480,16 +480,52 @@ function Chat({
+     );
+   const modelConfig = useModelConfig(profile);
+   const { reload: reloadModelConfig, selectModel } = modelConfig;
+-  const chatCurrentModel =
+-    sessionModelOverride?.model ?? modelConfig.currentModel;
++  // Dashboard chats: the model an existing session really runs (its stored
++  // route on open, then resume answers and session.info), and the user's own
++  // pick that has not reached the session yet. The profile default
++  // (modelConfig) is only what a brand-new chat starts on; showing it for an
++  // existing session showed e.g. the default for a chat running another model.
++  const [sessionRuntimeModel, setSessionRuntimeModel] = useState<{
++    model: string;
++    provider: string;
++  } | null>(null);
++  const [pendingModelPick, setPendingModelPick] = useState<
++    SessionModelOverride | undefined
++  >(undefined);
++  const dashboardModel = dashboardChatEnabled
++    ? (pendingModelPick ??
++      (sessionRuntimeModel
++        ? { ...sessionRuntimeModel, baseUrl: "" }
++        : undefined))
++    : undefined;
++  const chatModelSource = dashboardModel ?? sessionModelOverride;
++  const chatCurrentModel = chatModelSource?.model ?? modelConfig.currentModel;
+   const chatCurrentProvider =
+-    sessionModelOverride?.provider ?? modelConfig.currentProvider;
++    chatModelSource?.provider ?? modelConfig.currentProvider;
+   const chatCurrentBaseUrl =
+-    sessionModelOverride?.baseUrl ?? modelConfig.currentBaseUrl;
+-  const chatDisplayModel = sessionModelOverride?.model
+-    ? sessionModelOverride.model.split("/").pop() || sessionModelOverride.model
++    chatModelSource?.baseUrl ?? modelConfig.currentBaseUrl;
++  const chatDisplayModel = chatModelSource?.model
++    ? chatModelSource.model.split("/").pop() || chatModelSource.model
+     : modelConfig.displayModel;
+ 
++  // The stored route of a resumed session, so the picker shows the session's
++  // own model before any message (live reports replace it).
++  useEffect(() => {
++    if (!initialSessionId || !dashboardChatEnabled) return;
++    const read = window.hermesAPI.getSessionRuntimeModel;
++    if (typeof read !== "function") return;
++    let cancelled = false;
++    void read(initialSessionId, connectionId, profile)
++      .then((stored) => {
++        if (!cancelled && stored?.model)
++          setSessionRuntimeModel((live) => live ?? stored);
++      })
++      .catch(() => undefined);
++    return () => {
++      cancelled = true;
++    };
++  }, [initialSessionId, connectionId, profile, dashboardChatEnabled]);
++
+   // Restore the model/provider linked to a resumed session. The saved value is
+   // applied only to this chat's local picker state (`persist:false`) so it never
+   // rewrites the global config.yaml default.
+@@ -749,6 +785,8 @@ function Chat({
+     // Clearing the conversation reverts to the global default model — the
+     // session-scoped pick belongs to the conversation being cleared (#688).
+     setSessionModelOverride(undefined);
++    setPendingModelPick(undefined);
++    setSessionRuntimeModel(null);
+     void reloadModelConfig();
+     activeTurnRef.current = null;
+     setUsage(null);
+@@ -805,6 +843,21 @@ function Chat({
+     [connectionId, profile, runId],
+   );
+ 
++  const handleModelPickApplied = useCallback(
++    (applied: { model: string; provider: string }) => {
++      setSessionRuntimeModel(applied);
++      setPendingModelPick((pick) =>
++        pick?.model === applied.model && pick?.provider === applied.provider
++          ? undefined
++          : pick,
++      );
++    },
++    [],
++  );
++  const handleModelPickRejected = useCallback(() => {
++    setPendingModelPick(undefined);
++  }, []);
++
+   const dashboardTransport = useDashboardChatTransport({
+     activeTurnRef,
+     getConnectionAuthority,
+@@ -816,10 +869,15 @@ function Chat({
+     fallbackOnUnavailable: chatTransportPreference === "auto",
+     hermesSessionId,
+     messagesRef,
+-    model: chatCurrentModel,
+-    modelBaseUrl: chatCurrentBaseUrl,
++    // Only an explicit, not yet applied pick: sending in (or reopening) an
++    // existing chat never switches it to a model the app has cached.
++    model: pendingModelPick?.model,
++    modelBaseUrl: pendingModelPick?.baseUrl,
+     profile,
+-    provider: chatCurrentProvider,
++    provider: pendingModelPick?.provider,
++    onModelPickApplied: handleModelPickApplied,
++    onModelPickRejected: handleModelPickRejected,
++    onRuntimeModel: setSessionRuntimeModel,
+     setHermesSessionId,
+     setIsLoading,
+     setMessages,
+@@ -1134,15 +1192,16 @@ function Chat({
+       // Carry the full identity (not just the model name) so a cross-provider
+       // switch reaches the right backend. Mirror the baseUrl rule selectModel
+       // applies so they can't drift.
+-      setSessionModelOverride(
+-        model
+-          ? {
+-              provider,
+-              model,
+-              baseUrl: effectiveOverrideBaseUrl(provider, baseUrl),
+-            }
+-          : undefined,
+-      );
++      const pick = model
++        ? {
++            provider,
++            model,
++            baseUrl: effectiveOverrideBaseUrl(provider, baseUrl),
++          }
++        : undefined;
++      setSessionModelOverride(pick);
++      // Dashboard chats switch on the next send, once.
++      setPendingModelPick(pick);
+     },
+     [selectModel],
+   );
+diff --git a/src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.test.tsx b/src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.test.tsx
+index 21e6d07..259f12f 100644
+--- a/src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.test.tsx
++++ b/src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.test.tsx
+@@ -178,8 +178,18 @@ function Harness({
+   onDashboardUnavailable,
+   onPetEvent,
+   onPetFailure,
++  initialModel = "bad-model",
++  initialProvider = "bad-provider",
++  onModelPickApplied,
++  onModelPickRejected,
++  onRuntimeModel,
+   setUsage = vi.fn() as SetUsageMock,
+ }: {
++  initialModel?: string;
++  initialProvider?: string;
++  onModelPickApplied?: (m: { model: string; provider: string }) => void;
++  onModelPickRejected?: () => void;
++  onRuntimeModel?: (m: { model: string; provider: string }) => void;
+   api: HarnessApi;
+   connectionId?: string;
+   connectionRevision?: number;
+@@ -203,8 +213,8 @@ function Harness({
+     },
+   ]);
+   const [isLoading, setIsLoading] = useState(false);
+-  const [model, setModel] = useState("bad-model");
+-  const [provider, setProvider] = useState("bad-provider");
++  const [model, setModel] = useState(initialModel);
++  const [provider, setProvider] = useState(initialProvider);
+   const [connectionMode, setConnectionMode] = useState<
+     "local" | "remote" | "ssh"
+   >(initialConnectionMode);
+@@ -230,6 +240,9 @@ function Harness({
+     onDashboardUnavailable,
+     onPetEvent,
+     onPetFailure,
++    onModelPickApplied,
++    onModelPickRejected,
++    onRuntimeModel,
+   });
+ 
+   useEffect(() => {
+@@ -825,7 +838,7 @@ describe("useDashboardChatTransport recovery", () => {
+     expect(dashboardMock.connect).toHaveBeenCalledWith("ws://fresh-dashboard");
+   });
+ 
+-  it("does not request model.options twice when no model switch runs", async () => {
++  it("does not switch a session that already runs the pick", async () => {
+     dashboardMock.request.mockImplementation(async (method) => {
+       if (method === "session.create") {
+         return { session_id: "live", stored_session_id: "stored" };
+@@ -844,9 +857,10 @@ describe("useDashboardChatTransport recovery", () => {
+     });
+ 
+     const methods = dashboardMock.request.mock.calls.map(([method]) => method);
+-    expect(methods.filter((method) => method === "slash.exec")).toHaveLength(1);
++    expect(methods).not.toContain("slash.exec");
++    expect(methods).not.toContain("config.set");
+     expect(methods.filter((method) => method === "model.options")).toHaveLength(
+-      3,
++      2,
+     );
+   });
+ 
+@@ -969,56 +983,307 @@ describe("useDashboardChatTransport recovery", () => {
+     },
+   );
+ 
+-  // @lat: [[chat-commands#Busy refusal preserves conversation#Busy model setup]]
+-  it("retries model setup on the same runtime after its busy refusal", async () => {
+-    let busy = true;
+-    let liveModel = "other-model";
++  it("switches a picked model through config.set, which builds the agent", async () => {
++    // slash.exec /model on a runtime without an agent (a lazy roster resume)
++    // switched only the slash worker; config.set model waits for the build.
++    let liveModel = "default-model";
++    let liveProvider = "default-provider";
++    dashboardMock.request.mockImplementation(async (method, params) => {
++      if (method === "session.resume")
++        return { session_id: "lazy-runtime", resumed: "stored-chat" };
++      if (method === "model.options")
++        return { model: liveModel, provider: liveProvider, providers: [] };
++      if (method === "config.set") {
++        expect(params).toEqual({
++          session_id: "lazy-runtime",
++          key: "model",
++          value: "bad-model --provider bad-provider",
++        });
++        liveModel = "bad-model";
++        liveProvider = "bad-provider";
++        return { key: "model", value: "bad-model" };
++      }
++      return {};
++    });
++    const applied = vi.fn();
++    const api: HarnessApi = {};
++    render(
++      <Harness
++        api={api}
++        hermesSessionId="stored-chat"
++        onModelPickApplied={applied}
++      />,
++    );
++    await act(async () => {
++      api.activeTurnRef!.current = { ...activeRecoveryTurn };
++      await api.send?.("first try");
++    });
++    const methods = dashboardMock.request.mock.calls.map(([method]) => method);
++    expect(methods).not.toContain("slash.exec");
++    expect(methods).not.toContain("session.create");
++    expect(methods.filter((m) => m === "config.set")).toHaveLength(1);
++    expect(applied).toHaveBeenCalledWith({
++      model: "bad-model",
++      provider: "bad-provider",
++    });
++    expect(dashboardMock.request).toHaveBeenLastCalledWith("prompt.submit", {
++      session_id: "lazy-runtime",
++      text: "first try",
++    });
++  });
++
++  it("never switches an existing session's model without a pick", async () => {
++    // Opening (resuming) a chat that runs another model than the profile
++    // default and sending in it must not run /model or config.set.
+     dashboardMock.request.mockImplementation(async (method) => {
+       if (method === "session.resume")
+-        return { session_id: "existing-runtime", resumed: "stored-chat" };
+-      if (method === "session.create")
+         return {
+-          session_id: "replacement-runtime",
+-          stored_session_id: "new-chat",
++          session_id: "deepseek-runtime",
++          resumed: "deepseek-chat",
++          info: {
++            model: "deepseek/deepseek-v4.1-flash-1017",
++            provider: "openrouter",
++            lazy: true,
++          },
+         };
+       if (method === "model.options")
+         return {
+-          model: liveModel,
+-          provider: "bad-provider",
++          model: "deepseek/deepseek-v4.1-flash-1017",
++          provider: "openrouter",
+           providers: [],
+         };
+-      if (method === "slash.exec") {
+-        if (busy)
+-          throw new Error(
+-            "session busy — /interrupt the current turn before /model",
+-          );
+-        liveModel = "bad-model";
+-      }
+       return {};
+     });
++    const live = vi.fn();
+     const api: HarnessApi = {};
+-    render(<Harness api={api} hermesSessionId="stored-chat" />);
++    render(
++      <Harness
++        api={api}
++        hermesSessionId="deepseek-chat"
++        initialModel=""
++        initialProvider=""
++        onRuntimeModel={live}
++      />,
++    );
+     await act(async () => {
+-      await api.send?.("first try");
++      api.activeTurnRef!.current = { ...activeRecoveryTurn };
++      await api.send?.("hello");
++      await api.send?.("again");
++    });
++    const methods = dashboardMock.request.mock.calls.map(([method]) => method);
++    expect(methods).not.toContain("slash.exec");
++    expect(methods).not.toContain("config.set");
++    expect(methods).not.toContain("session.create");
++    expect(live).toHaveBeenCalledWith({
++      model: "deepseek/deepseek-v4.1-flash-1017",
++      provider: "openrouter",
+     });
++  });
++
++  it("keeps the conversation and shows the error when a model switch fails", async () => {
++    let fail = true;
++    dashboardMock.request.mockImplementation(async (method) => {
++      if (method === "session.resume")
++        return { session_id: "existing-runtime", resumed: "stored-chat" };
++      if (method === "session.create")
++        return { session_id: "fork-runtime", stored_session_id: "forked-chat" };
++      if (method === "model.options")
++        return { model: "other-model", provider: "other", providers: [] };
++      if (method === "config.set" && fail)
++        throw new Error("agent initialization failed: Unknown provider");
++      return {};
++    });
++    const rejected = vi.fn();
++    const api: HarnessApi = {};
++    render(
++      <Harness
++        api={api}
++        hermesSessionId="stored-chat"
++        onModelPickRejected={rejected}
++      />,
++    );
++    await act(async () => {
++      expect(await api.send?.("first try")).toBe(true);
++    });
++    expect(rejected).toHaveBeenCalledOnce();
+     expect(
+-      dashboardMock.request.mock.calls.map(([method]) => method),
+-    ).not.toContain("prompt.submit");
+-    busy = false;
++      api.messages?.some(
++        (m) =>
++          "error" in m &&
++          typeof m.error === "string" &&
++          m.error.includes("agent initialization failed: Unknown provider"),
++      ),
++    ).toBe(true);
++    // The parent drops a rejected pick; the retry sends on the session as is.
++    fail = false;
++    await act(async () => {
++      api.setModel?.("");
++      api.setProvider?.("");
++    });
+     await act(async () => {
+       api.activeTurnRef!.current = { ...activeRecoveryTurn };
+-      await api.send?.("retry");
++      expect(await api.send?.("retry")).toBe(true);
+     });
+     const methods = dashboardMock.request.mock.calls.map(([method]) => method);
+     expect(methods).not.toContain("session.create");
+     expect(methods).not.toContain("session.close");
+-    expect(methods).not.toContain("session.interrupt");
+     expect(dashboardMock.request).toHaveBeenLastCalledWith("prompt.submit", {
+       session_id: "existing-runtime",
+       text: "retry",
+     });
+   });
+ 
++  it("asks before an expensive model and switches only when confirmed", async () => {
++    let liveModel = "other-model";
++    const calls: unknown[] = [];
++    dashboardMock.request.mockImplementation(async (method, params) => {
++      if (method === "session.resume")
++        return { session_id: "existing-runtime", resumed: "stored-chat" };
++      if (method === "model.options")
++        return { model: liveModel, provider: "bad-provider", providers: [] };
++      if (method === "config.set") {
++        calls.push(params);
++        if (!(params as { confirm_expensive_model?: boolean })
++          .confirm_expensive_model)
++          return {
++            confirm_required: true,
++            confirm_message: "bad-model costs $$$ per token",
++          };
++        liveModel = "bad-model";
++        return { value: "bad-model" };
++      }
++      return {};
++    });
++    const confirm = vi.fn(() => true);
++    vi.stubGlobal("confirm", confirm);
++    const api: HarnessApi = {};
++    render(<Harness api={api} hermesSessionId="stored-chat" />);
++    await act(async () => {
++      api.activeTurnRef!.current = { ...activeRecoveryTurn };
++      await api.send?.("go");
++    });
++    vi.unstubAllGlobals();
++    expect(confirm).toHaveBeenCalledWith("bad-model costs $$$ per token");
++    expect(calls).toHaveLength(2);
++    expect(dashboardMock.request).toHaveBeenLastCalledWith("prompt.submit", {
++      session_id: "existing-runtime",
++      text: "go",
++    });
++  });
++
++  it("waits for a cold-resumed agent before switching, so the pick sticks", async () => {
++    // The gateway's semantics (tui_gateway/methods_config_set.py,
++    // session_registry.py): while the resumed session's agent is still
++    // building, config.set "<m> --provider <p>" only records an override the
++    // build then replaces with the stored route, and model.options reports
++    // the profile default. `_sess`-routed RPCs (approval.pending) wait for
++    // the build.
++    let agentReady = false;
++    let finishBuild: (() => void) | undefined;
++    const built = new Promise<void>((resolve) => {
++      finishBuild = () => {
++        agentReady = true;
++        resolve();
++      };
++    });
++    let live = { model: "deepseek-v4", provider: "openrouter" };
++    const order: string[] = [];
++    dashboardMock.request.mockImplementation(async (method, params) => {
++      order.push(method);
++      if (method === "session.resume")
++        return { session_id: "cold-runtime", resumed: "stored-chat" };
++      if (method === "approval.pending") {
++        await built;
++        return { approvals: [] };
++      }
++      if (method === "model.options")
++        return agentReady
++          ? { ...live, providers: [] }
++          : { model: "default-model", provider: "default-provider", providers: [] };
++      if (method === "config.set") {
++        // Before the build: recorded, then lost to the stored route.
++        if (agentReady) {
++          const [m, , p] = String((params as { value: string }).value).split(" ");
++          live = { model: m, provider: p };
++        }
++        return { key: "model", value: "x" };
++      }
++      return {};
++    });
++    const applied = vi.fn();
++    const rejected = vi.fn();
++    const api: HarnessApi = {};
++    render(
++      <Harness
++        api={api}
++        hermesSessionId="stored-chat"
++        initialModel="default-model"
++        initialProvider="default-provider"
++        onModelPickApplied={applied}
++        onModelPickRejected={rejected}
++      />,
++    );
++    let sent: Promise<boolean | undefined> | undefined;
++    act(() => {
++      api.activeTurnRef!.current = { ...activeRecoveryTurn };
++      sent = api.send?.("go");
++    });
++    await waitFor(() => expect(order).toContain("approval.pending"));
++    // Nothing is read or switched while the agent builds.
++    expect(order).not.toContain("config.set");
++    expect(order).not.toContain("model.options");
++    await act(async () => {
++      finishBuild?.();
++      await sent;
++    });
++    expect(order.indexOf("approval.pending")).toBeLessThan(
++      order.indexOf("config.set"),
++    );
++    expect(live).toEqual({ model: "default-model", provider: "default-provider" });
++    expect(applied).toHaveBeenCalledWith({
++      model: "default-model",
++      provider: "default-provider",
++    });
++    expect(rejected).not.toHaveBeenCalled();
++    expect(dashboardMock.request).toHaveBeenLastCalledWith("prompt.submit", {
++      session_id: "cold-runtime",
++      text: "go",
++    });
++  });
++
++  it("does not claim a pick when the agent never comes up", async () => {
++    dashboardMock.request.mockImplementation(async (method) => {
++      if (method === "session.resume")
++        return { session_id: "cold-runtime", resumed: "stored-chat" };
++      if (method === "approval.pending")
++        throw new Error("Hermes is still starting this session (loading tools)");
++      if (method === "model.options")
++        return { model: "default-model", provider: "default-provider", providers: [] };
++      return {};
++    });
++    const applied = vi.fn();
++    const rejected = vi.fn();
++    const api: HarnessApi = {};
++    render(
++      <Harness
++        api={api}
++        hermesSessionId="stored-chat"
++        initialModel="default-model"
++        initialProvider="default-provider"
++        onModelPickApplied={applied}
++        onModelPickRejected={rejected}
++      />,
++    );
++    await act(async () => {
++      await api.send?.("go");
++    });
++    const methods = dashboardMock.request.mock.calls.map(([method]) => method);
++    expect(methods).not.toContain("config.set");
++    expect(methods).not.toContain("prompt.submit");
++    expect(applied).not.toHaveBeenCalled();
++    expect(rejected).toHaveBeenCalled();
++  });
++
+   // @lat: [[chat-commands#Busy refusal preserves conversation#Busy refusal never interrupts shared work]]
+   it("does not interrupt busy upstream work when expiring a displayed approval", async () => {
+     let rejectSubmit: ((reason: Error) => void) | undefined;
+@@ -1066,7 +1331,7 @@ describe("useDashboardChatTransport recovery", () => {
+     expect(api.isLoading).toBe(false);
+   });
+ 
+-  it("creates a clean runtime after a failed provider turn", async () => {
++  it("resumes the same conversation in a clean runtime after a failed provider turn", async () => {
+     const requests: Array<{ method: string; params: unknown }> = [];
+     let liveModel = "bad-model";
+     let liveProvider = "bad-provider";
+@@ -1078,12 +1343,12 @@ describe("useDashboardChatTransport recovery", () => {
+       if (method === "session.resume") {
+         return { session_id: "live-recovery", resumed: "stored-chat" };
+       }
+-      if (method === "slash.exec") {
+-        const command =
+-          params && typeof params === "object" && "command" in params
+-            ? String(params.command)
++      if (method === "config.set") {
++        const value =
++          params && typeof params === "object" && "value" in params
++            ? String(params.value)
+             : "";
+-        const match = command.match(/^\/model\s+(.+?)\s+--provider\s+(.+)$/);
++        const match = value.match(/^(.+?)\s+--provider\s+(.+)$/);
+         if (match) {
+           liveModel = match[1];
+           liveProvider = match[2];
+@@ -1135,16 +1400,22 @@ describe("useDashboardChatTransport recovery", () => {
+       await api.send?.("recovery turn");
+     });
+ 
+-    expect(requests).not.toContainEqual({
++    // A failed turn must not fork the chat into a new session.
++    expect(requests).toContainEqual({
++      method: "session.close",
++      params: { session_id: "live-bad" },
++    });
++    expect(requests).toContainEqual({
+       method: "session.resume",
+       params: { session_id: "stored-chat", cols: 96 },
+     });
+     expect(
+       requests.filter((request) => request.method === "session.create"),
+-    ).toEqual([
+-      { method: "session.create", params: { cols: 96 } },
+-      { method: "session.create", params: { cols: 96 } },
+-    ]);
++    ).toEqual([{ method: "session.create", params: { cols: 96 } }]);
++    expect(requests.at(-1)).toEqual({
++      method: "prompt.submit",
++      params: { session_id: "live-recovery", text: "recovery turn" },
++    });
+     expect(requests).not.toContainEqual({
+       method: "session.create",
+       params: {
+@@ -1162,13 +1433,8 @@ describe("useDashboardChatTransport recovery", () => {
+         userContent: "bad provider turn",
+       },
+     );
+-    expect(window.hermesAPI.recordSessionContinuation).toHaveBeenCalledWith(
+-      "stored-chat",
+-      [
+-        { kind: "user", content: "bad provider turn" },
+-        { kind: "assistant", content: "", error: "Invalid API Key" },
+-      ],
+-    );
++    // The resumed conversation already holds its history server-side.
++    expect(window.hermesAPI.recordSessionContinuation).not.toHaveBeenCalled();
+   });
+ 
+   it("discards an in-flight dashboard client after the connection mode changes", async () => {
+diff --git a/src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts b/src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts
+index eeb3bfd..35f8f9e 100644
+--- a/src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts
++++ b/src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts
+@@ -55,9 +55,36 @@ interface ModelOptionProvider {
+   slug: string;
+ }
+ 
+-interface SlashExecResponse {
+-  output?: string;
++interface ConfigSetModelResponse {
++  value?: string;
+   warning?: string;
++  confirm_required?: boolean;
++  confirm_message?: string;
++  deferred?: boolean;
++}
++
++/** The model a dashboard session really runs, as reported by Hermes. */
++export interface DashboardRuntimeModel {
++  model: string;
++  provider: string;
++}
++
++/** Model/provider from a built session's `session.info` payload (or a resume
++ *  response's `info`). Lazy (agent-less) infos report the profile default, not
++ *  the session's model, so they are ignored. */
++export function dashboardRuntimeModelFromInfo(
++  info: unknown,
++  { acceptLazy = false }: { acceptLazy?: boolean } = {},
++): DashboardRuntimeModel | null {
++  if (!info || typeof info !== "object") return null;
++  const record = info as Record<string, unknown>;
++  // A session.resume/create answer carries the session's stored (or, for a
++  // new chat, the default) route even before its agent exists.
++  if (record.lazy === true && !acceptLazy) return null;
++  const model = typeof record.model === "string" ? record.model.trim() : "";
++  const provider =
++    typeof record.provider === "string" ? record.provider.trim() : "";
++  return model ? { model, provider } : null;
+ }
+ 
+ interface ImageAttachBytesResponse {
+@@ -113,10 +140,20 @@ interface UseDashboardChatTransportArgs {
+    *  source of truth this hook applies stream deltas to. Must be the same ref
+    *  the provided `setMessages` maintains, or coalesced deltas can be lost. */
+   messagesRef: React.MutableRefObject<ChatMessage[]>;
++  /** The model the user explicitly picked for this conversation and that is
++   *  not applied yet. Unset = leave the session on whatever it runs: an
++   *  existing session keeps its own model, a new one gets the profile default. */
+   model?: string;
+   modelBaseUrl?: string;
+   profile?: string;
+   provider?: string;
++  /** The pick above is live on the session; the caller should drop it so a
++   *  later open/reconnect never switches the session back to it. */
++  onModelPickApplied?: (applied: DashboardRuntimeModel) => void;
++  /** The pick could not be applied; the session keeps its model. */
++  onModelPickRejected?: () => void;
++  /** The session's live model as Hermes reports it (resume, session.info). */
++  onRuntimeModel?: (live: DashboardRuntimeModel) => void;
+   setHermesSessionId: (id: string) => void;
+   setIsLoading: (loading: boolean) => void;
+   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
+@@ -1036,6 +1073,9 @@ export function useDashboardChatTransport({
+   modelBaseUrl,
+   profile,
+   provider,
++  onModelPickApplied,
++  onModelPickRejected,
++  onRuntimeModel,
+   setHermesSessionId,
+   setIsLoading,
+   setMessages,
+@@ -1045,6 +1085,12 @@ export function useDashboardChatTransport({
+   onPetEvent,
+   onPetFailure,
+ }: UseDashboardChatTransportArgs): UseDashboardChatTransportResult {
++  const onModelPickAppliedRef = useRef(onModelPickApplied);
++  onModelPickAppliedRef.current = onModelPickApplied;
++  const onModelPickRejectedRef = useRef(onModelPickRejected);
++  onModelPickRejectedRef.current = onModelPickRejected;
++  const onRuntimeModelRef = useRef(onRuntimeModel);
++  onRuntimeModelRef.current = onRuntimeModel;
+   const clientRef = useRef<DashboardGatewayClient | null>(null);
+   const connectingRef = useRef<Promise<DashboardGatewayClient> | null>(null);
+   const clientGenerationRef = useRef(0);
+@@ -1317,6 +1363,8 @@ export function useDashboardChatTransport({
+       }
+ 
+       if (event.type === "session.info") {
++        const live = dashboardRuntimeModelFromInfo(event.payload);
++        if (live) onRuntimeModelRef.current?.(live);
+         const recordRuntimeInfo = window.hermesAPI.recordAgentRuntimeInfo;
+         if (typeof recordRuntimeInfo === "function") {
+           void recordRuntimeInfo(event.payload, profile, connectionId).catch(
+@@ -1823,6 +1871,10 @@ export function useDashboardChatTransport({
+           storedSessionId: stored,
+         });
+         options.assertCurrent?.();
++        const resumedModel = dashboardRuntimeModelFromInfo(response.info, {
++          acceptLazy: true,
++        });
++        if (resumedModel) onRuntimeModelRef.current?.(resumedModel);
+         const recordRuntimeInfo = window.hermesAPI.recordAgentRuntimeInfo;
+         if (typeof recordRuntimeInfo === "function") {
+           void recordRuntimeInfo(response.info, profile, connectionId).catch(
+@@ -1914,9 +1966,31 @@ export function useDashboardChatTransport({
+         return ensureRuntimeSession(client, { assertCurrent });
+       };
+ 
++      // With `--provider` the gateway only records a pick on a session whose
++      // agent is not built yet (tui_gateway/methods_config_set.py), and the
++      // agent a cold resume is still building comes up on the stored route,
++      // dropping it; model.options without an agent reports the profile
++      // default. So wait for the session's agent first: a read-only RPC
++      // routed through the gateway's `_sess`, which builds and waits for it.
++      // Then read its live model, switch, and validate on the live agent.
++      const waitForAgent = async (targetSessionId: string): Promise<void> => {
++        try {
++          await client.request("approval.pending", {
++            session_id: targetSessionId,
++          });
++        } catch (err) {
++          const message = err instanceof Error ? err.message : String(err);
++          throw new Error(
++            `Hermes could not switch this chat to ${provider}/${model}: ${message}`,
++          );
++        }
++        assertCurrent?.();
++      };
++
+       const switchAndValidate = async (
+         targetSessionId: string,
+       ): Promise<string> => {
++        await waitForAgent(targetSessionId);
+         let before = await client.request<ModelOptionsResponse>(
+           "model.options",
+           {
+@@ -1937,6 +2011,7 @@ export function useDashboardChatTransport({
+             (before.provider || "").toLowerCase().startsWith("custom"))
+         ) {
+           targetSessionId = await resetRuntimeSession(targetSessionId);
++          await waitForAgent(targetSessionId);
+           before = await client.request<ModelOptionsResponse>("model.options", {
+             session_id: targetSessionId,
+           });
+@@ -1958,6 +2033,7 @@ export function useDashboardChatTransport({
+           storedSessionIdRef.current
+         ) {
+           targetSessionId = await resetRuntimeSession(targetSessionId);
++          await waitForAgent(targetSessionId);
+ 
+           const rebuilt = await client.request<ModelOptionsResponse>(
+             "model.options",
+@@ -1974,50 +2050,93 @@ export function useDashboardChatTransport({
+         const resolvedCommand = dashboardModelCommand(dashboardProvider, model);
+         if (!resolvedCommand) return targetSessionId;
+         const key = `${targetSessionId}\n${dashboardProvider}\n${model}`;
+-        let slashResponse: SlashExecResponse | null = null;
+-        if (appliedModelRef.current !== key) {
+-          slashResponse = await client.request<SlashExecResponse>(
+-            "slash.exec",
+-            {
+-              session_id: targetSessionId,
+-              command: resolvedCommand,
+-            },
+-          );
++        // Already on the pick: nothing to switch (no needless /model).
++        if (dashboardModelMatches(dashboardProvider, model, before)) {
++          appliedModelRef.current = key;
++          return targetSessionId;
+         }
+-
+-        // `before` is already the live state for this send. Only re-read after
+-        // slash.exec, which is the sole operation above that can change it.
+-        // This avoids a duplicate model.options round-trip on every later turn.
+-        const live = slashResponse
+-          ? await client.request<ModelOptionsResponse>("model.options", {
++        // config.set model is the gateway's own switch RPC: it builds and
++        // waits for a missing agent (a runtime resumed without one ran
++        // slash.exec /model only in its slash worker, so the pick was lost
++        // while it still answered "Model switched"), queues the pick when a
++        // turn is running, reports a failed agent build (5032) and asks for
++        // confirmation before an expensive model.
++        const value = resolvedCommand.replace(/^\/model\s+/, "");
++        const requestSwitch = async (
++          confirmed: boolean,
++        ): Promise<ConfigSetModelResponse> => {
++          try {
++            return await client.request<ConfigSetModelResponse>("config.set", {
+               session_id: targetSessionId,
+-            })
+-          : before;
++              key: "model",
++              value,
++              ...(confirmed ? { confirm_expensive_model: true } : {}),
++            });
++          } catch (err) {
++            if (isDashboardSessionBusyError(err)) throw err;
++            const message = err instanceof Error ? err.message : String(err);
++            throw new Error(
++              `Hermes could not switch this chat to ${dashboardProvider}/${model}: ${message}`,
++            );
++          }
++        };
++        let switched = await requestSwitch(false);
++        assertCurrent?.();
++        if (switched?.confirm_required) {
++          const question =
++            switched.confirm_message ||
++            switched.warning ||
++            `Switch this chat to ${dashboardProvider}/${model}?`;
++          const confirmed =
++            typeof window.confirm === "function" && window.confirm(question);
++          assertCurrent?.();
++          if (!confirmed)
++            throw new Error(
++              `Model switch to ${dashboardProvider}/${model} not confirmed: ${question}`,
++            );
++          switched = await requestSwitch(true);
++          assertCurrent?.();
++          if (switched?.confirm_required)
++            throw new Error(
++              `Hermes still asks to confirm ${dashboardProvider}/${model}: ${switched.confirm_message || question}`,
++            );
++        }
++        // Queued for the next turn start (a turn is running): applied there.
++        if (switched?.deferred) {
++          appliedModelRef.current = key;
++          return targetSessionId;
++        }
++        const live = await client.request<ModelOptionsResponse>(
++          "model.options",
++          { session_id: targetSessionId },
++        );
+         if (!dashboardModelMatches(dashboardProvider, model, live)) {
+           appliedModelRef.current = null;
+-          const warning = slashResponse?.warning
+-            ? `; /model warning: ${slashResponse.warning}`
+-            : "";
+-          const output = slashResponse?.output
+-            ? `; /model output: ${slashResponse.output}`
++          const warning = switched?.warning
++            ? `; warning: ${switched.warning}`
+             : "";
+           throw new Error(
+-            `Hermes dashboard did not switch to ${dashboardProvider}/${model}; live model is ${live.provider || "unknown"}/${live.model || "unknown"}${warning}${output}; custom inventory: ${modelOptionsSummary(before)}`,
++            `Hermes dashboard did not switch to ${dashboardProvider}/${model}; live model is ${live.provider || "unknown"}/${live.model || "unknown"}${warning}; custom inventory: ${modelOptionsSummary(before)}`,
+           );
+         }
+         appliedModelRef.current = key;
+         return targetSessionId;
+       };
+ 
++      let appliedSessionId: string;
+       try {
+-        return await switchAndValidate(sessionId);
++        appliedSessionId = await switchAndValidate(sessionId);
+       } catch (err) {
+-        assertCurrent?.();
+-        if (!isDashboardSlashWorkerExitError(err)) throw err;
+-        appliedModelRef.current = null;
+-        const freshSessionId = await resetRuntimeSession(sessionId);
+-        return switchAndValidate(freshSessionId);
++        // A busy refusal is retried with the same pick; any other failure
++        // leaves the session on its own model, so the picker shows that again.
++        if (!isDashboardSessionBusyError(err)) onModelPickRejectedRef.current?.();
++        throw err;
+       }
++      onModelPickAppliedRef.current?.({
++        model: model || "",
++        provider: provider || "",
++      });
++      return appliedSessionId;
+     },
+     [ensureRuntimeSession, model, modelBaseUrl, provider],
+   );
+@@ -2300,9 +2419,14 @@ export function useDashboardChatTransport({
+           return result;
+         },
+       };
++      let modelSetupStage = false;
+       try {
+         let continuationItems: DesktopSessionContinuationItem[] = [];
+-        const forceCreateRuntime = recreateRuntimeSessionRef.current;
++        // A saved conversation is never replaced by a new session (that forked
++        // the chat): a runtime that failed a turn is closed and the SAME
++        // conversation resumed. Only a chat without a saved id starts fresh.
++        const forceCreateRuntime =
++          recreateRuntimeSessionRef.current && !storedSessionIdRef.current;
+         if (recreateRuntimeSessionRef.current) {
+           continuationItems = dashboardContinuationItemsFromTranscript(
+             messagesRef.current,
+@@ -2335,11 +2459,13 @@ export function useDashboardChatTransport({
+           continuationItems = [];
+         }
+         await recordContinuationItems(continuationItems);
++        modelSetupStage = true;
+         const selectedSessionId = await ensureSelectedModel(
+           submissionClient,
+           runtimeSessionId,
+           assertSubmission,
+         );
++        modelSetupStage = false;
+         assertSubmission();
+         await recordContinuationItems(mergePendingRecoveredContinuation([]));
+         const syncedAttachments = await syncDashboardAttachments(
+@@ -2383,9 +2509,11 @@ export function useDashboardChatTransport({
+       } catch (err) {
+         if (!ownsSubmission()) return retireSupersededSubmission();
+         appliedModelRef.current = null;
+-        // Busy is an admission refusal, not a failed provider runtime. Keep
+-        // the resumed conversation so a later retry cannot fork its history.
+-        recreateRuntimeSessionRef.current = !isDashboardSessionBusyError(err);
++        // Busy is an admission refusal, not a failed provider runtime, and a
++        // refused model switch leaves the runtime as it was: keep both, show
++        // the error, retry on the next send. Neither may fork the history.
++        recreateRuntimeSessionRef.current =
++          !modelSetupStage && !isDashboardSessionBusyError(err);
+         const message = err instanceof Error ? err.message : String(err);
+         return failActiveTurn(message);
+       }

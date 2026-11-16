@@ -17,6 +17,32 @@
 #     ~/.hermes) and the Hermes Office setup (git clone + npm install)
 #     refuse to run;
 #   - no project `.env` is read from the working directory.
+# ./session-model.patch (dashboard chats; tests in the build's checkPhase):
+#   - the composer's model picker shows the model the session really runs
+#     (its stored route via GET /api/sessions/{id}, then resume answers and
+#     session.info), not the profile default, which only a brand-new chat
+#     starts on. Upstream showed config.yaml's default for every chat
+#     without a local pick;
+#   - the app switches a chat's model only after the user picks one in that
+#     chat, once (the pick is dropped when applied or refused), never on
+#     open, reconnect or a plain send. Upstream re-applied the picker's value
+#     (i.e. the default) with /model before every send;
+#   - the switch first waits for the session's agent (a resumed chat's agent
+#     is built in the background; a pick sent before it is up was replaced
+#     by the stored route), then goes through the gateway's `config.set
+#     model` (queues the pick while a turn runs, reports a failed agent
+#     build, asks before an expensive model via a confirm dialog) instead of
+#     `slash.exec /model`, which on a runtime without an agent switched only
+#     the slash worker and answered "Model switched"; it is checked against
+#     the live agent afterwards;
+#   - a refused switch or a failed turn never replaces a saved chat with a
+#     new session (that forked the conversation): the error shows, the
+#     runtime is kept (refused switch) or the same chat is resumed (failed
+#     turn), and the next send retries there.
+#   Limits: Remote connections only for the stored route (SSH/local chats
+#   show the session's model once Hermes reports it on the first resume);
+#   the local per-session pick store is still written but no longer forces
+#   a model on reopen.
 # ./links-external.patch: every link opens in the system browser, only on
 #   the user's click; the in-app "Web Preview" pane (a <webview>) and its
 #   automatic opening on web tool events are gone.
@@ -76,6 +102,7 @@ buildNpmPackage rec {
     ./links-external.patch
     ./compact-activity.patch
     ./busy-input-steer.patch
+    ./session-model.patch
   ];
 
   # ./remote-models-all-configured.patch's behaviour (and upstream's cases
@@ -135,7 +162,9 @@ buildNpmPackage rec {
       tests/remote-oauth-native.test.ts tests/remote-oauth.test.ts \
       src/renderer/src/components/AgentMarkdown.links-external.test.tsx \
       src/renderer/src/screens/Chat/activityRuns.test.tsx \
-      src/renderer/src/screens/Chat/MessageList.test.tsx
+      src/renderer/src/screens/Chat/MessageList.test.tsx \
+      src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.test.tsx \
+      src/renderer/src/screens/Chat/Chat.connection-config.test.tsx
     runHook postCheck
   '';
 
