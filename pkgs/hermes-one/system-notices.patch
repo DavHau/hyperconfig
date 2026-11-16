@@ -253,7 +253,7 @@ index 0000000..4d121aa
 +  );
 +});
 diff --git a/src/renderer/src/screens/Chat/dashboardEventAdapter.ts b/src/renderer/src/screens/Chat/dashboardEventAdapter.ts
-index ab94408..5b48b63 100644
+index ab94408..a6d7a70 100644
 --- a/src/renderer/src/screens/Chat/dashboardEventAdapter.ts
 +++ b/src/renderer/src/screens/Chat/dashboardEventAdapter.ts
 @@ -10,6 +10,7 @@ import type {
@@ -264,12 +264,18 @@ index ab94408..5b48b63 100644
  } from "./types";
  
  export interface DashboardStreamEvent<T = unknown> {
-@@ -713,6 +714,45 @@ function completeAssistantWithFinalText(
+@@ -713,6 +714,51 @@ function completeAssistantWithFinalText(
    ];
  }
  
 +/** A `status.update {kind: "process", text}` as a live notice row; null for
-+ *  other status kinds (heartbeats, model/busy states) and empty text. */
++ *  other status kinds (heartbeats, model/busy states) and empty text.
++ *  The `notice-live-*` row has no reconciliation key (sessionHistory.ts
++ *  `reconciliationKey`), so it never pairs with the stored `db-n-*` row.
++ *  No duplicates today: only the dashboard transport emits it, and that
++ *  path never reconciles its transcript with the DB (the legacy IPC path's
++ *  `reconcileAfterDbRefresh` drops such rows in favour of the stored one);
++ *  the stored row shows on the next reopen instead. */
 +export function liveNoticeFromStatus(
 +  payload: unknown,
 +  now: number,
@@ -310,7 +316,7 @@ index ab94408..5b48b63 100644
  export function applyDashboardStreamEvent(
    state: DashboardEventState,
    event: DashboardStreamEvent,
-@@ -791,6 +831,19 @@ export function applyDashboardStreamEvent(
+@@ -791,6 +837,19 @@ export function applyDashboardStreamEvent(
          reasoningSegmentClosed: true,
        };
      }
@@ -331,7 +337,7 @@ index ab94408..5b48b63 100644
        const finalText = textFromPayload(event.payload, "text", "rendered");
        const finalReasoning = thinkingTextFromPayload(
 diff --git a/src/renderer/src/screens/Chat/sessionHistory.ts b/src/renderer/src/screens/Chat/sessionHistory.ts
-index 9e48e16..04138fe 100644
+index 9e48e16..af5a7b3 100644
 --- a/src/renderer/src/screens/Chat/sessionHistory.ts
 +++ b/src/renderer/src/screens/Chat/sessionHistory.ts
 @@ -6,6 +6,7 @@ import {
@@ -428,12 +434,32 @@ index 9e48e16..04138fe 100644
        ...(needsContent ? { content: d.content } : {}),
        ...(needsAttachments ? { attachments: d.attachments } : {}),
        ...(timestamp !== undefined ? { timestamp } : {}),
+@@ -629,11 +671,19 @@ export function preserveLocalAssistantErrors(
+   return output;
+ }
+ 
++function isLiveNotice(m: ChatMessage): boolean {
++  return "kind" in m && m.kind === "notice" && m.id.startsWith("notice-live-");
++}
++
+ function isDbSyncable(
+   m: ChatMessage,
+   failedUserIds: ReadonlySet<string>,
+ ): boolean {
+   if (isAssistantError(m)) return false;
++  // A live notice (Nix, system-notices.patch, `notice-live-*`) has no
++  // reconciliation key, so a DB refresh would keep it next to the stored
++  // row (`db-n-*`); the stored row is the canonical one, drop the live copy.
++  if (isLiveNotice(m)) return false;
+   if (isBubbleMessage(m)) {
+     if (m.localOnly) return false;
+     if (failedUserIds.has(m.id)) return false;
 diff --git a/src/renderer/src/screens/Chat/systemNotices.test.tsx b/src/renderer/src/screens/Chat/systemNotices.test.tsx
 new file mode 100644
-index 0000000..c0d41f4
+index 0000000..43230f0
 --- /dev/null
 +++ b/src/renderer/src/screens/Chat/systemNotices.test.tsx
-@@ -0,0 +1,398 @@
+@@ -0,0 +1,415 @@
 +import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 +import { afterEach, describe, expect, it, vi } from "vitest";
 +import { classifyUserRow, describeSkillInvocation } from "./systemNotices";
@@ -817,6 +843,23 @@ index 0000000..c0d41f4
 +      notice: "process",
 +      label: "Background process finished",
 +    });
++  });
++
++  it("a DB refresh keeps the stored notice, not the live copy", () => {
++    const live: ChatMessage = {
++      id: "notice-live-1000-1",
++      kind: "notice",
++      role: "user",
++      notice: "process",
++      label: "Background process finished",
++      detail: "Background Process Finished: echo example",
++      text: "Background Process Finished: echo example",
++      timestamp: 1000,
++    };
++    const stored: ChatMessage = { ...live, id: "db-n-7" };
++    const user: ChatMessage = { id: "u1", role: "user", content: "hi" };
++    const merged = reconcileAfterDbRefresh([user, live], [user, stored]);
++    expect(merged.map((m) => m.id)).toEqual(["u1", "db-n-7"]);
 +  });
 +
 +  it("ignores other status kinds", () => {

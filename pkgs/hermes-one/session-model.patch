@@ -327,7 +327,7 @@ index 7f09bd7..72e2ee6 100644
      [selectModel],
    );
 diff --git a/src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.test.tsx b/src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.test.tsx
-index 21e6d07..259f12f 100644
+index 21e6d07..de45aee 100644
 --- a/src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.test.tsx
 +++ b/src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.test.tsx
 @@ -178,8 +178,18 @@ function Harness({
@@ -392,7 +392,7 @@ index 21e6d07..259f12f 100644
      );
    });
  
-@@ -969,56 +983,307 @@ describe("useDashboardChatTransport recovery", () => {
+@@ -969,56 +983,420 @@ describe("useDashboardChatTransport recovery", () => {
      },
    );
  
@@ -715,16 +715,129 @@ index 21e6d07..259f12f 100644
 +      await api.send?.("go");
 +    });
 +    const methods = dashboardMock.request.mock.calls.map(([method]) => method);
++    // Asked again while it is still starting (~2 min), then given up.
++    expect(methods.filter((m) => m === "approval.pending")).toHaveLength(4);
 +    expect(methods).not.toContain("config.set");
 +    expect(methods).not.toContain("prompt.submit");
 +    expect(applied).not.toHaveBeenCalled();
 +    expect(rejected).toHaveBeenCalled();
 +  });
 +
++  it("keeps waiting for an agent build that outlives the gateway's 30 s wait", async () => {
++    // session_registry.py `_wait_agent` answers 5032 AGENT_STILL_STARTING
++    // after 30 s; a cold build often takes longer. The pick must survive it.
++    let waits = 0;
++    let live = { model: "default-model", provider: "default-provider" };
++    dashboardMock.request.mockImplementation(async (method, params) => {
++      if (method === "session.resume")
++        return { session_id: "cold-runtime", resumed: "stored-chat" };
++      if (method === "approval.pending") {
++        waits += 1;
++        if (waits < 3)
++          throw new Error(
++            "Hermes is still starting this session (loading tools), so this command could not run yet.",
++          );
++        return { approvals: [] };
++      }
++      if (method === "model.options") return { ...live, providers: [] };
++      if (method === "config.set") {
++        const [m, , p] = String((params as { value: string }).value).split(" ");
++        live = { model: m, provider: p };
++        return { key: "model", value: m };
++      }
++      return {};
++    });
++    const applied = vi.fn();
++    const rejected = vi.fn();
++    const api: HarnessApi = {};
++    render(
++      <Harness
++        api={api}
++        hermesSessionId="stored-chat"
++        onModelPickApplied={applied}
++        onModelPickRejected={rejected}
++      />,
++    );
++    await act(async () => {
++      api.activeTurnRef!.current = { ...activeRecoveryTurn };
++      await api.send?.("go");
++    });
++    expect(waits).toBe(3);
++    expect(live).toEqual({ model: "bad-model", provider: "bad-provider" });
++    expect(applied).toHaveBeenCalledWith({
++      model: "bad-model",
++      provider: "bad-provider",
++    });
++    expect(rejected).not.toHaveBeenCalled();
++    expect(dashboardMock.request).toHaveBeenLastCalledWith("prompt.submit", {
++      session_id: "cold-runtime",
++      text: "go",
++    });
++  });
++
++  it("switches a custom-provider pick in place, without closing and resuming the runtime", async () => {
++    let live = { model: "default-model", provider: "openrouter" };
++    const providers = [
++      {
++        slug: "custom:lab",
++        name: "Lab",
++        base_url: "http://lab.invalid/v1",
++        models: ["lab-model"],
++      },
++    ];
++    dashboardMock.request.mockImplementation(async (method, params) => {
++      if (method === "session.resume")
++        return { session_id: "lab-runtime", resumed: "stored-chat" };
++      if (method === "approval.pending") return { approvals: [] };
++      if (method === "model.options") return { ...live, providers };
++      if (method === "config.set") {
++        expect(params).toEqual({
++          session_id: "lab-runtime",
++          key: "model",
++          value: "lab-model --provider custom:lab",
++        });
++        live = { model: "lab-model", provider: "custom:lab" };
++        return { key: "model", value: "lab-model" };
++      }
++      return {};
++    });
++    const applied = vi.fn();
++    const rejected = vi.fn();
++    const api: HarnessApi = {};
++    render(
++      <Harness
++        api={api}
++        hermesSessionId="stored-chat"
++        initialModel="lab-model"
++        initialProvider="custom"
++        onModelPickApplied={applied}
++        onModelPickRejected={rejected}
++      />,
++    );
++    await act(async () => {
++      api.activeTurnRef!.current = { ...activeRecoveryTurn };
++      await api.send?.("go");
++    });
++    const methods = dashboardMock.request.mock.calls.map(([method]) => method);
++    expect(methods).not.toContain("session.close");
++    expect(methods.filter((m) => m === "session.resume")).toHaveLength(1);
++    expect(methods).not.toContain("session.create");
++    expect(methods.filter((m) => m === "config.set")).toHaveLength(1);
++    expect(applied).toHaveBeenCalledWith({
++      model: "lab-model",
++      provider: "custom",
++    });
++    expect(rejected).not.toHaveBeenCalled();
++    expect(dashboardMock.request).toHaveBeenLastCalledWith("prompt.submit", {
++      session_id: "lab-runtime",
++      text: "go",
++    });
++  });
++
    // @lat: [[chat-commands#Busy refusal preserves conversation#Busy refusal never interrupts shared work]]
    it("does not interrupt busy upstream work when expiring a displayed approval", async () => {
      let rejectSubmit: ((reason: Error) => void) | undefined;
-@@ -1066,7 +1331,7 @@ describe("useDashboardChatTransport recovery", () => {
+@@ -1066,7 +1444,7 @@ describe("useDashboardChatTransport recovery", () => {
      expect(api.isLoading).toBe(false);
    });
  
@@ -733,7 +846,7 @@ index 21e6d07..259f12f 100644
      const requests: Array<{ method: string; params: unknown }> = [];
      let liveModel = "bad-model";
      let liveProvider = "bad-provider";
-@@ -1078,12 +1343,12 @@ describe("useDashboardChatTransport recovery", () => {
+@@ -1078,12 +1456,12 @@ describe("useDashboardChatTransport recovery", () => {
        if (method === "session.resume") {
          return { session_id: "live-recovery", resumed: "stored-chat" };
        }
@@ -751,7 +864,7 @@ index 21e6d07..259f12f 100644
          if (match) {
            liveModel = match[1];
            liveProvider = match[2];
-@@ -1135,16 +1400,22 @@ describe("useDashboardChatTransport recovery", () => {
+@@ -1135,16 +1513,22 @@ describe("useDashboardChatTransport recovery", () => {
        await api.send?.("recovery turn");
      });
  
@@ -779,7 +892,7 @@ index 21e6d07..259f12f 100644
      expect(requests).not.toContainEqual({
        method: "session.create",
        params: {
-@@ -1162,13 +1433,8 @@ describe("useDashboardChatTransport recovery", () => {
+@@ -1162,13 +1546,8 @@ describe("useDashboardChatTransport recovery", () => {
          userContent: "bad provider turn",
        },
      );
@@ -796,7 +909,7 @@ index 21e6d07..259f12f 100644
  
    it("discards an in-flight dashboard client after the connection mode changes", async () => {
 diff --git a/src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts b/src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts
-index eeb3bfd..35f8f9e 100644
+index eeb3bfd..820bdf7 100644
 --- a/src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts
 +++ b/src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts
 @@ -55,9 +55,36 @@ interface ModelOptionProvider {
@@ -859,7 +972,27 @@ index eeb3bfd..35f8f9e 100644
    setHermesSessionId: (id: string) => void;
    setIsLoading: (loading: boolean) => void;
    setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
-@@ -1036,6 +1073,9 @@ export function useDashboardChatTransport({
+@@ -231,6 +268,19 @@ export function isDashboardSessionNotFoundError(err: unknown): boolean {
+ }
+ 
+ // @lat: [[chat-commands#Busy refusal preserves conversation]]
++/** Tries of the agent wait before a pick (each up to the gateway's 30 s). */
++const AGENT_START_ATTEMPTS = 4;
++
++/** The gateway's 5032 AGENT_STILL_STARTING (tui_gateway/user_messages.py), or
++ *  this client's own 30 s timeout of the same wait. */
++function isAgentStillStartingError(err: unknown): boolean {
++  const message = err instanceof Error ? err.message : String(err);
++  return (
++    /\bstill starting\b/i.test(message) ||
++    /request timed out: approval\.pending\b/i.test(message)
++  );
++}
++
+ function isDashboardSessionBusyError(err: unknown): boolean {
+   const message = err instanceof Error ? err.message : String(err);
+   return /\bsession (?:is )?busy\b/i.test(message);
+@@ -1036,6 +1086,9 @@ export function useDashboardChatTransport({
    modelBaseUrl,
    profile,
    provider,
@@ -869,7 +1002,7 @@ index eeb3bfd..35f8f9e 100644
    setHermesSessionId,
    setIsLoading,
    setMessages,
-@@ -1045,6 +1085,12 @@ export function useDashboardChatTransport({
+@@ -1045,6 +1098,12 @@ export function useDashboardChatTransport({
    onPetEvent,
    onPetFailure,
  }: UseDashboardChatTransportArgs): UseDashboardChatTransportResult {
@@ -882,7 +1015,7 @@ index eeb3bfd..35f8f9e 100644
    const clientRef = useRef<DashboardGatewayClient | null>(null);
    const connectingRef = useRef<Promise<DashboardGatewayClient> | null>(null);
    const clientGenerationRef = useRef(0);
-@@ -1317,6 +1363,8 @@ export function useDashboardChatTransport({
+@@ -1317,6 +1376,8 @@ export function useDashboardChatTransport({
        }
  
        if (event.type === "session.info") {
@@ -891,7 +1024,7 @@ index eeb3bfd..35f8f9e 100644
          const recordRuntimeInfo = window.hermesAPI.recordAgentRuntimeInfo;
          if (typeof recordRuntimeInfo === "function") {
            void recordRuntimeInfo(event.payload, profile, connectionId).catch(
-@@ -1823,6 +1871,10 @@ export function useDashboardChatTransport({
+@@ -1823,6 +1884,10 @@ export function useDashboardChatTransport({
            storedSessionId: stored,
          });
          options.assertCurrent?.();
@@ -902,10 +1035,17 @@ index eeb3bfd..35f8f9e 100644
          const recordRuntimeInfo = window.hermesAPI.recordAgentRuntimeInfo;
          if (typeof recordRuntimeInfo === "function") {
            void recordRuntimeInfo(response.info, profile, connectionId).catch(
-@@ -1914,9 +1966,31 @@ export function useDashboardChatTransport({
-         return ensureRuntimeSession(client, { assertCurrent });
-       };
- 
+@@ -1898,128 +1963,163 @@ export function useDashboardChatTransport({
+     ): Promise<string> => {
+       const command = dashboardModelCommand(provider, model);
+       if (!command) return sessionId;
+-      const resetRuntimeSession = async (
+-        targetSessionId: string,
+-      ): Promise<string> => {
+-        const storedSessionId = storedSessionIdRef.current;
+-        await client
+-          .request("session.close", { session_id: targetSessionId })
+-          .catch(() => undefined);
 +      // With `--provider` the gateway only records a pick on a session whose
 +      // agent is not built yet (tui_gateway/methods_config_set.py), and the
 +      // agent a cold resume is still building comes up on the stored route,
@@ -913,44 +1053,113 @@ index eeb3bfd..35f8f9e 100644
 +      // default. So wait for the session's agent first: a read-only RPC
 +      // routed through the gateway's `_sess`, which builds and waits for it.
 +      // Then read its live model, switch, and validate on the live agent.
++      // The gateway's `_sess` gives up after 30 s with 5032 "still starting"
++      // (session_registry.py `_wait_agent`) and a cold agent build routinely
++      // takes longer, so a still-starting answer (or this client's own 30 s
++      // request timeout racing it) is asked again, up to ~2 min, with a
++      // "Starting agent…" status meanwhile. Any other error is final.
 +      const waitForAgent = async (targetSessionId: string): Promise<void> => {
++        let showedStatus = false;
 +        try {
-+          await client.request("approval.pending", {
-+            session_id: targetSessionId,
-+          });
-+        } catch (err) {
-+          const message = err instanceof Error ? err.message : String(err);
-+          throw new Error(
-+            `Hermes could not switch this chat to ${provider}/${model}: ${message}`,
-+          );
++          for (let attempt = 1; ; attempt++) {
++            try {
++              await client.request("approval.pending", {
++                session_id: targetSessionId,
++              });
++              break;
++            } catch (err) {
++              const message = err instanceof Error ? err.message : String(err);
++              if (
++                attempt < AGENT_START_ATTEMPTS &&
++                isAgentStillStartingError(err)
++              ) {
++                assertCurrent?.();
++                if (!showedStatus) setToolProgress("Starting agent…");
++                showedStatus = true;
++                continue;
++              }
++              throw new Error(
++                `Hermes could not switch this chat to ${provider}/${model}: ${message}`,
++              );
++            }
++          }
++        } finally {
++          if (showedStatus) setToolProgress(null);
 +        }
-+        assertCurrent?.();
-+      };
-+
+         assertCurrent?.();
+-        runtimeSessionIdRef.current = null;
+-        pendingApprovalsRef.current = [];
+-        storedSessionIdRef.current = storedSessionId;
+-        reasoningSegmentClosedRef.current = false;
+-        appliedModelRef.current = null;
+-        return ensureRuntimeSession(client, { assertCurrent });
+       };
+ 
        const switchAndValidate = async (
          targetSessionId: string,
        ): Promise<string> => {
+-        let before = await client.request<ModelOptionsResponse>(
 +        await waitForAgent(targetSessionId);
-         let before = await client.request<ModelOptionsResponse>(
++        // A custom-provider pick goes through the same config.set as any
++        // other: it switches the live agent once it is up (waited for above),
++        // so the runtime is not closed and resumed first (upstream's reset
++        // cost extra agent builds and was only needed for /model on a
++        // runtime without an agent).
++        const before = await client.request<ModelOptionsResponse>(
            "model.options",
            {
-@@ -1937,6 +2011,7 @@ export function useDashboardChatTransport({
-             (before.provider || "").toLowerCase().startsWith("custom"))
-         ) {
-           targetSessionId = await resetRuntimeSession(targetSessionId);
-+          await waitForAgent(targetSessionId);
-           before = await client.request<ModelOptionsResponse>("model.options", {
              session_id: targetSessionId,
-           });
-@@ -1958,6 +2033,7 @@ export function useDashboardChatTransport({
-           storedSessionIdRef.current
-         ) {
-           targetSessionId = await resetRuntimeSession(targetSessionId);
-+          await waitForAgent(targetSessionId);
+           },
+         );
+-        let dashboardProvider = resolveDashboardProviderForModel(
++        const dashboardProvider = resolveDashboardProviderForModel(
+           provider,
+           model,
+           modelBaseUrl,
+           before,
+         );
  
-           const rebuilt = await client.request<ModelOptionsResponse>(
-             "model.options",
-@@ -1974,50 +2050,93 @@ export function useDashboardChatTransport({
+-        if (
+-          storedSessionIdRef.current &&
+-          !dashboardModelMatches(dashboardProvider, model, before) &&
+-          (provider === "custom" ||
+-            (before.provider || "").toLowerCase().startsWith("custom"))
+-        ) {
+-          targetSessionId = await resetRuntimeSession(targetSessionId);
+-          before = await client.request<ModelOptionsResponse>("model.options", {
+-            session_id: targetSessionId,
+-          });
+-          dashboardProvider = resolveDashboardProviderForModel(
+-            provider,
+-            model,
+-            modelBaseUrl,
+-            before,
+-          );
+-          if (dashboardModelMatches(dashboardProvider, model, before)) {
+-            appliedModelRef.current = `${targetSessionId}\n${dashboardProvider}\n${model}`;
+-            return targetSessionId;
+-          }
+-        }
+-
+-        if (
+-          provider === "custom" &&
+-          dashboardProvider === "custom" &&
+-          storedSessionIdRef.current
+-        ) {
+-          targetSessionId = await resetRuntimeSession(targetSessionId);
+-
+-          const rebuilt = await client.request<ModelOptionsResponse>(
+-            "model.options",
+-            {
+-              session_id: targetSessionId,
+-            },
+-          );
+-          if (dashboardModelMatches("custom", model, rebuilt)) {
+-            appliedModelRef.current = `${targetSessionId}\ncustom\n${model}`;
+-            return targetSessionId;
+-          }
+-        }
+-
          const resolvedCommand = dashboardModelCommand(dashboardProvider, model);
          if (!resolvedCommand) return targetSessionId;
          const key = `${targetSessionId}\n${dashboardProvider}\n${model}`;
@@ -1071,9 +1280,12 @@ index eeb3bfd..35f8f9e 100644
 +      });
 +      return appliedSessionId;
      },
-     [ensureRuntimeSession, model, modelBaseUrl, provider],
+-    [ensureRuntimeSession, model, modelBaseUrl, provider],
++    [model, modelBaseUrl, provider, setToolProgress],
    );
-@@ -2300,9 +2419,14 @@ export function useDashboardChatTransport({
+ 
+   const syncDashboardAttachments = useCallback(
+@@ -2300,9 +2400,14 @@ export function useDashboardChatTransport({
            return result;
          },
        };
@@ -1089,7 +1301,7 @@ index eeb3bfd..35f8f9e 100644
          if (recreateRuntimeSessionRef.current) {
            continuationItems = dashboardContinuationItemsFromTranscript(
              messagesRef.current,
-@@ -2335,11 +2459,13 @@ export function useDashboardChatTransport({
+@@ -2335,11 +2440,13 @@ export function useDashboardChatTransport({
            continuationItems = [];
          }
          await recordContinuationItems(continuationItems);
@@ -1103,7 +1315,7 @@ index eeb3bfd..35f8f9e 100644
          assertSubmission();
          await recordContinuationItems(mergePendingRecoveredContinuation([]));
          const syncedAttachments = await syncDashboardAttachments(
-@@ -2383,9 +2509,11 @@ export function useDashboardChatTransport({
+@@ -2383,9 +2490,11 @@ export function useDashboardChatTransport({
        } catch (err) {
          if (!ownsSubmission()) return retireSupersededSubmission();
          appliedModelRef.current = null;

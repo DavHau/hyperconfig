@@ -29,12 +29,16 @@
 #     (i.e. the default) with /model before every send;
 #   - the switch first waits for the session's agent (a resumed chat's agent
 #     is built in the background; a pick sent before it is up was replaced
-#     by the stored route), then goes through the gateway's `config.set
+#     by the stored route; the gateway's 30 s wait answers "still starting"
+#     for a slow cold build, so that is asked again up to ~2 min, showing
+#     "Starting agent…"), then goes through the gateway's `config.set
 #     model` (queues the pick while a turn runs, reports a failed agent
 #     build, asks before an expensive model via a confirm dialog) instead of
 #     `slash.exec /model`, which on a runtime without an agent switched only
 #     the slash worker and answered "Model switched"; it is checked against
-#     the live agent afterwards;
+#     the live agent afterwards. A custom-provider pick switches the same
+#     way, without upstream's close+resume of the runtime first (extra
+#     agent builds);
 #   - a refused switch or a failed turn never replaces a saved chat with a
 #     new session (that forked the conversation): the error shows, the
 #     runtime is kept (refused switch) or the same chat is resumed (failed
