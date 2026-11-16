@@ -15,13 +15,20 @@
   variant,
 }:
 let
+  # nixpkgs' cargoSetupHook (since nixpkgs 5d2b81a7, 2026-11) runs
+  # cargoUseSystemLibs: LIBSQLITE3_SYS_USE_PKG_CONFIG,
+  # RUSTONIG_SYSTEM_LIBONIG and more override the crates' bundled
+  # builds, and voxtype's flake lists none of those libraries
+  # (`cannot find -lsqlite3`, no oniguruma.pc). Build as before, with
+  # the bundled copies, until voxtype's flake adapts.
+  bundledLibs = p: p.overrideAttrs { dontCargoUseSystemLibs = true; };
   # Each variant is a symlinkJoin wrapper (wrapVoxtype / wrapOnnx: PATH,
   # ORT_DYLIB_PATH) around one unwrapped build, which the flake also
   # exports as voxtype[-<variant>]-unwrapped. Patch that build and swap it
   # into the wrapper; `paths` of the wrapper itself are plain strings.
   unwrapped =
     voxtypePackages.${if variant == "default" then "voxtype-unwrapped" else "voxtype-${variant}-unwrapped"};
-  patchedUnwrapped = unwrapped.overrideAttrs (old: {
+  patchedUnwrapped = (bundledLibs unwrapped).overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [ ./take-archive.patch ];
     # voxtype's whole suite (incl. take_archive's tests) passes in the
     # sandbox; explicit so an upstream doCheck = false can't drop it.
@@ -33,9 +40,15 @@ let
       unwrapped = patchedUnwrapped;
     };
   });
+  # The CPU parakeet build spaces-os' voxtype-tuner shells out to, built
+  # the same way (unpatched: the tuner only transcribes).
+  parakeet = voxtypePackages.parakeet.overrideAttrs (old: {
+    paths = [ (bundledLibs voxtypePackages.voxtype-parakeet-unwrapped) ];
+  });
 in
 {
   voxtype = patched;
+  inherit parakeet;
   tool = writeShellApplication {
     name = "voxtype-archive";
     runtimeInputs = [

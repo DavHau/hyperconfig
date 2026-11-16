@@ -37,6 +37,24 @@ let
     inherit (config.spaces.voxtype) variant;
   };
   dir = "%h/.local/share/voxtype-archive";
+  # spaces-os' voxtype-tuner, pointed at our parakeet build
+  # (pkgs/voxtype-archive: voxtype's own no longer builds with nixpkgs'
+  # cargoSetupHook). It replaces the
+  # module's own tuner below (spaces.voxtype.tuner.enable forced off).
+  tuner =
+    inputs.spaces.packages.${pkgs.stdenv.hostPlatform.system}.voxtype-tuner.override
+      (old: {
+        inputs = old.inputs // {
+          voxtype = old.inputs.voxtype // {
+            packages = old.inputs.voxtype.packages // {
+              ${pkgs.stdenv.hostPlatform.system} =
+                old.inputs.voxtype.packages.${pkgs.stdenv.hostPlatform.system} // {
+                  inherit (archive) parakeet;
+                };
+            };
+          };
+        };
+      });
 in
 {
   options.hyper.voxtypeArchive = {
@@ -51,12 +69,33 @@ in
 
   config = lib.mkIf cfg.enable {
     programs.voxtype.package = lib.mkForce archive.voxtype;
-    environment.systemPackages = [ archive.tool ];
+    environment.systemPackages = [
+      archive.tool
+      tuner
+    ];
+    spaces.voxtype.tuner.enable = lib.mkForce false;
 
     systemd.user.services.voxtype = {
       # spaces-os puts its own voxtype first on the unit's PATH (the daemon
-      # script execs `voxtype` by name); the patched one goes before it.
-      path = lib.mkBefore [ archive.voxtype ];
+      # script execs `voxtype` by name); the patched one replaces it (its
+      # unpatched build no longer links with nixpkgs' cargoSetupHook, see
+      # pkgs/voxtype-archive). Otherwise spaces-os' list: `which`, then
+      # the default path, which mkForce would drop.
+      path = lib.mkForce (
+        [
+          archive.voxtype
+          pkgs.which
+        ]
+        # systemd.defaultPath is new in nixpkgs (2026-11); before it, the
+        # same list was built into every unit's path.
+        ++ config.systemd.defaultPath or [
+          pkgs.coreutils
+          pkgs.findutils
+          pkgs.gnugrep
+          pkgs.gnused
+          config.systemd.package
+        ]
+      );
       environment.VOXTYPE_ARCHIVE_DIR = dir;
     };
 
