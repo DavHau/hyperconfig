@@ -59,6 +59,18 @@
 #   is the fallback for a refusal (also while an approval prompt is pending)
 #   and now always drains. A steered message shows the user's own words,
 #   not hermes' marker, after a history reload ("sent while working").
+# ./system-notices.patch: hermes' own agent-facing messages, stored as
+#   role=user (subagent results, background-process exits, the crash-recovery
+#   note, compaction handoffs, model/personality switches), show as one
+#   compact muted row ("Subagent result · deleg_…", "Background process
+#   finished", "Resumed after restart", "Earlier conversation summarised")
+#   that expands to the full text, not as the user's bubble; also live, as
+#   soon as hermes announces a subagent result or a finished process
+#   (`status.update` kind=process), without reopening the chat. Typed by
+#   the dashboard's display_kind / display_metadata; hermes' message
+#   prefixes only for untyped rows (a skill invocation shows just "/skill —
+#   words", a legacy heartbeat is hidden). A failed turn's notice is an
+#   error card. Steers stay busy-input-steer.patch's.
 # What stays off without a patch: analytics (needs build-time
 # VITE_ANALYTICS_* secrets, unset here), the Hermes One account (device
 # login, only on a click; the wrappers point HERMES_API_URL at
@@ -103,10 +115,11 @@ buildNpmPackage rec {
     ./compact-activity.patch
     ./busy-input-steer.patch
     ./session-model.patch
+    ./system-notices.patch
   ];
 
   # ./remote-models-all-configured.patch's behaviour (and upstream's cases
-  # for the same file).
+  # for the same file); ./system-notices.patch's main-process side.
   postCheck = ''
     # These import the `electron` npm stub, which has no binary here.
     ELECTRON_OVERRIDE_DIST_PATH=${electron}/bin \
@@ -118,7 +131,8 @@ buildNpmPackage rec {
     node node_modules/vitest/vitest.mjs run \
       src/renderer/src/screens/Chat/Chat.busy-steer.test.tsx \
       src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.busy-steer.test.tsx \
-      src/main/sessions.steer-history.test.ts
+      src/main/sessions.steer-history.test.ts \
+      tests/system-notices-history.test.ts
   '';
 
   npmDepsHash = "sha256-yjLIByolfYcOjgCZ+gZuOSf9sx8AwwQZiW5hEr64fRY=";
@@ -164,7 +178,8 @@ buildNpmPackage rec {
       src/renderer/src/screens/Chat/activityRuns.test.tsx \
       src/renderer/src/screens/Chat/MessageList.test.tsx \
       src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.test.tsx \
-      src/renderer/src/screens/Chat/Chat.connection-config.test.tsx
+      src/renderer/src/screens/Chat/Chat.connection-config.test.tsx \
+      src/renderer/src/screens/Chat/systemNotices.test.tsx
     runHook postCheck
   '';
 

@@ -1,0 +1,1265 @@
+diff --git a/src/main/remote-sessions.ts b/src/main/remote-sessions.ts
+index abcdf1a..25ab72f 100644
+--- a/src/main/remote-sessions.ts
++++ b/src/main/remote-sessions.ts
+@@ -475,6 +475,8 @@ function normalizeMessageRow(row: RemoteRecord, index: number): RawMessageRow {
+     // Nix, busy-input-steer.patch: a steer's own words, not hermes' marker.
+     display_kind: nullableString(row.display_kind),
+     display_content: nullableString(row.display_content),
++    // Nix, system-notices.patch: hermes' typing of its own notices.
++    display_metadata: row.display_metadata ?? null,
+   };
+ }
+ 
+diff --git a/src/main/sessions.ts b/src/main/sessions.ts
+index 040bff4..68135aa 100644
+--- a/src/main/sessions.ts
++++ b/src/main/sessions.ts
+@@ -67,6 +67,9 @@ export type HistoryItem =
+       /** Sent while the agent worked and delivered into the running turn
+        *  (hermes `display_kind: "steer"`; Nix, busy-input-steer.patch). */
+       steered?: true;
++      /** hermes' display typing of the row (Nix, system-notices.patch). */
++      displayKind?: string;
++      displayMetadata?: unknown;
+     }
+   | {
+       kind: "assistant";
+@@ -75,6 +78,9 @@ export type HistoryItem =
+       timestamp: number;
+       error?: string;
+       attachments?: Attachment[];
++      /** "failed_turn" for hermes' failed-turn notice (Nix,
++       *  system-notices.patch). */
++      displayKind?: string;
+     }
+   | {
+       kind: "reasoning";
+@@ -579,6 +585,9 @@ export interface RawMessageRow {
+   /** What the transcript shows instead of `content` (dashboard REST only;
+    *  set for steers and vetoed prompts). */
+   display_content?: string | null;
++  /** Dashboard REST only: details of a typed notice (delegation id, …).
++   *  Nix, system-notices.patch. */
++  display_metadata?: unknown;
+ }
+ 
+ // Nix, busy-input-steer.patch: hermes stores a mid-turn steer as a role=user
+@@ -641,6 +650,14 @@ export function expandRowsToHistory(rows: RawMessageRow[]): HistoryItem[] {
+           ? { attachments: decoded.attachments }
+           : {}),
+         ...(r.display_kind === "steer" ? { steered: true as const } : {}),
++        // Nix, system-notices.patch: hermes' typing of its own notices (a
++        // steer is already carried by `steered` above).
++        ...(r.display_kind && r.display_kind !== "steer"
++          ? { displayKind: r.display_kind }
++          : {}),
++        ...(r.display_metadata != null
++          ? { displayMetadata: r.display_metadata }
++          : {}),
+       });
+       continue;
+     }
+@@ -666,6 +683,9 @@ export function expandRowsToHistory(rows: RawMessageRow[]): HistoryItem[] {
+           ...(decoded.attachments.length > 0
+             ? { attachments: decoded.attachments }
+             : {}),
++          ...(r.display_kind === "failed_turn"
++            ? { displayKind: r.display_kind }
++            : {}),
+         });
+       }
+ 
+diff --git a/src/preload/index.d.ts b/src/preload/index.d.ts
+index 415721c..5795bf8 100644
+--- a/src/preload/index.d.ts
++++ b/src/preload/index.d.ts
+@@ -738,6 +738,8 @@ interface HermesAPI {
+           timestamp: number;
+           attachments?: Attachment[];
+           steered?: true;
++          displayKind?: string;
++          displayMetadata?: unknown;
+         }
+       | {
+           kind: "assistant";
+@@ -746,6 +748,7 @@ interface HermesAPI {
+           timestamp: number;
+           error?: string;
+           attachments?: Attachment[];
++          displayKind?: string;
+         }
+       | {
+           kind: "reasoning";
+diff --git a/src/renderer/src/assets/main.css b/src/renderer/src/assets/main.css
+index 1cbdaa2..3ffff90 100644
+--- a/src/renderer/src/assets/main.css
++++ b/src/renderer/src/assets/main.css
+@@ -18195,3 +18195,75 @@ body:has(.shell-vibrant),
+   line-height: 1.2;
+   opacity: 0.7;
+ }
++
++/* ── Hermes' own notices (subagent results, process exits, …) ────────── */
++.chat-notice {
++  margin: 2px 0 2px 40px;
++  min-width: 0;
++  font-size: 12px;
++  color: var(--text-muted);
++}
++
++.chat-notice-summary {
++  display: flex;
++  align-items: center;
++  gap: 6px;
++  max-width: 100%;
++  padding: 2px 6px;
++  border: none;
++  border-radius: 6px;
++  background: transparent;
++  color: inherit;
++  font: inherit;
++  text-align: left;
++  cursor: pointer;
++}
++
++.chat-notice-summary:hover,
++.chat-notice-summary:focus-visible {
++  color: var(--text-primary);
++}
++
++.chat-notice-icon,
++.chat-notice-chevron {
++  flex: 0 0 auto;
++  opacity: 0.7;
++  transition: transform 0.15s ease;
++}
++
++.chat-notice-chevron--open {
++  transform: rotate(90deg);
++}
++
++.chat-notice-label {
++  flex: 0 0 auto;
++  white-space: nowrap;
++}
++
++.chat-notice-detail {
++  flex: 0 1 auto;
++  min-width: 0;
++  overflow: hidden;
++  white-space: nowrap;
++  text-overflow: ellipsis;
++  opacity: 0.75;
++}
++
++.chat-notice--subagent_failed .chat-notice-label {
++  color: var(--error, #ef4444);
++}
++
++.chat-notice-text {
++  margin: 4px 0 6px 6px;
++  padding: 8px 10px;
++  max-height: 480px;
++  overflow: auto;
++  border-left: 1px solid var(--border, rgba(127, 127, 127, 0.18));
++  background: var(--code-bg, rgba(127, 127, 127, 0.04));
++  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
++  font-size: 12px;
++  line-height: 1.5;
++  white-space: pre-wrap;
++  word-break: break-word;
++  color: var(--text-secondary);
++}
+diff --git a/src/renderer/src/screens/Chat/MessageList.tsx b/src/renderer/src/screens/Chat/MessageList.tsx
+index 4ca7755..ea618d2 100644
+--- a/src/renderer/src/screens/Chat/MessageList.tsx
++++ b/src/renderer/src/screens/Chat/MessageList.tsx
+@@ -19,6 +19,7 @@ import {
+   type ActivityItem,
+ } from "./activityRuns";
+ import { ClarifyCard } from "./ClarifyCard";
++import { NoticeRow } from "./NoticeRow";
+ import { useI18n } from "../../components/useI18n";
+ import { ApprovalCard } from "./ApprovalCard";
+ import type { ApprovalChoice } from "../../../../shared/chat-approval";
+@@ -28,6 +29,7 @@ import type {
+   ClarifyMessage,
+   ToolCallMessage,
+   ToolResultMessage,
++  NoticeMessage,
+ } from "./types";
+ 
+ /**
+@@ -450,6 +452,11 @@ export const MessageList = memo(function MessageList({
+       continue;
+     }
+ 
++    if (k === "notice") {
++      rows.push(<NoticeRow key={msg.id} msg={msg as NoticeMessage} />);
++      continue;
++    }
++
+     if (k === "clarify") {
+       rows.push(
+         <ClarifyCard
+diff --git a/src/renderer/src/screens/Chat/NoticeRow.tsx b/src/renderer/src/screens/Chat/NoticeRow.tsx
+new file mode 100644
+index 0000000..4d121aa
+--- /dev/null
++++ b/src/renderer/src/screens/Chat/NoticeRow.tsx
+@@ -0,0 +1,43 @@
++import { memo, useState } from "react";
++import { ChevronRight, Info } from "lucide-react";
++import type { NoticeMessage } from "./types";
++
++/**
++ * One of hermes' own agent-facing messages (a subagent result, a finished
++ * background process, a crash-recovery note, a compaction summary): one
++ * compact, muted row instead of a user bubble. A click shows the full text.
++ */
++export const NoticeRow = memo(function NoticeRow({
++  msg,
++}: {
++  msg: NoticeMessage;
++}): React.JSX.Element {
++  const [open, setOpen] = useState(false);
++  return (
++    <div
++      className={`chat-notice chat-notice--${msg.notice}`}
++      data-testid="notice-row"
++      data-notice={msg.notice}
++    >
++      <button
++        type="button"
++        className="chat-notice-summary"
++        aria-expanded={open}
++        onClick={() => setOpen((o) => !o)}
++      >
++        <Info size={12} className="chat-notice-icon" />
++        <span className="chat-notice-label">{msg.label}</span>
++        {msg.detail && <span className="chat-notice-detail">{msg.detail}</span>}
++        <ChevronRight
++          size={12}
++          className={`chat-notice-chevron${open ? " chat-notice-chevron--open" : ""}`}
++        />
++      </button>
++      {open && (
++        <pre className="chat-notice-text" data-testid="notice-text">
++          {msg.text}
++        </pre>
++      )}
++    </div>
++  );
++});
+diff --git a/src/renderer/src/screens/Chat/dashboardEventAdapter.ts b/src/renderer/src/screens/Chat/dashboardEventAdapter.ts
+index ab94408..5b48b63 100644
+--- a/src/renderer/src/screens/Chat/dashboardEventAdapter.ts
++++ b/src/renderer/src/screens/Chat/dashboardEventAdapter.ts
+@@ -10,6 +10,7 @@ import type {
+   ChatBubbleMessage,
+   ChatMessage,
+   ClarifyMessage,
++  NoticeMessage,
+ } from "./types";
+ 
+ export interface DashboardStreamEvent<T = unknown> {
+@@ -713,6 +714,45 @@ function completeAssistantWithFinalText(
+   ];
+ }
+ 
++/** A `status.update {kind: "process", text}` as a live notice row; null for
++ *  other status kinds (heartbeats, model/busy states) and empty text. */
++export function liveNoticeFromStatus(
++  payload: unknown,
++  now: number,
++  index: number,
++): NoticeMessage | null {
++  if (!payload || typeof payload !== "object") return null;
++  const p = payload as { kind?: unknown; text?: unknown };
++  if (p.kind !== "process" || typeof p.text !== "string") return null;
++  const text = p.text.trim();
++  if (!text) return null;
++  const subagent = /^Subagent Tasks? /.exec(text);
++  const failed = /^Subagent Tasks? (Failed|Cancelled|Interrupted|Timed Out|Stalled|Finished with Issues)/.test(text);
++  const process = text.startsWith("Background Process");
++  return {
++    id: `notice-live-${now}-${index}`,
++    kind: "notice",
++    role: "user",
++    notice: subagent
++      ? failed
++        ? "subagent_failed"
++        : "subagent"
++      : process
++        ? "process"
++        : "system",
++    label: subagent
++      ? failed
++        ? "Subagent failed"
++        : "Subagent result"
++      : process
++        ? "Background process finished"
++        : "System notice",
++    detail: text,
++    text,
++    timestamp: now,
++  };
++}
++
+ export function applyDashboardStreamEvent(
+   state: DashboardEventState,
+   event: DashboardStreamEvent,
+@@ -791,6 +831,19 @@ export function applyDashboardStreamEvent(
+         reasoningSegmentClosed: true,
+       };
+     }
++    case "status.update": {
++      // Nix, system-notices.patch: hermes announces a subagent result or a
++      // finished background process here (tui_gateway/session_notifications.py)
++      // while it injects the full text into the agent as a role=user row the
++      // live stream never sends. Show it now as the same compact notice row
++      // history will show, not only after the session is reopened.
++      const row = liveNoticeFromStatus(event.payload, now, state.messages.length);
++      if (!row) return state;
++      return {
++        messages: [...state.messages, row],
++        reasoningSegmentClosed: true,
++      };
++    }
+     case "message.complete": {
+       const finalText = textFromPayload(event.payload, "text", "rendered");
+       const finalReasoning = thinkingTextFromPayload(
+diff --git a/src/renderer/src/screens/Chat/sessionHistory.ts b/src/renderer/src/screens/Chat/sessionHistory.ts
+index 9e48e16..04138fe 100644
+--- a/src/renderer/src/screens/Chat/sessionHistory.ts
++++ b/src/renderer/src/screens/Chat/sessionHistory.ts
+@@ -6,6 +6,7 @@ import {
+ } from "./chatMessages";
+ import { toolResultFailed } from "./activityRuns";
+ import { isLossyChunkCopy } from "./lossyText";
++import { classifyUserRow } from "./systemNotices";
+ import type { ActiveTurn, ChatMessage, ChatBubbleMessage } from "./types";
+ 
+ /**
+@@ -26,6 +27,9 @@ export interface DbHistoryItem {
+   attachments?: Attachment[];
+   /** A user message sent mid-turn (Nix, busy-input-steer.patch). */
+   steered?: boolean;
++  /** hermes' display typing (Nix, system-notices.patch). */
++  displayKind?: string;
++  displayMetadata?: unknown;
+ }
+ 
+ /**
+@@ -49,20 +53,54 @@ export function dbItemsToChatMessages(
+   return items
+     .map((it): ChatMessage | null => {
+       switch (it.kind) {
+-        case "user":
++        case "user": {
++          // Hermes' own agent-facing rows: a notice row (or nothing).
++          const view = classifyUserRow({
++            content: it.content || "",
++            displayKind: it.displayKind,
++            displayMetadata: it.displayMetadata,
++          });
++          if (view.type === "hidden") return null;
++          if (view.type === "notice") {
++            return {
++              id: `db-n-${it.id}`,
++              kind: "notice",
++              role: "user",
++              notice: view.notice,
++              label: view.label,
++              ...(view.detail ? { detail: view.detail } : {}),
++              text: view.text,
++              ...(typeof it.timestamp === "number"
++                ? { timestamp: it.timestamp }
++                : {}),
++            };
++          }
+           return {
+             id: `db-${it.id}`,
+             role: "user",
+-            content: it.content || "",
++            content: view.content,
++            ...(view.steered || it.steered ? { steered: true } : {}),
+             ...(typeof it.timestamp === "number"
+               ? { timestamp: it.timestamp }
+               : {}),
+             ...(it.attachments && it.attachments.length > 0
+               ? { attachments: it.attachments }
+               : {}),
+-            ...(it.steered ? { steered: true } : {}),
+           };
++        }
+         case "assistant":
++          // hermes' failed-turn notice ("Your request was not processed…"):
++          // an error card, not an answer (Nix, system-notices.patch).
++          if (it.displayKind === "failed_turn" && it.content)
++            return {
++              id: `db-${it.id}`,
++              role: "agent",
++              content: "",
++              error: it.content,
++              ...(typeof it.timestamp === "number"
++                ? { timestamp: it.timestamp }
++                : {}),
++            };
+           return {
+             id: `db-${it.id}`,
+             role: "agent",
+@@ -316,13 +354,17 @@ function mergeDbMetadataIntoStreamed(
+     !!d.attachments &&
+     d.attachments.length > 0 &&
+     (!s.attachments || s.attachments.length === 0);
++  // A live bubble the stored row reveals as a steer gets the one label.
++  const needsSteered = !!d.steered && !s.steered;
+   if (
+     needsContent ||
+     needsAttachments ||
++    needsSteered ||
+     (timestamp !== undefined && timestamp !== s.timestamp)
+   ) {
+     return {
+       ...s,
++      ...(needsSteered ? { steered: true } : {}),
+       ...(needsContent ? { content: d.content } : {}),
+       ...(needsAttachments ? { attachments: d.attachments } : {}),
+       ...(timestamp !== undefined ? { timestamp } : {}),
+diff --git a/src/renderer/src/screens/Chat/systemNotices.test.tsx b/src/renderer/src/screens/Chat/systemNotices.test.tsx
+new file mode 100644
+index 0000000..c0d41f4
+--- /dev/null
++++ b/src/renderer/src/screens/Chat/systemNotices.test.tsx
+@@ -0,0 +1,398 @@
++import { cleanup, fireEvent, render, screen } from "@testing-library/react";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { classifyUserRow, describeSkillInvocation } from "./systemNotices";
++import { applyDashboardStreamEvent } from "./dashboardEventAdapter";
++import {
++  dbItemsToChatMessages,
++  reconcileAfterDbRefresh,
++} from "./sessionHistory";
++import { NoticeRow } from "./NoticeRow";
++import { MessageList } from "./MessageList";
++import type { ChatMessage, NoticeMessage } from "./types";
++
++vi.mock("../../components/useI18n", () => ({
++  useI18n: () => ({
++    t: (key: string) => key,
++    locale: "en",
++    setLocale: vi.fn(),
++  }),
++}));
++
++// Synthetic examples in hermes' formats (no real transcript content).
++const BATCH =
++  "[ASYNC DELEGATION BATCH COMPLETE — deleg_6605942c]\n" +
++  "A background fan-out unit you dispatched earlier — 1 subagent(s) — has finished.\n" +
++  "--- ✓ TASK 1/1: write a haiku  (status=completed) ---\nan example result";
++const TASK_FAILED =
++  "[ASYNC DELEGATION TASK FAILED — deleg_0badc0de, task 2/3]\n" +
++  "One subagent in a background fan-out you dispatched has failed.\nError: example";
++const INTERRUPTED =
++  "[System note: Your previous turn was interrupted mid-run — the app or its backend " +
++  "process stopped before the turn could finish. The interrupted request was:]\n\nhello";
++const PROCESS =
++  "[IMPORTANT: Background process proc_1a2b exited (exit code 0).\n" +
++  "Command: echo example\nOutput:\nexample]";
++const COMPACTION =
++  "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted into the summary below.\n" +
++  "## Summary\nexample summary";
++
++afterEach(cleanup);
++
++describe("classifyUserRow: server metadata", () => {
++  it("labels a delegation result from display_metadata", () => {
++    const view = classifyUserRow({
++      content: BATCH,
++      displayKind: "async_delegation_complete",
++      displayMetadata: JSON.stringify({
++        delegation_id: "deleg_6605942c",
++        task_count: 1,
++        completed_count: 1,
++        failed_count: 0,
++        display_text: "Subagent Task Completed: write a haiku",
++      }),
++    });
++    expect(view).toEqual({
++      type: "notice",
++      notice: "subagent",
++      label: "Subagent result · deleg_6605942c",
++      detail: "Subagent Task Completed: write a haiku",
++      text: BATCH,
++    });
++  });
++
++  it("marks an early task failure as failed and respects suppression", () => {
++    const meta = {
++      delegation_id: "deleg_0badc0de",
++      delivery_notice: "task_failure:1",
++      failed_count: 1,
++      completed_count: 0,
++    };
++    const view = classifyUserRow({
++      content: TASK_FAILED,
++      displayKind: "async_delegation_complete",
++      displayMetadata: meta,
++    });
++    expect(view).toMatchObject({
++      type: "notice",
++      notice: "subagent_failed",
++      label: "Subagent failed · deleg_0badc0de",
++    });
++    expect(
++      classifyUserRow({
++        content: TASK_FAILED,
++        displayKind: "async_delegation_complete",
++        displayMetadata: { ...meta, presentation_suppressed: true },
++      }),
++    ).toEqual({ type: "hidden" });
++  });
++
++  it("uses process_complete's display_text", () => {
++    expect(
++      classifyUserRow({
++        content: PROCESS,
++        displayKind: "process_complete",
++        displayMetadata: {
++          display_text: "Background Process Finished: echo example",
++        },
++      }),
++    ).toMatchObject({
++      notice: "process",
++      label: "Background process finished",
++      detail: "Background Process Finished: echo example",
++    });
++  });
++
++  it("maps auto_continue and hides hidden rows", () => {
++    expect(
++      classifyUserRow({ content: INTERRUPTED, displayKind: "auto_continue" }),
++    ).toMatchObject({ notice: "resumed", label: "Resumed after restart" });
++    expect(
++      classifyUserRow({
++        content: "[System: example nudge]",
++        displayKind: "hidden",
++      }),
++    ).toEqual({ type: "hidden" });
++  });
++
++  it("keeps a pure compaction handoff visible as a notice", () => {
++    expect(
++      classifyUserRow({ content: COMPACTION, displayKind: "hidden" }),
++    ).toMatchObject({
++      notice: "compaction",
++      label: "Earlier conversation summarised",
++      text: COMPACTION,
++    });
++  });
++
++  it("leaves a steer (already unwrapped by the history loader) a bubble", () => {
++    expect(
++      classifyUserRow({
++        content: "please also check the tests",
++        displayKind: "steer",
++      }),
++    ).toEqual({
++      type: "bubble",
++      content: "please also check the tests",
++      steered: true,
++    });
++  });
++
++  it("maps personality_switch to a notice", () => {
++    expect(
++      classifyUserRow({
++        content: "[System: personality changed to concise]",
++        displayKind: "personality_switch",
++      }),
++    ).toMatchObject({
++      type: "notice",
++      notice: "personality_switch",
++      label: "Personality changed",
++    });
++  });
++
++  it("an unknown display_kind stays a bubble (no prefix fallback)", () => {
++    expect(
++      classifyUserRow({ content: BATCH, displayKind: "some_future_kind" }),
++    ).toEqual({ type: "bubble", content: BATCH });
++  });
++});
++
++describe("classifyUserRow: prefix fallback for untyped rows", () => {
++  it.each([
++    [BATCH, "subagent", "Subagent result · deleg_6605942c"],
++    [TASK_FAILED, "subagent_failed", "Subagent failed · deleg_0badc0de"],
++    [INTERRUPTED, "resumed", "Resumed after restart"],
++    [PROCESS, "process", "Background process finished"],
++    [COMPACTION, "compaction", "Earlier conversation summarised"],
++  ])("%#", (content, notice, label) => {
++    const view = classifyUserRow({ content });
++    expect(view).toMatchObject({
++      type: "notice",
++      notice,
++      label,
++      text: content,
++    });
++  });
++
++  it("adds the process id and exit code as detail", () => {
++    expect(classifyUserRow({ content: PROCESS })).toMatchObject({
++      detail: "proc_1a2b · exit 0",
++    });
++  });
++
++  it("shows only the invocation of an untyped skill row", () => {
++    const single =
++      '[IMPORTANT: The user has invoked the "work" skill, indicating they want you to ' +
++      "follow its instructions. The full skill content is loaded below.]\n\n" +
++      "# Work\nexample skill body\n\n" +
++      "The user has provided the following instruction alongside the skill invocation: " +
++      "fix the  title";
++    expect(classifyUserRow({ content: single })).toEqual({
++      type: "bubble",
++      content: "/work — fix the title",
++    });
++    const bare =
++      '[IMPORTANT: The user has invoked the "work" skill, indicating they want you to ' +
++      "follow its instructions. The full skill content is loaded below.]\n\nbody";
++    expect(describeSkillInvocation(bare)).toBe("/work");
++    expect(describeSkillInvocation("plain")).toBeNull();
++  });
++
++  it("hides a legacy process heartbeat", () => {
++    expect(
++      classifyUserRow({
++        content:
++          "[Background process proc_1a2b heartbeat #3 — still running after 90s]",
++      }),
++    ).toEqual({ type: "hidden" });
++  });
++
++  it("leaves ordinary prompts alone", () => {
++    expect(classifyUserRow({ content: "[draft] fix the build" })).toEqual({
++      type: "bubble",
++      content: "[draft] fix the build",
++    });
++  });
++});
++
++describe("history mapping", () => {
++  it("a refresh keeps one copy of a notice and of a steered message", () => {
++    const db = dbItemsToChatMessages([
++      { kind: "user", id: 1, content: "write a haiku" },
++      { kind: "user", id: 2, content: BATCH },
++      {
++        kind: "user",
++        id: 3,
++        content: "please also check the tests",
++        displayKind: "steer",
++        steered: true,
++      },
++    ]);
++    expect(db[2]).toEqual({
++      id: "db-3",
++      role: "user",
++      content: "please also check the tests",
++      steered: true,
++    });
++    const current: ChatMessage[] = [
++      ...db.slice(0, 2),
++      {
++        id: "live-1",
++        role: "user",
++        content: "please also check the tests",
++        steered: true,
++      },
++    ];
++    const merged = reconcileAfterDbRefresh(current, db);
++    expect(merged.map((m) => m.id)).toEqual(["db-1", "db-n-2", "live-1"]);
++  });
++
++  it("a failed_turn assistant row becomes an error card", () => {
++    expect(
++      dbItemsToChatMessages([
++        {
++          kind: "assistant",
++          id: 9,
++          content: "Your request was not processed.",
++          displayKind: "failed_turn",
++        },
++      ]),
++    ).toEqual([
++      {
++        id: "db-9",
++        role: "agent",
++        content: "",
++        error: "Your request was not processed.",
++      },
++    ]);
++  });
++
++  it("drops hidden rows", () => {
++    expect(
++      dbItemsToChatMessages([
++        {
++          kind: "user",
++          id: 5,
++          content: "[System: nudge]",
++          displayKind: "hidden",
++        },
++      ]),
++    ).toEqual([]);
++  });
++});
++
++describe("rendering", () => {
++  const notice: NoticeMessage = {
++    id: "db-n-2",
++    kind: "notice",
++    role: "user",
++    notice: "subagent",
++    label: "Subagent result · deleg_6605942c",
++    text: BATCH,
++  };
++
++  it("NoticeRow is one compact row that expands to the full text", () => {
++    render(<NoticeRow msg={notice} />);
++    const button = screen.getByRole("button");
++    expect(button.textContent).toContain("Subagent result · deleg_6605942c");
++    expect(button.getAttribute("aria-expanded")).toBe("false");
++    expect(screen.queryByTestId("notice-text")).toBeNull();
++    fireEvent.click(button);
++    expect(button.getAttribute("aria-expanded")).toBe("true");
++    expect(screen.getByTestId("notice-text").textContent).toBe(BATCH);
++  });
++
++  it("MessageList renders a notice instead of a user bubble", () => {
++    const messages: ChatMessage[] = [
++      { id: "u1", role: "user", content: "write a haiku" },
++      notice,
++      { id: "s1", role: "user", content: "and a limerick", steered: true },
++      { id: "a1", role: "agent", content: "done" },
++    ];
++    const { container } = render(
++      <MessageList
++        messages={messages}
++        isLoading={false}
++        toolProgress={null}
++        onApprove={vi.fn()}
++        onDeny={vi.fn()}
++        onClarifyResolved={vi.fn()}
++        onApprovalRespond={vi.fn().mockResolvedValue(true)}
++        onApprovalResolved={vi.fn()}
++      />,
++    );
++    expect(screen.getAllByTestId("notice-row")).toHaveLength(1);
++    expect(container.querySelectorAll(".chat-bubble-user")).toHaveLength(2);
++    expect(container.textContent).not.toContain("ASYNC DELEGATION");
++    // One label, from busy-input-steer.patch's MessageRow.
++    const labels = container.querySelectorAll(".chat-bubble-steered");
++    expect(labels).toHaveLength(1);
++    expect(labels[0].textContent).toBe("chat.sentWhileWorking");
++  });
++});
++
++describe("live dashboard stream", () => {
++  it("status.update kind=process becomes a notice row at once", () => {
++    const state = { messages: [] as ChatMessage[], reasoningSegmentClosed: false };
++    const next = applyDashboardStreamEvent(
++      state,
++      {
++        type: "status.update",
++        payload: {
++          kind: "process",
++          text: "Subagent Task Completed: write a haiku",
++        },
++      },
++      { now: 1000 },
++    );
++    expect(next.messages).toEqual([
++      {
++        id: "notice-live-1000-0",
++        kind: "notice",
++        role: "user",
++        notice: "subagent",
++        label: "Subagent result",
++        detail: "Subagent Task Completed: write a haiku",
++        text: "Subagent Task Completed: write a haiku",
++        timestamp: 1000,
++      },
++    ]);
++    const failed = applyDashboardStreamEvent(
++      state,
++      {
++        type: "status.update",
++        payload: { kind: "process", text: "Subagent Task Failed: lint" },
++      },
++      { now: 1 },
++    );
++    expect(failed.messages[0]).toMatchObject({ notice: "subagent_failed" });
++    const proc = applyDashboardStreamEvent(
++      state,
++      {
++        type: "status.update",
++        payload: {
++          kind: "process",
++          text: "Background Process Finished: echo example",
++        },
++      },
++      { now: 1 },
++    );
++    expect(proc.messages[0]).toMatchObject({
++      notice: "process",
++      label: "Background process finished",
++    });
++  });
++
++  it("ignores other status kinds", () => {
++    const state = { messages: [] as ChatMessage[], reasoningSegmentClosed: false };
++    for (const payload of [
++      { kind: "heartbeat", text: "♥ heartbeat #2 firing…" },
++      { kind: "process", text: "  " },
++      null,
++    ]) {
++      expect(
++        applyDashboardStreamEvent(state, { type: "status.update", payload }),
++      ).toBe(state);
++    }
++  });
++});
+diff --git a/src/renderer/src/screens/Chat/systemNotices.ts b/src/renderer/src/screens/Chat/systemNotices.ts
+new file mode 100644
+index 0000000..11325f0
+--- /dev/null
++++ b/src/renderer/src/screens/Chat/systemNotices.ts
+@@ -0,0 +1,240 @@
++/**
++ * Hermes stores its own agent-facing messages (subagent results, background
++ * process completions, crash-recovery notes, compaction handoffs) as
++ * `role=user` rows. This module decides how such a row is shown: as the
++ * user's own bubble, as one compact system notice, or not at all.
++ *
++ * The dashboard's `GET /api/sessions/{id}/messages` types most of them with
++ * `display_kind` (+ `display_metadata`); the text prefixes below are only
++ * the fallback for rows hermes left untyped (older rows, a turn killed
++ * before its kind was stamped).
++ *
++ * Steers and `display_content` are not handled here: the history loaders
++ * (busy-input-steer.patch, main/sessions.ts expandRowsToHistory) already
++ * replaced the row's content with the user's own words and flagged a steer
++ * `steered`, which MessageRow labels "sent while working".
++ */
++
++export type SystemNoticeKind =
++  | "subagent"
++  | "subagent_failed"
++  | "process"
++  | "resumed"
++  | "compaction"
++  | "model_switch"
++  | "personality_switch"
++  | "system";
++
++export interface UserRowInput {
++  content: string;
++  displayKind?: string | null;
++  displayMetadata?: unknown;
++}
++
++export type UserRowView =
++  | { type: "bubble"; content: string; steered?: boolean }
++  | {
++      type: "notice";
++      notice: SystemNoticeKind;
++      /** One-line row label, e.g. "Subagent result · deleg_6605942c". */
++      label: string;
++      /** Optional muted detail after the label (hermes' own display text). */
++      detail?: string;
++      /** The full message, shown when the row is expanded. */
++      text: string;
++    }
++  | { type: "hidden" };
++
++function parseMetadata(raw: unknown): Record<string, unknown> {
++  let parsed = raw;
++  if (typeof parsed === "string") {
++    try {
++      parsed = JSON.parse(parsed);
++    } catch {
++      return {};
++    }
++  }
++  return parsed && typeof parsed === "object" && !Array.isArray(parsed)
++    ? (parsed as Record<string, unknown>)
++    : {};
++}
++
++function str(v: unknown): string | undefined {
++  return typeof v === "string" && v.trim() ? v.trim() : undefined;
++}
++
++function num(v: unknown): number | undefined {
++  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
++}
++
++const DELEG_RE =
++  /^\s*\[ASYNC DELEGATION (BATCH COMPLETE|COMPLETE|TASK FAILED) — ([^,\]\s]+)/;
++const COMPACTION_RE = /^\s*\[(?:CONTEXT COMPACTION|CONTEXT SUMMARY\]:)/;
++const PROCESS_RE = /\[IMPORTANT: Background process (\S+) ([^\n]*)/;
++const EXIT_RE = /\(exit code (-?\d+)/;
++const HEARTBEAT_RE = /^\[Background process \S+ heartbeat #/;
++const SKILL_PREFIX = "[IMPORTANT: The user has invoked the ";
++const SKILL_NAME_RE = /^\[IMPORTANT: The user has invoked the "([^"]*)"/;
++const SKILL_INSTRUCTION =
++  "The user has provided the following instruction alongside the skill invocation: ";
++
++function delegationLabel(id: string | undefined, failed: boolean): string {
++  const base = failed ? "Subagent failed" : "Subagent result";
++  return id ? `${base} · ${id}` : base;
++}
++
++/** "proc_1a2b · exit 0" from the first `[IMPORTANT: Background process …]`. */
++function processDetail(text: string): string | undefined {
++  const m = PROCESS_RE.exec(text);
++  if (!m) return undefined;
++  if (/matched/.test(m[2])) return `${m[1]} · matched watch pattern`;
++  const exit = EXIT_RE.exec(m[2]);
++  return exit ? `${m[1]} · exit ${exit[1]}` : m[1];
++}
++
++function notice(
++  kind: SystemNoticeKind,
++  label: string,
++  text: string,
++  detail?: string,
++): UserRowView {
++  return {
++    type: "notice",
++    notice: kind,
++    label,
++    text,
++    ...(detail ? { detail } : {}),
++  };
++}
++
++/** From hermes' `display_kind` (+ metadata). */
++function fromDisplayKind(row: UserRowInput, text: string): UserRowView {
++  const meta = parseMetadata(row.displayMetadata);
++  const displayText = str(meta.display_text);
++  switch (row.displayKind) {
++    case "hidden":
++      // The server hides a pure compaction handoff too; that one still
++      // gets its row, so the jump in the conversation is explained.
++      return COMPACTION_RE.test(text)
++        ? notice("compaction", "Earlier conversation summarised", text)
++        : { type: "hidden" };
++    case "steer":
++      // Already the user's words: busy-input-steer.patch's history loaders
++      // unwrapped them and set the one `steered` flag MessageRow labels.
++      return { type: "bubble", content: text, steered: true };
++    case "async_delegation_complete": {
++      if (meta.presentation_suppressed === true) return { type: "hidden" };
++      const id = str(meta.delegation_id) ?? DELEG_RE.exec(text)?.[2];
++      const failedCount = num(meta.failed_count) ?? 0;
++      const completed = num(meta.completed_count);
++      const failed =
++        String(meta.delivery_notice ?? "").startsWith("task_failure") ||
++        (failedCount > 0 && completed === 0) ||
++        DELEG_RE.exec(text)?.[1] === "TASK FAILED";
++      return notice(
++        failed ? "subagent_failed" : "subagent",
++        delegationLabel(id, failed),
++        text,
++        displayText,
++      );
++    }
++    case "process_complete":
++      return notice(
++        "process",
++        "Background process finished",
++        text,
++        displayText ?? processDetail(text),
++      );
++    case "auto_continue":
++      return notice("resumed", "Resumed after restart", text);
++    case "model_switch":
++      return notice("model_switch", "Model changed", text);
++    case "personality_switch":
++      return notice("personality_switch", "Personality changed", text);
++    case "internal_notification":
++      return notice("system", "System notice", text, displayText);
++    default:
++      // A kind this build does not know: the user's bubble as stored (the
++      // prefix fallback is only for rows hermes left untyped).
++      return { type: "bubble", content: text };
++  }
++}
++
++/** `/work — fix the title` for a skill invocation (hermes'
++ *  agent/skill_commands.py describe_skill_invocation, single skill and
++ *  bundle); null when the row is no skill scaffold. */
++export function describeSkillInvocation(text: string): string | null {
++  if (!text.startsWith(SKILL_PREFIX)) return null;
++  const name = (SKILL_NAME_RE.exec(text)?.[1] ?? "").trim();
++  const label = name.startsWith("/") ? name : `/${name}`;
++  let instruction: string | undefined;
++  if (text.includes(" skill bundle,")) {
++    instruction = cutAfter(text, "\nUser instruction: ", "\n\n[Loaded as part of the ", false);
++  } else if (text.includes("The full skill content is loaded below.]")) {
++    instruction = cutAfter(text, SKILL_INSTRUCTION, "\n\n[Runtime note:", true);
++  }
++  const words = instruction ? instruction.split(/\s+/).join(" ").trim() : "";
++  if (words) return name ? `${label} — ${words}` : words;
++  return name ? label : null;
++}
++
++function cutAfter(
++  text: string,
++  marker: string,
++  end: string,
++  last: boolean,
++): string | undefined {
++  const at = last ? text.lastIndexOf(marker) : text.indexOf(marker);
++  if (at === -1) return undefined;
++  const rest = text.slice(at + marker.length);
++  const stop = rest.indexOf(end);
++  return stop === -1 ? rest : rest.slice(0, stop);
++}
++
++/** Untyped rows: hermes' own control-frame openers. */
++function fromPrefix(text: string): UserRowView | undefined {
++  const head = text.trimStart();
++  // A skill invocation: only what the user typed, not the skill body.
++  const skill = describeSkillInvocation(head);
++  if (skill !== null) return { type: "bubble", content: skill };
++  // A legacy process heartbeat (newer hermes types it hidden): a wake, not
++  // a message.
++  if (HEARTBEAT_RE.test(head)) return { type: "hidden" };
++  const deleg = DELEG_RE.exec(head);
++  if (deleg) {
++    const failed = deleg[1] === "TASK FAILED";
++    return notice(
++      failed ? "subagent_failed" : "subagent",
++      delegationLabel(deleg[2], failed),
++      text,
++    );
++  }
++  if (head.startsWith("[ASYNC DELEGATION")) {
++    return notice("subagent", "Subagent result", text);
++  }
++  if (head.startsWith("[IMPORTANT: Background process ")) {
++    return notice(
++      "process",
++      "Background process finished",
++      text,
++      processDetail(head),
++    );
++  }
++  if (head.startsWith("[System note: Your previous turn was interrupted")) {
++    return notice("resumed", "Resumed after restart", text);
++  }
++  if (COMPACTION_RE.test(head)) {
++    return notice("compaction", "Earlier conversation summarised", text);
++  }
++  if (head.startsWith("[System:") || head.startsWith("[System note:")) {
++    return notice("system", "System notice", text);
++  }
++  return undefined;
++}
++
++/** How a stored `role=user` row is shown. */
++export function classifyUserRow(row: UserRowInput): UserRowView {
++  const text = row.content || "";
++  if (row.displayKind) return fromDisplayKind(row, text);
++  return fromPrefix(text) ?? { type: "bubble", content: text };
++}
+diff --git a/src/renderer/src/screens/Chat/types.ts b/src/renderer/src/screens/Chat/types.ts
+index fd517a8..6299263 100644
+--- a/src/renderer/src/screens/Chat/types.ts
++++ b/src/renderer/src/screens/Chat/types.ts
+@@ -107,8 +107,24 @@ export interface ApprovalMessage {
+   unavailable?: boolean;
+ }
+ 
++/** One of hermes' own agent-facing messages (stored as role=user): a
++ *  compact, muted row that expands to the full text (./systemNotices.ts). */
++export interface NoticeMessage {
++  id: string;
++  kind: "notice";
++  /** "user": it stands where hermes stored it, opening the agent's turn, so
++   *  turn-boundary and avatar logic treat it like the bubble it replaces. */
++  role: "user";
++  notice: import("./systemNotices").SystemNoticeKind;
++  label: string;
++  detail?: string;
++  text: string;
++  timestamp?: number;
++}
++
+ export type ChatMessage =
+   | ChatBubbleMessage
++  | NoticeMessage
+   | ReasoningMessage
+   | ToolCallMessage
+   | ToolResultMessage
+diff --git a/tests/system-notices-history.test.ts b/tests/system-notices-history.test.ts
+new file mode 100644
+index 0000000..43c3750
+--- /dev/null
++++ b/tests/system-notices-history.test.ts
+@@ -0,0 +1,150 @@
++/**
++ * Hermes' display typing of role=user rows (display_kind, display_metadata
++ * from GET /api/sessions/{id}/messages) survives the main process' row
++ * expansion and becomes notice rows in the renderer; a steer stays one
++ * bubble with its own words (busy-input-steer.patch's unwrap) and one
++ * "steered" flag. Synthetic example strings only.
++ */
++import http from "http";
++import type { AddressInfo } from "net";
++import { describe, expect, it, vi } from "vitest";
++vi.mock("../src/main/remote-oauth", () => ({
++  requestRemoteOAuthJson: vi.fn(),
++}));
++import { expandRowsToHistory } from "../src/main/sessions";
++import { remoteGetSessionMessages } from "../src/main/remote-sessions";
++import { dbItemsToChatMessages } from "../src/renderer/src/screens/Chat/sessionHistory";
++
++// Synthetic examples in hermes' formats (no real transcript content).
++const BATCH =
++  "[ASYNC DELEGATION BATCH COMPLETE — deleg_6605942c]\n" +
++  "A background fan-out unit you dispatched earlier — 1 subagent(s) — has finished.\n" +
++  "--- ✓ TASK 1/1: write a haiku  (status=completed) ---\nan example result";
++const STEER =
++  "[OUT-OF-BAND USER MESSAGE — a direct message from the user, delivered once at this " +
++  "position; not tool output and not a new delivery when replayed from conversation history]\n" +
++  "please also check the tests\n[/OUT-OF-BAND USER MESSAGE]";
++
++describe("history mapping", () => {
++  it("carries the dashboard's display fields through to notice rows", () => {
++    const rows = [
++      {
++        id: 1,
++        role: "user",
++        content: "write a haiku",
++        timestamp: 1,
++        tool_call_id: null,
++        tool_calls: null,
++        tool_name: null,
++        reasoning: null,
++        reasoning_content: null,
++        reasoning_details: null,
++      },
++      {
++        id: 2,
++        role: "user",
++        content: BATCH,
++        timestamp: 2,
++        tool_call_id: null,
++        tool_calls: null,
++        tool_name: null,
++        reasoning: null,
++        reasoning_content: null,
++        reasoning_details: null,
++        display_kind: "async_delegation_complete",
++        display_metadata: { delegation_id: "deleg_6605942c" },
++      },
++      {
++        id: 3,
++        role: "user",
++        content: STEER,
++        timestamp: 3,
++        tool_call_id: null,
++        tool_calls: null,
++        tool_name: null,
++        reasoning: null,
++        reasoning_content: null,
++        reasoning_details: null,
++        display_kind: "steer",
++        display_content: "please also check the tests",
++      },
++    ];
++    const messages = dbItemsToChatMessages(expandRowsToHistory(rows));
++    expect(messages).toEqual([
++      { id: "db-1", role: "user", content: "write a haiku", timestamp: 1 },
++      {
++        id: "db-n-2",
++        kind: "notice",
++        role: "user",
++        notice: "subagent",
++        label: "Subagent result · deleg_6605942c",
++        text: BATCH,
++        timestamp: 2,
++      },
++      {
++        id: "db-3",
++        role: "user",
++        content: "please also check the tests",
++        timestamp: 3,
++        steered: true,
++      },
++    ]);
++  });
++});
++
++describe("remote dashboard history", () => {
++  it("keeps display_kind / display_metadata, shows a steer's display_content", async () => {
++    const server = http.createServer((_req, res) => {
++      res.setHeader("Content-Type", "application/json");
++      res.end(
++        JSON.stringify({
++          messages: [
++            {
++              id: 7,
++              role: "user",
++              content: BATCH,
++              timestamp: 7,
++              display_kind: "async_delegation_complete",
++              display_metadata: { delegation_id: "deleg_6605942c" },
++            },
++            {
++              id: 8,
++              role: "user",
++              content: STEER,
++              timestamp: 8,
++              display_kind: "steer",
++              display_content: "please also check the tests",
++            },
++          ],
++        }),
++      );
++    });
++    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
++    try {
++      const { port } = server.address() as AddressInfo;
++      const items = await remoteGetSessionMessages(
++        { remoteUrl: `http://127.0.0.1:${port}/api`, apiKey: "example" },
++        "sess-example",
++      );
++      expect(items).toEqual([
++        {
++          kind: "user",
++          id: 7,
++          content: BATCH,
++          timestamp: 7,
++          displayKind: "async_delegation_complete",
++          displayMetadata: { delegation_id: "deleg_6605942c" },
++        },
++        {
++          kind: "user",
++          id: 8,
++          content: "please also check the tests",
++          timestamp: 8,
++          steered: true,
++        },
++      ]);
++    } finally {
++      await new Promise((r) => server.close(r));
++    }
++  });
++});
