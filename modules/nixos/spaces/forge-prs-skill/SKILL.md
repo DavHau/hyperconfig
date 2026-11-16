@@ -60,6 +60,25 @@ that PR.
     tea pr merge 12 --style squash --title "component: what changes"
     # styles: merge, rebase, squash, rebase-merge
 
+A repository whose `main` requires a `gitea-mq` status check (the
+generational-infrastructure repos on git.geninf.io) refuses a direct
+merge: that check is posted only by the org's merge queue, which runs CI
+on the merge result. Schedule the merge instead; the queue merges once
+its checks pass:
+
+    tea api --login git.geninf.io -X POST \
+      /repos/OWNER/REPO/pulls/12/merge \
+      -d '{"Do":"squash","merge_when_checks_succeed":true}'
+
+`tea api` exits 0 even on an HTTP error: read the reply (empty on
+success, a JSON `message` on refusal). Check the queue with
+`tea api --login git.geninf.io /repos/OWNER/REPO/branches/main`
+(`required_approvals`, `status_check_contexts`) and the PR's head commit
+status (`/repos/OWNER/REPO/commits/<sha>/status`): `gitea-mq` appears
+there once the queue has run. tea's "the server refused the merge"
+message is generic: look up the branch protection before guessing
+"needs approval".
+
 Merge only when asked to (or the task says so), never your own PR
 unreviewed unless told to. After a merge: `tea pr clean 12` removes the
 merged branch.
