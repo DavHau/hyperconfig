@@ -12,7 +12,9 @@
 #              slots' shares, machines/som/configuration.nix).
 #   `vault-ro` (gid 1103) read-only on /vault/parquet. Members: stefan,
 #              momentum, hsjobeki, dave-hermes, egg, pinpox, adam, j, willi, domi, rti, chris, b3x, joe, daniel, voice, fpv - each user's own
-#              module adds the group (users/*-vault.nix, *-hermes.nix).
+#              module adds the group (users/*-vault.nix, *-hermes.nix);
+#              slot-stefan-pq (som; primary group, the stefan-pq container
+#              slot's read-only share, machines/som/stefan-pq.nix).
 # The client sends its own gid list, so membership is granted per host: a
 # reader reads from every wg-vault client whose config imports its module.
 # root on any client is root on the pool (no_root_squash,
@@ -85,7 +87,8 @@
 # 1217 infra-browser (its Camofox server; both infra-space/agent-tools.nix),
 # 1218 searxng-candidate (uid and gid; som's sandboxed scratch SearXNG of
 # the nightly bump, searxng-canary/candidate.nix, Mullvad-tunneled); none
-# are vault principals. gid 1100 stays unallocated.
+# are vault principals. 1219 slot-stefan-pq (som; vault-ro only, see the
+# tiers above). gid 1100 stays unallocated.
 # These container uids are their on-disk owners only: inside, each space
 # container runs in its own user namespace (spaces/host.nix,
 # privateUsers), container uid n being host uid 0x50000000 +

@@ -37,7 +37,7 @@ if !cs.enable || s == null then { exists = false; } else {
   inherit (s) id mode memoryMax cpuQuota;
   inherit (cs) ipv6Prefix;
   keys = map comment s.deployKeys;
-  shares = builtins.attrNames s.shares;
+  shares = builtins.attrValues (builtins.mapAttrs (p: v: p + (if v.readOnly or false then " (read-only)" else "")) s.shares);
   storage = if (cs.storage.enable or false) && s.storage.enable then {
     inherit (s.storage) rootQuota scratchQuota;
     paths = cs.storage.defaultScratchPaths
@@ -156,8 +156,9 @@ if [ ${#shares[@]} -gt 0 ]; then
   done
   cat <<EOF
 
-They look owned by root and world-writable inside; the host account behind
-each share decides what actually succeeds (chown/chgrp are ignored). A share
+They look owned by root inside, writable unless marked read-only (those are
+mounted read-only); the host account behind each share decides what
+actually succeeds (chown/chgrp are ignored). A share
 can be empty for a while (its source down); it fills in without a restart.
 EOF
 fi

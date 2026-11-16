@@ -341,6 +341,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/user-manager-restart/default.nix — Bring a user's `systemd --user` manager back after it dies. <- som, m/user-manager-restart/test.nix
 - modules/nixos/user-manager-restart/test.nix — A lingering user's manager killed with SIGKILL (as the OOM killer does) comes back on its own, with a reachable user bu… <- flake.nix
 - modules/nixos/users/hsjobeki-vault.nix — hsjobeki on som: SSH login with read-only access to /vault/parquet mounted at /vault (vault-nfs-client.nix) via the `va… <- som
+- modules/nixos/users/stefan-keys.nix — stefan's ssh public keys, the one registry for them. <- machines/som/stefan-pq.nix, m/users/stefan.nix
 - modules/nixos/users/stefan-vault.nix — stefan on the wg-vault client machines (som, vit): <- vit, machines/som/hermes-agents.nix
 - modules/nixos/users/stefan.nix — - <- machines/nas/users.nix, m/users/stefan-vault.nix
 - modules/nixos/voice-gateway/cm-pi.nix — cm-pi's part of ./default.nix: <- cm-pi, m/voice-gateway/default.nix

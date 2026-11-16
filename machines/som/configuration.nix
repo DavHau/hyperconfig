@@ -38,6 +38,7 @@ in
     ./roman-esphome.nix
     # Pointers to Roman's home LANs for roman and dave-hermes.
     ./home-networks-agents.nix
+    ./stefan-pq.nix
     # Claude subscription OAuth for every agent (enabled in ./hermes-agents.nix).
     inputs.hyperhermes.nixosModules.claude-auth
     # lego through the local encrypted resolver: the home router intercepts
@@ -339,11 +340,10 @@ in
 
   # Container slots for other repos to deploy into (hyperhermes'
   # nixosModules.container-slots, generic). enp6s0 is a port of br0, which
-  # keeps its MAC and carries som's own DHCP/SLAAC addresses
-  # (networking.publicIPv6 above points at the bridge). Add a slot as
-  # `slots.<name> = { id; mode; }`; ids 4..16 are the agent slots below
-  # (slotIds). Inbound from the internet needs an allow rule for the
-  # slot's v6 on both routers, the AIS ZTE first, then the Beryl:
+  # keeps its MAC and som's DHCP/SLAAC addresses (networking.publicIPv6
+  # above). Add a slot as `slots.<name> = { id; mode; }`; ids 4..23: agent
+  # slots (slotIds below), 24: ./stefan-pq.nix, next free 25. Inbound from
+  # the internet needs an allow rule for the slot's v6 on both routers, AIS ZTE first, then Beryl:
   #   router-ais ipv6-rules add --address <v6> --name <slot>
   #   router-cm-beryl -J root@som.d ipv6-rules add --address <v6> --name <slot>
   # router-ais needs the LAN (192.168.1.1, Host header must be that IP):

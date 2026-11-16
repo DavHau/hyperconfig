@@ -116,6 +116,8 @@
 # ignored. The kernel resolves symlinks inside the slot, but bindfs itself
 # works by path, so a racing slot could steer an operation through a symlink
 # it swaps in: give `user` rights on `source` only, never broader groups.
+# `readOnly = true` mounts the share read-only twice over (bindfs `-o ro`
+# and a read-only bind into the slot), on top of whatever `user` may do.
 #
 # Shares come and go without the slot noticing more than an empty directory
 # meanwhile: the slot never waits for them (a share's NFS server down at
@@ -390,6 +392,11 @@ let
       user = mkOption {
         type = types.str;
         description = "Host account every operation on `source` runs as; its rights are the slot's rights.";
+      };
+      readOnly = mkOption {
+        type = types.bool;
+        default = false;
+        description = "Serve the share read-only (bindfs `-o ro` and a read-only bind into the slot), whatever `user` may do on `source`.";
       };
     };
   };
@@ -799,9 +806,9 @@ in
         ]
         ++ lib.mapAttrsToList (id: path: "--load-credential=${id}:${path}") slot.credentials;
         bindMounts =
-          lib.mapAttrs (path: _: {
+          lib.mapAttrs (path: share: {
             hostPath = shareMount name path;
-            isReadOnly = false;
+            isReadOnly = share.readOnly;
           }) slot.shares
           // {
             ${slotKeysPath} = {
@@ -898,10 +905,10 @@ in
                 "${pkgs.bindfs}/bin/bindfs"
                 "-f"
                 "-o"
-                "allow_other"
+                "allow_other${lib.optionalString share.readOnly ",ro"}"
                 "--force-user=${owner}"
                 "--force-group=${owner}"
-                "--perms=a+rwX"
+                "--perms=${if share.readOnly then "a=rX" else "a+rwX"}"
                 "--chown-ignore"
                 "--chgrp-ignore"
                 "--xattr-none"
