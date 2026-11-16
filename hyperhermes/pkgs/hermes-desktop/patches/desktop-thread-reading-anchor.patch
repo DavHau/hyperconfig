@@ -1,0 +1,2093 @@
+What upstream lacks (hermes-agent, apps/desktop transcript): a reader who
+scrolls up while the agent works is not left alone.
+
+The transcript's follow state belongs to use-stick-to-bottom. Only an upward
+WHEEL escapes it synchronously; every other scroll (scrollbar drag, PageUp,
+keyboard) goes through the library's scroll handler, which ignores the event
+while a content resize is in flight, which during a stream is almost every
+frame. The reader stays locked and the next streamed token pins them back to
+the bottom (measured: 1.8-2.4k px yanks within a second of a scrollbar
+scroll-up). The library also re-locks on any downward scroll or shrink that
+lands within 70 px of the bottom, and native overflow-anchor sometimes
+anchored a node inside a re-rendering block of the live turn, moving the text
+being read by ~118 px back and forth.
+
+Even with the wheel, every turn end moved what was being read: the finished
+turn was REMOUNTED. Its row key changes twice when it ends (the stream
+message gets a stored rowId, then the history re-read replaces it with a
+stored message with another id and often another rowId), and inside the turn
+the prompt/response sections are keyed by message id, which every history
+re-read renames. A remount replaces every node under the reader and lays the
+turn out afresh (measured 83-166 px at each turn end; 916 px when the
+auto-continued turn after a background-process notice started).
+
+PageUp with the composer focused (where it is after sending) did nothing:
+the composer swallows the key and the global keybind skips bare navigation
+keys in an editable target.
+
+This patch (Nix) adds thread/reading-anchor.ts and thread/stable-row-keys.ts,
+used by thread/list.tsx and thread/response-group.tsx:
+  - a follow state machine changed only by user input: an upward wheel or a
+    scroll made while the user is touching an input (pointer held on the
+    viewport/scrollbar, touch, wheel, PageUp/PageDown, other nav keys only
+    with the viewport focused, not typed in the composer) stops following;
+    the scrollTop clamp of content shrinking at the bottom (a row collapsed
+    by a click) is not a scroll up. A user scroll down to the bottom, "Jump
+    to latest" or any scrollToBottom call resumes it. Content resizes never
+    change it; a library lock taken while reading is undone, a stopScroll
+    elsewhere (inline edit, PageUp, restored offset) is adopted as reading;
+    re-taking a lost lock skips a transcript text selection (#115464);
+  - while reading, the element under the reading line (30 % from the top,
+    sticky overlays skipped) and the box right after it are remembered with
+    their on-screen top, and after every transcript layout change
+    (ResizeObserver on the content and each row, before paint) scrollTop is
+    corrected by however far the first still-visible one moved, so rows
+    growing/collapsing above and output added below leave it in place; a
+    scroll that is neither the user's nor the anchor's and comes with a
+    height change (old rows dropping off the front of the render window
+    while the reader scrolls up, whose scroll event can run before the
+    ResizeObserver) is corrected against the saved anchor too instead of
+    being adopted as the new position (measured: one-off 469-1506 px jumps);
+    native overflow-anchor is off meanwhile (it moved content without a
+    resize callback to correct);
+  - row keys stay the ones a message was first rendered under across
+    persistence and history re-reads (by renderer id, stored rowId, or the
+    message it replaced in place; always unique), and the prompt/response
+    sections inside a turn are keyed by position (the messages in them by
+    their row key, not their index, which shifts when older rows drop off),
+    so a finished turn is updated in place instead of remounted, also when
+    the re-read splits its assistant into two messages;
+  - a programmatic scroll is announced to the anchor (event
+    hermes:programmatic-scroll: the timeline rail's jump, find-in-page's
+    scrollIntoView of the active match on a find or step the user made, the
+    jump button revealing an approval) and suspends its corrections until no
+    announcement or scroll event for 150 ms, or until the user's own wheel or
+    pointer, then the anchor re-samples there and stays reading; without it
+    a streaming resize in the jump's frame (before its scroll event) read the
+    jump as drift and undid it. Find-in-page re-wrapping its marks after a
+    re-render (every token while the bar is open) neither reveals nor
+    announces: it would pause the anchor for the whole stream;
+  - "Jump to latest" resumes following also with a transcript text
+    selection; requestScrollToBottom takes { explicit } so automatic callers
+    (a clarify request) keep the selection pin;
+  - PageUp/PageDown in the composer page the transcript (while still bound
+    to conversation.scrollPageUp/Down);
+  - list.tsx's own resize pin and focus re-anchor run only while following;
+  - the hook's controller keeps its identity across renders: list.tsx's
+    restore effect (which owns the jump button's instant path) depends on
+    it, and a fresh object per render tore that path down while streaming,
+    so the button fell back to the spring scroll and stopped ~30 px short.
+Tested by thread/reading-anchor.test.ts, thread/stable-row-keys.test.ts and
+lib/find-in-page-scope.test.ts.
+
+diff --git a/apps/desktop/src/app/chat/composer/index.tsx b/apps/desktop/src/app/chat/composer/index.tsx
+index 9ef8daa..b0e1ff7 100644
+--- a/apps/desktop/src/app/chat/composer/index.tsx
++++ b/apps/desktop/src/app/chat/composer/index.tsx
+@@ -32,14 +32,16 @@ import { browseBackward, browseForward, deriveUserHistory, isBrowsingHistory } f
+ import { POPOUT_WIDTH_REM } from '@/store/composer-popout'
+ import { parkQueuedPrompts } from '@/store/composer-queue'
+ import { $hudMode } from '@/store/hud'
++import { bindingsFor } from '@/store/keybinds'
+ import { $showsAdvancedChrome } from '@/store/interface-mode'
+ import { $chatOnboardingSolo } from '@/store/onboarding-intro'
+ import { sessionBlockingPrompt } from '@/store/prompts'
+ import { toggleReview } from '@/store/review'
+ import { $gatewayState } from '@/store/session'
++import { $focusedStoredSessionId } from '@/store/session-focus'
+ import { $botChatSessionIds, $sessionStates, $sessionTiles, isBotChatSession } from '@/store/session-states'
+ import { useForcedTextDirection } from '@/store/text-direction'
+-import { $threadScrolledUpBySession } from '@/store/thread-scroll'
++import { $threadScrolledUpBySession, requestThreadPageScroll } from '@/store/thread-scroll'
+ import { $autoSpeakReplies } from '@/store/voice-prefs'
+ import { useTheme } from '@/themes'
+ 
+@@ -696,6 +698,21 @@ export function ChatBar({
+     // explicit, focused-transcript page instead.
+     if (event.key === 'PageUp' || event.key === 'PageDown') {
+       event.preventDefault()
++      // The global keybind never fires for a bare navigation key in an
++      // editable target (actionAllowedInInput), so page the transcript from
++      // here (Nix patch desktop-thread-reading-anchor).
++      // Only while the bare key is still bound to the action (a rebind moves it).
++      const action = event.key === 'PageUp' ? 'conversation.scrollPageUp' : 'conversation.scrollPageDown'
++
++      if (
++        !event.altKey &&
++        !event.ctrlKey &&
++        !event.metaKey &&
++        !event.shiftKey &&
++        bindingsFor(action).includes(event.key.toLowerCase())
++      ) {
++        requestThreadPageScroll(event.key === 'PageUp' ? -1 : 1, $focusedStoredSessionId.get())
++      }
+ 
+       return
+     }
+diff --git a/apps/desktop/src/app/chat/scroll-to-bottom-button.tsx b/apps/desktop/src/app/chat/scroll-to-bottom-button.tsx
+index 549f68e..e897839 100644
+--- a/apps/desktop/src/app/chat/scroll-to-bottom-button.tsx
++++ b/apps/desktop/src/app/chat/scroll-to-bottom-button.tsx
+@@ -2,6 +2,7 @@ import { useStore } from '@nanostores/react'
+ import { useReducedMotion } from 'motion/react'
+ import { useMemo, useRef } from 'react'
+ 
++import { announceProgrammaticScroll } from '@/components/assistant-ui/thread/reading-anchor'
+ import { useTranscriptWindow } from '@/components/assistant-ui/thread/transcript-window'
+ import { Codicon } from '@/components/ui/codicon'
+ import { AnimatedInt } from '@/components/ui/diff-count'
+@@ -114,12 +115,15 @@ export function ScrollToBottomButton({ sessionId }: { sessionId: string | null }
+         const approvalStack = visibleApproval ? findSessionApprovalStack(request?.sessionId ?? null) : null
+ 
+         if (approvalStack) {
++          // Nix patch desktop-thread-reading-anchor: a reveal, not drift.
++          announceProgrammaticScroll(approvalStack)
+           approvalStack.scrollIntoView({ block: 'nearest' })
+ 
+           return
+         }
+ 
+-        requestScrollToBottom(scrollSessionId)
++        // Nix patch desktop-thread-reading-anchor: the user's own return.
++        requestScrollToBottom(scrollSessionId, { explicit: true })
+       }}
+       style={{
+         bottom: 'calc(var(--composer-measured-height) + 1rem)'
+diff --git a/apps/desktop/src/components/assistant-ui/thread/list.tsx b/apps/desktop/src/components/assistant-ui/thread/list.tsx
+index 31fe6b5..19d46cb 100644
+--- a/apps/desktop/src/components/assistant-ui/thread/list.tsx
++++ b/apps/desktop/src/components/assistant-ui/thread/list.tsx
+@@ -46,7 +46,9 @@ import { isSecondaryWindow } from '@/store/windows'
+ import { MessageRenderBoundary } from '../message-render-boundary'
+ import { PendingApprovalStack } from '../tool/approval'
+ 
+-import { responseMessageRole, ResponseMessages } from './response-group'
++import { responseMessageRole, ResponseMessages, StableMessageKeys } from './response-group'
++import { useReadingAnchor } from './reading-anchor'
++import { createRowKeyMemory, stableRowKeys } from './stable-row-keys'
+ import { holdSessionSwitching } from './session-switching'
+ import { resolveShowEarlierAction, shouldAutoShowEarlier, useTranscriptWindow } from './transcript-window'
+ import { useMessagesBelow } from './use-messages-below'
+@@ -535,6 +537,8 @@ const ThreadMessageListInner: FC<ThreadMessageListProps> = ({
+   // below on every tick). Weights are folded in separately for the budget.
+   const groups = useMemo(() => buildGroups(structuralSignature), [structuralSignature])
+   const rowKeySignature = useAuiState(s => s.thread.messages.map(transcriptRowKey).join('\n'))
++  // Row keys remembered per transcript; a session switch starts afresh.
++  const rowKeyMemory = useMemo(() => createRowKeyMemory(), [sessionKey])
+   const renderEmpty = groups.length === 0 && Boolean(emptyPlaceholder)
+ 
+   // use-stick-to-bottom owns scrollTop (single writer): follow while locked,
+@@ -542,12 +546,42 @@ const ThreadMessageListInner: FC<ThreadMessageListProps> = ({
+   // spring can't tell live-token growth from a session-switch bulk relayout, and
+   // chasing the latter reads as the view scrolling to random spots before
+   // settling. Its refs hang off our own DOM so the sticky human bubbles survive.
+-  const { scrollRef, contentRef, isAtBottom, scrollToBottom, stopScroll } = useStickToBottom({
++  const {
++    scrollRef,
++    contentRef,
++    isAtBottom,
++    scrollToBottom,
++    stopScroll,
++    state: stickState
++  } = useStickToBottom({
+     initial: 'instant',
+     resize: 'instant',
+     targetScrollTop: resolveThreadScrollTarget
+   })
+ 
++  // Follow only while the user is at the bottom; once they scroll away (any
++  // input, not only an upward wheel) keep what they are reading pinned while
++  // the agent's output grows, rows expand/collapse and blocks re-render. See
++  // ./reading-anchor.ts (Nix patch desktop-thread-reading-anchor).
++  const readingAnchor = useReadingAnchor({
++    contentRef,
++    scrollRef,
++    enabled: true,
++    isLocked: () => stickState.isAtBottom,
++    canAnchor: () => loadSettledRef.current && !scrollRef.current?.hasAttribute('data-editing'),
++    unlock: stopScroll,
++    // A re-lock goes through the selection pin (#115464): a reader selecting
++    // transcript text is never pulled to the bottom.
++    lock: () => {
++      if (!hasTranscriptTextSelection(scrollRef.current)) {
++        void scrollToBottom('instant')
++      }
++    },
++    onAnchorWrite: scrollTop => {
++      stickState.ignoreScrollToTop = scrollTop
++    }
++  })
++
+   // #115464: explicit snaps go through the same selection pin as the resize
+   // follow above — without this a snap still flips isAtBottom and kicks an
+   // animation while the user is selecting transcript text.
+@@ -557,9 +591,11 @@ const ThreadMessageListInner: FC<ThreadMessageListProps> = ({
+         return undefined
+       }
+ 
++      readingAnchor.markFollowing()
++
+       return scrollToBottom(...args)
+     },
+-    [scrollRef, scrollToBottom]
++    [readingAnchor, scrollRef, scrollToBottom]
+   )
+ 
+   const { olderAvailable, expandWindow, isHistorical, returnToLatest } = useTranscriptWindow()
+@@ -636,7 +672,7 @@ const ThreadMessageListInner: FC<ThreadMessageListProps> = ({
+   const [restoreGrowTick, setRestoreGrowTick] = useState(0)
+   const windowRequestRef = useRef<object | null>(null)
+   const windowCommitRef = useRef<string | null>(null)
+-  const jumpRestoreRef = useRef<(() => void) | null>(null)
++  const jumpRestoreRef = useRef<((explicit: boolean) => void) | null>(null)
+   const isRunning = useAuiState(s => s.thread.isRunning)
+   // Read by the resize-pin callback so a turn boundary doesn't rebuild its
+   // scroll listener and ResizeObserver.
+@@ -813,13 +849,13 @@ const ThreadMessageListInner: FC<ThreadMessageListProps> = ({
+   // Floating jump button (outside this subtree) → return to the bottom.
+   useEffect(
+     () =>
+-      onScrollToBottomRequest(() => {
++      onScrollToBottomRequest(({ explicit }) => {
+         if (isHistorical) {
+           returnToLatest?.()
+         }
+ 
+         if (jumpRestoreRef.current) {
+-          jumpRestoreRef.current()
++          jumpRestoreRef.current(explicit)
+         } else {
+           void scrollToBottomUnlessSelecting()
+         }
+@@ -839,10 +875,10 @@ const ThreadMessageListInner: FC<ThreadMessageListProps> = ({
+   useEffect(
+     () =>
+       subscribeToThreadForeground(
+-        () => isAtBottom,
++        () => isAtBottom && stickState.isAtBottom,
+         () => void scrollToBottomUnlessSelecting()
+       ),
+-    [isAtBottom, scrollToBottomUnlessSelecting]
++    [isAtBottom, scrollToBottomUnlessSelecting, stickState]
+   )
+ 
+   const endEditHold = useCallback(() => {
+@@ -942,6 +978,7 @@ const ThreadMessageListInner: FC<ThreadMessageListProps> = ({
+       // bubble is never followed.
+       if (
+         isRunningRef.current &&
++        stickState.isAtBottom &&
+         !el.hasAttribute('data-editing') &&
+         shouldReapplyFrozenThreadScrollOffset(THREAD_SCROLL_BOTTOM, true, previousResizeMetrics, nextResizeMetrics) &&
+         threadScrollStateFromMetrics({ ...previousResizeMetrics, scrollTop: el.scrollTop }).kind === 'bottom' &&
+@@ -962,7 +999,7 @@ const ThreadMessageListInner: FC<ThreadMessageListProps> = ({
+       el.removeEventListener('scroll', update)
+       observer.disconnect()
+     }
+-  }, [contentRef, paneVisible, scrollRef])
++  }, [contentRef, paneVisible, scrollRef, stickState])
+ 
+   // Persist the live position on app close, so a reading position survives a
+   // quit without a session switch (the switch cleanup below only runs on
+@@ -1246,7 +1283,7 @@ const ThreadMessageListInner: FC<ThreadMessageListProps> = ({
+       cancelRestore()
+     }
+ 
+-    jumpRestoreRef.current = () => {
++    jumpRestoreRef.current = explicit => {
+       cancelRestore()
+       // A jump replaces reading intent, including an in-flight prepend anchor.
+       // Re-arm resize protection: deferred markdown may grow after this click.
+@@ -1265,7 +1302,16 @@ const ThreadMessageListInner: FC<ThreadMessageListProps> = ({
+         resizeObserver.observe(contentRef.current)
+       }
+ 
+-      void scrollToBottomUnlessSelecting('instant')
++      // The button is an explicit return: follow from here even with a
++      // transcript text selection (applyTarget above already moved to the
++      // bottom). An automatic request (a clarify prompt) keeps the selection
++      // pin (#115464).
++      if (explicit) {
++        readingAnchor.markFollowing()
++        void scrollToBottom('instant')
++      } else {
++        void scrollToBottomUnlessSelecting('instant')
++      }
+     }
+ 
+     el.addEventListener('wheel', onWheel, { passive: true })
+@@ -1291,7 +1337,9 @@ const ThreadMessageListInner: FC<ThreadMessageListProps> = ({
+     hasGroups,
+     paneVisible,
+     scrollRef,
++    readingAnchor,
+     scrollStorageKey,
++    scrollToBottom,
+     scrollToBottomUnlessSelecting,
+     sessionKey,
+     stopScroll
+@@ -1585,9 +1633,21 @@ const ThreadMessageListInner: FC<ThreadMessageListProps> = ({
+   // "MessageRenderBoundary (children only)" by explain()). With it, React
+   // bails out on element identity and a scroll flip re-renders nothing below.
+   const rows = useMemo(() => {
+-    const rowKeys = turnRowKeys(rowKeySignature, structuralSignature)
++    // Keep the key a row first rendered under across persistence (live id ->
++    // stored rowId), so a finished turn is not remounted under the reader.
++    // See ./stable-row-keys.ts (Nix patch desktop-thread-reading-anchor).
++    const structural = structuralSignature.split('\n').map(row => row.split(':'))
++
++    const rowKeys = stableRowKeys(
++      rowKeySignature.split('\n').map((key, index) => ({
++        key,
++        id: structural[index]?.[1] ?? key,
++        role: structural[index]?.at(-1) ?? ''
++      })),
++      rowKeyMemory
++    )
+ 
+-    return visibleGroups.map((group, indexInVisible) => (
++    const turnRows = visibleGroups.map((group, indexInVisible) => (
+       <TurnRow
+         components={components}
+         group={group}
+@@ -1596,7 +1656,9 @@ const ThreadMessageListInner: FC<ThreadMessageListProps> = ({
+         virtualized={indexInVisible < tailStart}
+       />
+     ))
+-  }, [visibleGroups, components, rowKeySignature, structuralSignature, tailStart])
++
++    return <StableMessageKeys.Provider value={rowKeys}>{turnRows}</StableMessageKeys.Provider>
++  }, [visibleGroups, components, rowKeySignature, structuralSignature, tailStart, rowKeyMemory])
+ 
+   useMessagesBelow({ contentRef, scrollRef, isAtBottom, paneVisible, rows, sessionKey, sessionId: scrollSessionId })
+   useStickyPromptClip({ contentRef, scrollRef, paneVisible, rows })
+diff --git a/apps/desktop/src/components/assistant-ui/thread/reading-anchor.test.ts b/apps/desktop/src/components/assistant-ui/thread/reading-anchor.test.ts
+new file mode 100644
+index 0000000..bc8fc36
+--- /dev/null
++++ b/apps/desktop/src/components/assistant-ui/thread/reading-anchor.test.ts
+@@ -0,0 +1,460 @@
++import { renderHook } from '@testing-library/react'
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
++
++import {
++  anchorCandidates,
++  anchorCorrection,
++  announceProgrammaticScroll,
++  createProgrammaticScrollHold,
++  type FollowEvent,
++  type FollowMode,
++  isLayoutScroll,
++  isScrollKey,
++  isShrinkClamp,
++  nextFollowMode,
++  pickAnchorChain,
++  PROGRAMMATIC_SCROLL_QUIET_MS,
++  reconcileLock,
++  useReadingAnchor
++} from './reading-anchor'
++
++// Nix patch desktop-thread-reading-anchor: the transcript follows new output
++// only while the reader is at the bottom; any user scroll away from it stops
++// the follow until they scroll back down or press "Jump to latest", and the
++// content they read stays put while the agent's output changes around it.
++
++const run = (events: FollowEvent[], start: FollowMode = 'following') =>
++  events.reduce<FollowMode>((mode, event) => nextFollowMode(mode, event), start)
++
++describe('nextFollowMode', () => {
++  it('stops following on any upward user scroll, wheel or not', () => {
++    expect(nextFollowMode('following', { type: 'wheel', deltaY: -3 })).toBe('reading')
++    // Scrollbar drag / keyboard / PageUp: only a scroll event, no wheel.
++    expect(
++      nextFollowMode('following', {
++        type: 'user-scroll',
++        deltaY: -40,
++        gap: 40
++      })
++    ).toBe('reading')
++    // Even a tiny nudge inside the library's near-bottom band.
++    expect(nextFollowMode('following', { type: 'user-scroll', deltaY: -1, gap: 1 })).toBe('reading')
++  })
++
++  it('keeps reading while the agent works (content resizes never change the mode)', () => {
++    expect(run([{ type: 'wheel', deltaY: -120 }, ...Array(50).fill({ type: 'content-resize' })])).toBe('reading')
++    expect(run(Array(50).fill({ type: 'content-resize' }))).toBe('following')
++  })
++
++  it('resumes following only when the user scrolls back down to the bottom', () => {
++    const up: FollowEvent = { type: 'wheel', deltaY: -120 }
++    // Part-way down: still reading, nothing yanks.
++    expect(run([up, { type: 'user-scroll', deltaY: 200, gap: 600 }])).toBe('reading')
++    // Down a wheel without reaching the bottom does not re-arm either.
++    expect(run([up, { type: 'wheel', deltaY: 120 }])).toBe('reading')
++    // Reaching the bottom by user input re-arms.
++    expect(run([up, { type: 'user-scroll', deltaY: 200, gap: 0 }])).toBe('following')
++    // A non-moving event at the bottom (deltaY 0) is not a return.
++    expect(run([up, { type: 'user-scroll', deltaY: 0, gap: 0 }])).toBe('reading')
++  })
++
++  it('jump to latest re-enables follow, an explicit escape disables it', () => {
++    expect(run([{ type: 'wheel', deltaY: -120 }, { type: 'jump' }])).toBe('following')
++    expect(nextFollowMode('following', { type: 'escape' })).toBe('reading')
++  })
++})
++
++describe('reconcileLock', () => {
++  it('undoes a library re-lock while reading and re-takes a lock it lost while following', () => {
++    expect(reconcileLock('reading', true)).toBe('unlock')
++    expect(reconcileLock('following', false)).toBe('lock')
++    expect(reconcileLock('reading', false)).toBeNull()
++    expect(reconcileLock('following', true)).toBeNull()
++  })
++})
++
++describe('anchorCorrection', () => {
++  const a = { id: 'a' } as unknown as Element
++  const b = { id: 'b' } as unknown as Element
++
++  it('returns how far the anchored element moved on screen', () => {
++    const sample = { chain: [a, b], tops: [100, 80] }
++    // A row above the reader grew by 240 px: the anchor moved down 240.
++    expect(anchorCorrection(sample, el => (el === a ? 340 : 320))).toBe(240)
++    // A tool row above collapsed by 90 px.
++    expect(anchorCorrection(sample, el => (el === a ? 10 : -10))).toBe(-90)
++  })
++
++  it('falls back to an outer anchor when the inner one re-rendered away', () => {
++    const sample = { chain: [a, b], tops: [100, 80] }
++    expect(anchorCorrection(sample, el => (el === a ? null : 130))).toBe(50)
++  })
++
++  it('ignores subpixel noise and missing anchors', () => {
++    expect(anchorCorrection({ chain: [a], tops: [100] }, () => 100.2)).toBe(0)
++    expect(anchorCorrection({ chain: [a], tops: [100] }, () => null)).toBe(0)
++    expect(anchorCorrection(null, () => 5)).toBe(0)
++  })
++})
++
++describe('pickAnchorChain', () => {
++  const box = (top: number, height: number, children: HTMLElement[] = [], position = 'static') => {
++    const el = document.createElement('div')
++    el.style.position = position
++    el.getBoundingClientRect = () =>
++      ({
++        top,
++        bottom: top + height,
++        height,
++        left: 0,
++        right: 100,
++        width: 100,
++        x: 0,
++        y: top,
++        toJSON() {}
++      }) as DOMRect
++    children.forEach(child => el.appendChild(child))
++
++    return el
++  }
++
++  it('picks the innermost in-flow element under the reading line', () => {
++    const para = box(210, 40)
++    const row = box(150, 400, [box(150, 50), para, box(260, 100)])
++    const content = box(0, 2000, [box(0, 150), row, box(550, 300)])
++    expect(pickAnchorChain(content, 230)).toEqual([para, row])
++  })
++
++  it('skips sticky overlays (the pinned human bubble) and uses the content under them', () => {
++    const sticky = box(200, 80, [], 'sticky')
++    const answer = box(180, 300)
++    const row = box(100, 500, [sticky, answer])
++    const content = box(0, 2000, [row])
++    expect(pickAnchorChain(content, 230)).toEqual([answer, row])
++  })
++
++  it('anchors the next block when the line falls in a gap', () => {
++    const below = box(260, 100)
++    const content = box(0, 2000, [box(100, 100), below])
++    expect(pickAnchorChain(content, 230)).toEqual([below])
++  })
++})
++
++describe('pickAnchorChain on a long transcript', () => {
++  it('finds the row under the line by binary search, skipping empty and pinned rows', () => {
++    const make = (top: number, height: number, position = 'static') => {
++      const el = document.createElement('div')
++      el.style.position = position
++      el.getBoundingClientRect = () =>
++        ({
++          top,
++          bottom: top + height,
++          height,
++          left: 0,
++          right: 100,
++          width: 100,
++          x: 0,
++          y: top,
++          toJSON() {}
++        }) as DOMRect
++
++      return el
++    }
++
++    const rows: HTMLElement[] = []
++
++    for (let index = 0; index < 300; index++) {
++      rows.push(index % 7 === 3 ? make(0, 0) : index % 11 === 5 ? make(0, 900, 'sticky') : make(index * 100, 100))
++    }
++
++    const content = document.createElement('div')
++    rows.forEach(child => content.appendChild(child))
++
++    for (const lineY of [0, 50, 99, 100, 350, 12_345, 29_950]) {
++      const expected = rows.find(
++        r =>
++          r.getBoundingClientRect().height > 0 &&
++          r.style.position !== 'sticky' &&
++          r.getBoundingClientRect().bottom > lineY
++      )
++      expect(pickAnchorChain(content, lineY)).toEqual(expected ? [expected] : [])
++    }
++
++    expect(pickAnchorChain(content, 40_000)).toEqual([])
++  })
++})
++
++describe('user input vs. browser scrolls', () => {
++  const viewport = document.createElement('div')
++  const row = document.createElement('div')
++  const editor = document.createElement('textarea')
++  viewport.append(row, editor)
++  const composer = document.createElement('div')
++  composer.contentEditable = 'true'
++  document.body.append(viewport, composer)
++
++  it('counts navigation keys only on the viewport, PageUp/PageDown from anywhere', () => {
++    // Space/arrows/Home/End typed in the composer are text editing.
++    for (const key of [' ', 'ArrowUp', 'ArrowDown', 'Home', 'End']) {
++      expect(isScrollKey(key, composer, viewport)).toBe(false)
++      expect(isScrollKey(key, editor, viewport)).toBe(false)
++      expect(isScrollKey(key, viewport, viewport)).toBe(true)
++      expect(isScrollKey(key, row, viewport)).toBe(true)
++    }
++
++    expect(isScrollKey('PageUp', composer, viewport)).toBe(true)
++    expect(isScrollKey('PageDown', document.body, viewport)).toBe(true)
++    expect(isScrollKey('a', viewport, viewport)).toBe(false)
++  })
++
++  it('does not take the clamp of a row collapsing at the bottom for a scroll up', () => {
++    // Collapsing a tool row at the bottom: content 400 px shorter, the browser
++    // clamps scrollTop to the new bottom.
++    expect(isShrinkClamp(-400, 0)).toBe(true)
++    expect(isShrinkClamp(-83, 1)).toBe(true)
++    // The same clamp keeps the reader following.
++    const shrink = isShrinkClamp(-400, 0)
++    const mode = shrink ? 'following' : nextFollowMode('following', { type: 'user-scroll', deltaY: -400, gap: 0 })
++    expect(mode).toBe('following')
++    // A real scroll up leaves a gap to the bottom and still counts.
++    expect(isShrinkClamp(-40, 40)).toBe(false)
++    expect(isShrinkClamp(-400, 300)).toBe(false)
++    expect(isShrinkClamp(200, 0)).toBe(false)
++  })
++})
++
++describe('isLayoutScroll', () => {
++  it('corrects a scroll that came with rows dropping off the front, not adopting it', () => {
++    // The render window dropped 1212 px of old rows above the reader; the
++    // browser moved scrollTop in the same frame, before the ResizeObserver.
++    expect(isLayoutScroll(false, false, -1212)).toBe(true)
++    expect(isLayoutScroll(false, false, 329)).toBe(true)
++  })
++
++  it('leaves user scrolls, the anchor\'s own writes and plain programmatic scrolls alone', () => {
++    expect(isLayoutScroll(true, false, -1212)).toBe(false)
++    expect(isLayoutScroll(false, true, -1212)).toBe(false)
++    // scrollIntoView / a restore with no layout change.
++    expect(isLayoutScroll(false, false, 0)).toBe(false)
++    expect(isLayoutScroll(false, false, 0.2)).toBe(false)
++  })
++})
++
++describe('anchorCandidates', () => {
++  it('adds the next visible sibling after each element, so a collapsing block hands over to what follows it', () => {
++    const parent = document.createElement('div')
++    const row = document.createElement('div')
++    const hidden = document.createElement('div')
++    const after = document.createElement('div')
++    const rect = (height: number) => () =>
++      ({
++        top: 0,
++        bottom: height,
++        height,
++        left: 0,
++        right: 0,
++        width: 0,
++        x: 0,
++        y: 0,
++        toJSON() {}
++      }) as DOMRect
++    row.getBoundingClientRect = rect(100)
++    hidden.getBoundingClientRect = rect(0)
++    after.getBoundingClientRect = rect(40)
++    parent.append(row, hidden, after)
++    expect(anchorCandidates([row, parent])).toEqual([row, after, parent])
++  })
++})
++
++describe('createProgrammaticScrollHold', () => {
++  beforeEach(() => vi.useFakeTimers())
++  afterEach(() => vi.useRealTimers())
++
++  it('holds from the announcement until the scroll has been quiet, then re-samples once', () => {
++    const settle = vi.fn()
++    const hold = createProgrammaticScrollHold(settle)
++    expect(hold.held).toBe(false)
++    // Scroll events without an announcement never start a hold.
++    hold.noteScroll()
++    expect(hold.held).toBe(false)
++
++    hold.begin()
++    // A 170 ms rail animation: an announcement and a scroll every frame.
++    for (let frame = 0; frame < 10; frame++) {
++      vi.advanceTimersByTime(17)
++      hold.begin()
++      hold.noteScroll()
++      expect(hold.held).toBe(true)
++    }
++
++    vi.advanceTimersByTime(PROGRAMMATIC_SCROLL_QUIET_MS - 1)
++    expect(settle).not.toHaveBeenCalled()
++    vi.advanceTimersByTime(1)
++    expect(hold.held).toBe(false)
++    expect(settle).toHaveBeenCalledTimes(1)
++  })
++
++  it('settles at once when the user takes over (end), and only while held', () => {
++    const settle = vi.fn()
++    const hold = createProgrammaticScrollHold(settle)
++    hold.end()
++    expect(settle).not.toHaveBeenCalled()
++    hold.begin()
++    vi.advanceTimersByTime(17)
++    hold.end()
++    expect(hold.held).toBe(false)
++    expect(settle).toHaveBeenCalledTimes(1)
++    vi.advanceTimersByTime(1000)
++    expect(settle).toHaveBeenCalledTimes(1)
++  })
++
++  it('drops a pending settle when disposed', () => {
++    const settle = vi.fn()
++    const hold = createProgrammaticScrollHold(settle)
++    hold.begin()
++    hold.dispose()
++    vi.advanceTimersByTime(1000)
++    expect(settle).not.toHaveBeenCalled()
++    expect(hold.held).toBe(false)
++  })
++})
++
++describe('useReadingAnchor with a programmatic jump during a stream', () => {
++  const ROW = 100
++  const ROWS = 100
++  let observers: ResizeObserverCallback[] = []
++
++  beforeEach(() => {
++    vi.useFakeTimers()
++    observers = []
++    vi.stubGlobal(
++      'ResizeObserver',
++      class {
++        constructor(callback: ResizeObserverCallback) {
++          observers.push(callback)
++        }
++
++        observe() {}
++        unobserve() {}
++        disconnect() {}
++      }
++    )
++  })
++
++  afterEach(() => {
++    vi.unstubAllGlobals()
++    vi.useRealTimers()
++  })
++
++  const rect = (top: number, height: number) =>
++    ({ top, bottom: top + height, height, left: 0, right: 100, width: 100, x: 0, y: top, toJSON() {} }) as DOMRect
++
++  // A 1000 px viewport over ROWS rows; `grown` px of streamed output above
++  // every row (a growing block at the top), so rows move without a scroll.
++  function transcript() {
++    const state = { scrollTop: 5000, grown: 0 }
++    const viewport = document.createElement('div')
++    const content = document.createElement('div')
++    Object.defineProperty(viewport, 'scrollTop', {
++      get: () => state.scrollTop,
++      set: (value: number) => {
++        state.scrollTop = value
++      }
++    })
++    Object.defineProperty(viewport, 'scrollHeight', { get: () => ROWS * ROW + state.grown })
++    Object.defineProperty(viewport, 'clientHeight', { get: () => 1000 })
++    viewport.getBoundingClientRect = () => rect(0, 1000)
++    content.getBoundingClientRect = () => rect(-state.scrollTop, ROWS * ROW + state.grown)
++
++    for (let index = 0; index < ROWS; index++) {
++      const row = document.createElement('div')
++      row.getBoundingClientRect = () => rect(state.grown + index * ROW - state.scrollTop, ROW)
++      content.append(row)
++    }
++
++    viewport.append(content)
++    document.body.append(viewport)
++
++    const lock = vi.fn()
++
++    const hook = renderHook(() =>
++      useReadingAnchor({
++        contentRef: { current: content },
++        scrollRef: { current: viewport },
++        enabled: true,
++        isLocked: () => false,
++        canAnchor: () => true,
++        unlock: () => undefined,
++        lock
++      })
++    )
++
++    // A streamed token above the reader: content grows, RO fires.
++    const stream = (px: number) => {
++      state.grown += px
++      observers.forEach(callback => callback([], {} as ResizeObserver))
++    }
++
++    const scrollEvent = () => viewport.dispatchEvent(new Event('scroll'))
++
++    return { state, viewport, lock, stream, scrollEvent, unmount: () => (hook.unmount(), viewport.remove()) }
++  }
++
++  it('without an announcement, a jump that meets a streaming resize is undone (the bug)', () => {
++    const t = transcript()
++    t.state.scrollTop = 1000
++    t.stream(20)
++    expect(t.state.scrollTop).toBe(5020)
++    t.unmount()
++  })
++
++  it('lets an announced rail jump land, then pins the reader at the new place', () => {
++    const t = transcript()
++    // timeline.tsx: announce, then a rAF loop writing scrollTop; the stream's
++    // ResizeObserver runs in the same frame, before the scroll event.
++    for (const top of [4000, 2500, 1200, 1000]) {
++      announceProgrammaticScroll(t.viewport)
++      t.state.scrollTop = top
++      t.stream(20)
++      expect(t.state.scrollTop).toBe(top)
++      vi.advanceTimersByTime(17)
++      t.scrollEvent()
++      expect(t.state.scrollTop).toBe(top)
++    }
++
++    // Settled: the anchor re-samples at the target and keeps reading there.
++    vi.advanceTimersByTime(PROGRAMMATIC_SCROLL_QUIET_MS)
++    t.stream(30)
++    expect(t.state.scrollTop).toBe(1030)
++    t.stream(-10)
++    expect(t.state.scrollTop).toBe(1020)
++    expect(t.lock).not.toHaveBeenCalled()
++    t.unmount()
++  })
++
++  it('ends the pause on a wheel and corrects from the new place right away', () => {
++    const t = transcript()
++    announceProgrammaticScroll(t.viewport)
++    t.state.scrollTop = 1000
++    t.scrollEvent()
++    t.viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: 0 }))
++    // No quiet window: the next streamed token is corrected at once.
++    t.stream(30)
++    expect(t.state.scrollTop).toBe(1030)
++    t.unmount()
++  })
++
++  it('treats a find-in-page reveal (scrollIntoView on a mark) the same way', () => {
++    const t = transcript()
++    const mark = t.viewport.querySelector('div > div:nth-child(12)')!
++    announceProgrammaticScroll(mark)
++    t.state.scrollTop = 1100
++    t.stream(40)
++    t.scrollEvent()
++    expect(t.state.scrollTop).toBe(1100)
++    vi.advanceTimersByTime(PROGRAMMATIC_SCROLL_QUIET_MS)
++    t.stream(25)
++    expect(t.state.scrollTop).toBe(1125)
++    t.unmount()
++  })
++})
+diff --git a/apps/desktop/src/components/assistant-ui/thread/reading-anchor.ts b/apps/desktop/src/components/assistant-ui/thread/reading-anchor.ts
+new file mode 100644
+index 0000000..de2a76c
+--- /dev/null
++++ b/apps/desktop/src/components/assistant-ui/thread/reading-anchor.ts
+@@ -0,0 +1,692 @@
++import { type RefObject, useCallback, useEffect, useMemo, useRef } from 'react'
++
++/**
++ * Reading-position anchor for the transcript viewport (Nix patch
++ * desktop-thread-reading-anchor). Two jobs:
++ *
++ * 1. Follow state from USER input only. use-stick-to-bottom escapes on an
++ *    upward wheel synchronously, but every other scroll (scrollbar drag,
++ *    keyboard, PageUp) goes through its scroll handler, which drops the event
++ *    whenever a content resize is in flight: during a stream that is almost
++ *    every frame, so the reader stayed locked and the next resize yanked them
++ *    back to the bottom. It also re-locks on any downward scroll that ends
++ *    near the bottom, including the browser's own scroll anchoring when rows
++ *    above grow, and on a shrink near the bottom. Here the mode changes only
++ *    on user input (upward = reading, reaching the bottom = following) or an
++ *    explicit jump (markFollowing); any other lock is undone.
++ *
++ * 2. While reading, keep what the reader is looking at pinned. The element at
++ *    the reading line is remembered with its on-screen top; after every layout
++ *    change of the transcript (ResizeObserver, before paint) scrollTop is
++ *    corrected by however far that element moved. Native overflow-anchor
++ *    alone moved the reader when rows inside the live turn re-rendered above
++ *    them (it anchored a node inside the changing block).
++ */
++
++export type FollowMode = 'following' | 'reading'
++
++export type FollowEvent =
++  /** Wheel/trackpad input over the viewport. */
++  | { type: 'wheel'; deltaY: number }
++  /** A scroll the user caused (inside an input window): signed movement and the gap to the bottom after it. */
++  | { type: 'user-scroll'; deltaY: number; gap: number }
++  /** "Jump to latest", a new run started at the bottom, a session load parking at the bottom. */
++  | { type: 'jump' }
++  /** Code escaped the lock on purpose (inline edit, PageUp, a restored reading offset). */
++  | { type: 'escape' }
++  /** Content changed size (streaming, rows expanding, images) or the browser moved scrollTop. */
++  | { type: 'content-resize' }
++
++/** Within this many px of the bottom a user scroll re-enables follow (use-stick-to-bottom's own band). */
++export const FOLLOW_REARM_GAP_PX = 70
++
++/** How long after a wheel/key/touch/pointer input a scroll still counts as the user's. */
++export const USER_INPUT_WINDOW_MS = 400
++
++/** The reading line, as a fraction of the viewport height from its top. */
++export const READING_LINE_FRACTION = 0.3
++
++/** Smallest correction worth a scrollTop write (subpixel noise otherwise). */
++export const ANCHOR_EPSILON_PX = 0.5
++
++export function nextFollowMode(mode: FollowMode, event: FollowEvent, rearmGapPx = FOLLOW_REARM_GAP_PX): FollowMode {
++  switch (event.type) {
++    case 'wheel':
++      return event.deltaY < 0 ? 'reading' : mode
++
++    case 'user-scroll':
++      if (event.deltaY < 0) {
++        return 'reading'
++      }
++
++      return event.deltaY > 0 && event.gap <= rearmGapPx ? 'following' : mode
++
++    case 'jump':
++      return 'following'
++
++    case 'escape':
++      return 'reading'
++
++    case 'content-resize':
++      return mode
++  }
++}
++
++/**
++ * What to do with the library's lock given our mode: `lock`/`unlock` it, or
++ * leave it. Only `following` may hold the lock; a lock taken while reading
++ * (a re-lock nobody asked for) is released.
++ */
++export function reconcileLock(mode: FollowMode, libraryLocked: boolean): 'lock' | 'unlock' | null {
++  if (mode === 'reading' && libraryLocked) {
++    return 'unlock'
++  }
++
++  if (mode === 'following' && !libraryLocked) {
++    return 'lock'
++  }
++
++  return null
++}
++
++export interface AnchorSample {
++  /** Anchor candidates, innermost first; the first still usable one is measured. */
++  chain: Element[]
++  tops: number[]
++}
++
++/** Correction for a saved anchor: how far its first usable element moved on screen, or 0. */
++export function anchorCorrection(sample: AnchorSample | null, measure: (element: Element) => number | null): number {
++  if (!sample) {
++    return 0
++  }
++
++  for (let index = 0; index < sample.chain.length; index++) {
++    const top = measure(sample.chain[index]!)
++
++    if (top == null) {
++      continue
++    }
++
++    const delta = top - sample.tops[index]!
++
++    return Math.abs(delta) >= ANCHOR_EPSILON_PX ? delta : 0
++  }
++
++  return 0
++}
++
++const isPinnedPosition = (element: Element): boolean => {
++  const { position } = getComputedStyle(element)
++
++  return position === 'sticky' || position === 'fixed' || position === 'absolute'
++}
++
++const inFlow = (element: Element): boolean => element.getBoundingClientRect().height > 0 && !isPinnedPosition(element)
++
++/** Below this many children a linear scan is as cheap as the search. */
++const LINEAR_SCAN_CHILDREN = 16
++
++/**
++ * Index to start the scan for the first child whose box reaches past lineY.
++ * In-flow children are in layout order, so their bottoms only grow: binary
++ * search over them (a long transcript has hundreds of rows), stepping over
++ * empty and pinned boxes. The result never passes the first in-flow child
++ * reaching past the line; the caller's linear scan from there makes the pick.
++ */
++function firstReachingPast(children: HTMLCollection, lineY: number): number {
++  if (children.length <= LINEAR_SCAN_CHILDREN) {
++    return 0
++  }
++
++  let lo = 0
++  let hi = children.length - 1
++
++  // Invariant: no child before lo reaches past the line.
++  while (lo < hi) {
++    const mid = (lo + hi) >> 1
++    let probe = mid
++
++    // Empty and pinned boxes carry no flow position: compare the next real one.
++    while (probe < hi && !inFlow(children[probe]!)) {
++      probe++
++    }
++
++    const rect = children[probe]!.getBoundingClientRect()
++
++    if (inFlow(children[probe]!) && rect.bottom <= lineY) {
++      lo = probe + 1
++    } else {
++      hi = mid
++    }
++  }
++
++  return lo
++}
++
++/**
++ * Elements under the reading line, innermost first, from the row level down.
++ * Walks rects instead of elementFromPoint so overlays (the sticky human
++ * bubble, popovers) are never picked: a pinned element does not move with the
++ * content it covers.
++ */
++export function pickAnchorChain(content: Element, lineY: number, maxDepth = 14): Element[] {
++  const chain: Element[] = []
++  let parent: Element = content
++
++  for (let depth = 0; depth < maxDepth; depth++) {
++    let next: Element | null = null
++    const { children } = parent
++
++    for (let index = firstReachingPast(children, lineY); index < children.length; index++) {
++      const child = children[index]!
++      const rect = child.getBoundingClientRect()
++
++      if (rect.height <= 0 || rect.bottom <= lineY || isPinnedPosition(child)) {
++        continue
++      }
++
++      // In flow order the first box reaching past the line is the one under it
++      // (or, in a gap between blocks, the next one below).
++      next = child
++
++      break
++    }
++
++    if (!next) {
++      break
++    }
++
++    chain.unshift(next)
++    parent = next
++  }
++
++  return chain
++}
++
++/**
++ * Anchor candidates for a chain from pickAnchorChain: each element under the
++ * line followed by the first box after it that starts below the line. When
++ * the block being read collapses (a tool/thought row folded above or around
++ * the reading line) the element under the line is hidden or clipped away;
++ * the next usable candidate is then what came right after it, which keeps
++ * its place instead of the row around it.
++ */
++export function anchorCandidates(chain: readonly Element[]): Element[] {
++  const out: Element[] = []
++
++  for (const element of chain) {
++    out.push(element)
++    let next = element.nextElementSibling
++
++    while (next && next.getBoundingClientRect().height <= 0) {
++      next = next.nextElementSibling
++    }
++
++    if (next) {
++      out.push(next)
++    }
++  }
++
++  return out
++}
++
++const clippedAway = (element: Element, content: Element): boolean => {
++  for (let node = element.parentElement; node && node !== content; node = node.parentElement) {
++    if (node.getBoundingClientRect().height < 1 && getComputedStyle(node).overflow !== 'visible') {
++      return true
++    }
++  }
++
++  return false
++}
++
++const usableTop =
++  (content: Element) =>
++  (element: Element): number | null => {
++    if (!element.isConnected || !content.contains(element)) {
++      return null
++    }
++
++    const rect = element.getBoundingClientRect()
++
++    return rect.height > 0 && !clippedAway(element, content) ? rect.top : null
++  }
++
++export interface ReadingAnchorOptions {
++  contentRef: RefObject<HTMLElement | null>
++  scrollRef: RefObject<HTMLElement | null>
++  /** use-stick-to-bottom's synchronous lock (`state.isAtBottom`). */
++  isLocked: () => boolean
++  /** Whether anchoring may write scrollTop now (a session load/restore owns it otherwise). */
++  canAnchor: () => boolean
++  /** Release the library's lock (stopScroll). */
++  unlock: () => void
++  /** Take the library's lock and go to the bottom (scrollToBottom). */
++  lock: () => void
++  /** After each anchor correction, with the new scrollTop (tell the library it was ours). */
++  onAnchorWrite?: (scrollTop: number) => void
++  enabled: boolean
++}
++
++export interface ReadingAnchorController {
++  /** An explicit return to the bottom: follow from here. */
++  markFollowing: () => void
++  /** Code escaped on purpose: reading from here. */
++  markReading: () => void
++}
++
++/** Keys that scroll the viewport when it (or something in it) has focus. */
++const NAV_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ', 'Spacebar'])
++
++/** Keys that page the transcript from anywhere (the composer forwards them). */
++const PAGE_KEYS = new Set(['PageUp', 'PageDown'])
++
++const isEditable = (target: EventTarget | null): boolean => {
++  const element = target as HTMLElement | null
++
++  return Boolean(
++    element?.isContentEditable ||
++    element instanceof HTMLInputElement ||
++    element instanceof HTMLTextAreaElement ||
++    element instanceof HTMLSelectElement
++  )
++}
++
++/**
++ * Whether a keydown can scroll the transcript: PageUp/PageDown from anywhere,
++ * other navigation keys only when the viewport itself (not an editor in it,
++ * not the composer) has focus. Space/arrows/Home/End typed in the composer
++ * must not open the user-input window, or the scrollTop clamp of a row
++ * collapsing at the bottom reads as the user scrolling up.
++ */
++export function isScrollKey(key: string, target: EventTarget | null, viewport: Element): boolean {
++  if (PAGE_KEYS.has(key)) {
++    return true
++  }
++
++  return NAV_KEYS.has(key) && target instanceof Node && viewport.contains(target) && !isEditable(target)
++}
++
++/**
++ * A scroll the browser made itself: scrollTop clamped to the new bottom
++ * because the content shrank (a row collapsed while at the bottom). It moves
++ * up but is not the user's, even right after they clicked. A user scrolling
++ * up never ends at the bottom, so an upward move that leaves no gap is a
++ * clamp (heights are not compared: the ResizeObserver may already have seen
++ * the shrink before the clamp's scroll event is dispatched).
++ */
++export function isShrinkClamp(deltaY: number, gap: number): boolean {
++  return deltaY < 0 && gap <= 1
++}
++
++/**
++ * A scroll that came with a layout change nobody asked for: neither the
++ * user's nor the anchor's own write, while the content height differs from
++ * when the anchor was sampled (rows dropped off the front of the render
++ * window, a layout effect re-applying an offset). Its scroll event can run
++ * before the ResizeObserver callback; it must be corrected against the saved
++ * anchor, not adopted as the new reading position.
++ */
++export function isLayoutScroll(user: boolean, ours: boolean, heightChange: number): boolean {
++  return !user && !ours && Math.abs(heightChange) >= ANCHOR_EPSILON_PX
++}
++
++/**
++ * Announced (bubbling, on the viewport or an element inside it) right before
++ * code moves the transcript on purpose: a timeline/rail jump, a find-in-page
++ * match scrolled into view, the jump button revealing an approval. Such a
++ * scroll is neither user input nor a layout shift, and while reading the
++ * anchor would undo it: a scrollTop write in requestAnimationFrame dispatches
++ * its scroll event a frame later, but a streaming resize in the same frame
++ * reaches the anchor first and reads the jump as drift.
++ */
++export const PROGRAMMATIC_SCROLL_EVENT = 'hermes:programmatic-scroll'
++
++/** A held programmatic scroll has settled after this long without another announcement or scroll event. */
++export const PROGRAMMATIC_SCROLL_QUIET_MS = 150
++
++/** Tell the transcript's reading anchor that the next scroll is code's, not drift. */
++export function announceProgrammaticScroll(target: EventTarget | null | undefined): void {
++  target?.dispatchEvent(new Event(PROGRAMMATIC_SCROLL_EVENT, { bubbles: true }))
++}
++
++export interface ProgrammaticScrollHold {
++  /** Whether anchor corrections are suspended now. */
++  readonly held: boolean
++  /** A programmatic scroll was announced: suspend until it has been quiet for the window. */
++  begin: () => void
++  /** A scroll event arrived: while held, the scroll is still moving, keep holding. */
++  noteScroll: () => void
++  /** The user took over (wheel, pointer): settle now instead of after the quiet window. */
++  end: () => void
++  dispose: () => void
++}
++
++/**
++ * The escape hatch for programmatic scrolls: from an announcement until no
++ * announcement or scroll event for `quietMs`, then `onSettle` (re-sample at
++ * the new place). An explicit begin, not a guess from scroll timing.
++ */
++export function createProgrammaticScrollHold(
++  onSettle: () => void,
++  quietMs = PROGRAMMATIC_SCROLL_QUIET_MS
++): ProgrammaticScrollHold {
++  let timer: ReturnType<typeof setTimeout> | undefined
++  let held = false
++
++  const settle = () => {
++    timer = undefined
++    held = false
++    onSettle()
++  }
++
++  const begin = () => {
++    held = true
++    clearTimeout(timer)
++    timer = setTimeout(settle, quietMs)
++  }
++
++  return {
++    get held() {
++      return held
++    },
++    begin,
++    noteScroll: () => {
++      if (held) {
++        begin()
++      }
++    },
++    end: () => {
++      if (held) {
++        clearTimeout(timer)
++        settle()
++      }
++    },
++    dispose: () => {
++      clearTimeout(timer)
++      held = false
++    }
++  }
++}
++
++export function useReadingAnchor(options: ReadingAnchorOptions): ReadingAnchorController {
++  const optionsRef = useRef(options)
++  optionsRef.current = options
++  const modeRef = useRef<FollowMode | null>(null)
++
++  const markFollowing = useCallback(() => {
++    modeRef.current = nextFollowMode(modeRef.current ?? 'following', {
++      type: 'jump'
++    })
++  }, [])
++
++  const markReading = useCallback(() => {
++    modeRef.current = nextFollowMode(modeRef.current ?? 'following', {
++      type: 'escape'
++    })
++  }, [])
++
++  const { contentRef, enabled, scrollRef } = options
++
++  useEffect(() => {
++    const el = scrollRef.current
++    const content = contentRef.current
++
++    if (!enabled || !el || !content) {
++      return
++    }
++
++    const opts = () => optionsRef.current
++    let inputUntil = 0
++    let pointerDown = false
++    let lastTop = el.scrollTop
++    let ownTop: number | null = null
++    let sample: AnchorSample | null = null
++    // scrollHeight when the sample was taken.
++    let sampleHeight = el.scrollHeight
++    let enforceTimer = 0
++    modeRef.current ??= opts().isLocked() ? 'following' : 'reading'
++    const measure = usableTop(content)
++
++    const gap = () => el.scrollHeight - el.scrollTop - el.clientHeight
++    const userActive = () => pointerDown || performance.now() < inputUntil
++
++    const markInput = () => {
++      inputUntil = performance.now() + USER_INPUT_WINDOW_MS
++    }
++
++    const reading = () => modeRef.current === 'reading'
++
++    // Native scroll anchoring would move content without a ResizeObserver
++    // callback for us to measure: off while our anchor is in charge
++    // (styles.css, data-reading-anchor; an inline edit keeps it on).
++    const setNativeAnchoring = (active: boolean) => {
++      if (el.hasAttribute('data-reading-anchor') !== active) {
++        el.toggleAttribute('data-reading-anchor', active)
++      }
++    }
++
++    const capture = () => {
++      const active = reading() && opts().canAnchor()
++      setNativeAnchoring(active)
++
++      if (!reading()) {
++        sample = null
++
++        return
++      }
++
++      sampleHeight = el.scrollHeight
++      const viewport = el.getBoundingClientRect()
++      const chain = anchorCandidates(pickAnchorChain(content, viewport.top + el.clientHeight * READING_LINE_FRACTION))
++      sample = chain.length
++        ? {
++            chain,
++            tops: chain.map(element => element.getBoundingClientRect().top)
++          }
++        : null
++    }
++
++    // Bring the library in line with our mode.
++    const enforce = () => {
++      const action = reconcileLock(modeRef.current ?? 'following', opts().isLocked())
++
++      if (action === 'unlock') {
++        opts().unlock()
++      } else if (action === 'lock') {
++        opts().lock()
++      }
++    }
++
++    const apply = (event: FollowEvent) => {
++      const before = modeRef.current ?? 'following'
++      modeRef.current = nextFollowMode(before, event)
++
++      if (modeRef.current !== before) {
++        enforce()
++
++        if (modeRef.current === 'reading') {
++          capture()
++        }
++      }
++    }
++
++    // A programmatic scroll in flight (rail jump, find-in-page reveal): no
++    // corrections until it settles, then read the new place as the anchor.
++    // The mode stays reading: the reader asked to see that place.
++    const hold = createProgrammaticScrollHold(() => {
++      lastTop = el.scrollTop
++      capture()
++    })
++
++    // Move scrollTop by however far the saved anchor moved on screen.
++    const correct = () => {
++      if (hold.held) {
++        return
++      }
++
++      const delta = anchorCorrection(sample, measure)
++
++      if (delta !== 0) {
++        el.scrollTop += delta
++        ownTop = el.scrollTop
++        opts().onAnchorWrite?.(el.scrollTop)
++      }
++    }
++
++    // Code paths outside this hook stop the lock on purpose (stopScroll for an
++    // inline edit, PageUp, a restored offset); adopt that as reading. Re-locks
++    // nobody asked for are undone by enforce().
++    const adoptEscapes = () => {
++      if (modeRef.current === 'following' && !opts().isLocked()) {
++        modeRef.current = 'reading'
++        capture()
++      }
++    }
++
++    const onWheel = (event: WheelEvent) => {
++      // The reader's own input ends a programmatic-scroll pause at once.
++      hold.end()
++      markInput()
++      adoptEscapes()
++      apply({ type: 'wheel', deltaY: event.deltaY })
++    }
++
++    const onPointerDown = (event: PointerEvent) => {
++      hold.end()
++      // Scrollbar drags and touch drags start here. Clicks on rows
++      // (expand/collapse) land here too, but only a scroll counts.
++      if (event.button === 0) {
++        pointerDown = true
++      }
++    }
++
++    const onPointerUp = () => {
++      if (pointerDown) {
++        pointerDown = false
++        markInput()
++      }
++    }
++
++    const onKeyDown = (event: KeyboardEvent) => {
++      if (isScrollKey(event.key, event.target, el)) {
++        markInput()
++      }
++    }
++
++    const onScroll = () => {
++      const top = el.scrollTop
++      const ours = ownTop != null && Math.abs(top - ownTop) < 1
++      ownTop = null
++      adoptEscapes()
++
++      const user = !ours && userActive()
++
++      if (user && !isShrinkClamp(top - lastTop, gap())) {
++        apply({ type: 'user-scroll', deltaY: top - lastTop, gap: gap() })
++      } else if (hold.held && !ours) {
++        hold.noteScroll()
++
++        // Revealing something above while following (a find match): read
++        // there instead of being pulled back down by the next token.
++        if (top < lastTop && !isShrinkClamp(top - lastTop, gap())) {
++          apply({ type: 'escape' })
++        }
++      }
++
++      // A scroll that is neither the user's nor ours, in the frame where the
++      // content changed height (rows dropped off the front of the window, a
++      // layout effect re-applying an offset), reaches us before the
++      // ResizeObserver callback: re-sampling here would adopt the shifted
++      // position as the new anchor and the reader jumps by the difference
++      // (measured: 469-1506 px). Correct against the saved sample instead. A
++      // programmatic scroll with no layout change (scrollIntoView) is kept.
++      if (reading() && opts().canAnchor() && isLayoutScroll(user, ours, el.scrollHeight - sampleHeight)) {
++        correct()
++      }
++
++      lastTop = el.scrollTop
++      capture()
++      // The library decides its lock in a setTimeout after the scroll event.
++      window.clearTimeout(enforceTimer)
++      enforceTimer = window.setTimeout(enforce, 4)
++    }
++
++    const onResize = () => {
++      adoptEscapes()
++      apply({ type: 'content-resize' })
++      // The library's ResizeObserver ran first (it observes from commit) and
++      // may have re-locked on a shrink near the bottom; its follow scroll
++      // waits for the next frame and checks the lock then.
++      enforce()
++
++      if (!reading() || !opts().canAnchor()) {
++        setNativeAnchoring(false)
++        sample = null
++        lastTop = el.scrollTop
++
++        return
++      }
++
++      correct()
++      lastTop = el.scrollTop
++      capture()
++    }
++
++    // Rows are the content's direct children; observing them too catches a
++    // change that leaves the total height unchanged (one row grows while
++    // another shrinks).
++    const resizeObserver = new ResizeObserver(onResize)
++    resizeObserver.observe(content)
++
++    for (const row of content.children) {
++      resizeObserver.observe(row)
++    }
++
++    const rowObserver = new MutationObserver(records => {
++      for (const record of records) {
++        record.addedNodes.forEach(node => node instanceof Element && resizeObserver.observe(node))
++        record.removedNodes.forEach(node => node instanceof Element && resizeObserver.unobserve(node))
++      }
++    })
++
++    rowObserver.observe(content, { childList: true })
++
++    const onProgrammaticScroll = () => hold.begin()
++
++    el.addEventListener(PROGRAMMATIC_SCROLL_EVENT, onProgrammaticScroll)
++    el.addEventListener('wheel', onWheel, { passive: true })
++    el.addEventListener('touchmove', markInput, { passive: true })
++    el.addEventListener('pointerdown', onPointerDown, { passive: true })
++    el.addEventListener('scroll', onScroll, { passive: true })
++    window.addEventListener('pointerup', onPointerUp, { passive: true })
++    window.addEventListener('pointercancel', onPointerUp, { passive: true })
++    window.addEventListener('keydown', onKeyDown, {
++      capture: true,
++      passive: true
++    })
++
++    capture()
++
++    return () => {
++      window.clearTimeout(enforceTimer)
++      hold.dispose()
++      resizeObserver.disconnect()
++      rowObserver.disconnect()
++      el.removeEventListener(PROGRAMMATIC_SCROLL_EVENT, onProgrammaticScroll)
++      el.removeEventListener('wheel', onWheel)
++      el.removeEventListener('touchmove', markInput)
++      el.removeEventListener('pointerdown', onPointerDown)
++      el.removeEventListener('scroll', onScroll)
++      window.removeEventListener('pointerup', onPointerUp)
++      window.removeEventListener('pointercancel', onPointerUp)
++      window.removeEventListener('keydown', onKeyDown, { capture: true })
++      el.removeAttribute('data-reading-anchor')
++    }
++  }, [contentRef, enabled, scrollRef])
++
++  // Stable identity: callers put the controller in effect deps (the jump
++  // button's instant restore path is torn down whenever it changes).
++  return useMemo(() => ({ markFollowing, markReading }), [markFollowing, markReading])
++}
+diff --git a/apps/desktop/src/components/assistant-ui/thread/response-group.tsx b/apps/desktop/src/components/assistant-ui/thread/response-group.tsx
+index c058ced..877572a 100644
+--- a/apps/desktop/src/components/assistant-ui/thread/response-group.tsx
++++ b/apps/desktop/src/components/assistant-ui/thread/response-group.tsx
+@@ -1,5 +1,5 @@
+ import { ThreadPrimitive, useAuiState } from '@assistant-ui/react'
+-import { type ComponentProps, createContext, useMemo } from 'react'
++import { type ComponentProps, createContext, useContext, useMemo } from 'react'
+ 
+ import { contentHasVisibleText, messageContentText, PROCESS_NOTIFICATION_RE } from './content'
+ 
+@@ -23,6 +23,13 @@ export function responseMessageRole(message: GroupMessage): string {
+ 
+ export const ResponseMessageIds = createContext<readonly string[]>([])
+ 
++/**
++ * Stable per-message React keys, indexed like thread.messages (Nix patch
++ * desktop-thread-reading-anchor, ./stable-row-keys.ts). Keying a message by
++ * its index remounted it whenever the transcript window dropped older rows.
++ */
++export const StableMessageKeys = createContext<readonly string[] | null>(null)
++
+ interface ResponseMessagesProps {
+   components: ComponentProps<typeof ThreadPrimitive.MessageByIndex>['components']
+   indices: readonly number[]
+@@ -44,6 +51,7 @@ interface ResponseSection {
+ 
+ /** Keep message runtimes intact; only their visual container and footer are shared. */
+ export function ResponseMessages({ components, indices }: ResponseMessagesProps) {
++  const stableKeys = useContext(StableMessageKeys)
+   const signature = useAuiState(s =>
+     JSON.stringify(
+       indices.flatMap(index => {
+@@ -72,8 +80,15 @@ export function ResponseMessages({ components, indices }: ResponseMessagesProps)
+       const response = row.role === 'assistant' || row.role === 'background'
+       const previous = result.at(-1)
+ 
++      // Sections are keyed by kind and position inside the turn, not by
++      // message id (Nix patch desktop-thread-reading-anchor): a history
++      // re-read renames ids and may split the turn's assistant into two
++      // messages, and an id key remounted the turn's prompt or response under
++      // the reader. The turn row itself keeps a stable key (stable-row-keys).
++      const key = `${response ? 'response' : 'message'}:${result.length}`
++
+       const section: ResponseSection =
+-        response && previous?.response ? previous : { key: row.id, indices: [], assistantIds: [], response }
++        response && previous?.response ? previous : { key, indices: [], assistantIds: [], response }
+ 
+       if (section !== previous) {
+         result.push(section)
+@@ -94,7 +109,7 @@ export function ResponseMessages({ components, indices }: ResponseMessagesProps)
+       <ResponseMessageIds.Provider key={section.key} value={section.assistantIds}>
+         <div className="group flex min-w-0 flex-col gap-(--scaffold-block-gap)" data-slot="aui_response-group">
+           {section.indices.map(index => (
+-            <ThreadPrimitive.MessageByIndex components={components} index={index} key={index} />
++            <ThreadPrimitive.MessageByIndex components={components} index={index} key={stableKeys?.[index] ?? index} />
+           ))}
+         </div>
+       </ResponseMessageIds.Provider>
+diff --git a/apps/desktop/src/components/assistant-ui/thread/stable-row-keys.test.ts b/apps/desktop/src/components/assistant-ui/thread/stable-row-keys.test.ts
+new file mode 100644
+index 0000000..02801f2
+--- /dev/null
++++ b/apps/desktop/src/components/assistant-ui/thread/stable-row-keys.test.ts
+@@ -0,0 +1,144 @@
++import { describe, expect, it } from 'vitest'
++
++import { createRowKeyMemory, type RowKeyInput, stableRowKeys } from './stable-row-keys'
++
++// Nix patch desktop-thread-reading-anchor: a turn keeps its React key while
++// its live message is persisted and the history is re-read, so the rows the
++// reader is looking at are not remounted under them.
++
++const row = (id: string, role: string, rowId?: number): RowKeyInput => ({
++  key: rowId == null ? id : `row:${rowId}`,
++  id,
++  role
++})
++
++describe('stableRowKeys', () => {
++  it('keeps the live key when the stream row gets its stored rowId', () => {
++    const memory = createRowKeyMemory()
++    const live = stableRowKeys(
++      [row('u1', 'user', 1), row('user-live', 'user'), row('assistant-stream-1', 'assistant')],
++      memory
++    )
++    const persisted = stableRowKeys(
++      [row('u1', 'user', 1), row('user-live', 'user', 7), row('assistant-stream-1', 'assistant', 12)],
++      memory
++    )
++
++    expect(persisted).toEqual(live)
++  })
++
++  it('keeps keys when a history re-read renames every message and moves its rowId', () => {
++    const memory = createRowKeyMemory()
++
++    const live = stableRowKeys(
++      [
++        row('a-0', 'user', 1),
++        row('a-1', 'assistant', 2),
++        row('user-live', 'user', 7),
++        row('assistant-stream-1', 'assistant', 12)
++      ],
++      memory
++    )
++
++    // Renderer ids re-derived from the new page; the stored assistant is the
++    // turn's FIRST row (8), not the last one the stream was stamped with.
++    const reread = stableRowKeys(
++      [row('b-0', 'user', 1), row('b-1', 'assistant', 2), row('b-2', 'user', 7), row('b-3', 'assistant', 8)],
++      memory
++    )
++
++    expect(reread).toEqual(live)
++  })
++
++  it('gives new messages their own key and never reuses one', () => {
++    const memory = createRowKeyMemory()
++    stableRowKeys([row('u1', 'user', 1), row('a1', 'assistant', 2)], memory)
++    const next = stableRowKeys(
++      [row('u1', 'user', 1), row('a1', 'assistant', 2), row('u2', 'user'), row('a2', 'assistant')],
++      memory
++    )
++
++    expect(next).toEqual(['row:1', 'row:2', 'u2', 'a2'])
++    expect(new Set(next).size).toBe(next.length)
++  })
++
++  it('does not hand a removed message key to a different role', () => {
++    const memory = createRowKeyMemory()
++    stableRowKeys([row('u1', 'user', 1), row('s1', 'system')], memory)
++
++    expect(stableRowKeys([row('u1', 'user', 1), row('a9', 'assistant')], memory)).toEqual(['row:1', 'a9'])
++  })
++
++  it('never duplicates a key when older rows drop off and the shared live id returns', () => {
++    const memory = createRowKeyMemory()
++    const live = 'assistant-stream-S'
++
++    const first = stableRowKeys(
++      [
++        row('u1', 'user', 1),
++        row(live, 'assistant'),
++        row('u2', 'user'),
++        row(live, 'assistant'),
++        row('u3', 'user'),
++        row(live, 'assistant')
++      ],
++      memory
++    )
++
++    // The first row is re-read under another rowId; the live id is still
++    // shared by three assistant rows. A suffix fallback must not collide with
++    // a key a later row holds from memory.
++    const next = stableRowKeys(
++      [
++        row('u1b', 'user', 3),
++        row(live, 'assistant'),
++        row('u2', 'user'),
++        row(live, 'assistant'),
++        row('u3', 'user'),
++        row(live, 'assistant')
++      ],
++      memory
++    )
++
++    expect(new Set(first).size).toBe(first.length)
++    expect(new Set(next).size).toBe(next.length)
++    expect(next).toEqual(first)
++
++    const trimmed = stableRowKeys(
++      [row('u2', 'user'), row(live, 'assistant'), row('u3', 'user'), row(live, 'assistant')],
++      memory
++    )
++    expect(new Set(trimmed).size).toBe(trimmed.length)
++    expect(trimmed[0]).toBe(first[2])
++    expect(trimmed[2]).toBe(first[4])
++  })
++
++  it('stays unique over random re-reads', () => {
++    let seed = 7
++    const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648
++
++    for (let trial = 0; trial < 500; trial++) {
++      const memory = createRowKeyMemory()
++
++      for (let step = 0; step < 8; step++) {
++        const rows = Array.from({ length: 1 + Math.floor(rnd() * 7) }, (_, index) =>
++          row(
++            rnd() < 0.3 ? 'assistant-stream-S' : `m${Math.floor(rnd() * 6)}`,
++            index % 2 ? 'assistant' : 'user',
++            rnd() < 0.5 ? Math.floor(rnd() * 6) : undefined
++          )
++        )
++
++        const keys = stableRowKeys(rows, memory)
++        expect(new Set(keys).size).toBe(keys.length)
++      }
++    }
++  })
++
++  it('keeps split rows (two messages, one stored row) unique', () => {
++    const memory = createRowKeyMemory()
++    const keys = stableRowKeys([row('a-1', 'assistant', 5), row('a-1b', 'assistant', 5)], memory)
++
++    expect(keys).toEqual(['row:5', 'a-1b'])
++  })
++})
+diff --git a/apps/desktop/src/components/assistant-ui/thread/stable-row-keys.ts b/apps/desktop/src/components/assistant-ui/thread/stable-row-keys.ts
+new file mode 100644
+index 0000000..dce9514
+--- /dev/null
++++ b/apps/desktop/src/components/assistant-ui/thread/stable-row-keys.ts
+@@ -0,0 +1,137 @@
++/**
++ * Row keys that survive a live message being persisted (Nix patch
++ * desktop-thread-reading-anchor). A streamed message is keyed by its renderer
++ * id until the turn completes; then it gets a stored rowId (upstream's key
++ * becomes `row:<id>`), and the history re-read that follows replaces it with
++ * a stored message that has another id and often another rowId (the turn's
++ * first row instead of its last). Each new key remounts the whole turn: every
++ * node the reader was looking at is replaced, the fresh subtree lays out at a
++ * different height, and the viewport jumps (measured: 83-166 px at every turn
++ * end while scrolled up, 916 px when an auto-continued turn started).
++ *
++ * The first key a message was rendered under is kept while its renderer id
++ * or its stored rowId is seen again, and a message with neither known takes
++ * over the key of the message it replaced in place: same role, right after
++ * the same predecessor, and gone from the new list.
++ */
++export interface RowKeyMemory {
++  /** Renderer id -> key, with the render it was last seen in. */
++  byId: Map<string, { key: string; at: number }>
++  /** Upstream `row:<rowId>` key -> key, with the render it was last seen in. */
++  byRow: Map<string, { key: string; at: number }>
++  previous: { key: string; role: string }[]
++  /** Render counter, for pruning entries of messages long gone. */
++  renders: number
++}
++
++export const createRowKeyMemory = (): RowKeyMemory => ({
++  byId: new Map(),
++  byRow: new Map(),
++  previous: [],
++  renders: 0
++})
++
++/** Entries unseen for this many renders are dropped (renamed ids never come back). */
++export const ROW_KEY_MEMORY_RENDERS = 200
++
++export interface RowKeyInput {
++  /** Upstream's key: `row:<rowId>` or the renderer id. */
++  key: string
++  /** Renderer id. */
++  id: string
++  role: string
++}
++
++const prune = (map: RowKeyMemory['byId'], oldest: number) => {
++  for (const [entry, { at }] of map) {
++    if (at < oldest) {
++      map.delete(entry)
++    }
++  }
++}
++
++/** Unique React keys, stable across persistence and history re-reads; updates `memory`. */
++export function stableRowKeys(rows: readonly RowKeyInput[], memory: RowKeyMemory): string[] {
++  const at = ++memory.renders
++
++  const remembered = rows.map(
++    ({ key, id }) => (key.startsWith('row:') ? memory.byRow.get(key)?.key : undefined) ?? memory.byId.get(id)?.key
++  )
++
++  // Every remembered key is reserved up front for the first row holding it,
++  // so no row before it (a fallback or an in-place takeover) can take it. A
++  // later row resolving to the same key (the live stream id shared by turns
++  // that came back after older rows dropped off) is treated as new.
++  const known: (string | undefined)[] = []
++  const reserved = new Set<string>()
++
++  remembered.forEach(key => {
++    known.push(key != null && !reserved.has(key) ? key : undefined)
++
++    if (key != null) {
++      reserved.add(key)
++    }
++  })
++
++  const previousIndex = new Map(memory.previous.map((row, index) => [row.key, index]))
++  const taken = new Set(reserved)
++  const keys: string[] = []
++  const idsSeen = new Set<string>()
++
++  rows.forEach(({ key: upstream, id, role }, index) => {
++    let key = known[index]
++
++    if (key == null) {
++      // Replaced in place: the old message that followed our predecessor.
++      const before = index > 0 ? previousIndex.get(keys[index - 1]!) : -1
++      const candidate = before != null ? memory.previous[before + 1] : undefined
++
++      if (candidate && candidate.role === role && !taken.has(candidate.key)) {
++        key = candidate.key
++      } else if (!taken.has(upstream)) {
++        key = upstream
++      } else if (!taken.has(id)) {
++        // Two rendered messages can carry one stored row (hydration splits a
++        // row it renders in parts): the later copy keeps its own id, as
++        // upstream does.
++        key = id
++      } else {
++        let suffix = index
++
++        while (taken.has(`${id}#${suffix}`)) {
++          suffix++
++        }
++
++        key = `${id}#${suffix}`
++      }
++
++      taken.add(key)
++    }
++
++    keys.push(key)
++
++    // A renderer id shared by several rows (the live stream id) remembers its
++    // first row, so that row keeps its key on the next render.
++    if (!idsSeen.has(id)) {
++      idsSeen.add(id)
++      memory.byId.set(id, { key, at })
++    }
++
++    if (upstream.startsWith('row:')) {
++      const stored = memory.byRow.get(upstream)
++      memory.byRow.set(upstream, { key: stored?.key ?? key, at })
++    }
++  })
++
++  memory.previous = rows.map(({ role }, index) => ({
++    key: keys[index]!,
++    role
++  }))
++
++  if (at % 50 === 0) {
++    prune(memory.byId, at - ROW_KEY_MEMORY_RENDERS)
++    prune(memory.byRow, at - ROW_KEY_MEMORY_RENDERS)
++  }
++
++  return keys
++}
+diff --git a/apps/desktop/src/components/assistant-ui/thread/timeline.tsx b/apps/desktop/src/components/assistant-ui/thread/timeline.tsx
+index 07dbfd3..e46bb16 100644
+--- a/apps/desktop/src/components/assistant-ui/thread/timeline.tsx
++++ b/apps/desktop/src/components/assistant-ui/thread/timeline.tsx
+@@ -10,6 +10,7 @@ import { useStoreSelector } from '@/lib/use-session-slice'
+ import { $hideThreadTimeline } from '@/store/thread-timeline'
+ 
+ import { messageContentText } from './content'
++import { announceProgrammaticScroll } from './reading-anchor'
+ import {
+   deriveTimelineEntries,
+   EARLIER_TIMELINE_ID,
+@@ -205,6 +206,9 @@ const ActiveThreadTimeline: FC = () => {
+           return
+         }
+ 
++        // Nix patch desktop-thread-reading-anchor: from here the transcript's
++        // scrollTop is this jump's, not drift for the reading anchor to undo.
++        announceProgrammaticScroll(viewport)
+         const start = viewport.scrollTop
+         const turn = node.closest<HTMLElement>('[data-slot="aui_turn-pair"]') ?? node
+ 
+@@ -221,6 +225,7 @@ const ActiveThreadTimeline: FC = () => {
+             return
+           }
+ 
++          announceProgrammaticScroll(viewport)
+           const progress = duration ? Math.min(1, (now - began) / duration) : 1
+           viewport.scrollTop = start + (destination - start) * (1 - (1 - progress) ** 3)
+ 
+diff --git a/apps/desktop/src/lib/find-in-page-scope.test.ts b/apps/desktop/src/lib/find-in-page-scope.test.ts
+new file mode 100644
+index 0000000..7346a08
+--- /dev/null
++++ b/apps/desktop/src/lib/find-in-page-scope.test.ts
+@@ -0,0 +1,71 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
++
++import { PROGRAMMATIC_SCROLL_EVENT } from '@/components/assistant-ui/thread/reading-anchor'
++
++import { captureFindScope, performScopedFind, releaseFindScope } from './find-in-page-scope'
++
++// Nix patch desktop-thread-reading-anchor: only a find / step the user asked
++// for reveals the match and announces a programmatic scroll; re-wrapping the
++// marks after a streaming re-render does neither, or the transcript's reading
++// anchor would stay paused for the whole stream while the bar is open.
++
++describe('find-in-page re-apply during a stream', () => {
++  let surface: HTMLElement
++  let message: HTMLElement
++  let announced: number
++  let revealed: number
++  const onAnnounce = () => {
++    announced += 1
++  }
++
++  beforeEach(() => {
++    announced = 0
++    revealed = 0
++    Element.prototype.scrollIntoView = vi.fn(() => {
++      revealed += 1
++    })
++    surface = document.createElement('div')
++    surface.setAttribute('data-chat-surface', '')
++    message = document.createElement('p')
++    message.textContent = 'the agent streams a token, then another token'
++    surface.append(message)
++    document.body.append(surface)
++    document.addEventListener(PROGRAMMATIC_SCROLL_EVENT, onAnnounce)
++  })
++
++  afterEach(() => {
++    releaseFindScope()
++    document.removeEventListener(PROGRAMMATIC_SCROLL_EVENT, onAnnounce)
++    surface.remove()
++    delete (Element.prototype as Partial<Element>).scrollIntoView
++  })
++
++  it('announces a user find and step, not the re-wrap after a re-render', async () => {
++    const root = captureFindScope()!
++    expect(root).toBe(surface)
++
++    expect(performScopedFind(root, 'token', { forward: true, findNext: false })).toEqual({
++      count: 2,
++      activeOrdinal: 1
++    })
++    expect(announced).toBe(1)
++    expect(revealed).toBe(1)
++
++    expect(performScopedFind(root, 'token', { forward: true, findNext: true }).activeOrdinal).toBe(2)
++    expect(announced).toBe(2)
++    expect(revealed).toBe(2)
++
++    // A streaming re-render replaces the message's text, detaching the marks.
++    for (let i = 1; i <= 5; i += 1) {
++      message.textContent = `the agent streams a token, then another token${' more'.repeat(i)}`
++      await new Promise(resolve => setTimeout(resolve, 0))
++      // Re-wrapped, still on the ordinal the user stood on.
++      expect(surface.querySelectorAll('mark.find-hit')).toHaveLength(2)
++      expect(surface.querySelectorAll('mark[data-find-active]')[0]?.textContent).toBe('token')
++      expect([...surface.querySelectorAll('mark.find-hit')].indexOf(surface.querySelector('mark[data-find-active]')!)).toBe(1)
++    }
++
++    expect(announced).toBe(2)
++    expect(revealed).toBe(2)
++  })
++})
+diff --git a/apps/desktop/src/lib/find-in-page-scope.ts b/apps/desktop/src/lib/find-in-page-scope.ts
+index 01bda80..efa68ef 100644
+--- a/apps/desktop/src/lib/find-in-page-scope.ts
++++ b/apps/desktop/src/lib/find-in-page-scope.ts
+@@ -53,6 +53,7 @@
+  *   the renderer-side walker is the only path that satisfies the issue.
+  */
+ 
++import { announceProgrammaticScroll } from '@/components/assistant-ui/thread/reading-anchor'
+ import { queryVisible } from '@/components/pane-shell/pane-visibility'
+ 
+ const SCOPE_SELECTOR = '[data-chat-surface]'
+@@ -402,8 +403,15 @@ function clearHighlights(root: Element): void {
+   }
+ }
+ 
+-/** Mark one element as the active match and scroll it into view. */
+-function setActiveMark(mark: HTMLElement | null): void {
++/**
++ * Mark one element as the active match and, unless `reveal` is false, scroll
++ * it into view. Nix patch desktop-thread-reading-anchor: only a find / step
++ * the user asked for reveals (and announces the scroll to the transcript's
++ * reading anchor); a re-apply after a re-render only re-marks, so a stream
++ * under an open bar neither pauses the anchor every token nor pulls a reader
++ * who scrolled away back to the match.
++ */
++function setActiveMark(mark: HTMLElement | null, reveal = true): void {
+   document.querySelectorAll(`mark[${ACTIVE_ATTR}]`).forEach(el => el.removeAttribute(ACTIVE_ATTR))
+ 
+   if (!mark) {
+@@ -417,7 +425,9 @@ function setActiveMark(mark: HTMLElement | null): void {
+   // screen. Inline: 'nearest' for the same reason. Guarded: jsdom does not
+   // implement scrollIntoView, and the bar still needs to highlight even
+   // when the renderer side has no layout (tests, headless boot, …).
+-  if (typeof mark.scrollIntoView === 'function') {
++  if (reveal && typeof mark.scrollIntoView === 'function') {
++    // Nix patch desktop-thread-reading-anchor: a reveal, not drift.
++    announceProgrammaticScroll(mark)
+     mark.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+   }
+ }
+@@ -613,7 +623,8 @@ function reapplying(root: HTMLElement): void {
+     // re-wrapped set, so a mid-stream re-render doesn't bounce their place
+     // back to match #1.
+     const nextIndex = Math.min(restoreOrdinal - 1, marks.length - 1)
+-    setActiveMark(marks[nextIndex] ?? null)
++    // No reveal (Nix patch desktop-thread-reading-anchor): see setActiveMark.
++    setActiveMark(marks[nextIndex] ?? null, false)
+     lastActiveOrdinal = nextIndex + 1
+   } finally {
+     applying = false
+diff --git a/apps/desktop/src/store/thread-scroll.ts b/apps/desktop/src/store/thread-scroll.ts
+index 18ee4d1..25f8d6f 100644
+--- a/apps/desktop/src/store/thread-scroll.ts
++++ b/apps/desktop/src/store/thread-scroll.ts
+@@ -90,10 +90,19 @@ export const resetPublishedThreadScroll = (publisher: { paneVisible: boolean; se
+ // Cross-component bridge: the jump button lives by the composer, the viewport's
+ // `scrollToBottom` lives inside the thread. The bridge registers a handler; the
+ // button fires it. Mirrors the composer focus/insert emitter pattern.
+-const handlers = new Map<string | null, Set<() => void>>()
++// Nix patch desktop-thread-reading-anchor: `explicit` marks the user's own
++// "Jump to latest" click, which follows even over a transcript text
++// selection; automatic callers (a clarify request) keep the selection pin.
++export interface ScrollToBottomRequest {
++  explicit: boolean
++}
++
++type ScrollToBottomHandler = (request: ScrollToBottomRequest) => void
++
++const handlers = new Map<string | null, Set<ScrollToBottomHandler>>()
+ 
+-export const onScrollToBottomRequest = (handler: () => void, sessionId: string | null = null) => {
+-  const scoped = handlers.get(sessionId) ?? new Set<() => void>()
++export const onScrollToBottomRequest = (handler: ScrollToBottomHandler, sessionId: string | null = null) => {
++  const scoped = handlers.get(sessionId) ?? new Set<ScrollToBottomHandler>()
+ 
+   scoped.add(handler)
+   handlers.set(sessionId, scoped)
+@@ -107,8 +116,8 @@ export const onScrollToBottomRequest = (handler: () => void, sessionId: string |
+   }
+ }
+ 
+-export const requestScrollToBottom = (sessionId: string | null = null) => {
+-  handlers.get(sessionId)?.forEach(handler => handler())
++export const requestScrollToBottom = (sessionId: string | null = null, { explicit = false } = {}) => {
++  handlers.get(sessionId)?.forEach(handler => handler({ explicit }))
+ }
+ 
+ export type ThreadPageDirection = -1 | 1
+diff --git a/apps/desktop/src/styles.css b/apps/desktop/src/styles.css
+index 100d2c6..d435582 100644
+--- a/apps/desktop/src/styles.css
++++ b/apps/desktop/src/styles.css
+@@ -1982,6 +1982,13 @@ body.guest-pointer-lock :is(webview, iframe) {
+   overflow-anchor: auto;
+ }
+ 
++/* While the reading anchor (thread/reading-anchor.ts, Nix patch
++   desktop-thread-reading-anchor) keeps the reader's place, native anchoring
++   would move content without a resize callback for it to measure. */
++[data-slot='aui_thread-viewport'][data-reading-anchor]:not([data-editing='true']) {
++  overflow-anchor: none;
++}
++
+ [data-slot='aui_thread-content'] {
+   max-width: var(--composer-width);
+   padding-inline: 1.5rem;

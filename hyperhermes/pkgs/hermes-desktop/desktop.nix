@@ -17,6 +17,12 @@
 #     drive_preview clicks only offer the link, a page's own redirect (or
 #     mailto:/custom scheme) is blocked
 #     (./patches/desktop-links-external.patch);
+#   - the transcript follows new output only while the reader is at the
+#     bottom; any user scroll away from it (scrollbar, keys, wheel) stops
+#     the follow, and what they read stays pinned while rows above/below
+#     change, a finished turn is re-keyed in place instead of remounted,
+#     and PageUp/PageDown work from the composer
+#     (./patches/desktop-thread-reading-anchor.patch);
 #   - the wrapper symlinks the renderer instead of copying it (below);
 #   - no extraEnv/extraRun: nothing here sets them.
 #
@@ -108,6 +114,7 @@ let
       ./patches/desktop-session-deeplink.patch
       ./patches/desktop-oauth-first-login.patch
       ./patches/desktop-links-external.patch
+      ./patches/desktop-thread-reading-anchor.patch
     ];
 
     buildPhase = ''
@@ -158,6 +165,13 @@ let
         node ../../node_modules/vitest/vitest.mjs run --project ui \
           src/store/connections-oauth-first-login.test.ts \
           src/store/preview-links-external.test.ts
+        # ./patches/desktop-thread-reading-anchor.patch's follow state
+        # machine, anchor correction, turn keys kept across persistence, and
+        # find-in-page's re-apply not pausing the anchor.
+        node ../../node_modules/vitest/vitest.mjs run --project ui \
+          src/components/assistant-ui/thread/reading-anchor.test.ts \
+          src/components/assistant-ui/thread/stable-row-keys.test.ts \
+          src/lib/find-in-page-scope.test.ts
         # ./patches/desktop-links-external.patch's guest-click rule. Setting
         # HERMES_PYTHON skips the project's interpreter lookup (unused here).
         HERMES_PYTHON=false node ../../node_modules/vitest/vitest.mjs run --project electron \
