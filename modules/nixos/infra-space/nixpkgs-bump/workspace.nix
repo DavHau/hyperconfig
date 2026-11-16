@@ -5,6 +5,15 @@
   pkgs,
   repo ? "/home/infra/hyperconfig",
   logDir ? "/home/infra/nixpkgs-bump",
+  # create's liveness check (./workspace.sh is_live): an earlier night's
+  # workspace changed this recently is a run still going
+  liveMinutes ? 30,
+  staleMinutes ? 20 * 60,
+  # the run's liveness stamp (<logDir>/<name>.alive, refreshed at each
+  # step): younger than this, the earlier run is alive
+  aliveMinutes ? 120,
+  # archive bookmarks (nixpkgs-bump-archive/*) older than this are pruned
+  archiveDays ? 14,
 }:
 let
   # The only jj config the helper's jj calls see (JJ_CONFIG, with an
@@ -37,7 +46,16 @@ pkgs.writeShellApplication {
   ];
   text =
     builtins.replaceStrings
-      [ "@repo@" "@logDir@" "@jjConfig@" "@path@" ]
-      [ repo logDir "${jjConfig}" path ]
+      [ "@repo@" "@logDir@" "@jjConfig@" "@path@" "@liveMinutes@" "@staleMinutes@" "@aliveMinutes@" "@archiveDays@" ]
+      [
+        repo
+        logDir
+        "${jjConfig}"
+        path
+        (toString liveMinutes)
+        (toString staleMinutes)
+        (toString aliveMinutes)
+        (toString archiveDays)
+      ]
       (builtins.readFile ./workspace.sh);
 }

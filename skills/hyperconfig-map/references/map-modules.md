@@ -240,7 +240,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/infra-space/nixpkgs-bump/searxng.sh — nixpkgs-bump-searxng: the nightly bump's steps for web_search's SearXNG (the root flake input `searxng`, upstream maste… <- m/infra-space/nixpkgs-bump/searxng.nix
 - modules/nixos/infra-space/nixpkgs-bump/workspace-test.nix — ./workspace.sh against a scratch colocated repository with a local origin (no network): <- flake.nix
 - modules/nixos/infra-space/nixpkgs-bump/workspace.nix — nixpkgs-bump-workspace (./workspace.sh), for ../nixpkgs-bump.nix (the guest's PATH) and ./workspace-test.nix. <- m/infra-space/nixpkgs-bump.nix, m/infra-space/nixpkgs-bump/workspace-test.nix
-- modules/nixos/infra-space/nixpkgs-bump/workspace.sh — nixpkgs-bump-workspace: creates and removes the nightly bump's jj workspace (../nixpkgs-bump/SKILL.md steps 1 and 6), s… <- m/infra-space/nixpkgs-bump/workspace.nix
+- modules/nixos/infra-space/nixpkgs-bump/workspace.sh — nixpkgs-bump-workspace: creates and removes the nightly bump's jj workspace (../nixpkgs-bump/SKILL.md steps 1 and 6), s… <- m/infra-space/nixpkgs-bump.nix, m/infra-space/nixpkgs-bump/workspace.nix
 - modules/nixos/infra-space/secret-prompt/clan-secret-prompt.py — - <- m/infra-space/secret-prompt/default.nix
 - modules/nixos/infra-space/secret-prompt/default.nix — clan-secret-prompt (./clan-secret-prompt.py): <- m/infra-space/dashboard.nix, m/infra-space/guest.nix
 - modules/nixos/ipv4-forward-slots-test/default.nix — ../ipv4-forward.nix with a container slot behind it (hyperhermes' nixosModules.container-slots), set up as on som: <- flake.nix

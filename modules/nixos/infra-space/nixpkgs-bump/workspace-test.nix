@@ -1,7 +1,11 @@
 # ./workspace.sh against a scratch colocated repository with a local
 # origin (no network): create and remove a bump workspace twice in a row
-# with no leftovers (create's stdout is the path alone); the overlap rule
-# (a workspace, a directory, a symlink), failing listings refused; the
+# with no leftovers (create's stdout is the path alone); a live earlier
+# workspace (a workspace, a directory just made) and failing listings
+# refused; the takeover of an earlier night's leftovers (its unpushed
+# work archived as a bookmark and carried onto main@origin without its
+# flake.lock change, or archived and a fresh start when it conflicts; a
+# stale symlink dropped; foreign content left beside the run); the
 # mkdir lock (a same-name run that wins the race during the fetch is
 # left alone); a failed create removing the workspace it made; remove on
 # a half-made workspace, a symlink (only the link goes), unpushed work
@@ -66,44 +70,59 @@ pkgs.runCommand "nixpkgs-bump-workspace-test"
       [ ! -e "$ws/stray.txt" ]
       [ -z "$(jj -R "$repo" --ignore-working-copy diff -r @ --name-only)" ]
       echo "ok: create $n"
-      # the overlap rule: a second create touches nothing
-      if w create hyperconfig-nixpkgs-bump-test-x 2>/dev/null; then echo "FAILED: overlap"; exit 1; fi
+      # a live run (its workspace changed just now): a second create
+      # touches nothing
+      if w create hyperconfig-nixpkgs-bump-test-x 2>$TMPDIR/err; then echo "FAILED: overlap"; exit 1; fi
+      grep -q "is in use" $TMPDIR/err
       [ ! -e hyperconfig-nixpkgs-bump-test-x ] && [ -d "$ws" ]
-      echo "ok: overlap refused"
+      echo "ok: a live earlier run is refused"
       echo r >/build/log/hyperconfig-nixpkgs-bump-test-$n.old-rev
       w remove hyperconfig-nixpkgs-bump-test-$n
       clean
       echo "ok: remove $n, no leftovers"
     done
 
-    # the overlap rule sees a bare directory too
+    # a caller whose cwd it cannot read (runuser from /root) still works
+    mkdir $TMPDIR/locked
+    (cd $TMPDIR/locked && chmod 000 . && w create hyperconfig-nixpkgs-bump-test-28 >/dev/null 2>$TMPDIR/err) ||
+      { chmod 755 $TMPDIR/locked; cat $TMPDIR/err; echo "FAILED: unreadable cwd"; exit 1; }
+    chmod 755 $TMPDIR/locked
+    w remove hyperconfig-nixpkgs-bump-test-28
+    clean
+    echo "ok: an unreadable cwd does not matter"
+
+    # a bare directory made just now counts as live too
     mkdir hyperconfig-nixpkgs-bump-old
     if w create hyperconfig-nixpkgs-bump-test-3 2>/dev/null; then echo "FAILED: dir overlap"; exit 1; fi
     [ ! -e hyperconfig-nixpkgs-bump-test-3 ] && [ -d hyperconfig-nixpkgs-bump-old ]
     rmdir hyperconfig-nixpkgs-bump-old
-    echo "ok: overlap with a directory refused, it is left alone"
+    echo "ok: a fresh directory is refused, it is left alone"
 
-    # ... and a symlink; remove of a symlink removes the link alone
+    # a stale symlink is taken over: the link goes, its target stays
     mkdir $TMPDIR/target && echo keep >$TMPDIR/target/f
     ln -s $TMPDIR/target hyperconfig-nixpkgs-bump-link
-    if w create hyperconfig-nixpkgs-bump-test-3 2>/dev/null; then echo "FAILED: symlink overlap"; exit 1; fi
-    [ ! -e hyperconfig-nixpkgs-bump-test-3 ] && [ -L hyperconfig-nixpkgs-bump-link ]
+    ws=$(w create hyperconfig-nixpkgs-bump-test-3 2>$TMPDIR/err)
+    grep -q "TAKEOVER: removed the earlier night's hyperconfig-nixpkgs-bump-link" $TMPDIR/err
+    [ ! -L hyperconfig-nixpkgs-bump-link ] && [ "$(cat $TMPDIR/target/f)" = keep ]
+    w remove hyperconfig-nixpkgs-bump-test-3
+    # remove of a symlink removes the link alone
+    ln -s $TMPDIR/target hyperconfig-nixpkgs-bump-link
     w remove hyperconfig-nixpkgs-bump-link
     [ ! -L hyperconfig-nixpkgs-bump-link ] && [ "$(cat $TMPDIR/target/f)" = keep ]
     clean
-    echo "ok: overlap with a symlink refused; remove drops only the link"
+    echo "ok: a symlink is taken over; remove drops only the link"
 
     # a listing that fails is a refusal: find (unreadable parent) ...
     chmod 311 .
     if w create hyperconfig-nixpkgs-bump-test-3 2>$TMPDIR/err; then echo "FAILED: find error ignored"; exit 1; fi
     chmod 755 .
-    grep -q "FAIL: find in" $TMPDIR/err
+    grep -q "FAIL: listing the earlier bump workspaces failed" $TMPDIR/err
     [ ! -e hyperconfig-nixpkgs-bump-test-3 ]
     # ... and jj (broken repository), for create and for remove
     mkdir hyperconfig-nixpkgs-bump-test-3
     mv "$repo/.jj/repo/op_heads" $TMPDIR/op_heads
     if w create hyperconfig-nixpkgs-bump-test-6 2>$TMPDIR/err; then echo "FAILED: jj error ignored"; exit 1; fi
-    grep -q "FAIL: jj workspace list failed" $TMPDIR/err
+    grep -q "FAIL: jj git fetch failed" $TMPDIR/err
     if w remove hyperconfig-nixpkgs-bump-test-3 2>$TMPDIR/err; then echo "FAILED: remove with jj broken"; exit 1; fi
     grep -q "FAIL: jj workspace list failed" $TMPDIR/err
     [ -d hyperconfig-nixpkgs-bump-test-3 ] && [ ! -e hyperconfig-nixpkgs-bump-test-6 ]
@@ -120,7 +139,7 @@ pkgs.runCommand "nixpkgs-bump-workspace-test"
     chmod +x $TMPDIR/race.sh
     if w create hyperconfig-nixpkgs-bump-test-7 2>$TMPDIR/err; then echo "FAILED: lock"; exit 1; fi
     git -C "$repo" config --unset remote.origin.uploadpack
-    grep -q "another run got there first" $TMPDIR/err
+    grep -q "hyperconfig-nixpkgs-bump-test-7 is in use" $TMPDIR/err
     ! grep -q "removing the workspace" $TMPDIR/err
     [ -d hyperconfig-nixpkgs-bump-test-7 ]
     rmdir hyperconfig-nixpkgs-bump-test-7
@@ -177,8 +196,92 @@ pkgs.runCommand "nixpkgs-bump-workspace-test"
     clean
     echo "ok: remove after the push"
 
-    # --- the review's hardening ---
+    # --- an earlier night's leftovers never stop a run ---
     jr() { jj -R "$repo" --ignore-working-copy "$@"; }
+    stale() { # $1 untouched for two days, as a run that died
+      find "$1" -exec touch -h -d '2 days ago' {} +
+      if [ -e "/build/log/''${1##*/}.alive" ]; then touch -d '2 days ago' "/build/log/''${1##*/}.alive"; fi
+    }
+    # unpushed work (a lock change, a fix, a fix that also moved the lock)
+    # and the files of its run: taken over, archived, carried without the
+    # lock changes
+    ws=$(w create hyperconfig-nixpkgs-bump-test-20)
+    (cd "$ws" && echo old-bump >flake.lock && jj describe -m lock && jj new &&
+      echo fix >fix.nix && jj describe -m fix && jj new &&
+      echo fix2 >fix2.nix && echo old-bump2 >flake.lock && jj describe -m mixed && jj new) >/dev/null 2>&1
+    echo r >/build/log/hyperconfig-nixpkgs-bump-test-20.old-rev
+    echo p >/build/log/hyperconfig-nixpkgs-bump-test-20.searxng-pick
+    old=$(jj -R "$ws" log --no-graph -r @ -T commit_id)
+    stale "$ws"
+    ws=$(w create hyperconfig-nixpkgs-bump-test-21 2>$TMPDIR/err)
+    cat $TMPDIR/err
+    grep -q "TAKEOVER: .* archived as nixpkgs-bump-archive/hyperconfig-nixpkgs-bump-test-20" $TMPDIR/err
+    grep -q "CARRIED: " $TMPDIR/err
+    [ ! -e hyperconfig-nixpkgs-bump-test-20 ] && [ ! -e /build/log/hyperconfig-nixpkgs-bump-test-20.old-rev ]
+    [ ! -e /build/log/hyperconfig-nixpkgs-bump-test-20.searxng-pick ]
+    ! jr workspace list -T 'name ++ "\n"' | grep -q test-20
+    [ "$(jr log --no-graph -r 'bookmarks(exact:"nixpkgs-bump-archive/hyperconfig-nixpkgs-bump-test-20")' -T commit_id)" = "$old" ]
+    # carried: fix and mixed (lock change dropped), lock (empty now) gone
+    [ "$(jj -R "$ws" log --no-graph --reversed -r 'main@origin..@-' -T 'description.first_line() ++ " "')" = "fix mixed " ]
+    [ "$(cat "$ws/fix.nix")" = fix ] && [ "$(cat "$ws/fix2.nix")" = fix2 ]
+    [ "$(cat "$ws/flake.lock")" = "$(git -C "$repo" show main:flake.lock)" ]
+    [ "$(jj -R "$ws" log --no-graph -r @ -T 'if(empty, "empty")')" = empty ]
+    [ -z "$(jj -R "$ws" log --no-graph -r '(main@origin..@) & conflicts()' -T change_id)" ]
+    echo "ok: a dead night's work is archived and carried forward, its lock left to the run"
+    # the carried work is unpushed: remove refuses; a later night takes
+    # it over in turn
+    if w remove hyperconfig-nixpkgs-bump-test-21 2>/dev/null; then echo "FAILED: removed carried work"; exit 1; fi
+    stale "$ws"
+    ws=$(w create hyperconfig-nixpkgs-bump-test-22 2>$TMPDIR/err)
+    grep -q "archived as nixpkgs-bump-archive/hyperconfig-nixpkgs-bump-test-21" $TMPDIR/err
+    [ "$(jj -R "$ws" log --no-graph --reversed -r 'main@origin..@-' -T 'description.first_line() ++ " "')" = "fix mixed " ]
+    echo "ok: carried work is carried again the next night"
+    # the liveness stamp: a quiet workspace (nothing changed for hours,
+    # no process in it) whose run refreshed its stamp within 2 h is in use
+    [ -f /build/log/hyperconfig-nixpkgs-bump-test-22.alive ]
+    find "$ws" -exec touch -h -d '3 hours ago' {} +
+    touch -d '3 hours ago' /build/log/hyperconfig-nixpkgs-bump-test-22.alive
+    w alive hyperconfig-nixpkgs-bump-test-22
+    if w create hyperconfig-nixpkgs-bump-test-29 2>$TMPDIR/err; then echo "FAILED: fresh stamp ignored"; exit 1; fi
+    grep -q "hyperconfig-nixpkgs-bump-test-22 is in use (its liveness stamp" $TMPDIR/err
+    [ -d "$ws" ] && [ ! -e hyperconfig-nixpkgs-bump-test-29 ]
+    if w alive hyperconfig-nixpkgs-bump-test-29 2>/dev/null; then echo "FAILED: alive without a workspace"; exit 1; fi
+    echo "ok: a fresh liveness stamp keeps a quiet run alive"
+    # archives older than 14 days are pruned (local bookmarks only)
+    jr bookmark create nixpkgs-bump-archive/ancient -r "$(JJ_TIMESTAMP=2020-01-01T00:00:00Z jj -R "$repo" --ignore-working-copy new main -m ancient --no-edit >/dev/null 2>&1 &&
+      jr log --no-graph -r 'description(exact:"ancient\n")' -T commit_id)" >/dev/null 2>&1
+    jr bookmark list -T 'name ++ "\n"' | grep -qx nixpkgs-bump-archive/ancient
+    # main@origin moves on with a conflicting fix: archived, fresh start
+    (cd $TMPDIR/seed && git pull -q ../origin.git main && echo other >fix.nix && git add -A &&
+      git commit -qm other && git push -q ../origin.git main)
+    stale "$ws"
+    ws=$(w create hyperconfig-nixpkgs-bump-test-23 2>$TMPDIR/err)
+    cat $TMPDIR/err
+    grep -q "archived as nixpkgs-bump-archive/hyperconfig-nixpkgs-bump-test-22" $TMPDIR/err
+    grep -q "PRUNED: archive nixpkgs-bump-archive/ancient" $TMPDIR/err
+    ! jr bookmark list -T 'name ++ "\n"' | grep -qx nixpkgs-bump-archive/ancient
+    jr bookmark list -T 'name ++ "\n"' | grep -qx nixpkgs-bump-archive/hyperconfig-nixpkgs-bump-test-21
+    grep -q "FRESH: nixpkgs-bump-archive/hyperconfig-nixpkgs-bump-test-22 does not apply" $TMPDIR/err
+    [ "$(jj -R "$ws" log --no-graph -r @- -T commit_id)" = "$(git -C "$repo" rev-parse main)" ]
+    [ "$(jj -R "$ws" log --no-graph -r @ -T 'if(empty, "empty")')" = empty ]
+    [ "$(cat "$ws/fix.nix")" = other ]
+    jr log --no-graph -r 'bookmarks(exact:"nixpkgs-bump-archive/hyperconfig-nixpkgs-bump-test-22")' -T commit_id | grep -q .
+    w remove hyperconfig-nixpkgs-bump-test-23
+    clean
+    echo "ok: work that no longer applies is archived and the run starts fresh"
+    # foreign content under a bump name is left alone, the run goes on
+    mkdir hyperconfig-nixpkgs-bump-test-24 && echo keep >hyperconfig-nixpkgs-bump-test-24/f
+    stale hyperconfig-nixpkgs-bump-test-24
+    ws=$(w create hyperconfig-nixpkgs-bump-test-25 2>$TMPDIR/err)
+    grep -q "SKIP: hyperconfig-nixpkgs-bump-test-24" $TMPDIR/err
+    grep -q "LEFT: directory .*hyperconfig-nixpkgs-bump-test-24" $TMPDIR/err
+    [ "$(cat hyperconfig-nixpkgs-bump-test-24/f)" = keep ] && [ -d "$ws/.jj" ]
+    w remove hyperconfig-nixpkgs-bump-test-25
+    rm -r hyperconfig-nixpkgs-bump-test-24
+    clean
+    echo "ok: foreign content is left alone beside the run"
+
+    # --- the review's hardening ---
     default_at() { jr log --no-graph -r default@ -T commit_id; }
 
     # no --repo flag: usage error, nothing touched; the production

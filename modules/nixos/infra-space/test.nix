@@ -811,6 +811,46 @@ pkgs.testers.runNixOSTest {
           assert guest(memberA, "command -v nixpkgs-bump-workspace").strip() == "/run/current-system/sw/bin/nixpkgs-bump-workspace"
           code, out = guest(memberA, "cd /home/infra && nixpkgs-bump-guard 2>&1", check=False)
           assert code != 0 and "not in a bump workspace" in out, (code, out)
+          # an earlier night's leftover workspace never stops a run: the
+          # production helper (repository /home/infra/hyperconfig, here a
+          # clone of a local origin) takes a stale one over, keeps its
+          # unpushed fix as a bookmark and carries it onto main@origin
+          # without its flake.lock change; a live one (changed just now)
+          # is refused, touching nothing
+          ids = "export JJ_USER=t JJ_EMAIL=t@t; "
+          guest(memberA, "git init --quiet --bare --initial-branch=main /tmp/bump-origin.git && "
+                         "git clone --quiet /tmp/bump-origin.git /tmp/bump-seed 2>/dev/null && cd /tmp/bump-seed && "
+                         "echo '{}' > flake.nix && echo lock0 > flake.lock && git add -A && "
+                         "git -c user.name=t -c user.email=t@t commit --quiet -m init && git push --quiet origin main && "
+                         "jj git clone --colocate /tmp/bump-origin.git /home/infra/hyperconfig >/dev/null 2>&1")
+          old_name = "hyperconfig-nixpkgs-bump-2026-11-14"
+          old = f"/home/infra/{old_name}"
+          code, out = guest(memberA, ids + "exec 2>&1; set -x; "
+                               f"ws=$(nixpkgs-bump-workspace create {old_name}) && cd $ws && "
+                               "echo lock1 > flake.lock && jj describe -m lock && jj new && "
+                               "echo fix > fix.nix && jj describe -m fix && jj new && "
+                               f"mkdir -p /home/infra/nixpkgs-bump && echo r > /home/infra/nixpkgs-bump/{old_name}.old-rev", check=False)
+          assert code == 0, (code, out)
+          code, out = guest(memberA, ids + "nixpkgs-bump-workspace create hyperconfig-nixpkgs-bump-2026-11-15 2>&1", check=False)
+          assert code != 0 and "is in use" in out, (code, out)
+          guest(memberA, f"test -d {old} && test ! -e /home/infra/hyperconfig-nixpkgs-bump-2026-11-15")
+          # dead: nothing changed in it, and its liveness stamp is old
+          guest(memberA, f"test -f /home/infra/nixpkgs-bump/{old_name}.alive")
+          # nixpkgs-bump-nix run in the workspace refreshes the stamp
+          guest(memberA, f"touch -d '3 hours ago' /home/infra/nixpkgs-bump/{old_name}.alive && "
+                         f"cd {old} && nixpkgs-bump-nix --version >/dev/null && "
+                         f"test -n \"$(find /home/infra/nixpkgs-bump/{old_name}.alive -mmin -5)\"")
+          guest(memberA, f"cd ~ && find {old} /home/infra/nixpkgs-bump/{old_name}.alive -exec touch -h -d '2 days ago' {{}} +")
+          code, out = guest(memberA, ids + "nixpkgs-bump-workspace create hyperconfig-nixpkgs-bump-2026-11-15 2>/tmp/err; cat /tmp/err >&2", check=False)
+          err = guest(memberA, "cat /tmp/err")
+          assert code == 0 and out.strip() == "/home/infra/hyperconfig-nixpkgs-bump-2026-11-15", (code, out, err)
+          assert "archived as nixpkgs-bump-archive/hyperconfig-nixpkgs-bump-2026-11-14" in err, err
+          assert "CARRIED: " in err, err
+          guest(memberA, f"test ! -e {old} && test ! -e /home/infra/nixpkgs-bump/hyperconfig-nixpkgs-bump-2026-11-14.old-rev")
+          new = "/home/infra/hyperconfig-nixpkgs-bump-2026-11-15"
+          assert guest(memberA, f"cd {new} && jj log --no-graph --reversed -r 'main@origin..@-' -T 'description.first_line()'").strip() == "fix"
+          assert guest(memberA, f"cat {new}/fix.nix {new}/flake.lock").split() == ["fix", "lock0"]
+          guest(memberA, f"rm -rf {new} /home/infra/hyperconfig /home/infra/nixpkgs-bump /tmp/bump-origin.git /tmp/bump-seed /tmp/err")
           # the verdict is the log's last non-empty line, exactly (hermes
           # -Q's trailing `session_id:` line aside)
           for text, ok in [("x\\nNIXPKGS-BUMP: merged\\n\\nsession_id: 20261110_013000_abc\\n", True),

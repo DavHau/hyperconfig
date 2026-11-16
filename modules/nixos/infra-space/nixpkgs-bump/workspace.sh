@@ -3,6 +3,7 @@
 # parses jj's output to decide whether it has one.
 #
 #   nixpkgs-bump-workspace create [NAME]
+#   nixpkgs-bump-workspace alive NAME
 #   nixpkgs-bump-workspace remove NAME
 #
 # The repository is @repo@ (fixed at build time, no flag: ./workspace.nix's
@@ -19,19 +20,43 @@
 # and .git must be real directories and .jj/repo/config.toml (legacy
 # in-tree config jj would apply) absent.
 #
-# create: the overlap rule first: any hyperconfig-nixpkgs-bump-* beside
-# the repository, as a directory, a jj workspace or a git worktree, means
-# an earlier run failed or is still going: exit 1, nothing touched; if
-# listing them fails, exit 1 too. Then fetch, `mkdir` (no -p), and the
-# workspace. The mkdir is a lock only against a parallel run with the
-# same NAME (with the default, one started on the same UTC date); a run
-# with another name is kept out by the overlap rule alone. Its stdout is
-# exactly the workspace's path; everything else is on stderr. Exit 0 only
-# once the facts hold: jj lists the workspace, its @ is an empty change
-# on top of main@origin, the tree is checked out, and git lists the
-# worktree. Any failure after the mkdir removes what this call created
-# (empty: no bump work yet) and exits 1, so one odd night cannot block
-# the next ones.
+# create: fetch, then the earlier nights first. Any hyperconfig-nixpkgs-
+# bump-* beside the repository (a directory, a jj workspace, a git
+# worktree) or in @logDir@ (.old-rev, .searxng-*) is an earlier run's:
+# - still running: exit 1, nothing touched (two runs must not overlap);
+#   if listing them fails, exit 1 too. Running means its liveness stamp
+#   @logDir@/NAME.alive (written by create, refreshed by `alive NAME` at
+#   each step of the run and by nixpkgs-bump-nix while a command runs in
+#   the workspace) is younger than @aliveMinutes@ minutes, or a file in
+#   it changed in the last @liveMinutes@ minutes, or a process has its
+#   cwd in it (see is_live). The stamp is the run's own word: hermes runs
+#   each terminal call in a fresh shell, and a quiet hour of polling a
+#   build looks like nothing else;
+# - not this helper's to judge (foreign content, a .jj or .git that is
+#   not jj's own, see remove): left alone (`SKIP:` and `LEFT:` lines),
+#   and the run goes on beside it;
+# - otherwise taken over: its unpushed work (snapshotted first) is kept
+#   as the local bookmark nixpkgs-bump-archive/<its name> (never pushed),
+#   then it is removed like `remove` does (`TAKEOVER:` line). A leftover
+#   never stops a run.
+# Archive bookmarks older than @archiveDays@ days (their commit's committer
+# date) are deleted first (local bookmarks only, never pushed).
+# Then `mkdir` (no -p) and the workspace. The mkdir is a lock only
+# against a parallel run with the same NAME (with the default, one
+# started on the same UTC date); a run with another name is kept out by
+# the liveness check alone. Then the carry: the newest archived
+# leftover's non-empty commits not in main@origin are duplicated, in
+# order, on top of main@origin, without their flake.lock changes (the
+# run moves the lock itself; a commit left empty by that is dropped). If
+# one conflicts, none is carried: the run starts fresh, the archive
+# stays (`CARRIED:` or `FRESH:` line). Its stdout is exactly the
+# workspace's path; everything else is on stderr. Exit 0 only once the
+# facts hold: jj lists the workspace, its @ is an empty change on top of
+# main@origin or of the carried commits (which descend from main@origin,
+# conflict-free), the tree is checked out, and git lists the worktree.
+# Any failure after the mkdir removes what this call created (no bump
+# work of its own yet; carried commits are copies of the archive) and
+# exits 1, so one odd night cannot block the next ones.
 #
 # Why `add` and then `jj new` in the workspace: `workspace add` run in
 # the repository snapshots and updates the repository's own working copy
@@ -41,6 +66,9 @@
 # exit 1). That exit is not trusted either way; `jj new main@origin`,
 # run in the new workspace (which has nothing to snapshot), checks the
 # tree out, and the facts above decide.
+#
+# alive NAME touches @logDir@/NAME.alive (NAME's directory must exist):
+# the run's liveness stamp, see create.
 #
 # remove goes by path, DIR = the repository's sibling NAME. It first
 # refuses (exit 1, nothing touched) unless:
@@ -58,7 +86,7 @@
 # A failing jj or git counts as a refusal. Then forgets the workspace
 # (jj also drops its git worktree), removes DIR, @logDir@/NAME.old-rev and
 # NAME.searxng-* (./searxng.sh's pick, diff and its parts, review and
-# canary files),
+# canary files), NAME.alive,
 # prunes git's worktree entries, and exits 0 only if none of them is left
 # (a failing listing counts as left).
 
@@ -72,13 +100,17 @@ die() {
   exit 1
 }
 usage() {
-  echo "usage: nixpkgs-bump-workspace create [NAME] | remove NAME" >&2
+  echo "usage: nixpkgs-bump-workspace create [NAME] | alive NAME | remove NAME" >&2
   exit 2
 }
 
 cmd=${1:-}
 [ $# -ge 1 ] && shift
 
+# Every path here is absolute; the caller's cwd may be unreadable to us
+# (`runuser -u infra` from /root): find fails when it cannot return to
+# its starting directory, which would read as a failed listing.
+cd /
 # The pinned environment for every jj and git call (see above): nothing
 # of the caller's but the identity jj writes into new commits.
 jjHome=$(mktemp -d) || die "mktemp failed"
@@ -158,6 +190,7 @@ leftovers() {
   fi
   [ -e "$repo/.git/worktrees/$name" ] && echo "git worktree entry .git/worktrees/$name"
   [ -e "$logDir/$name.old-rev" ] && echo "$logDir/$name.old-rev"
+  [ -e "$logDir/$name.alive" ] && echo "$logDir/$name.alive"
   for f in "$logDir/$name".searxng-{pick,diff,review,canary} "$logDir/$name".searxng-diff.part-*; do
     [ -e "$f" ] && echo "$f"
   done
@@ -200,9 +233,11 @@ check_own_dir() {
 }
 
 # Refuses (exit 1, nothing touched) unless $parent/$1 is bump workspace
-# $1's, by path, and all of its work is in main@origin.
+# $1's, by path, and all of its work is in main@origin. With $2 (a
+# takeover's archive bookmark), unpushed work does not refuse: it is kept
+# as bookmark $2 first.
 check_remove() {
-  local name=$1 ws=$parent/$1 list paths byname bypath admin unpushed e
+  local name=$1 ws=$parent/$1 archive=${2:-} list paths byname bypath admin unpushed e
   list=$(ws_list) || die "jj workspace list failed, touching nothing"
   paths=$(wt_paths) || die "git worktree list failed, touching nothing"
   byname=$(filter -F -- "\"$name\" " <<<"$list") || die "grep failed"
@@ -242,13 +277,20 @@ check_remove() {
   # builtin revset functions: the pinned config has no aliases
   unpushed=$(jjr log --no-graph -r "(::\"$name\"@ ~ ::main@origin) ~ empty()" \
     -T 'commit_id.short() ++ "\n"') || die "jj log of $name@ failed, touching nothing"
-  [ -z "$unpushed" ] ||
+  [ -z "$unpushed" ] && return 0
+  [ -n "$archive" ] ||
     die "$name has work not in main@origin, touching nothing: $(echo "$unpushed" | paste -sd ' ' -)"
+  jjr bookmark set --allow-backwards "$archive" -r "\"$name\"@" >&2 ||
+    die "cannot keep $name's work as bookmark $archive, touching nothing"
+  [ "$(jjr log --no-graph -r "bookmarks(exact:\"$archive\")" -T commit_id)" = \
+    "$(jjr log --no-graph -r "\"$name\"@" -T commit_id)" ] ||
+    die "bookmark $archive is not at $name@, touching nothing"
+  say "TAKEOVER: $name's unpushed work ($(echo "$unpushed" | paste -sd ' ' -)) archived as $archive"
 }
 
 remove() {
-  local name=$1 ws=$parent/$1
-  check_remove "$name"
+  local name=$1 ws=$parent/$1 archive=${2:-}
+  check_remove "$name" "$archive"
   if ws_list | grep -xF >/dev/null -- "\"$name\" \"$ws\""; then
     jjr workspace forget "$name" >&2 || say "jj workspace forget $name failed"
   fi
@@ -256,11 +298,106 @@ remove() {
     git -C "$repo" worktree remove --force "$ws" >&2 || true
   fi
   rm -rf -- "${parent:?}/$name"
-  rm -f -- "$logDir/$name.old-rev" "$logDir/$name".searxng-{pick,diff,review,canary} "$logDir/$name".searxng-diff.part-*
+  rm -f -- "$logDir/$name.old-rev" "$logDir/$name.alive" "$logDir/$name".searxng-{pick,diff,review,canary} "$logDir/$name".searxng-diff.part-*
   git -C "$repo" worktree prune >&2 || say "git worktree prune failed"
   local left
   left=$(leftovers "$name")
   [ -z "$left" ] || die "left behind: $(echo "$left" | paste -sd ';' -)"
+}
+
+# Every earlier night's bump name, one per line, sorted (the default
+# names sort by date): directories and symlinks beside the repository,
+# jj workspaces, git worktrees and git's worktree entries, and the
+# .old-rev / .alive / .searxng-* files in @logDir@. Exit 1 if a listing fails.
+earlier_names() {
+  local dirs names paths admin files
+  dirs=$(find "$parent" -mindepth 1 -maxdepth 1 -name "$prefix*" -printf '%f\n') || return 1
+  names=$(ws_names) || return 1
+  paths=$(wt_paths) || return 1
+  admin=
+  if [ -d "$repo/.git/worktrees" ]; then
+    admin=$(find "$repo/.git/worktrees" -mindepth 1 -maxdepth 1 -name "$prefix*" -printf '%f\n') || return 1
+  fi
+  files=
+  if [ -d "$logDir" ]; then
+    files=$(find "$logDir" -mindepth 1 -maxdepth 1 \( -name "$prefix*.old-rev" -o -name "$prefix*.alive" -o -name "$prefix*.searxng-*" \) -printf '%f\n' |
+      sed -e 's/\.old-rev$//' -e 's/\.alive$//' -e 's/\.searxng-.*$//') || return 1
+  fi
+  {
+    echo "$dirs"
+    filter -E -- "^$prefix" <<<"$names"
+    filter -F -- "$parent/$prefix" <<<"$paths" | sed 's|.*/||'
+    echo "$admin"
+    echo "$files"
+  } | sed '/^$/d' | sort -u
+}
+
+# Exit 0 (with the reason on stdout) if bump workspace $1 is in use: its
+# liveness stamp @logDir@/$1.alive is younger than @aliveMinutes@ minutes
+# (the run says it is alive), a file there changed in the last @liveMinutes@ minutes (the agent
+# editing, a build writing result-*), or a process has its cwd there and
+# something changed within @staleMinutes@ minutes (a long build). Otherwise the
+# run is taken for dead: the timer is 24 h apart, the unit's limit 16 h.
+is_live() {
+  local ws=$parent/$1 p cwd hit stamp=$logDir/$1.alive
+  if [ -f "$stamp" ] && [ ! -L "$stamp" ] &&
+    [ -n "$(find "$stamp" -mmin -@aliveMinutes@ -print 2>/dev/null)" ]; then
+    echo "its liveness stamp $stamp is younger than @aliveMinutes@ minutes"
+    return 0
+  fi
+  [ -d "$ws" ] && [ ! -L "$ws" ] || return 1
+  hit=$(find "$ws" -xdev -mmin -@liveMinutes@ -print -quit 2>/dev/null)
+  if [ -n "$hit" ]; then
+    echo "$hit changed in the last @liveMinutes@ minutes"
+    return 0
+  fi
+  # A process working in it (a build's client, the agent's shell) counts
+  # while the directory changed within @staleMinutes@ minutes: a shell left behind
+  # by a run that died does not hold the bump off forever.
+  [ -n "$(find "$ws" -xdev -mmin -@staleMinutes@ -print -quit 2>/dev/null)" ] || return 1
+  for p in /proc/[0-9]*; do
+    cwd=$(readlink "$p/cwd" 2>/dev/null) || continue
+    case "$cwd" in
+      "$ws" | "$ws"/*)
+        echo "process ${p#/proc/} works in it"
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+# Takes over an earlier night's leftovers $1: its unpushed work kept as
+# bookmark nixpkgs-bump-archive/$1 (`TAKEOVER: ... archived as <bookmark>`
+# when there was some), then removed as by `remove`. Exit 1 (nothing
+# touched but the bookmark) when remove would refuse for another reason.
+takeover() {
+  local name=$1
+  check_name "$name"
+  remove "$name" "nixpkgs-bump-archive/$name"
+  say "TAKEOVER: removed the earlier night's $name"
+}
+
+# The carry: the archived night's commits (non-empty, not in
+# main@origin), duplicated in order between main@origin and the new
+# workspace's @, without their flake.lock changes; commits that end up
+# empty are dropped. Exit 1 (the new workspace back at a fresh @ on
+# main@origin) if one conflicts.
+carry() {
+  local archive=$1 ws=$2 base=$3 c revs n
+  revs="(::bookmarks(exact:\"$archive\") ~ ::main@origin) ~ empty()"
+  n=$(jj -R "$ws" log --no-graph -r "$revs" -T '"x\n"' | grep -c x) || true
+  [ "$n" -gt 0 ] || return 0
+  jj -R "$ws" duplicate "$revs" -B @ >&2 || return 1
+  for c in $(jj -R "$ws" log --no-graph --reversed -r 'main@origin..@-' -T 'change_id ++ "\n"'); do
+    jj -R "$ws" restore -c "$c" 'root-file:"flake.lock"' >&2 || return 1
+  done
+  if [ -n "$(jj -R "$ws" log --no-graph -r '(main@origin..@-) & empty()' -T change_id)" ]; then
+    jj -R "$ws" abandon '(main@origin..@-) & empty()' >&2 || return 1
+  fi
+  [ -z "$(jj -R "$ws" log --no-graph -r '(main@origin..@) & conflicts()' -T change_id)" ] || return 1
+  [ "$(jj -R "$ws" log --no-graph -r @ -T 'if(empty, "empty")')" = empty ] || return 1
+  [ -n "$(jj -R "$ws" log --no-graph -r "$base & ::@" -T commit_id)" ] || return 1
 }
 
 case "$cmd" in
@@ -272,29 +409,52 @@ case "$cmd" in
     # stdout is the path alone: everything else to stderr
     exec 3>&1 1>&2
 
-    # The overlap rule: any bump workspace, in any form; a listing that
-    # fails is a refusal.
-    dirs=$(find "$parent" -mindepth 1 -maxdepth 1 -name "$prefix*" -printf 'directory %p\n') ||
-      die "find in $parent failed, touching nothing"
-    names=$(ws_names) || die "jj workspace list failed, touching nothing"
-    paths=$(wt_paths) || die "git worktree list failed, touching nothing"
-    other=$(
-      echo "$dirs" &&
-        filter -F -- "$prefix" <<<"$names" | sed 's/^/jj workspace /' &&
-        filter -F -- "$parent/$prefix" <<<"$paths" | sed 's/^/git worktree /'
-    ) || die "overlap check failed, touching nothing"
-    other=$(echo "$other" | sed '/^$/d')
-    [ -z "$other" ] || die "an earlier bump workspace exists (earlier night failed or still running), touching nothing: $(echo "$other" | paste -sd ';' -)"
-
     jjr git fetch >&2 || die "jj git fetch failed"
+
+    # The earlier nights: every bump name in any form; a listing that
+    # fails is a refusal.
+    earlier=$(earlier_names) || die "listing the earlier bump workspaces failed, touching nothing"
+    IFS=$'\n'
+    # A live one stops this run before anything is touched.
+    for n in $earlier; do
+      if why=$(is_live "$n"); then
+        die "bump workspace $n is in use ($why): an earlier run is still going, touching nothing"
+      fi
+    done
+    # Old archives go (local bookmarks only; never pushed).
+    while IFS=$'\t' read -r b t; do
+      [ -n "$b" ] && [ -n "$t" ] || continue
+      if [ "$t" -lt "$(($(date +%s) - @archiveDays@ * 86400))" ]; then
+        jjr bookmark delete "exact:\"$b\"" >&2 && say "PRUNED: archive $b (older than @archiveDays@ days)"
+      fi
+    done < <(jjr bookmark list "glob:nixpkgs-bump-archive/*" \
+      -T 'if(!remote && normal_target, name ++ "\t" ++ normal_target.committer().timestamp().format("%s") ++ "\n")')
+    archive=
+    for n in $earlier; do
+      if out=$(takeover "$n" 2>&1); then
+        echo "$out"
+        b=$(sed -n 's/^nixpkgs-bump-workspace: TAKEOVER: .* archived as \([^ ]*\)$/\1/p' <<<"$out")
+        # names sort by date: the last one archived is the newest night's
+        [ -z "$b" ] || archive=$b
+      else
+        echo "$out"
+        say "SKIP: $n is not this helper's to take over; the run goes on beside it"
+        while IFS= read -r l; do [ -z "$l" ] || say "LEFT: $l"; done < <(leftovers "$n")
+      fi
+    done
+    unset IFS
+
     mkdir -- "$ws" || die "mkdir $ws failed: another run got there first, touching nothing"
+    { mkdir -p -- "$logDir" && touch -- "$logDir/$name.alive"; } || die "cannot write the liveness stamp $logDir/$name.alive"
 
     # From here on the workspace is this call's: on any failure remove it.
     done=0
     on_exit() {
       if [ "$done" != 1 ]; then
         say "removing the workspace this call created: $ws"
-        (remove "$name") || say "cleanup incomplete; Dave cleans up"
+        # carried commits are copies of the archive (which keeps them)
+        jj -R "$ws" abandon 'main@origin..@' >/dev/null 2>&1 || true
+        (remove "$name") || say "cleanup incomplete; the next run takes it over"
       fi
       rm -rf -- "$jjHome"
     }
@@ -314,9 +474,34 @@ case "$cmd" in
     wt_paths | grep -xF >/dev/null "$ws" || die "git lists no worktree at $ws"
     [ "$(git -C "$ws" rev-parse HEAD)" = "$base" ] || die "git HEAD in $ws is not main@origin"
 
+    # Carry the newest earlier night's work forward, or start fresh.
+    if [ -n "$archive" ]; then
+      if carry "$archive" "$ws" "$base"; then
+        say "CARRIED: $(jj -R "$ws" log --no-graph -r 'main@origin..@-' -T 'change_id.short(8) ++ " " ++ description.first_line() ++ "; "') from $archive (flake.lock changes dropped: move the lock again)"
+      else
+        say "FRESH: $archive does not apply to main@origin ($base): starting fresh; it stays as that bookmark"
+        # drop what the carry made (copies; @ comes back empty on main@origin)
+        jj -R "$ws" abandon 'main@origin..@' >&2 || die "cannot drop the carry in $ws"
+        [ "$(jj -R "$ws" log --no-graph -r '@-' -T commit_id)" = "$base" ] ||
+          die "@- in $ws is not main@origin after dropping the carry"
+      fi
+      [ -z "$(jj -R "$ws" log --no-graph -r '(main@origin..@) & conflicts()' -T change_id)" ] ||
+        die "conflicted commits in $ws"
+      [ "$(jj -R "$ws" log --no-graph -r @ -T 'if(empty, "empty")')" = empty ] ||
+        die "@ in $ws is not empty"
+      [ -f "$ws/flake.nix" ] && [ -f "$ws/flake.lock" ] || die "no tree checked out in $ws"
+    fi
+
     done=1
-    say "ok: $name: @ empty on main@origin ($base)"
+    say "ok: $name: @ empty on $(jj -R "$ws" log --no-graph -r '@-' -T 'commit_id') (main@origin $base)"
     echo "$ws" >&3
+    ;;
+  alive)
+    [ $# = 1 ] || usage
+    check_name "$1"
+    [ -d "$parent/$1" ] && [ ! -L "$parent/$1" ] || die "no bump workspace $parent/$1"
+    [ ! -L "$logDir/$1.alive" ] || die "$logDir/$1.alive is a symlink"
+    touch -- "$logDir/$1.alive"
     ;;
   remove)
     [ $# = 1 ] || usage

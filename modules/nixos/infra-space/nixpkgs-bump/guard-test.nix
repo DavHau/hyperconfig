@@ -309,6 +309,33 @@ pkgs.runCommand "nixpkgs-bump-guard-test"
     allow_env() { fix '# NIXPKGS_ALLOW_INSECURE=1'; }
     envrc() { bump; echo 'use flake' >.envrc; }
     flake_parts() { bump; mkdir -p modules/flake-parts; echo '{ }' >modules/flake-parts/x.nix; }
+    # hyperhermes: a version guard adapted (allowed), its trust core (denied)
+    hh_guard() {
+      bump
+      mkdir -p hyperhermes/modules/wallet
+      printf '{ pkgs, lib, ... }:\nif lib.versionOlder pkgs.patchelf.version "0.18" then 1 else 2\n' >hyperhermes/modules/wallet/phoenixd.nix
+    }
+    hh_core() { bump; mkdir -p hyperhermes/modules/core; echo '{ }' >hyperhermes/modules/core/hardening.nix; }
+    hh_sso() { bump; mkdir -p hyperhermes/modules/sso; echo '{ }' >hyperhermes/modules/sso/x.nix; }
+    hh_lib() { bump; mkdir -p hyperhermes/lib; echo '{ }' >hyperhermes/lib/sso.nix; }
+    # hyperhermes/ is default-deny: a new or unlisted file anywhere else
+    hh_file() { bump; mkdir -p "hyperhermes/$(dirname "$1")"; echo '{ }' >"hyperhermes/$1"; }
+    hh_pkg() { hh_file pkgs/camoufox/python.nix; }
+    hh_browser() { hh_file modules/browser/ocr.nix; }
+    hh_clan() { hh_file modules/clan.nix; }
+    hh_mail() { hh_file modules/mail/default.nix; }
+    hh_wallet() { hh_file modules/wallet/default.nix; }
+    hh_storage() { hh_file modules/container-slots-storage/default.nix; }
+    hh_bridge() { hh_file pkgs/tcp-owner-bridge/default.nix; }
+    hh_searxng_pkg() { hh_file modules/browser/searxng-package.nix; }
+    hh_searxng() { hh_file modules/browser/searxng.nix; }
+    hh_camofox() { hh_file modules/browser/camofox.nix; }
+    hh_new() { hh_file modules/newthing.nix; }
+    hh_case() { hh_file Pkgs/x.nix; }
+    secret_word() { fix '{ p = pkgs.foo.override { secretFile = "/run/x"; }; }'; }
+    credential_word() { fix '{ x.LoadCredential = [ "k:/run/k" ]; }'; }
+    token_word() { fix '{ x.apiTokenPath = "/run/t"; }'; }
+    iptables_word() { fix '{ x.extra = "iptables -A INPUT -j ACCEPT"; }'; }
     nested_lock() { bump; mkdir -p tools/x; echo '{ }' >machines/x/flake.lock; }
     fake_header() { fix '{' '++ b/machines/x/fix.nix' '-- a/security' '}'; }
     # third review: admin keys, items in multi-line lists, non-Nix files,
@@ -402,6 +429,26 @@ pkgs.runCommand "nixpkgs-bump-guard-test"
     run fail "NIXPKGS_ALLOW_*" "denied options" allow_env
     run fail ".envrc" "denied paths" envrc
     run fail "modules/flake-parts/" "denied paths" flake_parts
+    run pass "a hyperhermes version guard adapted" "" hh_guard
+    run fail "hyperhermes' hardening" "denied paths" hh_core
+    run fail "hyperhermes' SSO" "denied paths" hh_sso
+    run fail "hyperhermes' library" "denied paths" hh_lib
+    run pass "a hyperhermes package adapted" "" hh_pkg
+    run pass "a hyperhermes browser module adapted" "" hh_browser
+    run fail "hyperhermes' clan glue" "denied paths" hh_clan
+    run fail "hyperhermes' mail" "denied paths" hh_mail
+    run fail "hyperhermes' wallet" "denied paths" hh_wallet
+    run fail "hyperhermes' slot storage" "denied paths" hh_storage
+    run fail "hyperhermes' tcp-owner-bridge" "denied paths" hh_bridge
+    run fail "hyperhermes' SearXNG package" "denied paths" hh_searxng_pkg
+    run fail "hyperhermes' SearXNG module" "denied paths" hh_searxng
+    run fail "hyperhermes' Camofox module" "denied paths" hh_camofox
+    run fail "a new hyperhermes module" "denied paths" hh_new
+    run fail "hyperhermes/ in another case" "denied paths" hh_case
+    run fail "a secret" "denied options" secret_word
+    run fail "a LoadCredential" "denied options" credential_word
+    run fail "a token" "denied options" token_word
+    run fail "iptables" "denied options" iptables_word
     run fail "a nested flake.lock" "denied paths" nested_lock
     run fail "content that looks like a diff header" "denied options" fake_header
     run fail "modules/admin-ssh-keys.nix" "denied paths" admin_key

@@ -333,7 +333,7 @@ if [ -n "$special" ]; then
 fi
 # Case-insensitive (grep -i): a case-folding checkout must not slip by.
 denied_paths='(^|/)(vars|sops)/|-age\.key(/|$)|(^|/)flake\.nix$|/flake\.lock$'
-denied_paths+='|^modules/nixos/infra-space/|^hyperhermes/|^modules/flake-parts/|^tools/'
+denied_paths+='|^modules/nixos/infra-space/|^modules/flake-parts/|^tools/'
 denied_paths+='|^inventory\.json$|^default\.nix$|^shell\.nix$|(^|/)\.envrc$'
 denied_paths+='|(^|/)\.gitattributes$|(^|/)\.gitmodules$|(^|/)\.git/'
 denied_paths+='|^modules/admin-ssh-keys\.nix$'
@@ -347,7 +347,27 @@ denied_paths+='|^\.github/|^\.gitlab-ci|^\.buildkite/|^\.garnix|^garnix\.yaml$|^
 if hits=$(grep -vE '\.nix$|^flake\.lock$' <<<"$files" | grep .); then
   fail "only .nix files may change:"$'\n'"$hits"
 fi
-if hits=$(grep -iE "$denied_paths" <<<"$files"); then
+# hyperhermes/ (the agents' own flake) is denied but for a short
+# allowlist: its trust core (accounts, hardening, firewall, locked config,
+# SSO, auth, mail, wallet keys, container slots and their storage, the
+# clan glue, checks, library) is most of it, and a new file there must
+# not slip through a list of what is denied. Allowed: phoenixd.nix (a
+# version guard that throws on a nixpkgs version), the packages but
+# tcp-owner-bridge (the owner-gated bridge), the browser modules but the
+# SearXNG package (the pin's build), searxng.nix (its secret key and
+# limits) and camofox.nix (its access key and iptables owner rules).
+# The allowlist is matched case-sensitively, the exceptions not.
+hh_allowed='^hyperhermes/(modules/wallet/phoenixd\.nix|pkgs/[^/].*|modules/browser/[^/].*)$'
+hh_except='^hyperhermes/(pkgs/tcp-owner-bridge/|modules/browser/(searxng-package|searxng|camofox)\.nix$)'
+hh_denied=
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  if [[ "$f" =~ $hh_allowed ]] && ! grep -qiE "$hh_except" <<<"$f"; then
+    continue
+  fi
+  hh_denied+="$f (hyperhermes/ outside its allowlist)"$'\n'
+done < <(grep -iE '^hyperhermes/' <<<"$files" || true)
+if hits=$({ grep -iE "$denied_paths" <<<"$files" || true; printf '%s' "$hh_denied"; } | grep .); then
   fail "denied paths changed:"$'\n'"$hits"
 else
   ok "no denied path among: $(tr '\n' ' ' <<<"$files")"
@@ -368,6 +388,7 @@ denied_opts+='|fetch[A-Za-z0-9]*|requireFile|outputHash|getFlake|builtins\s*\.\s
 denied_opts+='|ecdsa-sha2|\bsk-|AAAA[A-Za-z0-9+/]{12,}|\$\{\s*"|"\s*\+\s*"'
 denied_opts+='|\bcurl\b|\bwget\b|https?://|NIXPKGS_ALLOW'
 denied_opts+='|allowBroken|allowInsecure|permittedInsecurePackages|allowUnsupportedSystem|--impure'
+denied_opts+='|secret|credential|token|LoadCredential|iptables'
 # Changed lines marked by indicators no file content can fake (a line
 # `++ b/x` would read as a header in a plain diff's `+` marking).
 gitd -U3 --output-indicator-new='>' --output-indicator-old='<' \

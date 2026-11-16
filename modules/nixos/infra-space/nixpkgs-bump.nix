@@ -30,8 +30,12 @@
   it in the gateway (the dashboard, or restarting hermes-agent-infra,
   which this unit no longer follows, see below). What keeps a stray turn
   from merging over a newer run is the skill: step 1 refuses to start
-  while any bump workspace exists, and nixpkgs-bump-guard (below) fails a
-  push once someone else bumped.
+  while a bump workspace is in use (its liveness stamp, refreshed at each
+  step and by nixpkgs-bump-nix, younger than 2 h; a file changed in the
+  last 30 minutes; or a process in it), and nixpkgs-bump-guard (below) fails a push once
+  someone else bumped. A dead earlier night's workspace never stops a
+  run: step 1 takes it over, archives its work as a local bookmark and
+  carries its fixes forward (./nixpkgs-bump/workspace.sh).
 
   Failures surface three ways: the report (the agent's last message) in
   ~/nixpkgs-bump/<UTC date and time>.log, the unit failing (its journal;
@@ -143,8 +147,26 @@ let
   # all); the daemon's nix.conf values never apply to daemon clients.
   maxJobs = 2;
   cores = 8;
+  # Run in a bump workspace, it also keeps that run's liveness stamp fresh
+  # (nixpkgs-bump-workspace alive, every 10 minutes while nix runs: a
+  # mass rebuild is one command for hours).
   bumpNix = pkgs.writeShellScriptBin "nixpkgs-bump-nix" ''
-    exec ${config.nix.package}/bin/nix --max-jobs ${toString maxJobs} --cores ${toString cores} "$@"
+    nix=${config.nix.package}/bin/nix
+    case "$PWD" in
+      ${home}/hyperconfig-nixpkgs-bump-*) ;;
+      *) exec $nix --max-jobs ${toString maxJobs} --cores ${toString cores} "$@" ;;
+    esac
+    name=''${PWD#${home}/}
+    name=''${name%%/*}
+    alive() { ${lib.getExe workspace} alive "$name" >/dev/null 2>&1; }
+    alive
+    self=$$
+    (while sleep 600; do kill -0 "$self" 2>/dev/null || exit 0; alive; done) </dev/null >/dev/null 2>&1 &
+    toucher=$!
+    $nix --max-jobs ${toString maxJobs} --cores ${toString cores} "$@"
+    rc=$?
+    kill "$toucher" 2>/dev/null
+    exit $rc
   '';
 
   run = pkgs.writeShellScript "nixpkgs-bump" ''

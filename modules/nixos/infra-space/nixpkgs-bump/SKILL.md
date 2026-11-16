@@ -58,31 +58,73 @@ from `jj workspace add` by hand:
 
     ws=$(nixpkgs-bump-workspace create)
 
-It checks the overlap rule (any `/home/infra/hyperconfig-nixpkgs-bump-*`
-directory, jj workspace or git worktree: an earlier night failed or is
-still running), fetches, `mkdir`s the directory (no `-p`), adds the
-workspace (a jj workspace with its own git worktree) on `main@origin`
-and checks it out. It decides by facts, not by jj's messages: jj lists
-the workspace, its `@` is an empty change on top of `main@origin`, the
-tree is there, git lists the worktree. jj's own output goes to stderr
-and includes an expected `Error: This command must be able to update
-the working copy.`; ignore it, the exit code is the verdict. Its stdout
-is the workspace's path and nothing else.
+It fetches, then deals with the earlier nights: any
+`/home/infra/hyperconfig-nixpkgs-bump-*` (directory, jj workspace, git
+worktree, `.old-rev` or `.searxng-*` file) is an earlier run's. A leftover
+from an earlier night never stops a run:
+
+- still in use: its liveness stamp `~/nixpkgs-bump/<name>.alive` is
+  younger than 2 h (the run's own word, see below), a file in it changed
+  in the last 30 minutes, or a process works in it and it changed within
+  20 h: a run is going, it fails (`FAIL: ... is in use`), touching
+  nothing: two runs never overlap;
+- otherwise it is taken over (`TAKEOVER:` lines): its unpushed work is
+  kept as the local bookmark `nixpkgs-bump-archive/<its name>` (never
+  pushed; archives older than 14 days are pruned, `PRUNED:` lines), then
+  the workspace, its worktree and its `.old-rev` / `.alive` /
+  `.searxng-*` files are removed;
+- content it cannot vouch for (a foreign directory under a bump name, a
+  `.jj` or `.git` that is not jj's own) is left alone (`SKIP:` and
+  `LEFT:` lines) and the run goes on beside it: say so in the report.
+
+Then it `mkdir`s the directory (no `-p`), adds the workspace (a jj
+workspace with its own git worktree) on `main@origin`, checks it out,
+and carries the newest archived night forward: its commits, in order, on
+top of `main@origin`, without their `flake.lock` changes (you move the
+lock yourself in step 2; a commit that only moved the lock is dropped):
+`CARRIED: <change> <description>; ...`. If they no longer apply (a
+conflict on today's main), it starts fresh and the archive stays:
+`FRESH: ...`. It decides by facts, not by jj's messages: jj lists the
+workspace, its `@` is an empty change on top of `main@origin` or of the
+carried commits, nothing conflicts, the tree is there, git lists the
+worktree. jj's own output goes to stderr and includes an expected
+`Error: This command must be able to update the working copy.`; ignore
+it, the exit code is the verdict. Its stdout is the workspace's path and
+nothing else.
 
 - You have a workspace only if all three hold: the exit code is 0,
   `$ws` is non-empty, and `$ws` starts with
   `/home/infra/hyperconfig-nixpkgs-bump-`. Then `cd "$ws"` and confirm
-  `jj log -r @-` is `main@origin`. Do everything below in `$ws`, and
-  note the name: you clean it up at the end. Write nothing into `$ws`
-  but the bump itself (scratch files and logs go to `$TMPDIR`): any
-  stray file there makes the final `remove` refuse, and the next night
-  then fails at step 1.
+  `main@origin` is an ancestor of `@` (`jj log -r 'main@origin..@'`
+  lists the carried commits and the empty `@`, nothing else). Do
+  everything below in `$ws`, and note the name: you clean it up at the
+  end. Write nothing into `$ws` but the bump itself (scratch files and
+  logs go to `$TMPDIR`): any stray file there makes the final `remove`
+  refuse (the next night then takes it over).
+- Your liveness stamp: create wrote `~/nixpkgs-bump/<name>.alive`. Keep
+  it fresh, or the next night takes your workspace over while you work:
+  run `nixpkgs-bump-workspace alive $(basename $ws)` at the start of
+  every step below and at least once an hour while you wait (each poll
+  of a background build). `nixpkgs-bump-nix` run in `$ws` refreshes it
+  by itself (every 10 minutes while nix runs). hermes runs each terminal
+  call in a fresh shell, so a quiet workspace says nothing; the stamp is
+  what says you are alive.
+- Carried commits are an earlier night's fixes (they were reviewed by
+  nobody yet): keep each one the new nixpkgs still needs, drop one it no
+  longer needs (`jj abandon <change>`), adapt one that breaks; they go
+  through the gates and both reviews like your own fixes (step 4's
+  rules), and the report lists each (`carried`, `dropped` or
+  `adapted`). Do step 2's bump as a change of its own **below** them:
+  `jj new -B <first carried change>` (it lands on main@origin, below the
+  carried ones; never `jj new main@origin -B ...`, which jj refuses), or
+  plain on top when nothing was carried; then `jj new <last carried
+  change>` (an empty change on top of the stack) before step 3.
 - Otherwise (non-zero exit, empty or other `$ws`): you have no
   workspace. Touch nothing (no `cd`, no `jj new`, no retry, no cleanup
   of your own), report `failed` quoting its `FAIL:` line. If the failure
-  came after its `mkdir`, it already removed the empty workspace it made
-  (`removing the workspace this call created`), so the next night starts
-  clean; an earlier one it refused to touch stays for Dave.
+  came after its `mkdir`, it already removed the workspace it made
+  (`removing the workspace this call created`; the archive bookmark
+  keeps any carried work), so the next night starts clean.
 
 ## 2. Bump
 
@@ -401,7 +443,23 @@ Allowed, in the `.nix` files of the machine or module that broke only:
 adapting to renamed or removed options, packages and functions; small
 overlays for a package that broke, written inline (no fetched patch).
 Fixes are Nix: no other file changes (scripts, JSON, patches, keys),
-`flake.lock` aside.
+`flake.lock` aside. `hyperhermes/` (the agents' flake) is denied but
+for a short allowlist (the guard's, default-deny): `modules/wallet/phoenixd.nix`,
+`pkgs/` except `pkgs/tcp-owner-bridge/`, and `modules/browser/` except
+`searxng-package.nix`, `searxng.nix` and `camofox.nix` (they hold the
+SearXNG pin's build, secret keys, limits and iptables owner rules).
+Everything else there (core, SSO, auth, mail, the wallet's keys,
+`clan.nix`, the container slots and their storage, `checks/`, `lib/`, a
+new file) is the trust core.
+
+A guard or assert that throws on purpose when nixpkgs moves (`assert
+lib.versionOlder pkgs.php84.version "8.4.27"`, a `throw` when patchelf
+leaves a version: an override that must be dropped once nixpkgs carries
+the fix) is not a reason to stop: it is a fix like any other, wherever
+it is (in `hyperhermes/` too, within its allowlist above). Do what it asks (drop the
+override or backport it now carries, check that nixpkgs really does)
+or, when the condition is a known fact rather than a question,
+replace the throw with a fallback; never just widen the version.
 
 Forbidden: `allowBroken`, `allowInsecure`, `permittedInsecurePackages`,
 `allowUnsupportedSystem`, `--impure`; disabling services, modules,
@@ -411,21 +469,24 @@ new network fetches (`fetchpatch`, `fetchurl`, `fetchFromGitHub` and the
 other `fetch*`, `builtins.fetch*`); touching anything on the guard's
 denylist (step 6): `vars/`, `sops/`, secrets, any `flake.nix` or nested
 `flake.lock`, `modules/nixos/infra-space/`, `modules/flake-parts/`,
-`tools/`, `hyperhermes/`, `modules/admin-ssh-keys.nix`, the secrets
+`tools/`, `hyperhermes/` outside its allowlist (above), `modules/admin-ssh-keys.nix`, the secrets
 mirror (`modules/nixos/clan-secrets-mirror.nix` and its `-test.nix`),
 `modules/github-host-keys.nix`, the clan inventory, root `default.nix` and `shell.nix`, `.envrc`, `.gitattributes`,
 CI, symlinks and submodules, any file that is not `.nix`;
 in changed lines and the three lines around each: users, groups,
 security, PAM, polkit, wrappers, keys (`ssh-*`, `ecdsa-sha2-*`, `sk-*`,
 key material), known hosts, sudo, ssh, clan vars, the firewall, systemd
-units (`systemd`, `serviceConfig`, `ExecStart`, `script`), any `fetch*`,
+units (`systemd`, `serviceConfig`, `ExecStart`, `script`), secrets,
+credentials and tokens (`secret`, `credential`, `token`,
+`LoadCredential`), `iptables`, any `fetch*`,
 `requireFile`, `outputHash`, URLs, `curl`, `wget`, `NIXPKGS_ALLOW*`, nix
 substituters and trust, attribute names computed from strings (`${"`,
 `" + "`). The guard matches words, case-insensitively,
 so it rejects some harmless fixes too; that is a failed night, never a
 reason to reword a fix around it. A fix that needs any
-of these is a failed night: push nothing, leave the workspace for Dave,
-say in the report what it would need.
+of these is a failed night: push nothing, leave the workspace (the next
+night takes it over and carries its fixes forward), say in the report
+what it would need.
 
 Then run every gate of step 3 again, on all machines. Give up after three
 fix rounds.
@@ -455,7 +516,10 @@ or `request changes` with file:line findings.
   sudo, PAM, polkit, security wrappers; `nix.settings` substituters,
   `trusted-public-keys`, `trusted-users`; the clan inventory and the
   machine set (`inventory.json`, `modules/flake-parts/nixosConfigurations.nix`);
-  `modules/nixos/infra-space/**`, `hyperhermes/`, `flake.nix`; CI; any
+  `modules/nixos/infra-space/**`, `hyperhermes/` outside its allowlist (step 4;
+  an allowed `hyperhermes/` change is reviewed like a module fix: the
+  agents' tools, sandbox, network and credentials get the scrutiny of
+  sshd), `flake.nix`; CI; any
   new fetch (`fetch*`, `builtins.fetch*`, `getFlake`).
   `flake.lock`: only the root `nixpkgs` node's `locked` moved (and the
   root `searxng` node's: owner `searxng`, repo `searxng`, no ref,
@@ -529,11 +593,15 @@ links with it) and the `.old-rev` file, prunes git's worktree entries,
 and exits 0 only if none of them is left; it refuses, touching
 nothing, while `$ws` holds a non-empty change not in `main@origin`.
 Anything else goes in the report as a finding (the night still counts
-as merged; the next night fails at step 1 until Dave cleans up).
+as merged; the next night takes the leftover over).
 
 On failure push nothing; leave the workspace (and its `.old-rev`) as it
-is for Dave: never `nixpkgs-bump-workspace remove` it (it refuses anyway
-while the workspace holds work that is not in `main@origin`).
+is: never `nixpkgs-bump-workspace remove` it (it refuses anyway while the
+workspace holds work that is not in `main@origin`). The next night takes
+it over (step 1): archives the work as `nixpkgs-bump-archive/<name>`,
+carries the fixes forward onto that night's `main@origin` and newest
+nixpkgs, or starts fresh when they no longer apply. Name in the report
+what the next night inherits.
 
 ## Report
 
