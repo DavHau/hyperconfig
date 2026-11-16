@@ -71,6 +71,14 @@
 #   prefixes only for untyped rows (a skill invocation shows just "/skill —
 #   words", a legacy heartbeat is hidden). A failed turn's notice is an
 #   error card. Steers stay busy-input-steer.patch's.
+# ./chat-follow-bottom.patch: the transcript sticks to the bottom. Browser
+#   scroll anchoring is off while following (when a new row made the history
+#   window drop its oldest row, anchoring pulled the view up by that row's
+#   height, which counted as the reader scrolling up: the sent message ended
+#   half below the fold and follow stopped); sending (also a message queued
+#   or steered into a running turn), Jump to latest and any content/viewport
+#   resize while following pin the bottom before the frame paints; scrolling
+#   back down resumes following within 80 px.
 # What stays off without a patch: analytics (needs build-time
 # VITE_ANALYTICS_* secrets, unset here), the Hermes One account (device
 # login, only on a click; the wrappers point HERMES_API_URL at
@@ -116,6 +124,7 @@ buildNpmPackage rec {
     ./busy-input-steer.patch
     ./session-model.patch
     ./system-notices.patch
+    ./chat-follow-bottom.patch
   ];
 
   # ./remote-models-all-configured.patch's behaviour (and upstream's cases
@@ -179,7 +188,9 @@ buildNpmPackage rec {
       src/renderer/src/screens/Chat/MessageList.test.tsx \
       src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.test.tsx \
       src/renderer/src/screens/Chat/Chat.connection-config.test.tsx \
-      src/renderer/src/screens/Chat/systemNotices.test.tsx
+      src/renderer/src/screens/Chat/systemNotices.test.tsx \
+      src/renderer/src/screens/Chat/hooks/useChatScroll.test.tsx \
+      src/renderer/src/screens/Chat/hooks/useChatScroll.follow.test.tsx
     runHook postCheck
   '';
 

@@ -1,0 +1,492 @@
+diff --git a/src/renderer/src/screens/Chat/Chat.tsx b/src/renderer/src/screens/Chat/Chat.tsx
+index 72e2ee6..6c7dc3a 100644
+--- a/src/renderer/src/screens/Chat/Chat.tsx
++++ b/src/renderer/src/screens/Chat/Chat.tsx
+@@ -1182,6 +1182,16 @@ function Chat({
+     setContextFolder(null);
+   }, []);
+ 
++  // Sending always returns to the bottom and resumes following, also when
++  // the message is queued or steered into a running turn (no new row then).
++  const handleSubmitAndFollow = useCallback(
++    (text: string, attachments: Attachment[]): Promise<void> => {
++      jumpToLatest();
++      return handleSubmitOrQueue(text, attachments);
++    },
++    [jumpToLatest, handleSubmitOrQueue],
++  );
++
+   // Stable toolbar callbacks so the memoized ModelPicker / ContextFolderChip
+   // don't re-render on every streaming chunk (each chunk re-renders <Chat>).
+   const handleSelectModel = useCallback(
+@@ -1488,7 +1498,7 @@ function Chat({
+           contextUsage={contextUsage}
+           readiness={readiness}
+           slashCommands={slashMenuCommands}
+-          onSubmit={handleSubmitOrQueue}
++          onSubmit={handleSubmitAndFollow}
+           onQuickAsk={actions.handleQuickAsk}
+           onAbort={actions.handleAbort}
+           toolbarExtras={
+diff --git a/src/renderer/src/screens/Chat/hooks/useChatScroll.follow.test.tsx b/src/renderer/src/screens/Chat/hooks/useChatScroll.follow.test.tsx
+new file mode 100644
+index 0000000..42b8ce9
+--- /dev/null
++++ b/src/renderer/src/screens/Chat/hooks/useChatScroll.follow.test.tsx
+@@ -0,0 +1,303 @@
++import { act, fireEvent, render, screen } from "@testing-library/react";
++import { afterEach, beforeEach, expect, it, vi } from "vitest";
++import { useChatScroll } from "./useChatScroll";
++import type { ChatMessage } from "../types";
++
++// The stick-to-bottom state machine as Dave uses it: send -> bottom,
++// streaming while following -> bottom, reading -> pinned, session -> bottom.
++// Viewport: 300 px tall; `height` is the transcript's scrollHeight.
++let height = 1000;
++let top = 0;
++const frames = new Map<number, FrameRequestCallback>();
++let nextFrame = 0;
++const observers: ResizeObserverCallback[] = [];
++
++const history = (n: number, session = "a"): ChatMessage[] =>
++  Array.from({ length: n }, (_, i) =>
++    i % 2
++      ? { id: `${session}-agent-${i}`, role: "agent", content: `answer ${i}` }
++      : { id: `${session}-user-${i}`, role: "user", content: `question ${i}` },
++  );
++
++function Harness({
++  rows,
++  scope = "a",
++}: {
++  rows: ChatMessage[];
++  scope?: string;
++}): React.JSX.Element {
++  const api = useChatScroll(rows, scope);
++  return (
++    <>
++      <div ref={api.containerRef} data-testid="viewport">
++        <div ref={api.contentRef}>
++          {rows.map((row) => (
++            <p key={row.id}>{"content" in row ? row.content : ""}</p>
++          ))}
++          <div ref={api.bottomRef} />
++        </div>
++      </div>
++      {!api.isFollowing && (
++        <button onClick={api.jumpToLatest}>Jump to latest</button>
++      )}
++    </>
++  );
++}
++
++const viewport = (): HTMLElement => screen.getByTestId("viewport");
++const max = (): number => height - 300;
++const jump = (): HTMLElement | null =>
++  screen.queryByRole("button", { name: "Jump to latest" });
++function flush(): void {
++  act(() => {
++    const current = [...frames.values()];
++    frames.clear();
++    current.forEach((callback) => callback(1));
++  });
++}
++function resize(): void {
++  act(() => observers.forEach((cb) => cb([], {} as ResizeObserver)));
++}
++/** The reader scrolls up by `px` with the wheel (wheel event, then the
++ *  resulting scroll event), like Chromium does. */
++function wheelUp(px: number): void {
++  fireEvent.wheel(viewport(), { deltaY: -px });
++  top = Math.max(0, top - px);
++  fireEvent.scroll(viewport());
++}
++function mount(rows: ChatMessage[]): ReturnType<typeof render> {
++  // Geometry has to exist before the first layout effect runs.
++  const proto = HTMLElement.prototype;
++  const spies = [
++    vi.spyOn(proto, "scrollHeight", "get").mockImplementation(function (
++      this: HTMLElement,
++    ) {
++      return this.dataset.testid === "viewport" ? height : 0;
++    }),
++    vi.spyOn(proto, "clientHeight", "get").mockImplementation(function (
++      this: HTMLElement,
++    ) {
++      return this.dataset.testid === "viewport" ? 300 : 0;
++    }),
++  ];
++  Object.defineProperty(proto, "scrollTop", {
++    configurable: true,
++    get(this: HTMLElement) {
++      return this.dataset.testid === "viewport" ? top : 0;
++    },
++    set(this: HTMLElement, value: number) {
++      if (this.dataset.testid === "viewport")
++        top = Math.max(0, Math.min(value, height - 300));
++    },
++  });
++  cleanups.push(() => {
++    spies.forEach((s) => s.mockRestore());
++    delete (proto as { scrollTop?: number }).scrollTop;
++  });
++  return render(<Harness rows={rows} />);
++}
++const cleanups: Array<() => void> = [];
++
++beforeEach(() => {
++  height = 1000;
++  top = 0;
++  frames.clear();
++  observers.splice(0);
++  vi.stubGlobal(
++    "requestAnimationFrame",
++    vi.fn((callback: FrameRequestCallback) => {
++      frames.set(++nextFrame, callback);
++      return nextFrame;
++    }),
++  );
++  vi.stubGlobal(
++    "cancelAnimationFrame",
++    vi.fn((id: number) => frames.delete(id)),
++  );
++  vi.stubGlobal(
++    "ResizeObserver",
++    class {
++      constructor(callback: ResizeObserverCallback) {
++        observers.push(callback);
++      }
++      observe(): void {}
++      disconnect(): void {
++        const i = observers.indexOf(this as never);
++        if (i >= 0) observers.splice(i, 1);
++      }
++    },
++  );
++});
++afterEach(() => {
++  cleanups.splice(0).forEach((c) => c());
++  vi.unstubAllGlobals();
++});
++
++it("opens a session at its bottom, before the first paint", () => {
++  height = 20000;
++  mount(history(40));
++  // No frame flushed: the layout effect itself wrote the bottom.
++  expect(top).toBe(max());
++  expect(jump()).toBeNull();
++});
++
++it("sending scrolls to the bottom in the same frame and keeps browser anchoring off", () => {
++  const rows = history(40);
++  const view = mount(rows);
++  height = 1120;
++  view.rerender(
++    <Harness rows={[...rows, { id: "sent", role: "user", content: "hi" }]} />,
++  );
++  // Before any animation frame: the sent row is fully in view.
++  expect(top).toBe(max());
++  // Chromium's scroll anchoring would pull the viewport up when the history
++  // window drops a row above; it must be off while following.
++  expect(viewport().style.overflowAnchor).toBe("none");
++});
++
++it("sending while reading earlier output jumps to the bottom and resumes following", () => {
++  const rows = history(40);
++  const view = mount(rows);
++  height = 5000;
++  resize();
++  flush();
++  wheelUp(1500);
++  expect(jump()).not.toBeNull();
++  height = 5150;
++  view.rerender(
++    <Harness rows={[...rows, { id: "sent", role: "user", content: "hi" }]} />,
++  );
++  expect(top).toBe(max());
++  expect(jump()).toBeNull();
++  // The agent's reply then streams in: still followed.
++  height = 5600;
++  view.rerender(
++    <Harness
++      rows={[
++        ...rows,
++        { id: "sent", role: "user", content: "hi" },
++        { id: "reply", role: "agent", content: "streamed reply" },
++      ]}
++    />,
++  );
++  flush();
++  expect(top).toBe(max());
++});
++
++it("a notice arriving while reading does not move the reader", () => {
++  const rows = history(40);
++  const view = mount(rows);
++  height = 5000;
++  resize();
++  flush();
++  wheelUp(1500);
++  const before = top;
++  height = 5040;
++  view.rerender(
++    <Harness
++      rows={[
++        ...rows,
++        {
++          id: "notice-live-1",
++          kind: "notice",
++          role: "user",
++          notice: "subagent",
++          label: "Subagent result",
++          text: "[ASYNC DELEGATION BATCH COMPLETE]",
++        } as never,
++      ]}
++    />,
++  );
++  flush();
++  expect(top).toBe(before);
++  expect(jump()).not.toBeNull();
++});
++
++it("follows streaming text and late layout (code blocks, images, composer) while at the bottom", () => {
++  const rows = history(10);
++  const view = mount(rows);
++  for (const [h, text] of [
++    [1300, "a"],
++    [1700, "ab"],
++    [2400, "abc"],
++  ] as const) {
++    height = h;
++    view.rerender(
++      <Harness
++        rows={[...rows, { id: "reply", role: "agent", content: text }]}
++      />,
++    );
++    flush();
++    expect(top).toBe(max());
++  }
++  // Same rows, later height change (an image decoding, a code block
++  // highlighting, the composer growing): the ResizeObserver path.
++  height = 2900;
++  resize();
++  flush();
++  expect(top).toBe(max());
++  expect(jump()).toBeNull();
++});
++
++it("keeps the reader's position when output arrives below, with anchoring on, until Jump to latest", () => {
++  const rows = history(10);
++  const view = mount(rows);
++  height = 3000;
++  resize();
++  flush();
++  wheelUp(800);
++  const reading = top;
++  expect(viewport().style.overflowAnchor).toBe("");
++  for (const h of [3200, 3500, 4100]) {
++    height = h;
++    view.rerender(
++      <Harness rows={[...rows, { id: "reply", role: "agent", content: `${h}` }]} />,
++    );
++    resize();
++    flush();
++    expect(top).toBe(reading);
++  }
++  fireEvent.click(jump()!);
++  // Jump writes at once, then keeps following.
++  expect(top).toBe(max());
++  expect(viewport().style.overflowAnchor).toBe("none");
++  height = 4500;
++  resize();
++  flush();
++  expect(top).toBe(max());
++});
++
++it("resumes following when the reader scrolls back down to within 80 px", () => {
++  mount(history(10));
++  height = 3000;
++  resize();
++  flush();
++  wheelUp(600);
++  expect(jump()).not.toBeNull();
++  top = max() - 70;
++  fireEvent.scroll(viewport());
++  expect(jump()).toBeNull();
++  height = 3300;
++  resize();
++  flush();
++  expect(top).toBe(max());
++});
++
++it("lands at the bottom of the other session when switching, even after reading", () => {
++  const view = mount(history(40, "a"));
++  height = 9000;
++  resize();
++  flush();
++  wheelUp(4000);
++  height = 15000;
++  view.rerender(<Harness rows={history(60, "b")} scope="b" />);
++  expect(top).toBe(max());
++  expect(jump()).toBeNull();
++  // History rows settling to their real height afterwards stay pinned, in
++  // the resize callback itself (before paint, no frame shows a gap).
++  height = 16200;
++  resize();
++  expect(top).toBe(max());
++  flush();
++  expect(top).toBe(max());
++});
+diff --git a/src/renderer/src/screens/Chat/hooks/useChatScroll.test.tsx b/src/renderer/src/screens/Chat/hooks/useChatScroll.test.tsx
+index a4b422c..0978a18 100644
+--- a/src/renderer/src/screens/Chat/hooks/useChatScroll.test.tsx
++++ b/src/renderer/src/screens/Chat/hooks/useChatScroll.test.tsx
+@@ -209,19 +209,23 @@ it("cancels old scope work and disconnects observers on scope replacement and un
+   expect(top).toBe(900);
+   height = 1500;
+   resize();
++  // Resize callbacks pin before paint; the follow-up frame is cancelled.
++  expect(top).toBe(1200);
+   view.unmount();
+   expect(observers.every((o) => o.disconnected)).toBe(true);
+   expect(frames.size).toBe(0);
++  height = 1800;
+   resize();
+   flush();
+-  expect(top).toBe(900);
++  expect(top).toBe(1200);
+ });
+ 
+ // @lat: [[chat-performance#Bottom follow ownership#Upward input cancels queued follow]]
+ it("lets upward wheel input cancel a queued following frame before scroll geometry changes", () => {
+-  mount();
++  const view = mount();
+   height = 1100;
+-  resize();
++  // A streamed update queues the follow write for the next frame.
++  view.rerender(<Harness rows={[...messages]} />);
+   fireEvent.wheel(screen.getByTestId("viewport"), { deltaY: -30 });
+   flush();
+   expect(top).toBe(400);
+diff --git a/src/renderer/src/screens/Chat/hooks/useChatScroll.ts b/src/renderer/src/screens/Chat/hooks/useChatScroll.ts
+index f80a9b0..b69869d 100644
+--- a/src/renderer/src/screens/Chat/hooks/useChatScroll.ts
++++ b/src/renderer/src/screens/Chat/hooks/useChatScroll.ts
+@@ -1,6 +1,10 @@
+ import { useCallback, useLayoutEffect, useRef, useState } from "react";
+ import type { ChatMessage } from "../types";
+ 
++/** A reader scrolling down to within this distance of the bottom resumes
++ *  following. */
++export const FOLLOW_THRESHOLD_PX = 80;
++
+ // @lat: [[chat-performance#Bottom follow ownership]]
+ export function useChatScroll(
+   messages: ChatMessage[],
+@@ -28,6 +32,14 @@ export function useChatScroll(
+   }, []);
+   const follow = useCallback((value: boolean) => {
+     followingRef.current = value;
++    // Browser scroll anchoring only while reading (it keeps the reader's
++    // text in place when rows above change height). While following it must
++    // stay off: when a new row makes the history window drop its oldest row,
++    // anchoring pulls scrollTop up by that row's height, which looked like
++    // the reader scrolling up, paused following and left the new message
++    // below the fold.
++    const container = containerRef.current;
++    if (container) container.style.overflowAnchor = value ? "none" : "";
+     setIsFollowing(value);
+   }, []);
+   const writeBottom = useCallback(() => {
+@@ -48,10 +60,15 @@ export function useChatScroll(
+       if (followingRef.current) writeBottom();
+     });
+   }, [writeBottom]);
+-  const jumpToLatest = useCallback(() => {
++  // Follow and pin now (layout effects and resize callbacks run before
++  // paint), plus once more next frame for layout that settles after it.
++  const pinBottom = useCallback(() => {
+     follow(true);
++    cancelFrame();
++    writeBottom();
+     scheduleFollow();
+-  }, [follow, scheduleFollow]);
++  }, [follow, cancelFrame, writeBottom, scheduleFollow]);
++  const jumpToLatest = pinBottom;
+ 
+   useLayoutEffect(() => {
+     const container = containerRef.current;
+@@ -72,7 +89,10 @@ export function useChatScroll(
+       // Lazy row sizing can clamp scrollTop downward at the actual bottom.
+       // That correction is not upward reading; allow subpixel rounding only.
+       if (top < previousTopRef.current && bottomDistance >= 1) pause();
+-      else if (bottomDistance < 60 && top > previousTopRef.current)
++      else if (
++        bottomDistance < FOLLOW_THRESHOLD_PX &&
++        top > previousTopRef.current
++      )
+         follow(true);
+       // Height growth alone does not imply a change in the reader's intent.
+       previousTopRef.current = top;
+@@ -99,11 +119,19 @@ export function useChatScroll(
+     container.addEventListener("wheel", handleWheel, { passive: true });
+     container.addEventListener("keydown", handleKey);
+     // The viewport alone does not resize when an existing transcript row
+-    // grows. Observe the block-flow content too, including media/lazy layout.
++    // grows. Observe the block-flow content too (streaming, media, code
++    // blocks, content-visibility rows getting their real height) and the
++    // viewport (the composer or queued/steer rows growing shrink it).
++    // Resize callbacks run after layout and before paint: pin right there
++    // (no frame shows the bottom cut off, e.g. an opened session's rows
++    // settling to their real height), and once more next frame.
+     const observer =
+       typeof ResizeObserver === "undefined"
+         ? null
+-        : new ResizeObserver(scheduleFollow);
++        : new ResizeObserver(() => {
++            if (followingRef.current) writeBottom();
++            scheduleFollow();
++          });
+     observer?.observe(container);
+     observer?.observe(content);
+     return () => {
+@@ -113,7 +141,7 @@ export function useChatScroll(
+       container.removeEventListener("wheel", handleWheel);
+       container.removeEventListener("keydown", handleKey);
+     };
+-  }, [scope, cancelFrame, follow, scheduleFollow]);
++  }, [scope, cancelFrame, follow, scheduleFollow, writeBottom]);
+ 
+   useLayoutEffect(() => {
+     const prevCount = prevMessageCountRef.current;
+@@ -124,19 +152,23 @@ export function useChatScroll(
+     }
+     if (!initialScrollDoneRef.current || prevCount === 0) {
+       initialScrollDoneRef.current = true;
+-      follow(true);
+-      cancelFrame();
+       // History loads remain instant before the top expansion observer runs.
+-      writeBottom();
++      pinBottom();
+       return;
+     }
++    // Sending always lands at the bottom and resumes following, even when
++    // the reader had scrolled up.
++    // Only the user's own message: hermes' notices (a subagent result
++    // arriving while he reads) are role "user" too, but must not move him.
++    const last = messages[messages.length - 1];
+     if (
+       messages.length > prevCount &&
+-      messages[messages.length - 1]?.role === "user"
++      last?.role === "user" &&
++      !("kind" in last && last.kind === "notice")
+     )
+-      follow(true);
+-    scheduleFollow();
+-  }, [messages, scope, cancelFrame, follow, scheduleFollow, writeBottom]);
++      pinBottom();
++    else scheduleFollow();
++  }, [messages, scope, pinBottom, scheduleFollow]);
+ 
+   return { containerRef, contentRef, bottomRef, isFollowing, jumpToLatest };
+ }
