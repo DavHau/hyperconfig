@@ -119,6 +119,9 @@ let
             inherit user uid;
             home = guestHome;
             openOrigins = [ (url account) ];
+            # Dave's call: links in his Hermes apps open in his browser
+            # because he clicks them, whatever their origin (https only).
+            openAnyHttps = true;
           };
           apps."hermes-${account}" = {
             container = name;

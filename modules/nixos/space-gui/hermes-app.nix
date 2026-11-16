@@ -16,7 +16,8 @@
 
   The dashboards offer the native PKCE sign-in: the app opens the
   authorize URL through xdg-open (space-gui's broker: the host user's
-  browser, only the container's `openOrigins`) and waits on the
+  browser; any https link with `openAnyHttps`, else only `openOrigins`;
+  the sign-in forward only ever for `openOrigins`) and waits on the
   container's loopback, which the broker forwards from the host for the
   redirect.
 

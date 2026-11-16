@@ -11,7 +11,9 @@ into the container with:
   security context (wp_security_context_v1);
 - open.sock: the container's `xdg-open` (a shim on the command's PATH)
   sends URLs there. A URL is opened in the host user's browser only if it
-  is https on one of the container's allowed origins. If it carries a
+  is https on one of the container's allowed origins (any https URL with
+  the container's openAnyHttps, opened as a plain link: no forward). If an
+  allowed origin's URL carries a
   redirect_uri of http://127.0.0.1:<port>/... (an OAuth native/PKCE
   sign-in: the app listens on its own loopback, in the container's network
   namespace), this host's 127.0.0.1:<port> is forwarded into the
@@ -21,6 +23,7 @@ into the container with:
   only for a port of the ephemeral range the app's listen(0) draws from.
 """
 
+import fcntl
 import json
 import os
 import pwd
@@ -45,6 +48,16 @@ FORWARD_SECONDS = 180
 # (net.ipv4.ip_local_port_range, per network namespace; the container's is
 # the default).
 LOOPBACK_PORTS = range(32768, 61000)
+# Longest URL the broker opens (well under what open.sock reads, so a cut
+# URL is never taken for a whole one).
+MAX_URL = 8192
+# At most OPEN_BURST opens per OPEN_WINDOW seconds per container, across
+# its runs (separate helper processes: the timestamps live in a root-only
+# file under flock, /run/space-gui/<container>.opens, outside the directory
+# bound into the container); more are refused, so an app cannot flood the
+# host user's browser with tabs.
+OPEN_BURST = 5
+OPEN_WINDOW = 10.0
 
 
 def log(msg: str) -> None:
@@ -186,6 +199,7 @@ class Broker:
     def __init__(self, container: str, c: dict, pid: str, sock_path: Path, env: dict):
         self.container, self.c, self.pid, self.env = container, c, pid, env
         self.forwards: set[int] = set()
+        self.opens_file = Path("/run/space-gui") / f"{container}.opens"
         self.closing = threading.Event()
         self.srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.srv.bind(str(sock_path))
@@ -211,7 +225,11 @@ class Broker:
                         data += chunk
                 except OSError:
                     pass
-                ok = self.handle(data.decode("utf-8", "replace").strip())
+                try:
+                    ok = self.handle(data.decode("utf-8", "replace").strip())
+                except OSError as e:
+                    log(f"open refused: {e}")
+                    ok = False
                 try:
                     conn.sendall(b"ok\n" if ok else b"refused\n")
                 except OSError:
@@ -223,13 +241,28 @@ class Broker:
         except ValueError:
             u = None
         origin = f"{u.scheme}://{u.netloc}" if u else ""
-        if not u or u.scheme != "https" or origin not in self.c["openOrigins"] or any(ch in url for ch in "\r\n\0 "):
+        # https only, whatever the origin gate: the URL must literally start
+        # with https:// (so the opener can never take it for an option) and
+        # carry no whitespace or control characters (which urlsplit would
+        # silently strip).
+        if (not u or u.scheme != "https" or not u.netloc or not url[:8].lower() == "https://"
+                or len(url) > MAX_URL or any(ord(ch) <= 0x20 or ord(ch) == 0x7F for ch in url)):
+            log(f"refused to open a URL that is not plain https: {url[:120]!r}")
+            return False
+        allowed = origin in self.c["openOrigins"]
+        if not allowed and not self.c["openAnyHttps"]:
             log(f"refused to open a URL outside {self.c['openOrigins']}: {url[:120]!r}")
             return False
-        redirect = urllib.parse.parse_qs(u.query).get("redirect_uri", [""])[0]
+        # The sign-in's loopback forward is for the allowed origins only;
+        # any other https URL (openAnyHttps) opens as a plain link, its
+        # redirect_uri, if any, is none of ours.
+        redirect = urllib.parse.parse_qs(u.query).get("redirect_uri", [""])[0] if allowed else ""
         m = re.fullmatch(r"http://127\.0\.0\.1:(\d{5})(/[A-Za-z0-9/_-]*)", redirect)
         if redirect and not (m and int(m.group(1)) in LOOPBACK_PORTS):
             log(f"refused: redirect_uri is not the app's loopback: {redirect[:120]!r}")
+            return False
+        if not self.rate_ok():
+            log(f"refused: more than {OPEN_BURST} opens in {OPEN_WINDOW:g}s from {self.container}: {url[:120]!r}")
             return False
         if m:
             self.forward(int(m.group(1)), m.group(2))
@@ -237,10 +270,39 @@ class Broker:
         # In the host user's own manager, with their session's environment.
         subprocess.run(
             ["systemd-run", "--user", f"--machine={CONF['hostUser']}@.host", "--collect", "--quiet",
-             *[f"-E{k}={v}" for k, v in self.env.items()], CONF["opener"], url],
+             *[f"-E{k}={v}" for k, v in self.env.items()], "--", CONF["opener"], url],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, check=False,
         )
         return True
+
+    def rate_ok(self) -> bool:
+        """Count this open against the container's OPEN_BURST per
+        OPEN_WINDOW; False (not counted) beyond it."""
+        try:
+            fd = os.open(
+                self.opens_file, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600
+            )
+        except OSError as e:
+            log(f"open refused: rate file unusable ({e})")
+            return False
+        with os.fdopen(fd, "r+") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            now = time.clock_gettime(time.CLOCK_BOOTTIME)
+            opens = []
+            for line in f.read().split():
+                try:
+                    t = float(line)
+                except ValueError:
+                    continue
+                if 0 <= now - t < OPEN_WINDOW:
+                    opens.append(t)
+            ok = len(opens) < OPEN_BURST
+            if ok:
+                opens.append(now)
+            f.seek(0)
+            f.truncate()
+            f.write("".join(f"{t}\n" for t in opens))
+            return ok
 
     def forward(self, port: int, path: str) -> None:
         """This host's 127.0.0.1:<port> -> the container's 127.0.0.1:<port>,

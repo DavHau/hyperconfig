@@ -19,8 +19,12 @@
     container; closing the run retires this one;
   - open.sock: the URL broker. The container's `xdg-open` (a shim first on
     the command's PATH) hands URLs to it; only https URLs on the
-    container's `openOrigins` open, in the host user's browser (their
-    systemd user manager). An OAuth native sign-in's redirect_uri
+    container's `openOrigins` open (any https URL with `openAnyHttps`:
+    links the user clicked in the app), in the host user's browser (their
+    systemd user manager). Never another scheme, never a URL with
+    whitespace or control characters or over 8 KiB, at most
+    5 opens per 10 s per container. On an `openOrigins`
+    URL only, an OAuth native sign-in's redirect_uri
     http://127.0.0.1:<port>/... (the app listens on the container's
     loopback, a port of its ephemeral range) gets this host's
     127.0.0.1:<port> forwarded into the container, so the browser's
@@ -114,6 +118,7 @@ let
           uid
           home
           openOrigins
+          openAnyHttps
           ;
       }) cfg.containers;
     }
@@ -199,6 +204,16 @@ in
               default = [ ];
               example = [ "https://infra-space.example.org" ];
               description = "https origins whose URLs the container's apps may open in the host user's browser.";
+            };
+            openAnyHttps = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = ''
+                Let the container's apps open any https URL in the host user's
+                browser, not only those on `openOrigins` (other schemes stay
+                refused). For apps whose links open because the user clicked
+                them.
+              '';
             };
           };
         }

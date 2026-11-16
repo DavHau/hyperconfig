@@ -7,7 +7,9 @@
 # globals, which alice's own clients see); the session's socket itself
 # never enters the container; xdg-open in the container opens an allowed
 # https URL in alice's opener, refuses another origin and a non-loopback
-# redirect_uri, and an allowed sign-in URL's loopback redirect_uri gets
+# redirect_uri (with openAnyHttps on: any https URL opens, no forward for
+# a non-allowed origin's loopback redirect_uri, still https only, the
+# sixth open within 10 s refused), and an allowed sign-in URL's loopback redirect_uri gets
 # alice's 127.0.0.1:<port> forwarded to the container's loopback, one
 # shot (closed once the callback request is answered), refused for a port
 # outside the app's ephemeral range; when the client exits the run's
@@ -183,6 +185,7 @@ pkgs.testers.runNixOSTest {
 
   testScript = ''
     import json
+    import shlex
 
     def as_alice(cmd, **kw):
         return machine.succeed(
@@ -385,6 +388,62 @@ pkgs.testers.runNixOSTest {
         mounts = machine.succeed(f"grep space-gui /proc/{leader}/mountinfo").strip().splitlines()
         assert len(mounts) == 1 and " /run/space-gui " in mounts[0], mounts
         machine.succeed("[ -z \"$(ls -A /proc/" + leader + "/root/run/space-gui)\" ]")
+
+    with subtest("openAnyHttps: any https link opens, no forward for it, https only, rate limit"):
+        # The `gui` run above is strict (openAnyHttps off: evil.example.org
+        # refused). A second run with the same container's config but
+        # openAnyHttps on, started as sudo would (root, SUDO_UID of alice).
+        any_conf = json.loads(machine.succeed(f"cat {conf}"))
+        assert any_conf["containers"]["gui"]["openAnyHttps"] is False, any_conf
+        any_conf["containers"]["gui"]["openAnyHttps"] = True
+        machine.succeed(f"echo {shlex.quote(json.dumps(any_conf))} > /tmp/any.json")
+        machine.succeed(f"sed 's|SPACE_GUI_CONFIG=.*|SPACE_GUI_CONFIG=/tmp/any.json|' {helper} > /tmp/any-helper && chmod +x /tmp/any-helper")
+        display = machine.succeed("cd /run/user/1000 && ls wayland-? | head -1").strip()
+        machine.succeed(
+            f"systemd-run --unit=anyhttps -E SUDO_UID=1000 "
+            f"/tmp/any-helper gui {display} ${pkgs.coreutils}/bin/sleep infinity"
+        )
+        machine.wait_until_succeeds("ls /run/space-gui/gui/*/open.sock", timeout=30)
+        run2 = machine.succeed("ls /run/space-gui/gui/").split()[0]
+        def open2(url):
+            return machine.execute(
+                f"systemd-run -M gui --uid=gui --wait --pipe --quiet "
+                f"-E SPACE_GUI_OPEN=/run/space-gui/{run2}/open.sock {shim}/bin/xdg-open {shlex.quote(url)}"
+            )
+        machine.succeed("rm -f /tmp/opened")
+        # the container's opens window (5 per 10 s) starts empty
+        machine.sleep(11)
+        rc, out = open2("https://other.example.net/page?x=1")
+        assert rc == 0, out
+        machine.wait_until_succeeds("grep -qx 'https://other.example.net/page?x=1' /tmp/opened")
+        # Still https only, whatever the origin; refusals do not count.
+        for bad in ["http://other.example.net/x", "file:///etc/passwd", "javascript:alert(1)",
+                    "-https://other.example.net/", "https:///nohost", "https://other.example.net/\tx",
+                    "https://other.example.net/" + "a" * 9000]:
+            rc, out = open2(bad)
+            assert rc != 0, f"{bad[:80]} was opened: {out}"
+        # Not a dashboard URL: its loopback redirect_uri gets no forward.
+        machine.succeed(
+            "systemd-run -M gui --uid=gui --unit=cb2 "
+            "${pkgs.python3}/bin/python3 -m http.server --bind 127.0.0.1 --directory /tmp 47124"
+        )
+        machine.wait_until_succeeds("systemd-run -M gui --wait --pipe --quiet ${pkgs.curl}/bin/curl -sf http://127.0.0.1:47124/ >/dev/null")
+        rc, out = open2("https://other.example.net/authorize?redirect_uri=http%3A%2F%2F127.0.0.1%3A47124%2Fcallback")
+        assert rc == 0, out
+        machine.wait_until_succeeds("grep -q '^https://other.example.net/authorize' /tmp/opened")
+        machine.sleep(1)
+        machine.fail("ss -Htln 'sport = :47124' | grep -q .")
+        machine.fail("curl -sf --max-time 3 http://127.0.0.1:47124/")
+        # 2 opened so far: 3 more pass, the 6th within 10 s is refused.
+        for i in range(3):
+            rc, out = open2(f"https://other.example.net/n{i}")
+            assert rc == 0, out
+        rc, out = open2("https://other.example.net/sixth")
+        assert rc != 0, f"6th open in 10 s was opened: {out}"
+        machine.succeed("journalctl -u anyhttps -o cat --no-pager | grep -q 'refused: more than 5 opens'")
+        machine.sleep(1)
+        machine.succeed("[ $(wc -l < /tmp/opened) = 5 ] && ! grep -q sixth /tmp/opened")
+        machine.succeed("systemctl stop anyhttps; systemctl -M gui stop cb2")
 
     with subtest("only the host user may run the helper"):
         rc, out = machine.execute("su bob -c 'WAYLAND_DISPLAY=wayland-1 space-gui gui true' 2>&1")
