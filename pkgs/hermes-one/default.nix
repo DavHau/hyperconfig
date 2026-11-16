@@ -20,6 +20,12 @@
 # ./links-external.patch: every link opens in the system browser, only on
 #   the user's click; the in-app "Web Preview" pane (a <webview>) and its
 #   automatic opening on web tool events are gone.
+# ./compact-activity.patch: each run of consecutive thoughts/tool calls in a
+#   turn is one collapsed row ("Worked for 2m 14s · 14 thoughts · 18 tool
+#   calls  Terminal ×7, …"; live timer and current step while running),
+#   expandable to the detailed list; the answer text stays below it. Failed
+#   tool calls (live status, or judged from history's stored result) show as
+#   "· N failed" in the error colour and open the row.
 # What stays off without a patch: analytics (needs build-time
 # VITE_ANALYTICS_* secrets, unset here), the Hermes One account (device
 # login, only on a click; the wrappers point HERMES_API_URL at
@@ -61,6 +67,7 @@ buildNpmPackage rec {
     ./nix-remote-only.patch
     ./remote-models-all-configured.patch
     ./links-external.patch
+    ./compact-activity.patch
   ];
 
   # ./remote-models-all-configured.patch's behaviour (and upstream's cases
@@ -111,7 +118,9 @@ buildNpmPackage rec {
     # The patch's behaviour, plus upstream's own OAuth boundary tests.
     node node_modules/vitest/vitest.mjs run \
       tests/remote-oauth-native.test.ts tests/remote-oauth.test.ts \
-      src/renderer/src/components/AgentMarkdown.links-external.test.tsx
+      src/renderer/src/components/AgentMarkdown.links-external.test.tsx \
+      src/renderer/src/screens/Chat/activityRuns.test.tsx \
+      src/renderer/src/screens/Chat/MessageList.test.tsx
     runHook postCheck
   '';
 
