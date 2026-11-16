@@ -55,6 +55,10 @@ let
     confirm-close-surface = false;
     # No update nags on a nix-managed binary.
     auto-update = "off";
+
+    # A mouse wheel notch scrolled too far (default: 3 lines per notch).
+    # Only the wheel: the touchpad's precision scrolling stays as is.
+    mouse-scroll-multiplier = "discrete:1.5";
   };
 
   raw = (pkgs.formats.keyValue { listsAsDuplicateKeys = true; }).generate "ghostty-config" settings;
