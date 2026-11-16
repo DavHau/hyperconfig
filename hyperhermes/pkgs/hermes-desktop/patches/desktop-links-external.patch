@@ -1,0 +1,1067 @@
+What upstream lacks (hermes-agent, apps/desktop): a way to keep every web page
+out of the app, and to open one only when the user clicks it. By default a
+clicked link opens in the in-app Browser pane (a <webview>), the agent's
+preview.open events open URLs there by themselves, the link context menu
+offers "Open in in-app browser", and a page in the pane can redirect itself
+anywhere; only Ctrl/middle-click or a per-device setting reach the system
+browser.
+
+This patch (Nix). Rule: a web page reaches the system browser only because
+the user clicked (or typed) it; nothing opens it on its own.
+  - openLink always calls openExternalLink (hermes:openExternal -> main's
+    openExternalUrl -> shell.openExternal); the context menu no longer
+    offers "open in app".
+  - openPreview never shows an http(s) page: what reaches it with one is the
+    agent's preview.open (dev servers included), so it only shows a
+    bottom-right toast with the URL and an "Open in browser" button
+    (strings in i18n en: preview.webPageOffer*).
+    User-click callers (file tree, attachments, preview rows, contrib panes)
+    use openPreviewFromClick, which opens the system browser directly.
+  - inside a preview guest (an HTML file, the blank Browser) the preload
+    forwards every trusted click on an http(s) link (primary or middle) to
+    the system browser and cancels its in-pane navigation. The agent's
+    drive_preview input (sendInputEvent) is trusted too, so while a
+    preview.act runs and for 1.5 s after it or after any event it sent
+    (preview-input.ts), such a link is only offered as the toast below.
+  - main blocks every other navigation of a guest that is not file:,
+    about: or data: (script or <meta refresh> redirects, mailto: and custom
+    schemes) without opening anything, and the persist:hermes-preview
+    session denies the openExternal permission (OS protocol handlers).
+  - an address typed into the blank Browser's bar goes to the system browser.
+  - web-page tabs persisted by an older build are dropped on restore.
+  - the "Always open links in external browser" setting is hidden (moot).
+File, artifact and image previews keep the pane. Sign-in (OAuth) flows call
+openExternal directly and are untouched.
+Tested by src/store/preview-links-external.test.ts and
+electron/preview-guest-links-external.test.ts.
+Left in place (dead now, removing it would grow this patch a lot): the
+external-links store and its i18n keys (several upstream tests import it),
+the link.openInApp i18n key; hudForcesNativeLinks and the context menu's
+open-in-app items are removed (upstream's external-link.test.tsx, not run
+here, still names the former).
+
+diff --git a/apps/desktop/electron/main.ts b/apps/desktop/electron/main.ts
+index 4b6dcf6..4ed66b7 100644
+--- a/apps/desktop/electron/main.ts
++++ b/apps/desktop/electron/main.ts
+@@ -440,7 +440,7 @@ import { onPreviewWatchOwnerDestroyed, sendPreviewFileChangedToOwner } from './p
+ import { hasClosePreviewFlag, previewGuestInputAction } from './preview-guest-escape'
+ import { registerPreviewGuestIpc } from './preview-guest-ipc'
+ import { commandFocusedGuest } from './preview-guest-offscreen'
+-import { applyPreviewGuestAttachPrefs } from './preview-guest-throttle'
++import { applyPreviewGuestAttachPrefs, PREVIEW_GUEST_PARTITION } from './preview-guest-throttle'
+ import { PreviewReachRegistry } from './preview-reach'
+ import { previewHttpUrlTarget } from './preview-url-target'
+ import { FirstRunSetupResetError, runPrimaryBackendStartup } from './primary-backend-startup'
+@@ -12180,6 +12180,33 @@ function installPreviewGuestPreload() {
+     contents.on('will-attach-webview', (_attachEvent, webPreferences, params) => {
+       applyPreviewGuestAttachPrefs(webPreferences, params.partition, PREVIEW_GUEST_PRELOAD_PATH)
+     })
++
++    // Nix: a preview guest (an HTML file, the blank Browser) never leaves
++    // for a web page or another app by itself: a script or <meta refresh>
++    // redirect, or a link to mailto: or any custom scheme (which Chromium
++    // would hand to the OS handler), is blocked here and opens nothing. Only
++    // file:, about: and data: documents stay in the pane. An http(s) link
++    // the user clicks reaches the system browser through the preload
++    // (preview-guest-preload.ts), which cancels its in-pane navigation.
++    contents.on('did-attach-webview', (_attachEvent, guest) => {
++      guest.on('will-navigate', (event, url) => {
++        if (!/^(file|about|data):/i.test(url)) {
++          event.preventDefault()
++          rememberLog(`[preview] blocked a navigation the user did not click: ${url}`)
++        }
++      })
++    })
++  })
++
++  // Nix: and no preview page (or frame of one) may launch an OS protocol
++  // handler at all. Everything else keeps Electron's default (granted).
++  const previewSession = session.fromPartition(PREVIEW_GUEST_PARTITION)
++  previewSession.setPermissionRequestHandler((_contents, permission, callback) => {
++    if (permission === 'openExternal') {
++      rememberLog('[preview] denied a preview page opening an external app')
++    }
++
++    callback(permission !== 'openExternal')
+   })
+ }
+ 
+diff --git a/apps/desktop/electron/preview-guest-links-external.test.ts b/apps/desktop/electron/preview-guest-links-external.test.ts
+new file mode 100644
+index 0000000..29247ef
+--- /dev/null
++++ b/apps/desktop/electron/preview-guest-links-external.test.ts
+@@ -0,0 +1,75 @@
++// Nix: a preview guest's web link reaches the system browser only on the
++// user's click (hyperhermes/pkgs/hermes-desktop patch
++// desktop-links-external.patch). main blocks every other http(s) navigation
++// of the guest; this is the click half, in the guest preload.
++import assert from 'node:assert/strict'
++
++import { describe, test } from 'vitest'
++
++import { GUEST_EXTERNAL_CHANNEL, type GuestClickEvent, installGuestExternalHandoff } from './preview-guest-preload'
++
++function rig() {
++  const sent: { channel: string; args: unknown[] }[] = []
++  const listeners: { type: string; listener: (event: GuestClickEvent) => void; capture?: boolean }[] = []
++
++  installGuestExternalHandoff({
++    addEventListener: (type, listener, capture) => listeners.push({ capture, listener, type }),
++    sendToHost: (channel, ...args) => sent.push({ args, channel })
++  })
++
++  const fire = (type: string) => (event: GuestClickEvent) =>
++    listeners.filter(entry => entry.type === type).forEach(entry => entry.listener(event))
++
++  return { auxclick: fire('auxclick'), click: fire('click'), listeners, sent }
++}
++
++const anchor = (href: string, target = '') => ({
++  closest: (selector: string) => (selector === 'a[href]' ? { href, target } : null)
++})
++
++describe('preview guest links', () => {
++  test('listens to primary and middle clicks in the capture phase', () => {
++    const { listeners } = rig()
++
++    assert.deepEqual(
++      listeners.map(entry => [entry.type, entry.capture]),
++      [
++        ['click', true],
++        ['auxclick', true]
++      ]
++    )
++  })
++
++  test('a trusted click on any web link is forwarded and its in-pane navigation cancelled', () => {
++    const { auxclick, click, sent } = rig()
++    let cancelled = 0
++    const preventDefault = () => void cancelled++
++
++    click({ button: 0, isTrusted: true, preventDefault, target: anchor('https://example.org/a') })
++    auxclick({ button: 1, isTrusted: true, preventDefault, target: anchor('http://example.org/b') })
++    click({ button: 0, isTrusted: true, preventDefault, target: anchor('https://example.org/c', '_blank') })
++
++    assert.deepEqual(
++      sent.map(entry => [entry.channel, entry.args[0]]),
++      [
++        [GUEST_EXTERNAL_CHANNEL, 'https://example.org/a'],
++        [GUEST_EXTERNAL_CHANNEL, 'http://example.org/b'],
++        [GUEST_EXTERNAL_CHANNEL, 'https://example.org/c']
++      ]
++    )
++    assert.equal(cancelled, 3)
++  })
++
++  test('script clicks, wrong buttons and local same-tab links open nothing', () => {
++    const { auxclick, click, sent } = rig()
++
++    click({ button: 0, isTrusted: false, target: anchor('https://evil.example/') })
++    click({ button: 2, isTrusted: true, target: anchor('https://example.org/') })
++    auxclick({ button: 2, isTrusted: true, target: anchor('https://example.org/') })
++    click({ button: 0, isTrusted: true, target: anchor('file:///tmp/sibling.html') })
++    click({ button: 0, isTrusted: true, target: { closest: () => null } })
++    click({ button: 0, isTrusted: true, target: null })
++
++    assert.deepEqual(sent, [])
++  })
++})
+diff --git a/apps/desktop/electron/preview-guest-preload.ts b/apps/desktop/electron/preview-guest-preload.ts
+index cee6f55..cadf0aa 100644
+--- a/apps/desktop/electron/preview-guest-preload.ts
++++ b/apps/desktop/electron/preview-guest-preload.ts
+@@ -6,61 +6,83 @@
+ // renderer tsconfig cannot import from electron/.
+ export const GUEST_EXTERNAL_CHANNEL = 'preview-open-external'
+ 
++interface GuestAnchor {
++  href: string
++  target?: string
++}
++
+ interface GuestEventTarget {
+-  closest(selector: string): { href: string } | null
++  closest(selector: string): GuestAnchor | null
+ }
+ 
+ export interface GuestClickEvent {
+   button?: number
+   isTrusted?: boolean
++  preventDefault?: () => void
+   target?: unknown
+ }
+ 
+ export interface GuestHandoffHost {
+-  addEventListener(type: 'click', listener: (event: GuestClickEvent) => void, capture?: boolean): void
++  addEventListener(type: 'auxclick' | 'click', listener: (event: GuestClickEvent) => void, capture?: boolean): void
+   sendToHost(channel: string, ...args: unknown[]): void
+ }
+ 
+ /**
+- * Wire the DOM-capture listener that forwards a clicked `_blank` anchor's
+- * absolute URL to the host. `host` is injected so the entry can pass the
+- * guest's `document` and `ipcRenderer`, and tests can drive the same rules
+- * without Electron or a DOM.
++ * Wire the DOM-capture listeners that forward a clicked link's absolute URL
++ * to the host. `host` is injected so the entry can pass the guest's
++ * `document` and `ipcRenderer`, and tests can drive the same rules without
++ * Electron or a DOM.
+  *
+- * Only a trusted primary-button click qualifies. `isTrusted` is what keeps
+- * this bridge out of the gesture-less forced-navigation class
+- * (GHSA-9f4c-93c8-jc8g): page script can `dispatchEvent` a synthetic click
+- * on an anchor, but it cannot forge `isTrusted`.
++ * Only a trusted click qualifies (primary, or middle via `auxclick`).
++ * `isTrusted` is what keeps this bridge out of the gesture-less
++ * forced-navigation class (GHSA-9f4c-93c8-jc8g): page script can
++ * `dispatchEvent` a synthetic click on an anchor, but it cannot forge
++ * `isTrusted`.
++ *
++ * Nix: every http(s) link the user clicks goes to the host (and so to the
++ * system browser), `_blank` or not, and its in-pane navigation is cancelled;
++ * main blocks any other http(s) navigation of the guest (script and
++ * <meta refresh> redirects), so a web page only ever opens on a click.
++ * Other in-page links (`#anchor`, a sibling local file) keep the pane.
+  */
+ export function installGuestExternalHandoff(host: GuestHandoffHost): void {
+-  host.addEventListener(
+-    'click',
+-    event => {
+-      if (event.isTrusted !== true || (event.button ?? 0) !== 0) {
+-        return
+-      }
++  const handoff = (wantedButton: number) => (event: GuestClickEvent) => {
++    if (event.isTrusted !== true || (event.button ?? 0) !== wantedButton) {
++      return
++    }
++
++    const target = event.target as GuestEventTarget | null
++
++    if (!target || typeof target.closest !== 'function') {
++      return
++    }
++
++    // `closest` climbs through the click's own DOM, which this isolated
++    // preload world shares with the page: an inner `<span>` inside the
++    // anchor resolves to the enclosing anchor the same way it would for
++    // page script.
++    const anchor = target.closest('a[href]')
++
++    if (!anchor || typeof anchor.href !== 'string' || anchor.href === '') {
++      return
++    }
+ 
+-      const target = event.target as GuestEventTarget | null
++    // `anchor.href` is the browser-resolved absolute URL, not the raw
++    // attribute, so relative and protocol-relative hrefs arrive fully
++    // qualified for the host's scheme admission check.
++    const web = /^https?:/i.test(anchor.href)
+ 
+-      if (!target || typeof target.closest !== 'function') {
+-        return
+-      }
++    if (!web && anchor.target !== '_blank') {
++      return
++    }
+ 
+-      // `closest` climbs through the click's own DOM, which this isolated
+-      // preload world shares with the page: an inner `<span>` inside the
+-      // anchor resolves to the enclosing `<a target="_blank">` the same way
+-      // it would for page script.
+-      const anchor = target.closest('a[target="_blank"]')
++    if (web) {
++      event.preventDefault?.()
++    }
+ 
+-      if (!anchor || typeof anchor.href !== 'string' || anchor.href === '') {
+-        return
+-      }
++    host.sendToHost(GUEST_EXTERNAL_CHANNEL, anchor.href)
++  }
+ 
+-      // `anchor.href` is the browser-resolved absolute URL, not the raw
+-      // attribute, so relative and protocol-relative hrefs arrive fully
+-      // qualified for the host's scheme admission check.
+-      host.sendToHost(GUEST_EXTERNAL_CHANNEL, anchor.href)
+-    },
+-    true
+-  )
++  host.addEventListener('click', handoff(0), true)
++  host.addEventListener('auxclick', handoff(1), true)
+ }
+diff --git a/apps/desktop/src/app/chat/composer/attachments.tsx b/apps/desktop/src/app/chat/composer/attachments.tsx
+index 8ebadc6..f9ebf00 100644
+--- a/apps/desktop/src/app/chat/composer/attachments.tsx
++++ b/apps/desktop/src/app/chat/composer/attachments.tsx
+@@ -13,7 +13,7 @@ import { normalizeOrLocalPreviewTarget } from '@/lib/local-preview'
+ import { cn } from '@/lib/utils'
+ import type { ComposerAttachment } from '@/store/composer'
+ import { notifyError } from '@/store/notifications'
+-import { openPreview } from '@/store/preview'
++import { openPreviewFromClick } from '@/store/preview'
+ 
+ export function AttachmentList({
+   attachments,
+@@ -136,7 +136,7 @@ function AttachmentPill({ attachment, onRemove }: { attachment: ComposerAttachme
+         throw new Error(c.couldNotPreview(attachment.label))
+       }
+ 
+-      openPreview(preview)
++      openPreviewFromClick(preview)
+     } catch (error) {
+       notifyError(error, c.previewUnavailable)
+     }
+diff --git a/apps/desktop/src/app/chat/composer/status-stack/preview-row.tsx b/apps/desktop/src/app/chat/composer/status-stack/preview-row.tsx
+index 8e2eedf..0c9fcf7 100644
+--- a/apps/desktop/src/app/chat/composer/status-stack/preview-row.tsx
++++ b/apps/desktop/src/app/chat/composer/status-stack/preview-row.tsx
+@@ -9,7 +9,7 @@ import { isDesktopFsRemoteMode } from '@/lib/desktop-fs'
+ import { normalizeOrLocalPreviewTarget, openPreviewTargetInBrowser } from '@/lib/local-preview'
+ import { cn } from '@/lib/utils'
+ import { notifyError } from '@/store/notifications'
+-import { $previewTabSources, closePreviewForSource, openPreview, renderedHtmlTarget } from '@/store/preview'
++import { $previewTabSources, closePreviewForSource, openPreviewFromClick, renderedHtmlTarget } from '@/store/preview'
+ import { type PreviewArtifact } from '@/store/preview-status'
+ 
+ interface PreviewStatusRowProps {
+@@ -49,7 +49,7 @@ export const PreviewStatusRow = memo(function PreviewStatusRow({ item, onDismiss
+     setOpening(true)
+ 
+     try {
+-      openPreview(renderedHtmlTarget(await resolveTarget()))
++      openPreviewFromClick(renderedHtmlTarget(await resolveTarget()))
+     } catch (error) {
+       notifyError(error, t.preview.unavailable)
+     } finally {
+@@ -68,7 +68,7 @@ export const PreviewStatusRow = memo(function PreviewStatusRow({ item, onDismiss
+       // (Remote HTML stays on openPreviewTargetInBrowser, which stages a
+       // sanitized local copy before opening it.)
+       if (target.kind === 'file' && target.previewKind !== 'html' && isDesktopFsRemoteMode()) {
+-        openPreview(target)
++        openPreviewFromClick(target)
+ 
+         return
+       }
+diff --git a/apps/desktop/src/app/chat/right-rail/preview-act.ts b/apps/desktop/src/app/chat/right-rail/preview-act.ts
+index 4310eaa..3f4098a 100644
+--- a/apps/desktop/src/app/chat/right-rail/preview-act.ts
++++ b/apps/desktop/src/app/chat/right-rail/preview-act.ts
+@@ -41,7 +41,7 @@ import {
+   typeText,
+   wheelBy
+ } from './preview-drive'
+-import { activePreviewInput, type PreviewInputHandle } from './preview-input'
++import { activePreviewInput, beginAgentPreviewAction, type PreviewInputHandle } from './preview-input'
+ import { activePreviewNav, type PreviewNavHandle } from './preview-nav'
+ import { activePreviewScriptRunner, type PreviewScriptRunner } from './preview-script-runner'
+ 
+@@ -786,6 +786,21 @@ export async function actOnActivePreview(
+   action: Omit<PreviewActAction, 'kind'> & { kind: string },
+   signal?: AbortSignal,
+   owner?: PreviewOwner
++): Promise<PreviewActResult> {
++  // Nix: links this action hits are offered, not opened (preview-input.ts).
++  const endAgentAction = beginAgentPreviewAction()
++
++  try {
++    return await actOnActivePreviewInner(action, signal, owner)
++  } finally {
++    endAgentAction()
++  }
++}
++
++async function actOnActivePreviewInner(
++  action: Omit<PreviewActAction, 'kind'> & { kind: string },
++  signal?: AbortSignal,
++  owner?: PreviewOwner
+ ): Promise<PreviewActResult> {
+   const nav = NAV_ACTIONS.find(verb => verb === action.kind)
+ 
+diff --git a/apps/desktop/src/app/chat/right-rail/preview-drive-channels.ts b/apps/desktop/src/app/chat/right-rail/preview-drive-channels.ts
+index 6a2e064..a9cb234 100644
+--- a/apps/desktop/src/app/chat/right-rail/preview-drive-channels.ts
++++ b/apps/desktop/src/app/chat/right-rail/preview-drive-channels.ts
+@@ -9,7 +9,12 @@ import { type RefObject, useEffect } from 'react'
+ 
+ import { isElementInHiddenPane } from '@/components/pane-shell/pane-visibility'
+ 
+-import { type PreviewInputEvent, registerPreviewInput, toWebviewInputSpace } from './preview-input'
++import {
++  noteAgentPreviewInput,
++  type PreviewInputEvent,
++  registerPreviewInput,
++  toWebviewInputSpace
++} from './preview-input'
+ import { type PreviewScriptRunner, registerPreviewScriptRunner } from './preview-script-runner'
+ 
+ export type PreviewDriveGuest = HTMLElement & {
+@@ -195,6 +200,8 @@ export function usePreviewDriveChannels(
+           throw new Error('preview webview cannot take input events')
+         }
+ 
++        // Nix: a link this hits is the agent's, not the user's (preview-input.ts).
++        noteAgentPreviewInput()
+         // The guest keeps its own (per-host) zoom, which the act engine's CSS
+         // measurements do not include — ask the webview, not the window.
+         webview.sendInputEvent(toWebviewInputSpace(event, webview.getZoomFactor?.()))
+diff --git a/apps/desktop/src/app/chat/right-rail/preview-file.tsx b/apps/desktop/src/app/chat/right-rail/preview-file.tsx
+index f7395c1..d911d1c 100644
+--- a/apps/desktop/src/app/chat/right-rail/preview-file.tsx
++++ b/apps/desktop/src/app/chat/right-rail/preview-file.tsx
+@@ -49,7 +49,7 @@ import {
+ } from '@/lib/preview-markdown-links'
+ import { previewTargetFromMarkdownHref } from '@/lib/preview-targets'
+ import { cn } from '@/lib/utils'
+-import { markPreviewTabMissing, openPreview, type PreviewTarget } from '@/store/preview'
++import { markPreviewTabMissing, openPreviewFromClick, type PreviewTarget } from '@/store/preview'
+ import { setPreviewDirty } from '@/store/preview-edit'
+ import { $connection, $currentCwd } from '@/store/session'
+ import { notifyWorkspaceChanged } from '@/store/workspace-events'
+@@ -409,7 +409,7 @@ async function openLinkedNote(target: string, filePath?: string) {
+   const preview = await normalizeOrLocalPreviewTarget(target, noteDirectory(filePath))
+ 
+   if (preview) {
+-    openPreview(preview)
++    openPreviewFromClick(preview)
+   }
+ }
+ 
+diff --git a/apps/desktop/src/app/chat/right-rail/preview-input.ts b/apps/desktop/src/app/chat/right-rail/preview-input.ts
+index eca5b4e..c477d93 100644
+--- a/apps/desktop/src/app/chat/right-rail/preview-input.ts
++++ b/apps/desktop/src/app/chat/right-rail/preview-input.ts
+@@ -46,6 +46,40 @@ export function toWebviewInputSpace(event: PreviewInputEvent, zoomFactor: number
+   return { ...event, x: Math.round(event.x * zoomFactor), y: Math.round(event.y * zoomFactor) }
+ }
+ 
++// Nix: the agent's input reaches the guest as trusted events, so the guest
++// preload cannot tell its clicks from the user's. While a `preview.act` runs
++// (and for a settle window after it, or after any event it sent: a click's
++// navigation and the preload's message arrive a beat later), a link it hits
++// is only offered as a toast, never opened (preview-pane.tsx).
++export const AGENT_INPUT_SETTLE_MS = 1_500
++
++let agentActs = 0
++let agentQuietAt = 0
++
++/** Mark one agent action as running; the returned end is idempotent. */
++export function beginAgentPreviewAction(): () => void {
++  agentActs += 1
++  let ended = false
++
++  return () => {
++    if (!ended) {
++      ended = true
++      agentActs -= 1
++      agentQuietAt = Math.max(agentQuietAt, Date.now() + AGENT_INPUT_SETTLE_MS)
++    }
++  }
++}
++
++/** Note an input event the agent just sent into a guest. */
++export function noteAgentPreviewInput(): void {
++  agentQuietAt = Math.max(agentQuietAt, Date.now() + AGENT_INPUT_SETTLE_MS)
++}
++
++/** True while the agent drives a preview, or within its settle window. */
++export function agentDrivingPreview(now = Date.now()): boolean {
++  return agentActs > 0 || now < agentQuietAt
++}
++
+ const handles = new Map<string, PreviewInputHandle>()
+ 
+ /** Register a live pane's input channel; returns an idempotent unregister. */
+diff --git a/apps/desktop/src/app/chat/right-rail/preview-pane.tsx b/apps/desktop/src/app/chat/right-rail/preview-pane.tsx
+index 2e505cf..ecc2bdf 100644
+--- a/apps/desktop/src/app/chat/right-rail/preview-pane.tsx
++++ b/apps/desktop/src/app/chat/right-rail/preview-pane.tsx
+@@ -39,6 +39,7 @@ import {
+   commitBrowserTabLocation,
+   failPreviewServerRestart,
+   noteBrowserPage,
++  offerWebPage,
+   popOutBrowserTab,
+   type PreviewRenderMode,
+   type PreviewTarget,
+@@ -73,7 +74,7 @@ import { previewConsoleState } from './preview-console-store'
+ import { runPreviewGuestScript, usePreviewDriveChannels, withPreviewDeadline } from './preview-drive-channels'
+ import { LocalFilePreview, PreviewEmptyState, PreviewModeSwitcher } from './preview-file'
+ import { usePreviewGuestOffscreen } from './preview-guest-offscreen'
+-import { type PreviewInputEvent } from './preview-input'
++import { agentDrivingPreview, type PreviewInputEvent } from './preview-input'
+ import { PREVIEW_BROWSER_ATTR, registerPreviewNav } from './preview-nav'
+ import { registerPreviewPageReader } from './preview-reader'
+ import { RealProfileConsentDialog } from './real-profile-consent-dialog'
+@@ -743,6 +744,15 @@ export function PreviewPane({
+ 
+   const navigateTo = useCallback(
+     (url: string) => {
++      // Nix: a typed web address is the user's own action and goes to the
++      // system browser (loopback reach first, as below); the pane only
++      // shows files and the blank Browser.
++      if (/^https?:\/\//i.test(url)) {
++        void reachablePreviewUrl(url).then(reached => window.hermesDesktop?.openExternal?.(reached))
++
++        return
++      }
++
+       setLoadError(null)
+       // The reach probe below is a round-trip of its own, and `did-start-loading`
+       // can't fire until it resolves — so own the loading state from the moment
+@@ -1119,7 +1129,16 @@ export function PreviewPane({
+ 
+       const url = String(detail.args?.[0] ?? '')
+ 
+-      if (admitPreviewExternalUrl(url)) {
++      if (!admitPreviewExternalUrl(url)) {
++        return
++      }
++
++      // Nix: the agent's preview.act input is trusted in the guest too, so a
++      // link clicked while it drives (or just after) is only offered as a
++      // toast; only the user's own click opens the system browser.
++      if (agentDrivingPreview()) {
++        offerWebPage(url)
++      } else {
+         void window.hermesDesktop?.openExternal?.(url)
+       }
+     }
+diff --git a/apps/desktop/src/app/context-menu/app-context-menu.tsx b/apps/desktop/src/app/context-menu/app-context-menu.tsx
+index 46b7692..92aa758 100644
+--- a/apps/desktop/src/app/context-menu/app-context-menu.tsx
++++ b/apps/desktop/src/app/context-menu/app-context-menu.tsx
+@@ -21,13 +21,12 @@ import { registry } from '@/contrib/registry'
+ import type { Contribution } from '@/contrib/types'
+ import { type Translations, useI18n } from '@/i18n'
+ import { writeClipboardText } from '@/lib/clipboard'
+-import { hostPathLabel, hudForcesNativeLinks, normalizeExternalUrl, openExternalLink } from '@/lib/external-link'
++import { normalizeExternalUrl, openExternalLink } from '@/lib/external-link'
+ import { hostHas } from '@/lib/host-capabilities'
+ import { formatCombo } from '@/lib/keybinds/combo'
+ import { isRemoteGateway } from '@/lib/media'
+ import { reachablePreviewUrl } from '@/lib/preview-reach'
+ import { isBrowserOwnedTouch } from '@/lib/touch-interaction'
+-import { openPreview } from '@/store/preview'
+ 
+ import { type ComposerMenuRow, type ComposerMenuTarget, resolveComposerMenuSections } from './composer-menu'
+ import { ShellMenuItems } from './shell-menu-items'
+@@ -234,7 +233,6 @@ function domSections(
+   const linkUrl = target.linkUrl ? normalizeExternalUrl(target.linkUrl) : ''
+   const linkIsWeb = isWebUrl(linkUrl)
+   const imageIsWeb = isWebUrl(target.imageUrl)
+-  const openInApp = !hudForcesNativeLinks()
+   const showResolvedCopy = linkIsWeb && isRemoteGateway() && isLoopbackUrl(linkUrl)
+ 
+   // The edit verbs and spell-check actions act on the sender's FOCUSED
+@@ -292,14 +290,6 @@ function domSections(
+   if (linkUrl) {
+     sections.push(
+       [
+-        linkIsWeb && openInApp ? (
+-          <Item
+-            icon="globe"
+-            key="link-open-app"
+-            label={copy.link.openInApp}
+-            onSelect={() => openPreview({ kind: 'url', label: hostPathLabel(linkUrl), source: linkUrl, url: linkUrl })}
+-          />
+-        ) : null,
+         <Item
+           icon="link-external"
+           key="link-open-external"
+@@ -327,21 +317,6 @@ function domSections(
+   if (target.onImage) {
+     sections.push(
+       [
+-        imageIsWeb && openInApp ? (
+-          <Item
+-            icon="globe"
+-            key="image-open-app"
+-            label={copy.link.openInApp}
+-            onSelect={() =>
+-              openPreview({
+-                kind: 'url',
+-                label: hostPathLabel(target.imageUrl),
+-                source: target.imageUrl,
+-                url: target.imageUrl
+-              })
+-            }
+-          />
+-        ) : null,
+         imageIsWeb ? (
+           <Item
+             icon="link-external"
+@@ -484,7 +459,6 @@ function guestSections(open: Extract<OpenContextMenu, { kind: 'guest' }>, t: Tra
+   const sections: ReactNode[][] = []
+   const linkUrl = params.linkURL
+   const imageUrl = params.srcURL
+-  const openInApp = !hudForcesNativeLinks()
+ 
+   // Same trap-timing rule as the dom side: dispatch AFTER the menu closes,
+   // so the webview's focus() is not stolen back by the radix content.
+@@ -496,14 +470,6 @@ function guestSections(open: Extract<OpenContextMenu, { kind: 'guest' }>, t: Tra
+   if (linkUrl) {
+     sections.push(
+       [
+-        isWebUrl(linkUrl) && openInApp ? (
+-          <Item
+-            icon="globe"
+-            key="guest-link-open-app"
+-            label={copy.link.openInApp}
+-            onSelect={() => openPreview({ kind: 'url', label: hostPathLabel(linkUrl), source: linkUrl, url: linkUrl })}
+-          />
+-        ) : null,
+         <Item
+           icon="link-external"
+           key="guest-link-open-external"
+diff --git a/apps/desktop/src/app/contrib/panes.tsx b/apps/desktop/src/app/contrib/panes.tsx
+index 4ad93af..41d3cf4 100644
+--- a/apps/desktop/src/app/contrib/panes.tsx
++++ b/apps/desktop/src/app/contrib/panes.tsx
+@@ -25,7 +25,7 @@ import { registry } from '@/contrib/registry'
+ import { getLogs } from '@/hermes'
+ import { normalizeOrLocalPreviewTarget } from '@/lib/local-preview'
+ import { cn } from '@/lib/utils'
+-import { openPreview } from '@/store/preview'
++import { openPreviewFromClick } from '@/store/preview'
+ import { $focusedWorkspaceCwd } from '@/store/session-states'
+ 
+ // ---------------------------------------------------------------------------
+@@ -110,7 +110,7 @@ function previewFile(path: string) {
+   void normalizeOrLocalPreviewTarget(path, $focusedWorkspaceCwd.get() || undefined)
+     .then(target => {
+       if (target) {
+-        openPreview(target)
++        openPreviewFromClick(target)
+       }
+     })
+     .catch(() => undefined)
+diff --git a/apps/desktop/src/app/right-sidebar/index.tsx b/apps/desktop/src/app/right-sidebar/index.tsx
+index 85f0a6c..9fe0f21 100644
+--- a/apps/desktop/src/app/right-sidebar/index.tsx
++++ b/apps/desktop/src/app/right-sidebar/index.tsx
+@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils'
+ import { refreshRepoStatus, registerRepoStatusCwd } from '@/store/coding-status'
+ import { $panesFlipped } from '@/store/layout'
+ import { notifyError } from '@/store/notifications'
+-import { openPreview } from '@/store/preview'
++import { openPreviewFromClick } from '@/store/preview'
+ import { openFolderAsProject } from '@/store/projects'
+ import { $focusedWorkspaceCwd } from '@/store/session-states'
+ 
+@@ -84,7 +84,7 @@ export function RightSidebarPane({ onActivateFile, onActivateFolder }: RightSide
+         throw new Error(r.couldNotPreview(path))
+       }
+ 
+-      openPreview(preview)
++      openPreviewFromClick(preview)
+     } catch (error) {
+       notifyError(error, r.previewUnavailable)
+     }
+diff --git a/apps/desktop/src/app/right-sidebar/review/file-tree.tsx b/apps/desktop/src/app/right-sidebar/review/file-tree.tsx
+index 2821a32..431f9bd 100644
+--- a/apps/desktop/src/app/right-sidebar/review/file-tree.tsx
++++ b/apps/desktop/src/app/right-sidebar/review/file-tree.tsx
+@@ -30,7 +30,7 @@ import {
+ } from '@/store/file-actions'
+ import { $sidebarWorkspaceNodeOpen, revealFileInTree, toggleWorkspaceNodeCollapsed } from '@/store/layout'
+ import { notifyError } from '@/store/notifications'
+-import { openPreview } from '@/store/preview'
++import { openPreviewFromClick } from '@/store/preview'
+ import {
+   $reviewFiles,
+   $reviewLoading,
+@@ -361,7 +361,7 @@ function ReviewFileRow({ node, depth }: { node: ReviewTreeNode; depth: number })
+         const preview = await normalizeOrLocalPreviewTarget(dragPath)
+ 
+         if (preview) {
+-          openPreview(preview)
++          openPreviewFromClick(preview)
+         }
+       } catch (error) {
+         notifyError(error, t.rightSidebar.previewUnavailable)
+diff --git a/apps/desktop/src/app/settings/config-settings.tsx b/apps/desktop/src/app/settings/config-settings.tsx
+index e4e6b15..ef757ab 100644
+--- a/apps/desktop/src/app/settings/config-settings.tsx
++++ b/apps/desktop/src/app/settings/config-settings.tsx
+@@ -25,7 +25,6 @@ import {
+ } from '@/store/data-url-read-max'
+ import { recordSettingsSaved } from '@/store/desktop-metrics'
+ import { $disableF12, setDisableF12 } from '@/store/disable-f12'
+-import { $alwaysExternalLinks, setAlwaysExternalLinks } from '@/store/external-links'
+ import { $keepAwakeMode, type KeepAwakeMode, setKeepAwakeMode } from '@/store/keep-awake'
+ import { refreshMemoryStatus } from '@/store/memory-status'
+ import { notify, notifyError } from '@/store/notifications'
+@@ -121,7 +120,6 @@ function ConfigSettingsInner({
+   ] as const satisfies readonly { id: KeepAwakeMode; label: string }[]
+ 
+   const disableF12 = useStore($disableF12)
+-  const alwaysExternalLinks = useStore($alwaysExternalLinks)
+   // The editable draft is local (debounced autosave watches it), but it's seeded
+   // from — and saved back through — the shared config cache, so edits are visible
+   // in the MCP/model surfaces and reopening the page doesn't reload-flash.
+@@ -495,12 +493,8 @@ function ConfigSettingsInner({
+             label={c.disableF12Title}
+             onChange={setDisableF12}
+           />
+-          <ToggleRow
+-            checked={alwaysExternalLinks}
+-            description={c.alwaysExternalLinksDesc}
+-            label={c.alwaysExternalLinksTitle}
+-            onChange={setAlwaysExternalLinks}
+-          />
++          {/* Nix: no "Always open links in external browser" toggle; every
++              link already opens there (desktop-links-external.patch). */}
+           <QuickEntrySettings />
+           <OnboardingSettings />
+         </>
+diff --git a/apps/desktop/src/components/chat/preview-attachment.tsx b/apps/desktop/src/components/chat/preview-attachment.tsx
+index f8b8612..5b40550 100644
+--- a/apps/desktop/src/components/chat/preview-attachment.tsx
++++ b/apps/desktop/src/components/chat/preview-attachment.tsx
+@@ -9,7 +9,7 @@ import { normalizeOrLocalPreviewTarget } from '@/lib/local-preview'
+ import { downloadGatewayMediaFile } from '@/lib/media'
+ import { previewName } from '@/lib/preview-targets'
+ import { notifyError } from '@/store/notifications'
+-import { $previewTabSources, closePreviewForSource, openPreview } from '@/store/preview'
++import { $previewTabSources, closePreviewForSource, openPreviewFromClick } from '@/store/preview'
+ 
+ /** What the Electron main process said about this target's LOCAL filesystem
+  * state (#101683). `null` keeps the stock card — remote-backend targets keep
+@@ -176,7 +176,7 @@ export function PreviewAttachment({ target }: { target: string }) {
+         throw new Error(`Could not open preview target: ${requestTarget}`)
+       }
+ 
+-      openPreview(preview)
++      openPreviewFromClick(preview)
+     } catch (error) {
+       if (
+         !mountedRef.current ||
+diff --git a/apps/desktop/src/i18n/en.ts b/apps/desktop/src/i18n/en.ts
+index 813306a..dba87f2 100644
+--- a/apps/desktop/src/i18n/en.ts
++++ b/apps/desktop/src/i18n/en.ts
+@@ -4310,6 +4310,8 @@ export const en: Translations = {
+     unavailable: 'Preview unavailable',
+     missingTarget: 'That path does not exist on this computer',
+     missingTitle: 'File no longer exists',
++    webPageOfferTitle: 'Hermes suggested a web page',
++    webPageOfferOpen: 'Open in browser',
+     missingBody: label =>
+       `${label} was deleted, moved, or its temporary location was cleared. This tab will not be restored on the next launch.`,
+     opening: 'Opening...',
+diff --git a/apps/desktop/src/i18n/types.ts b/apps/desktop/src/i18n/types.ts
+index 9bfe0b7..ace4e0f 100644
+--- a/apps/desktop/src/i18n/types.ts
++++ b/apps/desktop/src/i18n/types.ts
+@@ -3714,6 +3714,8 @@ export interface Translations extends NoticeTranslations {
+     unavailable: string
+     missingTarget: string
+     missingTitle: string
++    webPageOfferTitle: string
++    webPageOfferOpen: string
+     missingBody: (label: string) => string
+     opening: string
+     hide: string
+diff --git a/apps/desktop/src/lib/external-link.tsx b/apps/desktop/src/lib/external-link.tsx
+index ea5b693..fcd6396 100644
+--- a/apps/desktop/src/lib/external-link.tsx
++++ b/apps/desktop/src/lib/external-link.tsx
+@@ -1,10 +1,8 @@
+ import type { ComponentProps, ReactNode } from 'react'
+ import { useEffect, useMemo, useState } from 'react'
+ 
+-import { hostHas } from '@/lib/host-capabilities'
+ import { ArrowUpRight } from '@/lib/icons'
+ import { IS_MAC } from '@/lib/keybinds/combo'
+-import { $alwaysExternalLinks } from '@/store/external-links'
+ 
+ import { resolveBrandIcon } from './brand-icon'
+ import { cn } from './utils'
+@@ -234,60 +232,17 @@ export function wantsNativeBrowser(event: Pick<MouseEvent, 'button' | 'ctrlKey'
+ }
+ 
+ /**
+- * The HUD is a chrome-free bar with no in-app browser. A preview tile there
+- * either no-ops or tries to paint a webview into the transparent overlay —
+- * the OAuth-in-the-HUD case. Always hand off to the OS browser.
++ * Where a link the user clicked should open. Nix: always the system browser
++ * (desktop-links-external.patch); `options` stays for the callers' sake.
+  */
+-export function hudForcesNativeLinks(search = typeof window === 'undefined' ? '' : window.location.search): boolean {
+-  try {
+-    return new URLSearchParams(search).get('win') === 'hud'
+-  } catch {
+-    return false
+-  }
+-}
+-
+-/**
+- * Where a link the user clicked should open.
+- *
+- * In Electron, a web page opens in the in-app browser — that pane exists so reading a doc
+- * doesn't cost a context switch out of Hermes, and it is the surface the agent
+- * can see. ⌘/Ctrl-click (or middle-click) escapes to the real browser, which is
+- * where you go for anything needing your logged-in session or a password.
+- * Webapp links open in a browser tab by default because sites often reject
+- * embedded pages. Keep that handoff synchronous so it retains the click gesture.
+- *
+- * Everything that ISN'T a web page — `mailto:`, `file:`, a custom scheme — has
+- * no business in the webview and always hands off to the OS. The HUD has no
+- * browser pane, so it always takes the OS path. The "Always open links in
+- * external browser" setting (`$alwaysExternalLinks`) sends every click there.
+- */
+-export function openLink(href: string, options: { native?: boolean } = {}): void {
++export function openLink(href: string, _options: { native?: boolean } = {}): void {
+   const target = normalizeExternalUrl(href)
+ 
+   if (!target) {
+     return
+   }
+ 
+-  if (
+-    options.native ||
+-    !hostHas('inAppLinks') ||
+-    $alwaysExternalLinks.get() ||
+-    isConnectorAuthorizationLink(target) ||
+-    hudForcesNativeLinks() ||
+-    !/^https?:$/i.test(parseUrl(target)?.protocol ?? '')
+-  ) {
+-    openExternalLink(target)
+-
+-    return
+-  }
+-
+-  // Lazy: this module is a leaf every surface imports, and the preview store
+-  // pulls the layout/session graph behind it. A static edge would make one
+-  // link helper drag that whole tree into anything that renders a link. The
+-  // tab lands a microtask later, which is invisible.
+-  void import('@/store/preview').then(({ openPreview }) =>
+-    openPreview({ kind: 'url', label: hostPathLabel(target), source: target, url: target })
+-  )
++  openExternalLink(target)
+ }
+ 
+ interface ExternalLinkProps extends Omit<ComponentProps<'a'>, 'href' | 'target'> {
+diff --git a/apps/desktop/src/store/preview-links-external.test.ts b/apps/desktop/src/store/preview-links-external.test.ts
+new file mode 100644
+index 0000000..ca99d9b
+--- /dev/null
++++ b/apps/desktop/src/store/preview-links-external.test.ts
+@@ -0,0 +1,130 @@
++// Nix: web pages never open inside the app, and reach the system browser
++// only on the user's click (hyperhermes/pkgs/hermes-desktop patch
++// desktop-links-external.patch). openPreview is the one entry every in-app
++// web view goes through; the agent's preview.open events land there.
++import { cleanup, fireEvent, render, screen } from '@testing-library/react'
++import { createElement } from 'react'
++import { afterEach, describe, expect, it, vi } from 'vitest'
++
++import {
++  agentDrivingPreview,
++  AGENT_INPUT_SETTLE_MS,
++  beginAgentPreviewAction,
++  noteAgentPreviewInput
++} from '@/app/chat/right-rail/preview-input'
++import { ExternalLink, openLink } from '@/lib/external-link'
++
++import { $notifications, clearNotifications } from './notifications'
++import {
++  $previewTabs,
++  closeRightRail,
++  decodePreviewTabs,
++  openBrowserTab,
++  openPreview,
++  openPreviewFromClick
++} from './preview'
++
++const desktopWindow = window as unknown as { hermesDesktop?: Window['hermesDesktop'] }
++
++function installBridge() {
++  const openExternal = vi.fn().mockResolvedValue(undefined)
++  desktopWindow.hermesDesktop = { openExternal } as unknown as Window['hermesDesktop']
++
++  return openExternal
++}
++
++afterEach(() => {
++  cleanup()
++  closeRightRail()
++  clearNotifications()
++  delete desktopWindow.hermesDesktop
++})
++
++describe('web pages open in the system browser', () => {
++  it('a plain click on a link opens it externally, no in-app tab', () => {
++    const openExternal = installBridge()
++
++    render(createElement(ExternalLink, { href: 'https://example.com/path' }, 'Example link'))
++    fireEvent.click(screen.getByRole('link', { name: 'Example link' }))
++
++    expect(openExternal).toHaveBeenCalledExactlyOnceWith('https://example.com/path')
++    expect($previewTabs.get()).toHaveLength(0)
++  })
++
++  it('openLink (terminal, directives) opens externally', () => {
++    const openExternal = installBridge()
++
++    openLink('example.org/x')
++
++    expect(openExternal).toHaveBeenCalledExactlyOnceWith('https://example.org/x')
++    expect($previewTabs.get()).toHaveLength(0)
++  })
++
++  it.each(['https://example.org/a?b=1', 'http://localhost:5173/'])(
++    'an agent preview.open of %s (openPreview) opens nothing: it offers a link',
++    url => {
++      const openExternal = installBridge()
++
++      openPreview({ kind: 'url', label: 'x', source: url, url })
++
++      expect(openExternal).not.toHaveBeenCalled()
++      expect($previewTabs.get()).toHaveLength(0)
++
++      const offer = $notifications.get().find(item => item.message === url)
++
++      expect(offer?.action).toBeDefined()
++
++      // Only the user's click on the offer opens it.
++      offer?.action?.onClick()
++
++      expect(openExternal).toHaveBeenCalledExactlyOnceWith(url)
++    }
++  )
++
++  it('a user click that previews a web page (openPreviewFromClick) opens it externally', () => {
++    const openExternal = installBridge()
++
++    openPreviewFromClick({ kind: 'url', label: 'x', source: 'http://localhost:5173/', url: 'http://localhost:5173/' })
++
++    expect(openExternal).toHaveBeenCalledExactlyOnceWith('http://localhost:5173/')
++    expect($previewTabs.get()).toHaveLength(0)
++  })
++
++  it('keeps the blank Browser the user opens and file previews in the pane', () => {
++    const openExternal = installBridge()
++
++    openBrowserTab()
++    openPreview({ kind: 'file', label: 'a.txt', previewKind: 'text', source: '/tmp/a.txt', url: 'file:///tmp/a.txt' })
++
++    expect(openExternal).not.toHaveBeenCalled()
++    expect($previewTabs.get().map(tab => tab.target.url)).toEqual(['about:blank', 'file:///tmp/a.txt'])
++  })
++
++  it('drops web-page tabs persisted by an older build', () => {
++    const tabs = decodePreviewTabs(
++      JSON.stringify([
++        { id: 'url:1', pinned: true, target: { kind: 'url', label: 'x', source: 'https://a.example', url: 'https://a.example' } },
++        { id: 'file:2', pinned: true, target: { kind: 'file', label: 'b', source: '/b', url: 'file:///b' } }
++      ])
++    )
++
++    expect(tabs.map(tab => tab.id)).toEqual(['file:2'])
++  })
++
++  it("counts the agent's preview input as its own for a settle window", () => {
++    const start = Date.now()
++    expect(agentDrivingPreview(start)).toBe(false)
++
++    const end = beginAgentPreviewAction()
++    expect(agentDrivingPreview(start + 60_000)).toBe(true)
++    end()
++    end()
++    const after = Date.now()
++    expect(agentDrivingPreview(after + AGENT_INPUT_SETTLE_MS - 50)).toBe(true)
++    expect(agentDrivingPreview(after + AGENT_INPUT_SETTLE_MS + 50)).toBe(false)
++
++    noteAgentPreviewInput()
++    expect(agentDrivingPreview()).toBe(true)
++    expect(agentDrivingPreview(Date.now() + AGENT_INPUT_SETTLE_MS + 50)).toBe(false)
++  })
++})
+diff --git a/apps/desktop/src/store/preview.ts b/apps/desktop/src/store/preview.ts
+index 38b5720..6e295e0 100644
+--- a/apps/desktop/src/store/preview.ts
++++ b/apps/desktop/src/store/preview.ts
+@@ -2,6 +2,7 @@ import { randomUuid } from '@hermes/shared'
+ import { atom, computed } from 'nanostores'
+ 
+ import { dismissTreePane, isPaneVisible } from '@/components/pane-shell/tree/store'
++import { translateNow } from '@/i18n'
+ import {
+   capturePreviewAnnotateDestination,
+   clearPreviewAnnotateDestination,
+@@ -11,6 +12,7 @@ import { readJson, writeKey } from '@/lib/storage'
+ import { normalize } from '@/lib/text'
+ 
+ import { recordFeatureUse } from './desktop-metrics'
++import { notify } from './notifications'
+ import { $rightRailActiveTabId, type RightRailTabId, selectRightRailTab } from './layout'
+ import { clearExplicitPreviewOpen, noteExplicitPreviewOpen, PREVIEW_TILE_PREFIX } from './preview-explicit'
+ import {
+@@ -168,6 +170,8 @@ function parseTabList(parsed: unknown): PreviewTab[] {
+     // Drop tombstoned file tabs (a previous session confirmed the file is
+     // gone). Keeping them would re-probe a known-dead path on every boot.
+     .filter(tab => !tab.target.missing)
++    // Nix: web pages restored from an older build would reopen in-app.
++    .filter(tab => !(tab.target.kind === 'url' && isWebPageUrl(tab.target.url)))
+ 
+   // Legacy rows (written before session scoping) have no owner and no way to
+   // recover one — keep them as workspace-pinned rather than dropping them or
+@@ -906,6 +910,38 @@ export function setPreviewRenderMode(tabId: string, renderMode: PreviewRenderMod
+   $previewTabs.set(current.map((item, i) => (i === index ? { ...item, target: { ...item.target, renderMode } } : item)))
+ }
+ 
++/** Nix: http(s) pages never open inside the app (see openPreview). */
++export function isWebPageUrl(url: string): boolean {
++  return /^https?:\/\//i.test(url.trim())
++}
++
++/** Nix: show a web page the agent asked to preview as a link, without
++ *  opening it: only the user's click on the toast's button opens it. */
++export function offerWebPage(url: string) {
++  notify({
++    action: { label: translateNow('preview.webPageOfferOpen'), onClick: () => void window.hermesDesktop?.openExternal?.(url) },
++    durationMs: 20_000,
++    id: `web-page-offer:${url}`,
++    kind: 'info',
++    message: url,
++    placement: 'bottom-right',
++    title: translateNow('preview.webPageOfferTitle')
++  })
++}
++
++/** Nix: openPreview for a user's click (file tree, attachments, preview
++ *  rows): a web page goes straight to the system browser, the rest to the
++ *  pane. Never call this from an agent event. */
++export function openPreviewFromClick(target: PreviewTarget) {
++  if (target.kind === 'url' && isWebPageUrl(target.url)) {
++    void window.hermesDesktop?.openExternal?.(target.url)
++
++    return
++  }
++
++  openPreview(target)
++}
++
+ /** Open (or re-front) the tab for `target`. Re-opening an existing tab refreshes
+  *  its target so a stale label/path can't outlive the thing it points at. The
+  *  only way anything reaches a preview.
+@@ -928,6 +964,16 @@ export function openPreview(
+    *  profile's pins may be reused. Omitted = the viewed profile. */
+   profile?: null | string
+ ) {
++  // Nix: a web page never opens inside the app, and never reaches the system
++  // browser without a click. What gets here with a web URL did not come from
++  // a click (the agent's `preview.open`; clicks use openPreviewFromClick), so
++  // it is only offered: a quiet toast whose button opens it.
++  if (target.kind === 'url' && isWebPageUrl(target.url)) {
++    offerWebPage(target.url)
++
++    return
++  }
++
+   // Stamp the tip, not an alias: the alias map is memory-only, so a tab
+   // stamped with a rotated-away id would be orphaned by the next relaunch.
+   const owner = currentSessionId(requestedOwner)

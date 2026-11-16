@@ -12,6 +12,11 @@
 #     (./patches/desktop-session-deeplink.patch);
 #   - picking a never-signed-in OAuth gateway runs the interactive sign-in
 #     (./patches/desktop-oauth-first-login.patch);
+#   - every link opens in the system browser, never the in-app Browser pane,
+#     and only on the user's click: the agent's preview.open and its
+#     drive_preview clicks only offer the link, a page's own redirect (or
+#     mailto:/custom scheme) is blocked
+#     (./patches/desktop-links-external.patch);
 #   - the wrapper symlinks the renderer instead of copying it (below);
 #   - no extraEnv/extraRun: nothing here sets them.
 #
@@ -102,6 +107,7 @@ let
       ./patches/desktop-model-row-full-name.patch
       ./patches/desktop-session-deeplink.patch
       ./patches/desktop-oauth-first-login.patch
+      ./patches/desktop-links-external.patch
     ];
 
     buildPhase = ''
@@ -150,7 +156,12 @@ let
         # ./patches/desktop-oauth-first-login.patch's behaviour, with
         # upstream's own vitest setup.
         node ../../node_modules/vitest/vitest.mjs run --project ui \
-          src/store/connections-oauth-first-login.test.ts
+          src/store/connections-oauth-first-login.test.ts \
+          src/store/preview-links-external.test.ts
+        # ./patches/desktop-links-external.patch's guest-click rule. Setting
+        # HERMES_PYTHON skips the project's interpreter lookup (unused here).
+        HERMES_PYTHON=false node ../../node_modules/vitest/vitest.mjs run --project electron \
+          electron/preview-guest-links-external.test.ts
 
         # validate staged node-pty native binary is present.
         STAGED_PTY_NODE="./dist/node_modules/node-pty/build/Release/pty.node"

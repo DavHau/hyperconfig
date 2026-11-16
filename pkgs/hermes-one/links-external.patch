@@ -1,0 +1,300 @@
+Every link opens in the system browser, and only on the user's click (Nix, on
+top of nix-remote-only.patch).
+
+Upstream v0.7.8 routes http(s) link clicks in chat markdown to a split-screen
+"Web Preview" pane (a <webview>, `web-preview:navigate` event -> Chat.tsx),
+and opens that pane by itself whenever a browser/web tool event carries a URL
+(useChatIPC.ts). This patch:
+  - markdown links: always window.hermesAPI.openExternal (main's audited
+    openExternalUrl -> shell.openExternal), from the user's click;
+  - the tool-event auto-open is gone, and nothing listens for
+    `web-preview:navigate` any more (an event is not a click);
+  - the pane, its globe toggle button and the inspect hook are removed from
+    Chat, and the main window gets webviewTag: false (nothing else in the
+    app mounts a <webview>; Office uses an in-renderer 3D view).
+Tested by src/renderer/src/components/AgentMarkdown.links-external.test.tsx.
+
+diff --git a/src/main/app/start.ts b/src/main/app/start.ts
+index 47a415d..ee63f3b 100644
+--- a/src/main/app/start.ts
++++ b/src/main/app/start.ts
+@@ -201,7 +201,8 @@ function createWindow(): void {
+       sandbox: true,
+       webSecurity: true,
+       allowRunningInsecureContent: false,
+-      webviewTag: true,
++      // Nix: no in-app web preview; links open in the system browser.
++      webviewTag: false,
+     },
+   });
+ 
+diff --git a/src/renderer/src/components/AgentMarkdown.links-external.test.tsx b/src/renderer/src/components/AgentMarkdown.links-external.test.tsx
+new file mode 100644
+index 0000000..e178cb2
+--- /dev/null
++++ b/src/renderer/src/components/AgentMarkdown.links-external.test.tsx
+@@ -0,0 +1,65 @@
++// Nix: every link opens in the system browser, never in an in-app pane.
++// @ts-expect-error Node built-ins are available to Vitest, but not in the
++// renderer's type environment (as in AppearancePane.test.tsx).
++import { readFileSync } from "node:fs";
++// @ts-expect-error See above.
++import { join } from "node:path";
++import { fireEvent, render } from "@testing-library/react";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { AgentMarkdown } from "./AgentMarkdown";
++
++vi.mock("./useI18n", () => ({
++  useI18n: () => ({ t: (key: string) => key }),
++}));
++
++vi.mock("./MediaImage", () => ({
++  MediaImage: () => null,
++  DownloadChip: () => null,
++}));
++
++afterEach(() => {
++  Reflect.deleteProperty(window, "hermesAPI");
++});
++
++declare const __dirname: string;
++const root = join(__dirname, "../../../..");
++
++describe("links open externally", () => {
++  it.each(["https://example.org/a?b=1", "http://example.org/", "mailto:x@example.org"])(
++    "a markdown link to %s goes to openExternal, not the web preview",
++    (href: string) => {
++      const openExternal = vi.fn().mockResolvedValue(undefined);
++      Object.defineProperty(window, "hermesAPI", {
++        configurable: true,
++        value: { openExternal },
++      });
++      const preview = vi.fn();
++      document.addEventListener("web-preview:navigate", preview);
++      const { getByText } = render(
++        <AgentMarkdown>{`[the link](${href})`}</AgentMarkdown>,
++      );
++      fireEvent.click(getByText("the link"));
++      document.removeEventListener("web-preview:navigate", preview);
++      expect(openExternal).toHaveBeenCalledWith(href);
++      expect(preview).not.toHaveBeenCalled();
++    },
++  );
++
++  it("the main window has no <webview> and nothing auto-opens a preview", () => {
++    const start = readFileSync(join(root, "src/main/app/start.ts"), "utf8");
++    expect(start).toContain("webviewTag: false");
++    expect(start).not.toContain("webviewTag: true");
++    const ipc = readFileSync(
++      join(root, "src/renderer/src/screens/Chat/hooks/useChatIPC.ts"),
++      "utf8",
++    );
++    expect(ipc).not.toContain("web-preview:navigate");
++    const chat = readFileSync(
++      join(root, "src/renderer/src/screens/Chat/Chat.tsx"),
++      "utf8",
++    );
++    expect(chat).not.toContain("<WebPreviewPanel");
++    // Only a click opens the system browser: no event listener does it.
++    expect(chat).not.toContain("web-preview:navigate");
++  });
++});
+diff --git a/src/renderer/src/components/AgentMarkdown.tsx b/src/renderer/src/components/AgentMarkdown.tsx
+index 28ddc04..5c32a87 100644
+--- a/src/renderer/src/components/AgentMarkdown.tsx
++++ b/src/renderer/src/components/AgentMarkdown.tsx
+@@ -307,13 +307,6 @@ const AgentMarkdown = memo(function AgentMarkdown({
+                   if (!["http:", "https:", "mailto:"].includes(url.protocol)) {
+                     return;
+                   }
+-                  if (url.protocol === "http:" || url.protocol === "https:") {
+-                    const event = new CustomEvent("web-preview:navigate", {
+-                      detail: href,
+-                    });
+-                    document.dispatchEvent(event);
+-                    return;
+-                  }
+                 } catch {
+                   return;
+                 }
+diff --git a/src/renderer/src/screens/Chat/Chat.tsx b/src/renderer/src/screens/Chat/Chat.tsx
+index 28af8d2..e8cc2e4 100644
+--- a/src/renderer/src/screens/Chat/Chat.tsx
++++ b/src/renderer/src/screens/Chat/Chat.tsx
+@@ -1,6 +1,6 @@
+ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+ import toast from "react-hot-toast";
+-import { Zap, Globe } from "lucide-react";
++import { Zap } from "lucide-react";
+ import { ChatInput, type ChatInputHandle } from "./ChatInput";
+ import { ChatEmptyState } from "./ChatEmptyState";
+ import { MessageList } from "./MessageList";
+@@ -9,7 +9,6 @@ import { ReasoningEffortPicker } from "./ReasoningEffortPicker";
+ import { ContextFolderChip } from "./ContextFolderChip";
+ import { WorktreePanel } from "./WorktreePanel";
+ import { RemoteFolderPicker } from "./RemoteFolderPicker";
+-import { WebPreviewPanel } from "./WebPreviewPanel";
+ import { useChatScroll } from "./hooks/useChatScroll";
+ import { useTranscriptState } from "./hooks/useTranscriptState";
+ import { useChatIPC } from "./hooks/useChatIPC";
+@@ -280,9 +279,6 @@ function Chat({
+   // Default false so the panel doesn't open automatically and interfere with scrolling
+   const [worktreeVisible, setWorktreeVisible] = useState<boolean>(false);
+   const [folderPickerOpen, setFolderPickerOpen] = useState<boolean>(false);
+-  const [webPreviewVisible, setWebPreviewVisible] = useState<boolean>(false);
+-  const [webPreviewUrl, setWebPreviewUrl] =
+-    useState<string>("https://google.com");
+   // Explicit session-scoped model override — set only when the user picks
+   // from the chat-screen picker (persist:false). Undefined until then so the
+   // TUI gateway bypass in sendMessageViaBestApi is not triggered for normal
+@@ -656,22 +652,9 @@ function Chat({
+     return () => window.removeEventListener("keydown", onKey);
+   }, [active, onNewChat]);
+ 
+-  // Listen for in-app link clicks to load in the split-screen Web Preview panel
+-  useEffect(() => {
+-    if (!active) return;
+-    const handleNavigate = (e: Event): void => {
+-      const customEvent = e as CustomEvent<string>;
+-      const url = customEvent.detail;
+-      if (url) {
+-        setWebPreviewUrl(url);
+-        setWebPreviewVisible(true);
+-      }
+-    };
+-    document.addEventListener("web-preview:navigate", handleNavigate);
+-    return () => {
+-      document.removeEventListener("web-preview:navigate", handleNavigate);
+-    };
+-  }, [active]);
++  // Nix: no in-app web preview, and no event listener that opens the system
++  // browser in its place: an event is not a user's click (links call
++  // openExternal themselves, AgentMarkdown.tsx).
+ 
+   // "Copy entire chat" context-menu items (issue #298) — serialise the whole
+   // conversation in the requested format and copy it. The transcript ref keeps
+@@ -1321,15 +1304,6 @@ function Chat({
+     usageCacheWrite,
+   ]);
+ 
+-  const handleInspectElement = useCallback(
+-    (payload: { selector: string; comment: string }) => {
+-      chatInputRef.current?.appendText(
+-        `Element: \`${payload.selector}\`\nComment: ${payload.comment}`,
+-      );
+-    },
+-    [],
+-  );
+-
+   return (
+     <div
+       className="chat-container"
+@@ -1380,13 +1354,6 @@ function Chat({
+           <WorktreePanel folderPath={contextFolder} />
+         )}
+ 
+-        {webPreviewVisible && (
+-          <WebPreviewPanel
+-            initialUrl={webPreviewUrl}
+-            onClose={() => setWebPreviewVisible(false)}
+-            onInspectElement={handleInspectElement}
+-          />
+-        )}
+       </div>
+ 
+       <div className="chat-input-area">
+@@ -1463,31 +1430,6 @@ function Chat({
+                 onToggleWorktree={handleToggleWorktree}
+                 onSelectRecentFolder={handleSelectRecentFolder}
+               />
+-              <button
+-                type="button"
+-                className={`btn-ghost chat-tool-btn ${webPreviewVisible ? "chat-tool-btn-active" : ""}`}
+-                onClick={() => setWebPreviewVisible((v) => !v)}
+-                title={
+-                  webPreviewVisible ? "Hide web preview" : "Show web preview"
+-                }
+-                style={{
+-                  display: "inline-flex",
+-                  alignItems: "center",
+-                  justifyContent: "center",
+-                  width: 28,
+-                  height: 28,
+-                  padding: 0,
+-                  borderRadius: 6,
+-                  color: webPreviewVisible
+-                    ? "var(--accent-text)"
+-                    : "var(--text-secondary)",
+-                  background: webPreviewVisible
+-                    ? "color-mix(in srgb, var(--accent-text) 10%, transparent)"
+-                    : "transparent",
+-                }}
+-              >
+-                <Globe size={14} />
+-              </button>
+             </>
+           }
+         />
+diff --git a/src/renderer/src/screens/Chat/hooks/useChatIPC.ts b/src/renderer/src/screens/Chat/hooks/useChatIPC.ts
+index 7d716f5..a055783 100644
+--- a/src/renderer/src/screens/Chat/hooks/useChatIPC.ts
++++ b/src/renderer/src/screens/Chat/hooks/useChatIPC.ts
+@@ -356,29 +356,6 @@ export function useChatIPC({
+         setMessages((prev) =>
+           upsertLiveToolEvent(prev, liveToolEventFromProgress(tool)),
+         );
+-
+-        // Also check progress text for URLs, but only if it's a web tool
+-        const toolEventName =
+-          liveToolEventFromProgress(tool).name.toLowerCase();
+-        const isWebTool = [
+-          "browser",
+-          "web",
+-          "browse",
+-          "web_search",
+-          "search_web",
+-          "computer_use",
+-          "computer",
+-        ].includes(toolEventName);
+-
+-        if (isWebTool) {
+-          const urlMatch = tool.match(/https?:\/\/[^\s)]+/i);
+-          if (urlMatch) {
+-            const event = new CustomEvent("web-preview:navigate", {
+-              detail: urlMatch[0],
+-            });
+-            document.dispatchEvent(event);
+-          }
+-        }
+       },
+     );
+ 
+@@ -389,28 +366,6 @@ export function useChatIPC({
+         setToolProgress(null);
+         reasoningSegmentClosedRef.current = true;
+         setMessages((prev) => upsertLiveToolEvent(prev, toolEvent));
+-
+-        // Auto-open webview if the agent is using a browser/web tool to navigate
+-        const isWebTool = [
+-          "browser",
+-          "web",
+-          "browse",
+-          "web_search",
+-          "search_web",
+-          "computer_use",
+-          "computer",
+-        ].includes(toolEvent.name.toLowerCase());
+-        if (isWebTool) {
+-          const textToSearch = `${toolEvent.preview || ""} ${toolEvent.result || ""}`;
+-          const urlMatch = textToSearch.match(/https?:\/\/[^\s)]+/i);
+-          if (urlMatch) {
+-            const url = urlMatch[0];
+-            const event = new CustomEvent("web-preview:navigate", {
+-              detail: url,
+-            });
+-            document.dispatchEvent(event);
+-          }
+-        }
+       },
+     );
+ 

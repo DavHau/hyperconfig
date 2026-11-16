@@ -17,6 +17,9 @@
 #     ~/.hermes) and the Hermes Office setup (git clone + npm install)
 #     refuse to run;
 #   - no project `.env` is read from the working directory.
+# ./links-external.patch: every link opens in the system browser, only on
+#   the user's click; the in-app "Web Preview" pane (a <webview>) and its
+#   automatic opening on web tool events are gone.
 # What stays off without a patch: analytics (needs build-time
 # VITE_ANALYTICS_* secrets, unset here), the Hermes One account (device
 # login, only on a click; the wrappers point HERMES_API_URL at
@@ -57,6 +60,7 @@ buildNpmPackage rec {
   patches = [
     ./nix-remote-only.patch
     ./remote-models-all-configured.patch
+    ./links-external.patch
   ];
 
   # ./remote-models-all-configured.patch's behaviour (and upstream's cases
@@ -106,7 +110,8 @@ buildNpmPackage rec {
     runHook preCheck
     # The patch's behaviour, plus upstream's own OAuth boundary tests.
     node node_modules/vitest/vitest.mjs run \
-      tests/remote-oauth-native.test.ts tests/remote-oauth.test.ts
+      tests/remote-oauth-native.test.ts tests/remote-oauth.test.ts \
+      src/renderer/src/components/AgentMarkdown.links-external.test.tsx
     runHook postCheck
   '';
 
