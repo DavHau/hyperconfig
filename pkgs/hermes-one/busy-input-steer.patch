@@ -1,0 +1,1524 @@
+Busy input steers the running turn (Nix, on top of compact-activity.patch).
+
+Hermes One v0.7.8 held every message sent while the agent works in a
+renderer-only queue (QueuedMessages above the composer) and submitted it
+only after the turn's message.complete, as a new turn. The agent never saw
+it during the turn, whatever its `display.busy_input_mode`; on a long turn
+it sat there with a spinner for as long as the turn ran.
+
+Now, like the official Hermes Desktop (use-busy-input-mode +
+use-prompt-actions): a text message sent while a dashboard turn of this chat
+is running reads the agent's policy (`config.get {key: "busy"}`) and
+delivers it right away, `steer` -> `session.steer` (joins the turn after the
+current tool step), `interrupt` -> `session.redirect`. Accepted: it appears
+as a user message in the transcript, labelled "sent while working", and
+nothing is queued. Only a refusal (mode `queue`, the turn ended meanwhile,
+an approval/sudo or clarify prompt pending, as the official
+busy-submit-state `canSteer`, attachments, a message already queued ahead,
+no dashboard) keeps it in the local queue. A dropped socket is reattached
+(session.resume) before steering. The drain now also runs when a message is
+queued after the turn already ended (refused steer, slash `enqueuePrompt`),
+so a queued message cannot be stranded. Busy sends are routed one at a time
+in send order, so two quick sends across a turn end keep their order. A
+refused steer whose chat was cleared or switched profile/connection
+meanwhile is not queued into the other conversation: the submit fails, so
+the words stay in the composer (or an error says it was not sent).
+
+History: hermes stores a steer as a role=user row, display_kind "steer",
+whose content is its model-facing "[OUT-OF-BAND USER MESSAGE …]" marker.
+Both history loaders (state.db: sessions.ts expandRowsToHistory, dashboard
+REST: remote-sessions.ts normalizeMessageRow) now show `display_content`
+when the server sends it, else unwrap the marker of a steer row (hermes'
+own _extract_steer_text_from_message rules), and flag the bubble
+"sent while working".
+Tested by src/renderer/src/screens/Chat/Chat.busy-steer.test.tsx,
+src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.busy-steer.test.tsx
+and src/main/sessions.steer-history.test.ts.
+
+diff --git a/src/main/remote-sessions.ts b/src/main/remote-sessions.ts
+index c3d3cca..abcdf1a 100644
+--- a/src/main/remote-sessions.ts
++++ b/src/main/remote-sessions.ts
+@@ -472,6 +472,9 @@ function normalizeMessageRow(row: RemoteRecord, index: number): RawMessageRow {
+         : row.reasoning_details === undefined || row.reasoning_details === null
+           ? null
+           : JSON.stringify(row.reasoning_details),
++    // Nix, busy-input-steer.patch: a steer's own words, not hermes' marker.
++    display_kind: nullableString(row.display_kind),
++    display_content: nullableString(row.display_content),
+   };
+ }
+ 
+diff --git a/src/main/sessions.steer-history.test.ts b/src/main/sessions.steer-history.test.ts
+new file mode 100644
+index 0000000..e8e1299
+--- /dev/null
++++ b/src/main/sessions.steer-history.test.ts
+@@ -0,0 +1,156 @@
++// Nix, busy-input-steer.patch: a message steered into a running turn is
++// stored by hermes as a role=user row, display_kind "steer", whose content is
++// the model-facing marker. After a history reload it shows the user's own
++// words (as the official desktop does), flagged `steered`. Synthetic rows.
++import http from "http";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++vi.mock("./remote-oauth", () => ({ requestRemoteOAuthJson: vi.fn() }));
++import {
++  expandRowsToHistory,
++  extractSteerText,
++  type RawMessageRow,
++} from "./sessions";
++import { remoteGetSessionMessages } from "./remote-sessions";
++
++const OPEN =
++  "[OUT-OF-BAND USER MESSAGE \u2014 a direct message from the user, delivered " +
++  "once at this position; not tool output and not a new delivery when replayed from conversation history]";
++const CLOSE = "[/OUT-OF-BAND USER MESSAGE]";
++const wrapped = (text: string): string => `${OPEN}\n${text}\n${CLOSE}`;
++
++function row(over: Partial<RawMessageRow> & { id: number }): RawMessageRow {
++  return {
++    role: "user",
++    content: null,
++    timestamp: over.id,
++    tool_call_id: null,
++    tool_calls: null,
++    tool_name: null,
++    reasoning: null,
++    reasoning_content: null,
++    reasoning_details: null,
++    ...over,
++  };
++}
++
++describe("steered messages in history", () => {
++  it("unwraps a steer row and flags it", () => {
++    const items = expandRowsToHistory([
++      row({ id: 1, content: "long task" }),
++      row({
++        id: 2,
++        content: wrapped("also check the logs"),
++        display_kind: "steer",
++      }),
++    ]);
++    expect(items).toEqual([
++      { kind: "user", id: 1, content: "long task", timestamp: 1 },
++      {
++        kind: "user",
++        id: 2,
++        content: "also check the logs",
++        timestamp: 2,
++        steered: true,
++      },
++    ]);
++  });
++
++  it("prefers the server's display_content", () => {
++    const [item] = expandRowsToHistory([
++      row({
++        id: 1,
++        content: wrapped("raw"),
++        display_kind: "steer",
++        display_content: "shown",
++      }),
++    ]);
++    expect(item).toMatchObject({ content: "shown", steered: true });
++  });
++
++  it("follows hermes' fallback for a reworded opening line", () => {
++    expect(
++      extractSteerText(
++        "[OUT-OF-BAND USER MESSAGE \u2014 reworded]\nhi there\n" + CLOSE,
++      ),
++    ).toBe("hi there");
++    expect(extractSteerText("no marker")).toBeNull();
++    expect(extractSteerText(`${OPEN}\nunterminated`)).toBeNull();
++  });
++
++  it("leaves a user row that is not a steer alone, marker text included", () => {
++    const quoted = wrapped("quoted by the user");
++    const [item] = expandRowsToHistory([row({ id: 1, content: quoted })]);
++    expect(item).toEqual({
++      kind: "user",
++      id: 1,
++      content: quoted,
++      timestamp: 1,
++    });
++  });
++
++  it("keeps the marker when a steer row cannot be unwrapped", () => {
++    const [item] = expandRowsToHistory([
++      row({ id: 1, content: "odd", display_kind: "steer" }),
++    ]);
++    expect(item).toMatchObject({ content: "odd", steered: true });
++  });
++});
++
++describe("remote history (dashboard REST rows)", () => {
++  let server: http.Server;
++  let baseUrl = "";
++  let messages: unknown[] = [];
++
++  beforeEach(async () => {
++    server = http.createServer((_req, res) => {
++      res.setHeader("Content-Type", "application/json");
++      res.end(JSON.stringify({ session_id: "s", messages }));
++    });
++    await new Promise<void>((resolve) =>
++      server.listen(0, "127.0.0.1", resolve),
++    );
++    const address = server.address();
++    baseUrl = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`;
++  });
++  afterEach(async () => {
++    await new Promise<void>((resolve) => server.close(() => resolve()));
++  });
++
++  it("uses display_content, or unwraps display_kind steer", async () => {
++    messages = [
++      { id: 1, role: "user", content: "long task", timestamp: 1 },
++      {
++        id: 2,
++        role: "user",
++        content: wrapped("first steer"),
++        display_kind: "steer",
++        display_content: "first steer",
++        timestamp: 2,
++      },
++      // An older dashboard without the display_content projection.
++      {
++        id: 3,
++        role: "user",
++        content: wrapped("second steer"),
++        display_kind: "steer",
++        timestamp: 3,
++      },
++    ];
++    const items = await remoteGetSessionMessages(
++      { remoteUrl: `${baseUrl}/api`, apiKey: "synthetic" },
++      "s",
++    );
++    expect(
++      items.map((i) => [
++        i.kind,
++        "content" in i ? i.content : null,
++        "steered" in i ? i.steered : undefined,
++      ]),
++    ).toEqual([
++      ["user", "long task", undefined],
++      ["user", "first steer", true],
++      ["user", "second steer", true],
++    ]);
++  });
++});
+diff --git a/src/main/sessions.ts b/src/main/sessions.ts
+index d619f87..040bff4 100644
+--- a/src/main/sessions.ts
++++ b/src/main/sessions.ts
+@@ -64,6 +64,9 @@ export type HistoryItem =
+       content: string;
+       timestamp: number;
+       attachments?: Attachment[];
++      /** Sent while the agent worked and delivered into the running turn
++       *  (hermes `display_kind: "steer"`; Nix, busy-input-steer.patch). */
++      steered?: true;
+     }
+   | {
+       kind: "assistant";
+@@ -570,6 +573,50 @@ export interface RawMessageRow {
+   reasoning: string | null;
+   reasoning_content: string | null;
+   reasoning_details: string | null;
++  /** hermes' display typing (newer state.db schema / dashboard REST rows);
++   *  absent on older agents. Nix, busy-input-steer.patch. */
++  display_kind?: string | null;
++  /** What the transcript shows instead of `content` (dashboard REST only;
++   *  set for steers and vetoed prompts). */
++  display_content?: string | null;
++}
++
++// Nix, busy-input-steer.patch: hermes stores a mid-turn steer as a role=user
++// row with display_kind "steer" whose content is the model-facing marker
++// (agent/prompt_builder.py STEER_MARKER_OPEN/CLOSE). The official desktop
++// shows the user's own words (hermes_cli/web_routers/sessions.py
++// `display_content`, tui_gateway/session_history.py); so do we. Same
++// extraction as agent/conversation_compression.py
++// _extract_steer_text_from_message, including its fallback for a reworded
++// opening line.
++const STEER_MARKER_OPEN =
++  "[OUT-OF-BAND USER MESSAGE \u2014 a direct message from the user, delivered " +
++  "once at this position; not tool output and not a new delivery when replayed from conversation history]";
++const STEER_FALLBACK_OPEN = "[OUT-OF-BAND USER MESSAGE";
++const STEER_MARKER_CLOSE = "[/OUT-OF-BAND USER MESSAGE]";
++
++export function extractSteerText(text: string): string | null {
++  let start = text.indexOf(STEER_MARKER_OPEN);
++  if (start === -1) {
++    start = text.indexOf(STEER_FALLBACK_OPEN);
++    if (start === -1) return null;
++    const nl = text.indexOf("\n", start);
++    start = nl !== -1 ? nl + 1 : start + STEER_FALLBACK_OPEN.length;
++  } else {
++    start += STEER_MARKER_OPEN.length;
++  }
++  const end = text.indexOf(STEER_MARKER_CLOSE, start);
++  if (end === -1) return null;
++  return text.slice(start, end).trim() || null;
++}
++
++/** The text a user row shows: `display_content` when the server sent one,
++ *  else a steer's own words unwrapped from the marker, else `text`. */
++function userDisplayText(r: RawMessageRow, text: string): string {
++  if (typeof r.display_content === "string" && r.display_content.trim())
++    return r.display_content;
++  if (r.display_kind === "steer") return extractSteerText(text) ?? text;
++  return text;
+ }
+ 
+ /**
+@@ -583,15 +630,17 @@ export function expandRowsToHistory(rows: RawMessageRow[]): HistoryItem[] {
+     const decoded = decodeContent(r.content || "", r.id);
+ 
+     if (r.role === "user") {
+-      if (!decoded.text && decoded.attachments.length === 0) continue;
++      const text = userDisplayText(r, decoded.text);
++      if (!text && decoded.attachments.length === 0) continue;
+       items.push({
+         kind: "user",
+         id: r.id,
+-        content: decoded.text,
++        content: text,
+         timestamp: r.timestamp,
+         ...(decoded.attachments.length > 0
+           ? { attachments: decoded.attachments }
+           : {}),
++        ...(r.display_kind === "steer" ? { steered: true as const } : {}),
+       });
+       continue;
+     }
+@@ -699,11 +748,15 @@ export function getSessionMessages(
+   const db = getDb(true, profile);
+   if (!db) return [];
+ 
++  // display_kind only exists in newer agents' schema (steer rows).
++  const displayKind = hasMessagesColumn(db, "display_kind")
++    ? ", display_kind"
++    : "";
+   const rows = db
+     .prepare(
+       `SELECT id, role, content, timestamp,
+               tool_call_id, tool_calls, tool_name,
+-              reasoning, reasoning_content, reasoning_details
++              reasoning, reasoning_content, reasoning_details${displayKind}
+        FROM messages
+        WHERE session_id = ? AND role IN ('user', 'assistant', 'tool')
+        ORDER BY timestamp, id`,
+@@ -755,6 +808,18 @@ function normalizeSessionIds(sessionIds: string[]): string[] {
+   return normalized;
+ }
+ 
++function hasMessagesColumn(db: Database.Database, column: string): boolean {
++  try {
++    return (
++      db
++        .prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name = ?")
++        .get(column) != null
++    );
++  } catch {
++    return false;
++  }
++}
++
+ // sessions has a self-referential FK parent_session_id -> sessions.id (set by
+ // the agent for subagent runs / branches). Each profile can have a different schema.
+ function hasParentSessionColumn(db: Database.Database): boolean {
+diff --git a/src/preload/index.d.ts b/src/preload/index.d.ts
+index 8e175d9..40e1b64 100644
+--- a/src/preload/index.d.ts
++++ b/src/preload/index.d.ts
+@@ -732,6 +732,7 @@ interface HermesAPI {
+           content: string;
+           timestamp: number;
+           attachments?: Attachment[];
++          steered?: true;
+         }
+       | {
+           kind: "assistant";
+diff --git a/src/renderer/src/assets/main.css b/src/renderer/src/assets/main.css
+index 8e0b872..1cbdaa2 100644
+--- a/src/renderer/src/assets/main.css
++++ b/src/renderer/src/assets/main.css
+@@ -18186,3 +18186,12 @@ body:has(.shell-vibrant),
+   padding-left: 8px;
+   border-left: 1px solid var(--border, rgba(127, 127, 127, 0.12));
+ }
++
++/* Nix, busy-input-steer.patch: a user message delivered into the running
++   turn ("sent while working"). */
++.chat-bubble-steered {
++  margin-top: 4px;
++  font-size: 11px;
++  line-height: 1.2;
++  opacity: 0.7;
++}
+diff --git a/src/renderer/src/screens/Chat/Chat.busy-steer.test.tsx b/src/renderer/src/screens/Chat/Chat.busy-steer.test.tsx
+new file mode 100644
+index 0000000..137ceed
+--- /dev/null
++++ b/src/renderer/src/screens/Chat/Chat.busy-steer.test.tsx
+@@ -0,0 +1,505 @@
++import {
++  act,
++  fireEvent,
++  render,
++  screen,
++  waitFor,
++} from "@testing-library/react";
++import { beforeEach, expect, it, vi } from "vitest";
++// Nix, busy-input-steer.patch: the composer delivers a message typed while
++// the agent works into the running turn (session.steer under the agent's
++// busy_input_mode `steer`), like the official Hermes Desktop; the local queue
++// is only the fallback, and it drains when the turn ends. Fixture: a copy of
++// Chat.connection-config.test.tsx's.
++type PublicConnectionConfig = Awaited<
++  ReturnType<typeof window.hermesAPI.getConnectionConfig>
++>;
++
++vi.mock("../../components/useI18n", () => {
++  const t = (key: string): string => key;
++  return { useI18n: () => ({ t }) };
++});
++const gateway = vi.hoisted(() => ({
++  clients: [] as Array<{
++    onEvent?: (event: unknown) => void;
++    closed: boolean;
++    rejectPending?: () => void;
++    request: (
++      method: string,
++      params?: Record<string, unknown>,
++    ) => Promise<unknown>;
++  }>,
++  request: vi.fn(),
++}));
++vi.mock("./dashboardGatewayClient", () => ({
++  DashboardGatewayClient: class {
++    activateServerRequests = vi.fn();
++    connected = true;
++    owner: {
++      onEvent?: (event: unknown) => void;
++      closed: boolean;
++      rejectPending?: () => void;
++      request: (
++        method: string,
++        params?: Record<string, unknown>,
++      ) => Promise<unknown>;
++    };
++    constructor(options: { onEvent?: (event: unknown) => void }) {
++      this.owner = {
++        ...options,
++        closed: false,
++        request: (method, params) => this.request(method, params),
++      };
++      gateway.clients.push(this.owner);
++    }
++    async connect(): Promise<void> {
++      // The real DashboardGatewayClient begins connect() by closing its old
++      // socket before opening the new one; admission must survive that cleanup.
++      this.close();
++      this.owner.closed = false;
++    }
++    close(): void {
++      this.owner.closed = true;
++      // The real client rejects each pending RPC when its socket is closed.
++      this.owner.rejectPending?.();
++    }
++    request = gateway.request;
++  },
++}));
++import Chat from "./Chat";
++
++let nextFixture = 0;
++async function fixture(transport: "dashboard" | "auto" = "dashboard"): Promise<{
++  api: Record<string, ReturnType<typeof vi.fn>>;
++  emit: (changes?: Partial<PublicConnectionConfig>) => void;
++  rotateKey: (notificationId?: string) => void;
++  beginAuthChange: (notificationId?: string) => void;
++  finishAuthChange: (notificationId?: string) => void;
++  target: () => { connectionId: string; revision: string };
++}> {
++  const authority = await import(
++    "../../../../main/" + "provider-request-target"
++  );
++  let connection = {
++    mode: "remote" as const,
++    remoteUrl: `https://chat-config-${++nextFixture}.test`,
++    apiKey: "aaaaaaaa",
++    remoteAuthMode: "token" as const,
++    remoteChatTransport: transport,
++    sshChatTransport: "auto" as const,
++    ssh: {
++      host: "",
++      port: 22,
++      username: "",
++      keyPath: "",
++      remotePort: 8642,
++      localPort: 8642,
++    },
++  };
++  let name = "Initial label";
++  const publicConfig = (): PublicConnectionConfig => ({
++    connectionId: "a",
++    name,
++    mode: connection.mode,
++    remoteUrl: connection.remoteUrl,
++    remoteAuthMode: connection.remoteAuthMode,
++    remoteChatTransport: connection.remoteChatTransport,
++    sshChatTransport: connection.sshChatTransport,
++    hasApiKey: true,
++    apiKeyLength: connection.apiKey.length,
++    ssh: connection.ssh,
++  });
++  const target = (): { connectionId: string; revision: string } => ({
++    connectionId: "a",
++    revision: authority.providerTargetRevision(connection),
++  });
++  const listeners = new Set<(config: PublicConnectionConfig) => void>();
++  const emit = (changes: Partial<PublicConnectionConfig> = {}): void => {
++    if (!changes.connectionId || changes.connectionId === "a") {
++      if (changes.name) name = changes.name;
++      if (changes.remoteUrl)
++        connection = { ...connection, remoteUrl: changes.remoteUrl };
++    }
++    listeners.forEach((callback) =>
++      callback({ ...publicConfig(), ...changes }),
++    );
++  };
++  const api: Record<string, ReturnType<typeof vi.fn>> = {
++    sendMessage: vi.fn().mockResolvedValue(null),
++    recordSessionContinuation: vi.fn().mockResolvedValue(null),
++    getProviderRequestTarget: vi.fn(async () => target()),
++    getConnectionConfig: vi.fn(async () => publicConfig()),
++    onConnectionConfigChanged: vi.fn(
++      (callback: (config: PublicConnectionConfig) => void) => {
++        listeners.add(callback);
++        return () => listeners.delete(callback);
++      },
++    ),
++    probeRemoteAuthMode: vi.fn().mockResolvedValue({ authMode: "token" }),
++    getModelConfig: vi
++      .fn()
++      .mockResolvedValue({ model: "gpt-x", provider: "openai" }),
++    listModels: vi.fn().mockResolvedValue([]),
++    discoverModels: vi.fn().mockResolvedValue({ models: [], status: "ok" }),
++    getConfig: vi.fn().mockResolvedValue(null),
++    getConfigHealth: vi.fn().mockResolvedValue(null),
++    getSessionUsage: vi.fn().mockResolvedValue(null),
++    getSessionContextFolder: vi.fn().mockResolvedValue(null),
++    getSessionModelOverride: vi.fn().mockResolvedValue(null),
++    getModelContextWindow: vi.fn().mockResolvedValue(200000),
++    validateChatReadiness: vi.fn().mockResolvedValue({ ok: true, issues: [] }),
++    checkChatReadiness: vi.fn().mockResolvedValue({ ok: true, issues: [] }),
++    startDashboard: vi.fn().mockResolvedValue({
++      running: true,
++      connection: { wsUrl: "ws://fixture" },
++    }),
++    freshDashboardWsUrl: vi.fn().mockResolvedValue("ws://fixture"),
++  };
++  Object.defineProperty(window, "hermesAPI", {
++    configurable: true,
++    value: new Proxy(api, {
++      get(record, key: string) {
++        record[key] ||= key.startsWith("on")
++          ? vi.fn().mockReturnValue(() => {})
++          : vi.fn().mockResolvedValue(null);
++        return record[key];
++      },
++    }),
++  });
++  gateway.request.mockImplementation(async (method: string) => {
++    if (method === "session.resume")
++      return {
++        session_id: "runtime-saved",
++        resumed: "saved",
++        info: { usage: { input: 1000, output: 200, total: 1200 } },
++      };
++    if (method === "model.options")
++      return { model: "gpt-x", provider: "openai", providers: [] };
++    return { status: "ok" };
++  });
++  return {
++    api,
++    emit,
++    rotateKey: (notificationId = "a") => {
++      connection = { ...connection, apiKey: "bbbbbbbb" };
++      emit({ connectionId: notificationId });
++    },
++    beginAuthChange: (notificationId = "a") => {
++      authority.beginProviderAuthChange(connection.remoteUrl);
++      emit({ connectionId: notificationId });
++    },
++    finishAuthChange: (notificationId = "a") => {
++      authority.finishProviderAuthChange(connection.remoteUrl);
++      emit({ connectionId: notificationId });
++    },
++    target,
++  };
++}
++beforeEach(() => {
++  localStorage.clear();
++  localStorage.setItem("hermes-follow-x-dismissed", "true");
++  gateway.clients.length = 0;
++  gateway.request.mockReset();
++  vi.stubGlobal(
++    "ResizeObserver",
++    class {
++      observe(): void {
++        /* No native layout observer in JSDOM. */
++      }
++      disconnect(): void {
++        /* No native layout observer in JSDOM. */
++      }
++      unobserve(): void {
++        /* No native layout observer in JSDOM. */
++      }
++    },
++  );
++  vi.stubGlobal(
++    "IntersectionObserver",
++    class {
++      observe(): void {
++        /* No native layout observer in JSDOM. */
++      }
++      disconnect(): void {
++        /* No native layout observer in JSDOM. */
++      }
++      unobserve(): void {
++        /* No native layout observer in JSDOM. */
++      }
++    },
++  );
++  Element.prototype.scrollIntoView = vi.fn();
++  Object.defineProperty(window, "matchMedia", {
++    configurable: true,
++    value: vi.fn().mockReturnValue({
++      matches: false,
++      addEventListener: vi.fn(),
++      removeEventListener: vi.fn(),
++    }),
++  });
++});
++function renderChat(): ReturnType<typeof render> {
++  return render(
++    <Chat
++      runId="run"
++      connectionId="a"
++      profile="work"
++      initialSessionId="saved"
++      initialMessages={[
++        { role: "user", id: "1", content: "saved history" },
++        { role: "agent", id: "2", content: "saved reply" },
++      ]}
++    />,
++  );
++}
++async function send(waitForReady = true): Promise<void> {
++  if (waitForReady)
++    await waitFor(() =>
++      expect(gateway.request).toHaveBeenCalledWith(
++        "commands.catalog",
++        expect.anything(),
++      ),
++    );
++  const box = screen
++    .getAllByRole("textbox")
++    .find((el) => el.tagName === "TEXTAREA")!;
++  fireEvent.change(box, { target: { value: "new prompt" } });
++  await waitFor(() =>
++    expect(
++      screen.getByRole("button", { name: "chat.send" }),
++    ).not.toBeDisabled(),
++  );
++  fireEvent.click(screen.getByRole("button", { name: "chat.send" }));
++  await waitFor(() =>
++    expect(gateway.request).toHaveBeenCalledWith(
++      "prompt.submit",
++      expect.anything(),
++    ),
++  );
++}
++async function complete(text = "native completed"): Promise<void> {
++  await act(async () =>
++    gateway.clients.at(-1)?.onEvent?.({
++      type: "message.complete",
++      session_id: "runtime-saved",
++      payload: {
++        text,
++        status: "ok",
++        usage: {
++          input: 1300,
++          output: 250,
++          total: 1550,
++          context_used: 400,
++          context_max: 200000,
++        },
++      },
++    }),
++  );
++}
++
++function busyReplies(mode: string, steerStatus: string): void {
++  const base = gateway.request.getMockImplementation()!;
++  gateway.request.mockImplementation(async (method: string, params) => {
++    if (method === "config.get") return { value: mode };
++    if (method === "session.steer" || method === "session.redirect")
++      return { status: steerStatus, text: params?.text };
++    return base(method, params);
++  });
++}
++
++async function typeWhileBusy(text: string): Promise<void> {
++  const box = screen.getByPlaceholderText("chat.typeMessage");
++  fireEvent.change(box, { target: { value: text } });
++  fireEvent.keyDown(box, { key: "Enter" });
++}
++
++it("steers a message typed mid-turn into the running turn", async () => {
++  await fixture();
++  renderChat();
++  busyReplies("steer", "queued");
++  await send();
++  gateway.request.mockClear();
++  await typeWhileBusy("also check the logs");
++  await waitFor(() =>
++    expect(gateway.request).toHaveBeenCalledWith("session.steer", {
++      session_id: "runtime-saved",
++      text: "also check the logs",
++    }),
++  );
++  // Delivered: in the transcript, not in the queue, no second turn.
++  await screen.findByText("also check the logs");
++  expect(document.querySelector(".chat-queue-single")).toBeNull();
++  expect(gateway.request).not.toHaveBeenCalledWith(
++    "prompt.submit",
++    expect.anything(),
++  );
++  expect(screen.getByRole("button", { name: "common.stop" })).toBeTruthy();
++});
++
++it("queues when the agent's busy mode is queue, then drains when the turn ends", async () => {
++  await fixture();
++  renderChat();
++  busyReplies("queue", "queued");
++  await send();
++  gateway.request.mockClear();
++  await typeWhileBusy("after this");
++  await waitFor(() =>
++    expect(document.querySelector(".chat-queue-single")?.textContent).toBe(
++      "after this",
++    ),
++  );
++  expect(gateway.request).not.toHaveBeenCalledWith(
++    "session.steer",
++    expect.anything(),
++  );
++  await complete();
++  await waitFor(() =>
++    expect(gateway.request).toHaveBeenCalledWith(
++      "prompt.submit",
++      expect.objectContaining({ text: "after this" }),
++    ),
++  );
++  expect(document.querySelector(".chat-queue-single")).toBeNull();
++});
++
++it("falls back to the queue when the steer is refused (the turn just ended)", async () => {
++  await fixture();
++  renderChat();
++  busyReplies("steer", "rejected");
++  await send();
++  gateway.request.mockClear();
++  await typeWhileBusy("late words");
++  await waitFor(() =>
++    expect(document.querySelector(".chat-queue-single")?.textContent).toBe(
++      "late words",
++    ),
++  );
++  await complete();
++  await waitFor(() =>
++    expect(gateway.request).toHaveBeenCalledWith(
++      "prompt.submit",
++      expect.objectContaining({ text: "late words" }),
++    ),
++  );
++});
++
++it("labels a steered bubble 'sent while working'", async () => {
++  await fixture();
++  renderChat();
++  busyReplies("steer", "queued");
++  await send();
++  await typeWhileBusy("also check the logs");
++  await screen.findByText("also check the logs");
++  expect(screen.getByText("chat.sentWhileWorking")).toBeTruthy();
++});
++
++it("keeps the order of two quick sends across a turn end", async () => {
++  await fixture();
++  renderChat();
++  busyReplies("steer", "queued");
++  await send();
++  // The first steer is answered only after the turn ended: refused, so it
++  // queues. The second, sent meanwhile, must wait for it and land behind it.
++  const base = gateway.request.getMockImplementation()!;
++  let refuseFirst!: () => void;
++  gateway.request.mockImplementation(async (method: string, params) => {
++    if (method === "session.steer" && params?.text === "first")
++      return new Promise((done) => {
++        refuseFirst = () => done({ status: "rejected" });
++      });
++    return base(method, params);
++  });
++  gateway.request.mockClear();
++  await typeWhileBusy("first");
++  await waitFor(() => expect(refuseFirst).toBeTypeOf("function"));
++  await typeWhileBusy("second");
++  await complete();
++  await act(async () => refuseFirst());
++  await waitFor(() =>
++    expect(gateway.request).toHaveBeenCalledWith(
++      "prompt.submit",
++      expect.objectContaining({ text: "first" }),
++    ),
++  );
++  const order = gateway.request.mock.calls
++    .filter(
++      ([m, p]) =>
++        (m === "prompt.submit" || m === "session.steer") &&
++        (p?.text === "first" || p?.text === "second"),
++    )
++    .map(([m, p]) => `${m}:${p.text}`);
++  // "second" never goes ahead of "first": it either joins first's turn as a
++  // steer or follows it from the queue.
++  expect(order[0]).toBe("session.steer:first");
++  expect(order[1]).toBe("prompt.submit:first");
++  expect(order.slice(2).every((x) => x.endsWith(":second"))).toBe(true);
++});
++
++it("keeps a refused steer in the composer when the chat moved to another profile meanwhile", async () => {
++  await fixture();
++  const view = renderChat();
++  busyReplies("steer", "queued");
++  await send();
++  const base = gateway.request.getMockImplementation()!;
++  let refuse!: () => void;
++  gateway.request.mockImplementation(async (method: string, params) => {
++    if (method === "session.steer")
++      return new Promise((done) => {
++        refuse = () => done({ status: "rejected" });
++      });
++    return base(method, params);
++  });
++  gateway.request.mockClear();
++  await typeWhileBusy("for the old profile");
++  await waitFor(() => expect(refuse).toBeTypeOf("function"));
++  view.rerender(
++    <Chat
++      runId="run"
++      connectionId="a"
++      profile="other"
++      initialSessionId="saved"
++      initialMessages={[]}
++    />,
++  );
++  await act(async () => refuse());
++  await complete();
++  // Not queued into (or sent by) the other profile's conversation...
++  expect(document.querySelector(".chat-queue-single")).toBeNull();
++  expect(gateway.request).not.toHaveBeenCalledWith(
++    "prompt.submit",
++    expect.objectContaining({ text: "for the old profile" }),
++  );
++  // ...and not lost: still in the composer.
++  expect(
++    (screen.getByPlaceholderText("chat.typeMessage") as HTMLTextAreaElement)
++      .value,
++  ).toBe("for the old profile");
++});
++
++it("keeps a refused steer in the composer when the chat was cleared meanwhile", async () => {
++  await fixture();
++  renderChat();
++  busyReplies("steer", "queued");
++  await send();
++  const base = gateway.request.getMockImplementation()!;
++  let refuse!: () => void;
++  gateway.request.mockImplementation(async (method: string, params) => {
++    if (method === "session.steer")
++      return new Promise((done) => {
++        refuse = () => done({ status: "rejected" });
++      });
++    return base(method, params);
++  });
++  gateway.request.mockClear();
++  await typeWhileBusy("before the clear");
++  await waitFor(() => expect(refuse).toBeTypeOf("function"));
++  await typeWhileBusy("/clear");
++  await waitFor(() => expect(screen.queryByText("saved history")).toBeNull());
++  await act(async () => refuse());
++  expect(document.querySelector(".chat-queue-single")).toBeNull();
++  expect(gateway.request).not.toHaveBeenCalledWith(
++    "prompt.submit",
++    expect.objectContaining({ text: "before the clear" }),
++  );
++  await screen.findByText("chat.steerNotDelivered");
++});
+diff --git a/src/renderer/src/screens/Chat/Chat.tsx b/src/renderer/src/screens/Chat/Chat.tsx
+index e8cc2e4..7f09bd7 100644
+--- a/src/renderer/src/screens/Chat/Chat.tsx
++++ b/src/renderer/src/screens/Chat/Chat.tsx
+@@ -49,6 +49,7 @@ import {
+ } from "../Layout/sessionUsage";
+ import { contextWindowForModel } from "./contextWindows";
+ import { QueuedMessages } from "./QueuedMessages";
++import { routeBusyMessage } from "./busySubmit";
+ import { SubagentSection } from "./SubagentSection";
+ import { SLASH_COMMANDS, type SlashCommand } from "./slashCommands";
+ import { reconcileSlashCatalog } from "./slash/commandCatalog";
+@@ -301,6 +302,13 @@ function Chat({
+     };
+   }, []);
+   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
++  // Bumped whenever something lands in the queue while the chat may already
++  // be idle, so the drain effect below runs even without an isLoading edge.
++  const [drainTick, setDrainTick] = useState(0);
++  // Busy messages being routed (steer attempt in flight), chained in send
++  // order: see handleSubmitOrQueue.
++  const busyRouteRef = useRef<Promise<void>>(Promise.resolve());
++  const busyRoutesRef = useRef(0);
+   const activeTurnRef = useRef<ActiveTurn | null>(null);
+   const dashboardChatEnabled = dashboardChatEnabledForConnection(
+     import.meta.env.VITE_HERMES_DESKTOP_DASHBOARD_CHAT,
+@@ -948,6 +956,7 @@ function Chat({
+     (text: string, attachments: Attachment[] = []) => {
+       queueRef.current.push({ text, attachments });
+       setQueuedMessages([...queueRef.current]);
++      setDrainTick((tick) => tick + 1);
+     },
+     [],
+   );
+@@ -995,7 +1004,8 @@ function Chat({
+     handleBackgroundRef.current = actions.handleBackground;
+   });
+ 
+-  // Drain queued messages one at a time when the agent finishes.
++  // Drain queued messages one at a time when the agent finishes (and when a
++  // message is queued after it already finished: drainTick).
+   useEffect(() => {
+     if (isLoading) return;
+     const queue = queueRef.current;
+@@ -1018,7 +1028,7 @@ function Chat({
+         `error: ${error instanceof Error ? error.message : String(error)}`,
+       );
+     });
+-  }, [isLoading, addAgentMessage]);
++  }, [isLoading, drainTick, addAgentMessage]);
+ 
+   const handleRemoveQueued = useCallback((index: number) => {
+     queueRef.current.splice(index, 1);
+@@ -1044,14 +1054,57 @@ function Chat({
+         await handleSendRef.current(text, attachments, true);
+         return;
+       }
+-      if (isLoading) {
+-        queueRef.current.push({ text, attachments });
+-        setQueuedMessages([...queueRef.current]);
++      // A message sent while an earlier busy one is still being routed waits
++      // for it, even if the turn ended meanwhile: two quick sends across a
++      // turn end keep their order (the later one sees the earlier one queued
++      // and queues behind it, or joins the turn the earlier one started).
++      if (isLoading || busyRoutesRef.current > 0) {
++        // Text-only messages go to the running turn right away, through the
++        // agent's busy_input_mode (steer/redirect), like the official
++        // desktop; only a refusal (mode `queue`, the turn just ended, no
++        // live dashboard turn, an approval/clarify prompt pending,
++        // attachments) keeps it in the local queue, which drains when the
++        // turn ends.
++        const steer = dashboardTransport.enabled
++          ? dashboardTransport.steerMessage
++          : undefined;
++        const queue = queueRef.current;
++        const owner = queueOwnerRef.current;
++        const prior = busyRouteRef.current;
++        let release = (): void => undefined;
++        busyRouteRef.current = new Promise<void>((resolve) => {
++          release = resolve;
++        });
++        busyRoutesRef.current += 1;
++        try {
++          await prior;
++          const route = steer
++            ? await routeBusyMessage(text, attachments, {
++                queuedAhead: queueRef.current.length,
++                steer,
++              })
++            : "queue";
++          if (route === "delivered") return;
++          if (!queueMountedRef.current) return;
++          // The chat this was typed into was cleared, or moved to another
++          // profile/connection, while the steer was on its way: never hand
++          // the words to the other conversation. Failing the submit keeps
++          // them in the composer (ChatInput clears only on success).
++          if (queueRef.current !== queue || queueOwnerRef.current !== owner)
++            throw new Error(t("chat.steerNotDelivered"));
++          queue.push({ text, attachments });
++          setQueuedMessages([...queue]);
++          // The turn may have ended while the steer was refused: drain now.
++          setDrainTick((tick) => tick + 1);
++        } finally {
++          busyRoutesRef.current -= 1;
++          release();
++        }
+         return;
+       }
+       await handleSendRef.current(text, attachments);
+     },
+-    [isLoading],
++    [isLoading, dashboardTransport.enabled, dashboardTransport.steerMessage, t],
+   );
+ 
+   const handleSuggestion = useCallback((text: string) => {
+diff --git a/src/renderer/src/screens/Chat/MessageRow.tsx b/src/renderer/src/screens/Chat/MessageRow.tsx
+index 562fee0..3e2df82 100644
+--- a/src/renderer/src/screens/Chat/MessageRow.tsx
++++ b/src/renderer/src/screens/Chat/MessageRow.tsx
+@@ -334,6 +334,11 @@ export const MessageRow = memo(function MessageRow({
+             msg.content
+           ))
+         )}
++        {msg.role === "user" && msg.steered && (
++          <div className="chat-bubble-steered">
++            {t("chat.sentWhileWorking")}
++          </div>
++        )}
+         {msg.error && (
+           <div className="chat-error-message" role="alert">
+             {msg.error}
+diff --git a/src/renderer/src/screens/Chat/busySubmit.ts b/src/renderer/src/screens/Chat/busySubmit.ts
+new file mode 100644
+index 0000000..a7c15b3
+--- /dev/null
++++ b/src/renderer/src/screens/Chat/busySubmit.ts
+@@ -0,0 +1,31 @@
++import type { Attachment } from "./types";
++
++/**
++ * What to do with a message the user sends while the agent is busy (Nix,
++ * busy-input-steer.patch). Text goes to the running turn first (the
++ * dashboard transport's `steerMessage`, which honours the agent's
++ * `display.busy_input_mode`); only a refusal lands in the local queue. A
++ * message behind an already-queued one, or one with attachments, queues so
++ * the order and the attachments are kept.
++ */
++export async function routeBusyMessage(
++  text: string,
++  attachments: Attachment[],
++  options: {
++    queuedAhead: number;
++    steer?: (text: string) => Promise<"delivered" | "rejected">;
++  },
++): Promise<"delivered" | "queue"> {
++  if (
++    !options.steer ||
++    attachments.length > 0 ||
++    options.queuedAhead > 0 ||
++    !text.trim()
++  )
++    return "queue";
++  try {
++    return (await options.steer(text)) === "delivered" ? "delivered" : "queue";
++  } catch {
++    return "queue";
++  }
++}
+diff --git a/src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.busy-steer.test.tsx b/src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.busy-steer.test.tsx
+new file mode 100644
+index 0000000..7ab8fa6
+--- /dev/null
++++ b/src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.busy-steer.test.tsx
+@@ -0,0 +1,303 @@
++// Nix, busy-input-steer.patch: a message sent while the agent works goes into
++// the running turn (the agent's display.busy_input_mode), the way the official
++// Hermes Desktop delivers it, instead of waiting in the local queue.
++import { act, render } from "@testing-library/react";
++import { useEffect, useRef, useState, type MutableRefObject } from "react";
++import { beforeEach, describe, expect, it, vi } from "vitest";
++import type { DashboardRpcEvent } from "../dashboardGatewayClient";
++import { routeBusyMessage } from "../busySubmit";
++import { dbItemsToChatMessages } from "../sessionHistory";
++import { useDashboardChatTransport } from "./useDashboardChatTransport";
++import { useTranscriptState } from "./useTranscriptState";
++import type { ActiveTurn, ChatMessage } from "../types";
++
++const mock = vi.hoisted(() => ({
++  onEvent: null as ((event: DashboardRpcEvent) => void) | null,
++  onClose: null as (() => void) | null,
++  request: vi.fn(),
++}));
++
++vi.mock("../dashboardGatewayClient", () => ({
++  DashboardGatewayClient: class {
++    activateServerRequests = vi.fn();
++    close = vi.fn();
++    connect = vi.fn(async () => undefined);
++    connected = true;
++    request = mock.request;
++    constructor(
++      options: {
++        onEvent?: (event: DashboardRpcEvent) => void;
++        onClose?: () => void;
++      } = {},
++    ) {
++      mock.onEvent = options.onEvent ?? null;
++      mock.onClose = options.onClose ?? null;
++    }
++  },
++}));
++
++interface Api {
++  isLoading?: boolean;
++  messages?: ChatMessage[];
++  activeTurnRef?: MutableRefObject<ActiveTurn | null>;
++  send?: (text: string) => Promise<boolean>;
++  steer?: (text: string) => Promise<"delivered" | "rejected">;
++}
++
++function Harness({ api }: { api: Api }): null {
++  const { messages, setMessages, messagesRef } = useTranscriptState([
++    { id: "u-1", role: "user", content: "long task", turnId: "turn-1" },
++  ]);
++  const [isLoading, setIsLoading] = useState(false);
++  const activeTurnRef = useRef<ActiveTurn | null>(null);
++  const transport = useDashboardChatTransport({
++    activeTurnRef,
++    contextFolder: null,
++    connectionMode: "remote",
++    enabled: true,
++    fallbackOnUnavailable: false,
++    hermesSessionId: null,
++    messagesRef,
++    model: "m",
++    provider: "p",
++    setHermesSessionId: vi.fn(),
++    setIsLoading,
++    setMessages,
++    setToolProgress: vi.fn(),
++    setUsage: vi.fn(),
++  });
++  useEffect(() => {
++    Object.assign(api, {
++      isLoading,
++      messages,
++      activeTurnRef,
++      send: transport.sendMessage,
++      steer: transport.steerMessage,
++    });
++  });
++  return null;
++}
++
++let busyMode = "steer";
++let steerReply: unknown = { status: "queued" };
++
++async function busyTurn(): Promise<Api> {
++  const api: Api = {};
++  render(<Harness api={api} />);
++  await act(async () => {
++    api.activeTurnRef!.current = {
++      turnId: "turn-1",
++      userId: "u-1",
++      startIndex: 1,
++      status: "running",
++    };
++    expect(await api.send?.("long task")).toBe(true);
++  });
++  return api;
++}
++
++const calls = (method: string): unknown[][] =>
++  mock.request.mock.calls.filter(([m]) => m === method);
++
++describe("busy input steers the running dashboard turn", () => {
++  beforeEach(() => {
++    busyMode = "steer";
++    steerReply = { status: "queued" };
++    mock.request.mockReset();
++    mock.request.mockImplementation(async (method: string) => {
++      if (method === "session.create")
++        return { session_id: "live-1", stored_session_id: "stored-1" };
++      if (method === "model.options")
++        return { model: "m", provider: "p", providers: [] };
++      if (method === "config.get") return { value: busyMode };
++      if (method === "session.steer" || method === "session.redirect") {
++        if (steerReply instanceof Error) throw steerReply;
++        return steerReply;
++      }
++      if (method === "prompt.submit") return { status: "streaming" };
++      if (method === "session.resume")
++        return { session_id: "live-2", stored_session_id: "stored-1" };
++      return {};
++    });
++    Object.defineProperty(window, "hermesAPI", {
++      configurable: true,
++      value: {
++        recordSessionContinuation: vi.fn(async () => true),
++        recordSessionLocalError: vi.fn(async () => true),
++        startDashboard: vi.fn(async () => ({
++          connection: { wsUrl: "ws://127.0.0.1:1" },
++          running: true,
++        })),
++      },
++    });
++  });
++
++  it("delivers via session.steer and shows the message in the transcript", async () => {
++    const api = await busyTurn();
++    await act(async () => {
++      expect(await api.steer?.("  also check the logs ")).toBe("delivered");
++    });
++    expect(calls("config.get")).toEqual([
++      ["config.get", { key: "busy", session_id: "live-1" }],
++    ]);
++    expect(calls("session.steer")).toEqual([
++      ["session.steer", { session_id: "live-1", text: "also check the logs" }],
++    ]);
++    // Never a second prompt.submit: that would start a new turn after this one.
++    expect(calls("prompt.submit")).toHaveLength(1);
++    expect(api.messages?.at(-1)).toMatchObject({
++      role: "user",
++      content: "also check the logs",
++      turnId: "turn-1",
++    });
++  });
++
++  it("uses session.redirect when the agent's busy mode is interrupt", async () => {
++    busyMode = "interrupt";
++    steerReply = { status: "redirected" };
++    const api = await busyTurn();
++    await act(async () => {
++      expect(await api.steer?.("stop, do Y")).toBe("delivered");
++    });
++    expect(calls("session.redirect")).toEqual([
++      ["session.redirect", { session_id: "live-1", text: "stop, do Y" }],
++    ]);
++    expect(calls("session.steer")).toHaveLength(0);
++  });
++
++  it("leaves the message to the local queue in queue mode", async () => {
++    busyMode = "queue";
++    const api = await busyTurn();
++    const before = api.messages?.length;
++    await act(async () => {
++      expect(await api.steer?.("later")).toBe("rejected");
++    });
++    expect(calls("session.steer")).toHaveLength(0);
++    expect(calls("session.redirect")).toHaveLength(0);
++    expect(api.messages?.length).toBe(before);
++  });
++
++  it("reports a refused or failed steer as rejected without a bubble", async () => {
++    const api = await busyTurn();
++    const before = api.messages?.length;
++    steerReply = { status: "rejected" }; // the turn ended meanwhile
++    await act(async () => {
++      expect(await api.steer?.("x")).toBe("rejected");
++    });
++    steerReply = new Error("Hermes dashboard WebSocket closed");
++    await act(async () => {
++      expect(await api.steer?.("y")).toBe("rejected");
++    });
++    expect(api.messages?.length).toBe(before);
++  });
++
++  it("does not steer when no turn of this chat is running", async () => {
++    const api = await busyTurn();
++    await act(async () => {
++      api.activeTurnRef!.current = null;
++      expect(await api.steer?.("hi")).toBe("rejected");
++    });
++    expect(calls("config.get")).toHaveLength(0);
++  });
++
++  it("queues while an approval prompt is pending (the turn is parked on the user)", async () => {
++    const api = await busyTurn();
++    await act(async () => {
++      mock.onEvent?.({
++        type: "approval.request",
++        session_id: "live-1",
++        payload: {
++          request_id: "approval-1",
++          command: "echo synthetic",
++          description: "synthetic approval",
++          choices: ["once", "deny"],
++        },
++      } as DashboardRpcEvent);
++    });
++    await act(async () => {
++      expect(await api.steer?.("after the prompt")).toBe("rejected");
++    });
++    expect(calls("config.get")).toHaveLength(0);
++    expect(calls("session.steer")).toHaveLength(0);
++  });
++
++  it("marks the delivered bubble as sent while working", async () => {
++    const api = await busyTurn();
++    await act(async () => {
++      expect(await api.steer?.("note")).toBe("delivered");
++    });
++    expect(api.messages?.at(-1)).toMatchObject({
++      content: "note",
++      steered: true,
++    });
++  });
++
++  it("reattaches after a dropped socket and steers the resumed runtime", async () => {
++    const api = await busyTurn();
++    await act(async () => {
++      mock.onClose?.();
++    });
++    await act(async () => {
++      expect(await api.steer?.("still there?")).toBe("delivered");
++    });
++    expect(calls("session.resume")).toEqual([
++      ["session.resume", { session_id: "stored-1", cols: 96 }],
++    ]);
++    expect(calls("session.steer")).toEqual([
++      ["session.steer", { session_id: "live-2", text: "still there?" }],
++    ]);
++  });
++});
++
++describe("routeBusyMessage", () => {
++  const delivered = vi.fn(async () => "delivered" as const);
++  const rejected = vi.fn(async () => "rejected" as const);
++
++  it("steers plain text first", async () => {
++    expect(
++      await routeBusyMessage("hi", [], { queuedAhead: 0, steer: delivered }),
++    ).toBe("delivered");
++    expect(delivered).toHaveBeenCalledWith("hi");
++  });
++
++  it("queues on refusal, error, attachments, a queue ahead or no transport", async () => {
++    expect(
++      await routeBusyMessage("hi", [], { queuedAhead: 0, steer: rejected }),
++    ).toBe("queue");
++    expect(
++      await routeBusyMessage("hi", [], {
++        queuedAhead: 0,
++        steer: async () => {
++          throw new Error("boom");
++        },
++      }),
++    ).toBe("queue");
++    const steer = vi.fn(async () => "delivered" as const);
++    expect(
++      await routeBusyMessage(
++        "hi",
++        [{ id: "a", name: "a.png", path: "/a.png" } as never],
++        { queuedAhead: 0, steer },
++      ),
++    ).toBe("queue");
++    expect(await routeBusyMessage("hi", [], { queuedAhead: 1, steer })).toBe(
++      "queue",
++    );
++    expect(await routeBusyMessage("hi", [], { queuedAhead: 0 })).toBe("queue");
++    expect(steer).not.toHaveBeenCalled();
++  });
++});
++
++describe("history reload", () => {
++  it("keeps the 'sent while working' flag of a steered history row", () => {
++    const [msg] = dbItemsToChatMessages([
++      { kind: "user", id: 7, content: "also", timestamp: 1, steered: true },
++    ]);
++    expect(msg).toMatchObject({
++      id: "db-7",
++      role: "user",
++      content: "also",
++      steered: true,
++    });
++  });
++});
+diff --git a/src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts b/src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts
+index 29edbc1..eeb3bfd 100644
+--- a/src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts
++++ b/src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts
+@@ -140,6 +140,16 @@ interface UseDashboardChatTransportResult {
+     choice: ApprovalChoice,
+   ) => Promise<boolean>;
+   sendMessage: (text: string, attachments?: Attachment[]) => Promise<boolean>;
++  /**
++   * Deliver a message typed while the agent is busy into the RUNNING turn,
++   * honouring the agent's `display.busy_input_mode` the way the official
++   * Hermes Desktop does: `steer` -> `session.steer` (joins the turn after the
++   * current tool step), `interrupt` -> `session.redirect`, `queue` -> not
++   * delivered (the caller keeps it in its next-turn queue). "delivered" means
++   * the agent took it; the user bubble is then already in the transcript.
++   * "rejected" means nothing reached the agent: the caller must queue it.
++   */
++  steerMessage: (text: string) => Promise<"delivered" | "rejected">;
+   /**
+    * Run a slash command through the gateway's `slash.exec` pipeline instead of
+    * submitting it to the model as a literal prompt. `sys` renders command
+@@ -2399,6 +2409,94 @@ export function useDashboardChatTransport({
+     ],
+   );
+ 
++  const steerMessage = useCallback(
++    async (text: string): Promise<"delivered" | "rejected"> => {
++      const trimmed = text.trim();
++      let client = clientRef.current;
++      let sessionId = runtimeSessionIdRef.current;
++      // Only a turn this chat is running can be steered; everything else
++      // (a clarify question or an approval/sudo prompt pending, nothing
++      // running) is a normal next-turn message. A blocking prompt parks the
++      // tool batch on the user, so a steer could not reach the model: the
++      // official desktop's busy-submit-state `canSteer` queues then too.
++      if (
++        !enabled ||
++        !trimmed ||
++        !activeTurnRef.current ||
++        pendingClarifyRef.current ||
++        pendingApprovalsRef.current.length > 0
++      )
++        return "rejected";
++      try {
++        // The socket dropped mid-turn (sleep, network change): reattach to
++        // the saved session first, as the next send would. The agent keeps
++        // running server-side and streams the rest of the turn here again.
++        if (!client?.connected || !sessionId) {
++          if (!storedSessionIdRef.current) return "rejected";
++          client = await ensureClient();
++          sessionId = await ensureRuntimeSession(client);
++        }
++        // The agent's own policy, read per message (Dave can flip it with
++        // `/busy` mid-session), exactly like the official desktop's
++        // use-busy-input-mode: `queue` keeps it for the next turn.
++        const busy = await client.request<{ value?: unknown }>("config.get", {
++          key: "busy",
++          session_id: sessionId,
++          ...(profile && profile !== "default" ? { profile } : {}),
++        });
++        const raw =
++          typeof busy?.value === "string"
++            ? busy.value.trim().toLowerCase()
++            : "";
++        const mode =
++          raw === "steer" || raw === "queue" ? raw : ("interrupt" as const);
++        if (mode === "queue") return "rejected";
++        if (runtimeSessionIdRef.current !== sessionId || !activeTurnRef.current)
++          return "rejected";
++        const result = await client.request<{ status?: string }>(
++          mode === "steer" ? "session.steer" : "session.redirect",
++          { session_id: sessionId, text: trimmed },
++        );
++        // session.steer: "queued" = accepted into the live turn, "rejected" =
++        // the turn already ended. session.redirect: "redirected", or "queued"
++        // for the next turn on the server (delivered either way).
++        const status = result?.status;
++        if (status !== "queued" && status !== "redirected") return "rejected";
++      } catch {
++        // Any failure counts as not delivered, so the words go to the local
++        // queue. That includes a request timeout after the server already
++        // took the steer: the message then reaches the agent twice (once in
++        // this turn, once as the next prompt). Accepted on purpose: the
++        // official desktop does the same (session-tile-actions submitCorrection
++        // drops its optimistic bubble on any error and use-composer-submit
++        // steerDraft re-queues the words), and a duplicate beats a lost message.
++        return "rejected";
++      }
++      const now = Date.now();
++      const bubble: ChatMessage = {
++        id: `steer-${now}-${Math.random().toString(36).slice(2, 8)}`,
++        role: "user",
++        content: trimmed,
++        timestamp: now,
++        steered: true,
++        ...(activeTurnRef.current?.turnId
++          ? { turnId: activeTurnRef.current.turnId }
++          : {}),
++      };
++      flushDeltasNow([...messagesRef.current, bubble]);
++      return "delivered";
++    },
++    [
++      enabled,
++      activeTurnRef,
++      messagesRef,
++      flushDeltasNow,
++      profile,
++      ensureClient,
++      ensureRuntimeSession,
++    ],
++  );
++
+   const respondApproval = useCallback(
+     async (requestId: string, choice: ApprovalChoice): Promise<boolean> => {
+       const pending = pendingApprovalsRef.current[0];
+@@ -2677,6 +2775,7 @@ export function useDashboardChatTransport({
+     respondApproval,
+     respondClarify,
+     sendMessage,
++    steerMessage,
+     execSlash,
+     getCommandCatalog,
+     runBackground,
+diff --git a/src/renderer/src/screens/Chat/sessionHistory.ts b/src/renderer/src/screens/Chat/sessionHistory.ts
+index faf18cc..9e48e16 100644
+--- a/src/renderer/src/screens/Chat/sessionHistory.ts
++++ b/src/renderer/src/screens/Chat/sessionHistory.ts
+@@ -24,6 +24,8 @@ export interface DbHistoryItem {
+   args?: string;
+   timestamp?: number;
+   attachments?: Attachment[];
++  /** A user message sent mid-turn (Nix, busy-input-steer.patch). */
++  steered?: boolean;
+ }
+ 
+ /**
+@@ -58,6 +60,7 @@ export function dbItemsToChatMessages(
+             ...(it.attachments && it.attachments.length > 0
+               ? { attachments: it.attachments }
+               : {}),
++            ...(it.steered ? { steered: true } : {}),
+           };
+         case "assistant":
+           return {
+diff --git a/src/renderer/src/screens/Chat/types.ts b/src/renderer/src/screens/Chat/types.ts
+index 2718411..fd517a8 100644
+--- a/src/renderer/src/screens/Chat/types.ts
++++ b/src/renderer/src/screens/Chat/types.ts
+@@ -29,6 +29,9 @@ export interface ChatBubbleMessage {
+   timestamp?: number;
+   /** Renderer-only progress row while a slash command is executing. */
+   isSlashLoader?: boolean;
++  /** A user message sent while the agent worked, delivered into the running
++   *  turn (Nix, busy-input-steer.patch); labelled "sent while working". */
++  steered?: boolean;
+ }
+ 
+ /**
+diff --git a/src/shared/i18n/locales/en/chat.ts b/src/shared/i18n/locales/en/chat.ts
+index a405198..fcb513e 100644
+--- a/src/shared/i18n/locales/en/chat.ts
++++ b/src/shared/i18n/locales/en/chat.ts
+@@ -176,6 +176,9 @@ export default {
+   queuedCount: "{{count}} queued",
+   queuedAttachment: "{{count}} attachment(s)",
+   queuedCancel: "Remove from queue",
++  sentWhileWorking: "sent while working",
++  steerNotDelivered:
++    "Not sent: this chat changed while the message was on its way.",
+   copyMessage: "Copy message",
+   subagents: {
+     title: "{{count}} subagent(s) running",

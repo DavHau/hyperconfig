@@ -26,6 +26,13 @@
 #   expandable to the detailed list; the answer text stays below it. Failed
 #   tool calls (live status, or judged from history's stored result) show as
 #   "· N failed" in the error colour and open the row.
+# ./busy-input-steer.patch: a message sent while the agent works goes into
+#   the running turn by the agent's own `display.busy_input_mode`
+#   (`session.steer`/`session.redirect`, as the official Hermes Desktop does),
+#   not into a local queue that only drained after the turn; the local queue
+#   is the fallback for a refusal (also while an approval prompt is pending)
+#   and now always drains. A steered message shows the user's own words,
+#   not hermes' marker, after a history reload ("sent while working").
 # What stays off without a patch: analytics (needs build-time
 # VITE_ANALYTICS_* secrets, unset here), the Hermes One account (device
 # login, only on a click; the wrappers point HERMES_API_URL at
@@ -68,6 +75,7 @@ buildNpmPackage rec {
     ./remote-models-all-configured.patch
     ./links-external.patch
     ./compact-activity.patch
+    ./busy-input-steer.patch
   ];
 
   # ./remote-models-all-configured.patch's behaviour (and upstream's cases
@@ -77,6 +85,13 @@ buildNpmPackage rec {
     ELECTRON_OVERRIDE_DIST_PATH=${electron}/bin \
     node node_modules/vitest/vitest.mjs run \
       tests/remote-models.test.ts src/main/remote-models.ipc.test.ts
+    # ./busy-input-steer.patch's behaviour (the history test imports the
+    # electron stub as well).
+    ELECTRON_OVERRIDE_DIST_PATH=${electron}/bin \
+    node node_modules/vitest/vitest.mjs run \
+      src/renderer/src/screens/Chat/Chat.busy-steer.test.tsx \
+      src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.busy-steer.test.tsx \
+      src/main/sessions.steer-history.test.ts
   '';
 
   npmDepsHash = "sha256-yjLIByolfYcOjgCZ+gZuOSf9sx8AwwQZiW5hEr64fRY=";
