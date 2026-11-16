@@ -6,6 +6,8 @@
 # copy build against the caller's electron. What differs:
 #   - the desktop-entry script comes from the injected hermesSrc (upstream's
 #     ../ sibling paths resolve to nothing here);
+#   - model picker rows show the full model name, prices on a second line
+#     (./patches/desktop-model-row-full-name.patch);
 #   - the `hermes://session/<id>` deep link
 #     (./patches/desktop-session-deeplink.patch);
 #   - picking a never-signed-in OAuth gateway runs the interactive sign-in
@@ -82,6 +84,14 @@ let
 
     doCheck = true;
 
+    # hermesNpmLib's source drops every *.test.* file; restore the upstream
+    # test ./patches/desktop-model-row-full-name.patch updates (the
+    # checkPhase runs it).
+    prePatch = ''
+      install -m644 ${hermesSrc}/apps/desktop/src/app/shell/model-catalog-menu.test.tsx \
+        apps/desktop/src/app/shell/model-catalog-menu.test.tsx
+    '';
+
     # `hermes-desktop hermes://session/<id>` opens that chat, and a second
     # launch switches the running window to it. Picking an OAuth gateway
     # without a session (a newly added agent) signs in interactively
@@ -89,6 +99,7 @@ let
     # headers name what upstream lacks; building packages.hermes-desktop
     # proves they apply to the pinned input (and typechecks them).
     patches = [
+      ./patches/desktop-model-row-full-name.patch
       ./patches/desktop-session-deeplink.patch
       ./patches/desktop-oauth-first-login.patch
     ];
@@ -129,6 +140,12 @@ let
       pushd apps/desktop
 
         node scripts/assert-dist-built.mjs
+
+        # ./patches/desktop-model-row-full-name.patch's behaviour, plus
+        # upstream's catalog-menu tests it updates.
+        node ../../node_modules/vitest/vitest.mjs run --project ui \
+          src/app/shell/model-catalog-menu.full-name.test.tsx \
+          src/app/shell/model-catalog-menu.test.tsx
 
         # ./patches/desktop-oauth-first-login.patch's behaviour, with
         # upstream's own vitest setup.

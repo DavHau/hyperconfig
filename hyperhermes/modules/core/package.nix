@@ -51,6 +51,8 @@ let
     # After the subagents resume patch and the duplicate collapse: it extends
     # both (re-dispatch from every turn, no copies of resuming subagents).
     ./patches/hermes-subagents-resume-every-turn.patch
+    # After the exclude-native patch: extends its catalog filter lines.
+    ./patches/hermes-openrouter-no-batch.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {

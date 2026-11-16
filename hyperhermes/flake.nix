@@ -176,6 +176,7 @@
         # picker surface.
         openrouter-catalog = import ./checks/openrouter-catalog { inherit pkgs hermesPackage; };
         openrouter-native = import ./checks/openrouter-native { inherit pkgs hermesPackage; };
+        openrouter-no-batch = import ./checks/openrouter-no-batch { inherit pkgs hermesPackage; };
         # Offline: with HERMES_GATEWAY_MANAGED_UNIT, no client or
         # `gateway run` starts a gateway beside the agent's unit.
         managed-unit = import ./checks/managed-unit { inherit pkgs hermesPackage; };

@@ -1,0 +1,223 @@
+hermes v0.23.0: OpenRouter `:batch` models are never offered or used for chat.
+
+`<model>:batch` ids are OpenRouter's asynchronous Batch API (results
+within a 24 h window, no streaming), unusable for an interactive agent.
+With model_catalog.openrouter_all_models they made up 67 of the 368 rows
+of the OpenRouter picker and sat right next to the real model under the
+same display name (deepseek/deepseek-v4.1-flash-1017 and
+deepseek/deepseek-v4.1-flash-1017:batch both read "DeepSeek V4.1 Flash
+1017"), so the chat model looked missing behind its batch twin.
+
+- catalog: fetch_openrouter_models drops them (model_ids,
+  provider_model_ids, /api/model/options and model.options, TUI and
+  messaging /model, `hermes model`), and drop_unofferable_model_ids
+  drops them from every OpenRouter-routed picker row (is_openrouter_route:
+  provider openrouter, an openrouter.ai base_url, or a named custom
+  provider pointing there). _credential_fingerprint("openrouter") gains a
+  marker so provider_models_cache.json rows cached with them are refetched.
+- resolution: an OpenRouter `...:batch` model runs as the same id without
+  `:batch`, logged as a WARNING, in init_agent (every AIAgent: main,
+  delegated children, cron) and its fallback chain, agent switch_model,
+  model_switch.switch_model (/model), bind_route_entry (fallback
+  activation) and resolve_provider_client (auxiliary clients).
+
+Applies after hermes-openrouter-exclude-native.patch (extends its
+filter_catalog / drop_unofferable_model_ids lines).
+Tests: the offline check hyperhermes/checks/openrouter-no-batch.
+Upstream status: not reported; hyperhermes-only.
+
+diff --git a/agent/agent_init.py b/agent/agent_init.py
+index a2d6d76..1aff68a 100644
+--- a/agent/agent_init.py
++++ b/agent/agent_init.py
+@@ -2176,6 +2176,9 @@ def init_agent(
+     if _native_overrides:  # an OpenRouter -fast id: the base model with fast mode on, for that model only
+         request_overrides = {**(request_overrides or {}), **_native_overrides}
+         agent._native_fast_route = (model, dict(_native_overrides))
++    from hermes_cli.openrouter_batch import unbatch_entries, unbatched  # OpenRouter :batch never runs a chat
++    model = unbatched(provider, model, base_url, "agent") or model
++    fallback_model = unbatch_entries(fallback_model)
+ 
+     _params = locals()
+     for _name in _PASSTHROUGH_PARAMS:
+diff --git a/agent/agent_runtime_helpers.py b/agent/agent_runtime_helpers.py
+index 933ca68..d4ef13a 100644
+--- a/agent/agent_runtime_helpers.py
++++ b/agent/agent_runtime_helpers.py
+@@ -2402,6 +2402,8 @@ def switch_model(
+         api_key, base_url, api_mode = _rt.get("api_key") or "", _rt.get("base_url") or "", _rt.get("api_mode") or ""
+     elif (_fixed := native_id_fixup(new_provider, new_model)) is not None:
+         new_model, _native_overrides = _fixed
++    from hermes_cli.openrouter_batch import unbatched  # OpenRouter :batch never runs a chat
++    new_model = unbatched(new_provider, new_model, base_url, "model switch") or new_model
+     old_model = agent.model
+     old_provider = agent.provider
+     # ── Reload credential pool for the new provider (issue #52727) ── Without this,
+diff --git a/agent/auxiliary_client.py b/agent/auxiliary_client.py
+index 1414646..691f99b 100644
+--- a/agent/auxiliary_client.py
++++ b/agent/auxiliary_client.py
+@@ -5343,6 +5343,8 @@ def resolve_provider_client(
+         explicit_base_url = explicit_api_key = None
+         if api_mode and api_mode != "anthropic_messages":
+             api_mode = None
++    from hermes_cli.openrouter_batch import unbatched  # OpenRouter :batch never runs a chat
++    model = unbatched(provider, model, explicit_base_url, f"auxiliary {task or 'client'}") or model
+     api_mode = _canonical_api_mode(str(api_mode or "")).lower() or None
+     # MoA chokepoint: "moa" is not an HTTP provider; resolve to the aggregator so direct callers don't
+     # dead-end in unknown-provider. Unresolvable preset → leave untouched for the normal diagnostic.
+diff --git a/agent/route_binding.py b/agent/route_binding.py
+index 28f8898..a5a80de 100644
+--- a/agent/route_binding.py
++++ b/agent/route_binding.py
+@@ -29,6 +29,9 @@ def bind_route_entry(agent: Any, entry: dict[str, Any], provider: str, model: st
+     _native_entry = rewrite_fallback_entries(entry)  # model_catalog.openrouter_exclude_native
+     if _native_entry is not entry:
+         entry, provider, model = _native_entry, _native_entry["provider"], _native_entry["model"]
++    from hermes_cli.openrouter_batch import unbatch_entries  # OpenRouter :batch never runs a chat
++    if (_plain_entry := unbatch_entries(entry)) is not entry:
++        entry, model = _plain_entry, _plain_entry["model"]
+     # Pass the entry's base_url/api_key so custom endpoints (Ollama Cloud) resolve instead
+     # of falling through to OpenRouter defaults.
+     base_url_hint = (entry.get("base_url") or "").strip() or None
+diff --git a/hermes_cli/model_switch.py b/hermes_cli/model_switch.py
+index ebd8589..ef72d48 100644
+--- a/hermes_cli/model_switch.py
++++ b/hermes_cli/model_switch.py
+@@ -1758,6 +1758,16 @@ def _native_instead_of_openrouter(st: _Switch) -> Optional[ModelSwitchResult]:
+     return None
+ 
+ 
++def _no_openrouter_batch(st: _Switch) -> Optional[ModelSwitchResult]:
++    """``/model`` onto an OpenRouter ``:batch`` id (async Batch API) runs the same id without it."""
++    from hermes_cli.openrouter_batch import unbatched
++    plain = unbatched(st.target_provider, st.new_model,
++                      st.current_base_url if st.target_provider == st.current_provider else None, "/model")
++    if plain is not None:
++        st.new_model = plain
++    return None
++
++
+ def _build_switch_result(st: _Switch) -> ModelSwitchResult:
+     """COMMON PATH part 3: final api_mode / base_url shaping, metadata, warnings."""
+     derived = model_derived_api_mode(st.target_provider, st.new_model, st.api_key)
+@@ -1819,7 +1829,8 @@ def switch_model(
+         explicit_provider=explicit_provider, user_providers=user_providers, custom_providers=custom_providers,
+         new_model=raw_input.strip(), target_provider=current_provider)
+     route = _route_explicit_provider if explicit_provider else _route_from_model_input
+-    for step in (route, _native_instead_of_openrouter, _resolve_switch_credentials, _validate_switch):
++    for step in (route, _native_instead_of_openrouter, _no_openrouter_batch, _resolve_switch_credentials,
++                 _validate_switch):
+         fail = step(st)
+         if fail is not None:
+             return fail
+diff --git a/hermes_cli/models.py b/hermes_cli/models.py
+index a9849f7..19cd549 100644
+--- a/hermes_cli/models.py
++++ b/hermes_cli/models.py
+@@ -671,7 +671,8 @@ def fetch_openrouter_models(
+     timeout: float = 8.0, *, force_refresh: bool = False, cache_only: bool = False) -> list[tuple[str, str]]:
+     """The OpenRouter picker list without the vendors ``model_catalog.openrouter_exclude_native`` serves natively."""
+     from hermes_cli.openrouter_native import filter_catalog
+-    return filter_catalog(_fetch_openrouter_models_all(timeout, force_refresh=force_refresh, cache_only=cache_only))
++    from hermes_cli.openrouter_batch import drop_batch  # :batch = async Batch API, never a chat model
++    return drop_batch(filter_catalog(_fetch_openrouter_models_all(timeout, force_refresh=force_refresh, cache_only=cache_only)))
+ 
+ 
+ def _fetch_openrouter_models_all(
+@@ -1999,6 +2000,7 @@ def _credential_fingerprint(provider: str) -> str:
+         # Rows of natively served vendors are hidden only while that native credential works.
+         from hermes_cli.openrouter_native import fingerprint_part
+         parts.append(fingerprint_part())
++        parts.append("openrouter_no_batch=1")  # rows cached before :batch ids were dropped
+ 
+     blob = "|".join(parts).encode("utf-8", errors="replace")
+     # blake2b, not sha256: fingerprint only (collisions = a harmless cache miss), and CodeQL's
+diff --git a/hermes_cli/models_validate.py b/hermes_cli/models_validate.py
+index c1b2c26..c0e1edc 100644
+--- a/hermes_cli/models_validate.py
++++ b/hermes_cli/models_validate.py
+@@ -241,6 +241,7 @@ def drop_unofferable_model_ids(rows: list) -> None:
+     """In-place: picker rows must not offer an id ``validate_requested_model`` will refuse for whitespace,
+     nor an OpenRouter id of a vendor served natively (``model_catalog.openrouter_exclude_native``)."""
+     from hermes_cli.openrouter_native import filter_catalog, is_openrouter_route
++    from hermes_cli.openrouter_batch import drop_batch
+     for row in rows:
+         if not isinstance(row, dict):
+             continue
+@@ -249,9 +250,10 @@ def drop_unofferable_model_ids(rows: list) -> None:
+         models = row.get("models")
+         native_filter = is_openrouter_route(provider, base_url)
+         if native_filter and isinstance(row.get("featured_models"), list):
+-            row["featured_models"] = filter_catalog(row["featured_models"])
++            row["featured_models"] = drop_batch(filter_catalog(row["featured_models"]))
+         if isinstance(models, list):
+-            filtered = offered_model_ids(filter_catalog(models) if native_filter else models, provider, base_url)
++            # OpenRouter rows also lose :batch ids (async Batch API, never a chat model).
++            filtered = offered_model_ids(drop_batch(filter_catalog(models)) if native_filter else models, provider, base_url)
+             removed = len(models) - len(filtered)
+             if removed:
+                 row["models"] = filtered
+diff --git a/hermes_cli/openrouter_batch.py b/hermes_cli/openrouter_batch.py
+new file mode 100644
+index 0000000..bfc75d8
+--- /dev/null
++++ b/hermes_cli/openrouter_batch.py
+@@ -0,0 +1,57 @@
++"""OpenRouter ``:batch`` models are never offered or used for chat (hyperhermes).
++
++``<model>:batch`` ids are OpenRouter's asynchronous Batch API (results within a 24 h window, no
++streaming): unusable for an interactive agent. They are:
++
++- dropped from the OpenRouter catalog (``hermes_cli.models.fetch_openrouter_models``) and from every
++  OpenRouter-routed picker row (``drop_unofferable_model_ids``: desktop/dashboard ``model.options``,
++  Hermes One, TUI and messaging ``/model``, ``hermes model``);
++- mapped to the same id without ``:batch`` wherever an OpenRouter provider+model pair is used: the
++  agent constructor (every AIAgent, delegated children and fallback chains included), live model
++  switches, ``/model``, fallback activation and auxiliary clients. Each mapping logs a warning.
++"""
++
++from __future__ import annotations
++
++import logging
++from typing import Any, Optional
++
++logger = logging.getLogger(__name__)
++
++BATCH_SUFFIX = ":batch"
++
++
++def is_batch_id(model: Any) -> bool:
++    return isinstance(model, str) and model.strip().lower().endswith(BATCH_SUFFIX)
++
++
++def drop_batch(rows: list) -> list:
++    """Catalog rows (ids or ``(id, desc)`` tuples) without ``:batch`` ids."""
++    if not isinstance(rows, list):
++        return rows
++    out = [row for row in rows if not is_batch_id(row[0] if isinstance(row, (tuple, list)) else row)]
++    return rows if len(out) == len(rows) else out
++
++
++def unbatched(provider: Any, model: Any, base_url: Any = None, where: str = "") -> Optional[str]:
++    """The id without ``:batch`` for an OpenRouter-routed ``:batch`` model (logged), else None."""
++    if not is_batch_id(model):
++        return None
++    from hermes_cli.openrouter_native import is_openrouter_route
++    if not is_openrouter_route(provider, base_url):
++        return None
++    plain = model.strip()[: -len(BATCH_SUFFIX)]
++    logger.warning(
++        "openrouter_no_batch: %s asked for %r (OpenRouter's async Batch API, unusable for chat); "
++        "running %r instead", where or "request", model, plain)
++    return plain
++
++
++def unbatch_entries(entries: Any) -> Any:
++    """Fallback chain (dict or list of dicts) with OpenRouter ``:batch`` models mapped."""
++    if isinstance(entries, dict):
++        plain = unbatched(entries.get("provider"), entries.get("model"), entries.get("base_url"), "fallback entry")
++        return entries if plain is None else {**entries, "model": plain}
++    if isinstance(entries, list):
++        return [unbatch_entries(e) if isinstance(e, dict) else e for e in entries]
++    return entries

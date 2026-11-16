@@ -1,0 +1,252 @@
+Model picker: the model name owns the row instead of being cut by prices.
+
+Upstream (v0.23.0) lays a catalog row out on one line: star, name
+(`min-w-0 truncate`), then the shrink-0 price, usage and setting chips.
+In the 18rem (`w-72`) popover the price column takes most of the width,
+so OpenRouter names read "DeepSee…" and "DeepSeek V4.1 Fl…", and dated
+variants of one model can't be told apart.
+
+- the name may wrap (`whitespace-normal break-words`), never an ellipsis;
+- load bar, price, usage level and setting chips move to a second line
+  under the name;
+- the row's tooltip (`title`) is the full model id;
+- the composer's model popover is wider: min(26rem, 100vw - 2rem).
+
+Test: src/app/shell/model-catalog-menu.full-name.test.tsx (run by
+desktop.nix's checkPhase). Upstream's model-catalog-menu.test.tsx found
+the name span by `.truncate`, which this patch removes: it now selects
+`[data-model-menu-row-name]` (also run by the checkPhase).
+
+diff --git a/apps/desktop/src/app/chat/composer/model-pill.tsx b/apps/desktop/src/app/chat/composer/model-pill.tsx
+index ab93fb8..06d7014 100644
+--- a/apps/desktop/src/app/chat/composer/model-pill.tsx
++++ b/apps/desktop/src/app/chat/composer/model-pill.tsx
+@@ -222,7 +222,7 @@ export function ModelPill({
+       </Tip>
+       <DropdownMenuContent
+         align="end"
+-        className="w-72 p-0"
++        className="w-[min(26rem,calc(100vw-2rem))] p-0"
+         onCloseAutoFocus={event => {
+           if (restoreSelection.current) {
+             event.preventDefault()
+diff --git a/apps/desktop/src/app/shell/model-catalog-menu.full-name.test.tsx b/apps/desktop/src/app/shell/model-catalog-menu.full-name.test.tsx
+new file mode 100644
+index 0000000..224edd0
+--- /dev/null
++++ b/apps/desktop/src/app/shell/model-catalog-menu.full-name.test.tsx
+@@ -0,0 +1,94 @@
++vi.mock('@/store/profile', async (): Promise<object> => {
++  const { atom } = await import('nanostores')
++
++  return { $activeGatewayProfile: atom<string>('default') }
++})
++vi.mock('@/store/session', async (): Promise<object> => {
++  const { atom } = await import('nanostores')
++
++  return { $connection: atom(null), $defaultReasoningEffort: atom<string>('') }
++})
++
++const getGlobalModelOptions = vi.fn()
++
++vi.mock('@/hermes', () => ({
++  getGlobalModelOptions: (...args: unknown[]) => getGlobalModelOptions(...args),
++  getLocalModelsJobs: vi.fn().mockResolvedValue({ jobs: [] }),
++  getLocalModelsStatus: vi.fn().mockResolvedValue({ loading: {} }),
++  setApiRequestProfile: vi.fn()
++}))
++
++import { QueryClientProvider } from '@tanstack/react-query'
++import { cleanup, render, screen } from '@testing-library/react'
++import { afterEach, beforeAll, expect, it, vi } from 'vitest'
++
++import { DropdownMenu, DropdownMenuContent } from '@/components/ui/dropdown-menu'
++import { queryClient } from '@/lib/query-client'
++import { setShowModelPricing } from '@/store/model-pricing'
++
++import { ModelCatalogMenu, ModelMenuCloseContext, type ModelMenuController } from './model-catalog-menu'
++
++beforeAll(() => {
++  Element.prototype.scrollIntoView = vi.fn()
++  Element.prototype.hasPointerCapture = vi.fn(() => false)
++  Element.prototype.releasePointerCapture = vi.fn()
++})
++
++afterEach(() => {
++  cleanup()
++  queryClient.clear()
++  setShowModelPricing(false)
++})
++
++// hyperhermes desktop-model-row-full-name.patch: a long name is never cut by
++// the price column. It may wrap (no `truncate`), the price sits on its own line
++// below it, and the row's tooltip is the full model id.
++it('gives the model name its own line, the price a second one, and the id as tooltip', async () => {
++  const id = 'deepseek/deepseek-v4.1-flash-1017'
++
++  getGlobalModelOptions.mockResolvedValue({
++    providers: [
++      {
++        models: [id],
++        name: 'OpenRouter',
++        pricing: { [id]: { cache: '$0.003', input: '$0.15', output: '$0.60' } },
++        slug: 'openrouter'
++      }
++    ]
++  })
++  setShowModelPricing(true)
++
++  const controller: ModelMenuController = {
++    applyPreset: vi.fn(),
++    current: { effort: '', fast: false, model: '', provider: '' },
++    presetFor: () => ({}),
++    select: vi.fn(),
++    setOptions: vi.fn()
++  }
++
++  render(
++    <QueryClientProvider client={queryClient}>
++      <ModelMenuCloseContext.Provider value={vi.fn()}>
++        <DropdownMenu open>
++          <DropdownMenuContent>
++            <ModelCatalogMenu controller={controller} />
++          </DropdownMenuContent>
++        </DropdownMenu>
++      </ModelMenuCloseContext.Provider>
++    </QueryClientProvider>
++  )
++
++  const nameText = await screen.findByText('DeepSeek V4.1 Flash 1017')
++  const name = nameText.closest('[data-model-menu-row-name]')!
++
++  expect(name.className).not.toMatch(/\btruncate\b/)
++  expect(name.className).toMatch(/whitespace-normal/)
++
++  const row = name.closest('[role="menuitem"]')!
++  const details = row.querySelector('[data-model-menu-row-details]')!
++
++  expect(details.textContent).toContain('$0.15/$0.60')
++  // The price is not a sibling of the name's line: it is on the line below.
++  expect(name.parentElement!.contains(details)).toBe(false)
++  expect(row.querySelector(`[title="${id}"]`)).toBeTruthy()
++})
+diff --git a/apps/desktop/src/app/shell/model-catalog-menu.test.tsx b/apps/desktop/src/app/shell/model-catalog-menu.test.tsx
+index 51920c0..7e0df3e 100644
+--- a/apps/desktop/src/app/shell/model-catalog-menu.test.tsx
++++ b/apps/desktop/src/app/shell/model-catalog-menu.test.tsx
+@@ -248,12 +248,15 @@ describe('the reasoning-effort badge (#51833)', () => {
+     expect(badge.textContent).toBe('High')
+     expect(badge.getAttribute('data-slot')).toBe('badge')
+ 
+-    // …as a SIBLING of the truncating model-name span, so it can never read as
++    // …as a SIBLING of the model-name span, so it can never read as
+     // part of a differently-named model. The `-flash` variant tag is its own
+     // chip between them (#118083); the name itself stays free of both.
+-    const nameSpan = badge.parentElement?.querySelector('.truncate')
++    // (hyperhermes desktop-model-row-full-name.patch: the name wraps instead
++    // of truncating and the setting chips sit on the row's second line, so
++    // the name is found in the row by its data attribute.)
++    const nameSpan = badge.closest('[role="menuitem"]')?.querySelector('[data-model-menu-row-name]')
+ 
+-    expect(nameSpan?.className).toContain('truncate')
++    expect(nameSpan).toBeTruthy()
+     expect(nameSpan?.contains(badge)).toBe(false)
+     expect(nameSpan?.textContent?.toLowerCase()).toContain('gemini 2.5')
+     expect(nameSpan?.textContent?.toLowerCase()).not.toContain('flash')
+diff --git a/apps/desktop/src/app/shell/model-catalog-menu.tsx b/apps/desktop/src/app/shell/model-catalog-menu.tsx
+index 61fb7c4..476d95b 100644
+--- a/apps/desktop/src/app/shell/model-catalog-menu.tsx
++++ b/apps/desktop/src/app/shell/model-catalog-menu.tsx
+@@ -101,7 +101,7 @@ function ModelPrice({ pricing }: { pricing: ModelPricing }) {
+   const cache = pricing.cache || null
+ 
+   if (pricing.free) {
+-    return <span className="shrink-0 pl-2 text-[0.625rem] text-(--ui-green)">{copy.free}</span>
++    return <span className="shrink-0 text-[0.625rem] text-(--ui-green)">{copy.free}</span>
+   }
+ 
+   if (!input && !output) {
+@@ -113,7 +113,7 @@ function ModelPrice({ pricing }: { pricing: ModelPricing }) {
+ 
+   return (
+     <span
+-      className="flex shrink-0 items-center gap-1.5 pl-2 text-[0.625rem] tabular-nums text-(--ui-text-tertiary)"
++      className="flex shrink-0 items-center gap-1.5 text-[0.625rem] tabular-nums text-(--ui-text-tertiary)"
+       title={copy.priceTitle(input ?? '—', output ?? '—', cache ?? '')}
+     >
+       <span>
+@@ -1166,37 +1166,47 @@ function ModelFamilyRow({
+             <Codicon name={favorite ? 'star-full' : 'star-empty'} size="0.75rem" />
+           </button>
+         </Tip>
+-        <span className={cn('flex min-w-0 flex-1 items-center gap-1.5', limit.tone)}>
+-          {decoration.icon !== undefined ? <ModelMenuRowIcon icon={decoration.icon} /> : null}
+-          <span className="min-w-0 truncate">
+-            <HighlightMatches foldSeparators query={search} text={name} />
++        {/* hyperhermes: the name owns the row. It wraps instead of being
++            cut to "DeepSee…" by the price/badge columns, and the details
++            (load bar, price, usage level, settings) sit on a second line
++            below it. The full model id is the row's tooltip. */}
++        <span className={cn('flex min-w-0 flex-1 flex-col gap-0.5', limit.tone)} title={family.id}>
++          <span className="flex min-w-0 items-center gap-1.5">
++            {decoration.icon !== undefined ? <ModelMenuRowIcon icon={decoration.icon} /> : null}
++            <span className="min-w-0 whitespace-normal break-words" data-model-menu-row-name="">
++              <HighlightMatches foldSeparators query={search} text={name} />
++            </span>
++            {tag ? <ModelChip>{tag}</ModelChip> : null}
++            {decoration.badge ? (
++              <Badge className="shrink-0 uppercase tracking-wide" data-model-menu-row-badge="" size="xs" variant="muted">
++                {decoration.badge}
++              </Badge>
++            ) : null}
+           </span>
+-          {tag ? <ModelChip>{tag}</ModelChip> : null}
+-          {decoration.badge ? (
+-            <Badge className="shrink-0 uppercase tracking-wide" data-model-menu-row-badge="" size="xs" variant="muted">
+-              {decoration.badge}
+-            </Badge>
++          {loadProgress || (showPricing && pricing && !rowLevel) || rowLevel || settings.length > 0 ? (
++            <span className="flex min-w-0 flex-wrap items-center gap-1.5" data-model-menu-row-details="">
++              {loadProgress ? (
++                <span className="flex shrink-0 items-center gap-1.5" title={copyPicker.loadingIntoMemory}>
++                  <span className="h-1 w-14 overflow-hidden rounded-full bg-(--ui-bg-tertiary)">
++                    <span
++                      className="block h-full rounded-full bg-primary transition-[width] duration-500"
++                      style={{ width: `${Math.max(2, loadProgress.percent)}%` }}
++                    />
++                  </span>
++                  <span className="text-[0.62rem] tabular-nums text-(--ui-text-tertiary)">{loadProgress.percent}%</span>
++                </span>
++              ) : null}
++              {showPricing && pricing && !rowLevel ? <ModelPrice pricing={pricing} /> : null}
++              {rowLevel ? <UsageLevelTag level={usageTag(provider, family.id)} /> : null}
++              {settings.map(setting => (
++                <ModelChip key={setting} setting>
++                  {setting}
++                </ModelChip>
++              ))}
++            </span>
+           ) : null}
+         </span>
+         <ModelResetBadge time={limit.reset} />
+-        {loadProgress ? (
+-          <span className="flex shrink-0 items-center gap-1.5" title={copyPicker.loadingIntoMemory}>
+-            <span className="h-1 w-14 overflow-hidden rounded-full bg-(--ui-bg-tertiary)">
+-              <span
+-                className="block h-full rounded-full bg-primary transition-[width] duration-500"
+-                style={{ width: `${Math.max(2, loadProgress.percent)}%` }}
+-              />
+-            </span>
+-            <span className="text-[0.62rem] tabular-nums text-(--ui-text-tertiary)">{loadProgress.percent}%</span>
+-          </span>
+-        ) : null}
+-        {showPricing && pricing && !rowLevel ? <ModelPrice pricing={pricing} /> : null}
+-        {rowLevel ? <UsageLevelTag level={usageTag(provider, family.id)} /> : null}
+-        {settings.map(setting => (
+-          <ModelChip key={setting} setting>
+-            {setting}
+-          </ModelChip>
+-        ))}
+         {isCurrent ? <Codicon className="text-foreground" name="check" size="0.75rem" /> : null}
+       </DropdownMenuSubTrigger>
+       <ModelEditSubmenu

@@ -1,0 +1,211 @@
+Remote model list: every provider the dashboard calls configured.
+
+Hermes One (v0.7.8) lists a remote dashboard's models from
+GET /api/model/options, but keeps only the current provider's row and
+user-defined endpoints (shouldIncludeRemoteOptionProvider). A built-in
+provider configured with a key, OpenRouter via OPENROUTER_API_KEY on
+dave-hermes (`source: built-in`, `is_current: false`), was therefore
+dropped whole: no OpenRouter model at all while anthropic is current.
+
+The app now asks for `?explicit_only=true` (hermes' own filter for
+desktop pickers: only explicitly configured providers, no ambient or
+auto-seeded credentials) and lists every row it returns except the MoA
+pseudo-provider. Tests: tests/remote-models.test.ts (new case with
+dave-hermes' row shapes; the configured-only case's fake dashboard
+honours the flag; the named-profile case now expects its second
+provider) and the IPC test's request path.
+
+diff --git a/src/main/remote-models.ipc.test.ts b/src/main/remote-models.ipc.test.ts
+index 69df00a..6898262 100644
+--- a/src/main/remote-models.ipc.test.ts
++++ b/src/main/remote-models.ipc.test.ts
+@@ -83,7 +83,7 @@ async function gateway(
+     });
+     // Match the actual raw Agent route contract: /api/model/library is absent;
+     // /api/model/options is an authenticated GET and returns picker inventory.
+-    if (request.url !== "/api/model/options") {
++    if (request.url !== "/api/model/options?explicit_only=true") {
+       response.writeHead(404).end("missing");
+       return;
+     }
+@@ -183,7 +183,7 @@ it("actual Legacy Remote list-models IPC reads the authenticated raw gateway cat
+     fixture.requests.map(({ method, path }) => ({ method, path })),
+   ).toEqual([
+     { method: "GET", path: "/api/model/library" },
+-    { method: "GET", path: "/api/model/options" },
++    { method: "GET", path: "/api/model/options?explicit_only=true" },
+   ]);
+   expect(
+     fixture.requests.every(
+diff --git a/src/main/remote-models.ts b/src/main/remote-models.ts
+index aa3aa7f..8e3496a 100644
+--- a/src/main/remote-models.ts
++++ b/src/main/remote-models.ts
+@@ -114,14 +114,17 @@ async function remoteModelLibraryRows(
+   }
+ }
+ 
++// hyperhermes: the picker asks the dashboard for its explicitly configured
++// providers (`explicit_only`, hermes' own filter: no ambient or auto-seeded
++// credentials) and lists all of them. Upstream kept only the current row and
++// user-defined endpoints, so a built-in provider configured with a key (e.g.
++// OpenRouter via OPENROUTER_API_KEY) never showed while another was current.
++export const REMOTE_MODEL_OPTIONS_PATH = "/api/model/options?explicit_only=true";
++
+ function shouldIncludeRemoteOptionProvider(row: RemoteRecord): boolean {
+-  const source = asString(row.source).trim();
+-  return (
+-    row.is_current === true ||
+-    row.is_user_defined === true ||
+-    source === "user-config" ||
+-    source === "custom"
+-  );
++  const slug = asString(row.slug, asString(row.provider)).trim().toLowerCase();
++  // The MoA pseudo-provider is a preset router, not a model catalog.
++  return slug !== "" && slug !== "moa";
+ }
+ 
+ function modelsFromRemoteOptions(response: unknown): SavedModel[] {
+@@ -215,9 +218,9 @@ export async function remoteListModels(
+   try {
+     // The configured library can contain only the active row on a fresh
+     // profile. Merge the current provider's picker options so switching models
+-    // remains possible, while modelsFromRemoteOptions keeps unrelated
+-    // authenticated providers out of the list.
+-    const response = await remoteRequestJson(config, "/api/model/options", {
++    // remains possible; explicit_only keeps ambient (unconfigured)
++    // credentials' providers out of the list.
++    const response = await remoteRequestJson(config, REMOTE_MODEL_OPTIONS_PATH, {
+       timeoutMs: libraryRows?.length
+         ? REMOTE_MODEL_OPTIONS_ENRICHMENT_TIMEOUT_MS
+         : REMOTE_MODEL_OPTIONS_TIMEOUT_MS,
+diff --git a/tests/remote-models.test.ts b/tests/remote-models.test.ts
+index 61d5919..b6bdff0 100644
+--- a/tests/remote-models.test.ts
++++ b/tests/remote-models.test.ts
+@@ -61,7 +61,7 @@ describe("remote dashboard models", () => {
+         );
+         return;
+       }
+-      if (req.url === "/api/model/options?profile=james") {
++      if (req.url?.startsWith("/api/model/options?") && new URL(req.url, "http://x").searchParams.get("profile") === "james") {
+         res.end(
+           JSON.stringify({
+             provider: "openai-codex",
+@@ -96,12 +96,13 @@ describe("remote dashboard models", () => {
+       "openai-codex/gpt-6.1",
+       "openai-codex/gpt-5.3-codex",
+       "openai-codex/gpt-5.2-codex",
++      // hyperhermes: every provider the dashboard returns for explicit_only.
++      "anthropic/claude-opus-5.5",
+     ]);
+     expect(models[0]).toMatchObject({
+       id: "remote:active:openai-codex:gpt-6.1",
+       name: "GPT-6.1",
+     });
+-    expect(models.some((model) => model.provider === "anthropic")).toBe(false);
+     expect(timeoutSpy).toHaveBeenNthCalledWith(1, 20_000, expect.any(Function));
+     expect(timeoutSpy).toHaveBeenNthCalledWith(2, 5_000, expect.any(Function));
+   });
+@@ -131,7 +132,7 @@ describe("remote dashboard models", () => {
+         );
+         return;
+       }
+-      expect(req.url).toBe("/api/model/options");
++      expect(req.url).toBe("/api/model/options?explicit_only=true");
+       res.statusCode = 503;
+       res.end("unavailable");
+     });
+@@ -157,14 +158,16 @@ describe("remote dashboard models", () => {
+         res.end("missing");
+         return;
+       }
+-      expect(req.url).toBe("/api/model/options");
++      // The dashboard's explicit_only filter (hermes) drops ambient rows.
++      const explicitOnly = req.url === "/api/model/options?explicit_only=true";
++      expect(req.url?.startsWith("/api/model/options")).toBe(true);
+       res.setHeader("Content-Type", "application/json");
+       res.end(
+         JSON.stringify({
+           provider: "custom",
+           model: "deepseek-v4-pro",
+           providers: [
+-            {
++            ...(explicitOnly ? [] : [{
+               slug: "nous",
+               name: "Nous Portal",
+               authenticated: true,
+@@ -177,7 +180,7 @@ describe("remote dashboard models", () => {
+               authenticated: true,
+               models: ["gpt-5.5"],
+               total_models: 1,
+-            },
++            }]),
+             {
+               slug: "my-endpoint",
+               name: "My Endpoint",
+@@ -203,6 +206,55 @@ describe("remote dashboard models", () => {
+     );
+   });
+ 
++  // hyperhermes: a built-in provider configured with a key (OpenRouter) is
++  // listed although another provider is current; the dashboard's own
++  // explicit_only filter decides what counts as configured.
++  it("lists every explicitly configured provider, OpenRouter included", async () => {
++    const { url } = await startServer((req, res) => {
++      if (req.url === "/api/model/library") {
++        res.statusCode = 404;
++        res.end("missing");
++        return;
++      }
++      expect(req.url).toBe("/api/model/options?explicit_only=true");
++      res.setHeader("Content-Type", "application/json");
++      res.end(
++        JSON.stringify({
++          provider: "anthropic",
++          model: "claude-opus-5-5",
++          providers: [
++            {
++              slug: "openrouter",
++              name: "OpenRouter",
++              source: "built-in",
++              is_current: false,
++              is_user_defined: false,
++              models: [
++                "deepseek/deepseek-v4.1-flash",
++                "deepseek/deepseek-v4.1-flash-1017",
++              ],
++            },
++            {
++              slug: "anthropic",
++              name: "Anthropic",
++              source: "built-in",
++              is_current: true,
++              models: ["claude-opus-5-5"],
++            },
++            { slug: "moa", name: "MoA", models: ["preset-a"] },
++          ],
++        }),
++      );
++    });
++
++    const models = await remoteListModels({ remoteUrl: url, apiKey: "token" });
++    expect(models.map((model) => `${model.provider}/${model.model}`)).toEqual([
++      "anthropic/claude-opus-5-5",
++      "openrouter/deepseek/deepseek-v4.1-flash",
++      "openrouter/deepseek/deepseek-v4.1-flash-1017",
++    ]);
++  });
++
+   it("reads the remote current model and writes changes through dashboard REST", async () => {
+     const seenBodies: unknown[] = [];
+     let current = {
+@@ -216,7 +268,7 @@ describe("remote dashboard models", () => {
+         res.end(JSON.stringify({ detail: "not found" }));
+         return;
+       }
+-      if (req.url === "/api/model/options") {
++      if (req.url?.split("?")[0] === "/api/model/options") {
+         res.setHeader("Content-Type", "application/json");
+         res.end(
+           JSON.stringify({

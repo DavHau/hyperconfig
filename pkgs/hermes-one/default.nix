@@ -3,6 +3,9 @@
 # nixpkgs' electron, as a remote-only client for hermes dashboards. Used by
 # ../../modules/nixos/dave-desktop/hermes-one.nix.
 #
+# ./remote-models-all-configured.patch: a remote dashboard's model list
+#   shows every explicitly configured provider (OpenRouter included), not
+#   only the current one and user-defined endpoints.
 # ./nix-remote-only.patch (tested by the build's vitest run):
 #   - sign-in: a dashboard that advertises `native_pkce` (hermes'
 #     /auth/native/*) is signed in through the user's own browser (RFC
@@ -51,7 +54,19 @@ buildNpmPackage rec {
     hash = "sha256-tjzxSWFRNEsJ0EJS0zXFIdR4Z4q6HlaZRl9l10l2FBo=";
   };
 
-  patches = [ ./nix-remote-only.patch ];
+  patches = [
+    ./nix-remote-only.patch
+    ./remote-models-all-configured.patch
+  ];
+
+  # ./remote-models-all-configured.patch's behaviour (and upstream's cases
+  # for the same file).
+  postCheck = ''
+    # These import the `electron` npm stub, which has no binary here.
+    ELECTRON_OVERRIDE_DIST_PATH=${electron}/bin \
+    node node_modules/vitest/vitest.mjs run \
+      tests/remote-models.test.ts src/main/remote-models.ipc.test.ts
+  '';
 
   npmDepsHash = "sha256-yjLIByolfYcOjgCZ+gZuOSf9sx8AwwQZiW5hEr64fRY=";
   nodejs = nodejs_22;
