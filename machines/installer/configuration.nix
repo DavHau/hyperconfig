@@ -43,9 +43,37 @@
   fileSystems."/" = lib.mkDefault { device = "none"; fsType = "tmpfs"; };
   boot.loader.grub.enable = lib.mkDefault false;
 
+  # nixpkgs removed the scripted initrd and with it the option
+  # boot.initrd.systemd.enable: reading it throws, setting it fails an
+  # assertion. clan-core's iso image module still reads it to pick its
+  # extra-files extraction (clan-core main as of 2026-11 too). Swap it for
+  # the same module that is told the systemd initrd is on, the only initrd
+  # left; drop this once clan-core stops reading the option.
+  disabledModules = [ "${clan-core.sourceInfo}/nixosModules/clanCore/image/iso" ];
+  imports = [
+    ({config, lib, pkgs, ...}@args: let
+      clanIso = import "${clan-core.sourceInfo}/nixosModules/clanCore/image/iso" args;
+    in clanIso // {
+      config = clanIso.config // {
+        image.modules.iso = {config, lib, pkgs, ...}@isoArgs: let
+          c = isoArgs.config;
+        in clanIso.config.image.modules.iso (isoArgs // {
+          config = c // { boot = c.boot // { initrd = c.boot.initrd // {
+            systemd = c.boot.initrd.systemd // { enable = true; };
+          }; }; };
+        });
+      };
+    })
+  ];
+
   image.modules.kexecTarball = {config, ...}: {
+    # nixos-images' restore-remote-access.nix sets the removed
+    # boot.initrd.systemd.enable = true (nix-community/nixos-images#453, open
+    # as of 2026-11): keep its initrd service, drop the option.
+    disabledModules = [ "${inputs.nixos-images}/nix/restore-remote-access.nix" ];
     imports = [
       inputs.nixos-images.nixosModules.kexec-installer
+      { boot.initrd.systemd.services = (import "${inputs.nixos-images}/nix/restore-remote-access.nix").boot.initrd.systemd.services; }
     ];
     system.build.image = lib.mkForce config.system.build.kexecInstallerTarball;
 
