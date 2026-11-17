@@ -102,6 +102,9 @@ let
       digest-json)
         cat ${briefState}/digest.json
         exit "$(cat ${briefState}/digest-rc 2>/dev/null || echo 0)" ;;
+      recurring-json)
+        cat ${briefState}/recurring.json 2>/dev/null || echo '{"tasks": []}'
+        exit "$(cat ${briefState}/recurring-rc 2>/dev/null || echo 0)" ;;
     esac
     exit 8
   '';
@@ -386,7 +389,8 @@ pkgs.testers.runNixOSTest {
     # dispatcher; the root helper is a stub working in ${briefState}
     # (send/send-nostamp: the verb to verb.txt, stdin to sent.txt, exit
     # with send-rc if present;
-    # digest-json: digest.json, exit with digest-rc if present).
+    # digest-json: digest.json, exit with digest-rc if present;
+    # recurring-json: recurring.json (no tasks if absent), recurring-rc).
     users.users.fleet-brief = {
       isSystemUser = true;
       group = "fleet-brief";
@@ -916,7 +920,7 @@ pkgs.testers.runNixOSTest {
           brief_ssh = ("ssh -F /dev/null -i /run/infra-space/secrets/brief-ssh -o IdentitiesOnly=yes "
                        "-o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/dev/null "
                        "-o GlobalKnownHostsFile=/etc/ssh/ssh_known_hosts")
-          for cmd in ["id", "send x", "'send; id'", "send-nostamp x", "digest-json --dry-run"]:
+          for cmd in ["id", "send x", "'send; id'", "send-nostamp x", "digest-json --dry-run", "recurring-json x"]:
               code, out = guest(memberA, f"{brief_ssh} -l fleet-brief managed {cmd} 2>&1", check=False)
               assert code != 0 and "refused" in out, (cmd, code, out)
           code, out = guest(memberA, f"{brief_ssh} -l root managed id 2>&1", check=False)
@@ -961,6 +965,21 @@ pkgs.testers.runNixOSTest {
           out = sent()
           assert out is not None and "Nightly nixpkgs bump failed last night" in out, out
           guest(memberA, "rm -r /home/infra/nixpkgs-bump")
+          # the recurring tasks' section (edi's recurring-json): the stale
+          # one with its age against its SLO; all fresh is one line, sent
+          managed.succeed("""echo '{"tasks": [{"task": "decisions-curate", "fresh": true}, {"task": "nixpkgs-bump", "fresh": false, "what": "main nixpkgs", "problems": [{"kind": "result", "why": "old", "age": 2160000, "slo": 604800}]}]}' > ${briefState}/recurring.json""")
+          brief_run()
+          out = sent()
+          assert out is not None and "Recurring: 1/2 fresh" in out and "- nixpkgs-bump: main nixpkgs 25d old (SLO 7d)" in out, out
+          managed.succeed("""echo '{"tasks": [{"task": "decisions-curate", "fresh": true}]}' > ${briefState}/recurring.json""")
+          brief_run()
+          out = sent()
+          assert out is not None and out.strip() == "Recurring: 1/1 fresh", out
+          managed.succeed("echo 1 > ${briefState}/recurring-rc")
+          brief_run()
+          out = sent()
+          assert out is not None and "Recurring tasks: status could not be read" in out, out
+          managed.succeed("rm ${briefState}/recurring.json ${briefState}/recurring-rc")
           # a job's inbox line, a takedown notice, a warning
           guest(memberA, """printf '%s\\n' '{"title": "Take down foo?", "severity": "critical", "options": ["a) yes", "b) no"], "source": "cve-watch", "needs_dave": "noticeable: foo stops"}' '{"title": "Keep engines off", "recommendation": "no change", "source": "research"}' '{"title": "Urgent without a reason", "severity": "critical", "recommendation": "stop it", "source": "cve-watch"}' '{"kind": "notice", "text": "stopped foo.service on bam", "source": "cve-watch"}' >> /var/lib/infra-space/decisions/inbox.jsonl""")
           guest(memberA, "decision add --title 'Buy a proxy?' --urgency low --source test --needs-dave 'money: 20 USD'")

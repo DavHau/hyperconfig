@@ -289,7 +289,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/porkbun-records/stub.py — A stand-in for porkbun's JSON API v3, for the VM tests: <- m/porkbun-records/test.nix
 - modules/nixos/porkbun-records/sync.sh — porkbun-records-sync [--dry-run] <config.json> <- m/porkbun-records/default.nix
 - modules/nixos/porkbun-records/test.nix — ./default.nix against ./stub.py (porkbun's API on 127.0.0.1:8053): <- flake.nix
-- modules/nixos/recurring-tasks/default.nix — Freshness of the fleet's recurring tasks: <- modules/flake-parts/nixosConfigurations.nix, m/recurring-tasks/test.nix
+- modules/nixos/recurring-tasks/default.nix — Freshness of the fleet's recurring tasks: <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/decisions.nix, m/recurring-tasks/test.nix, m/telegram-send/default.nix
 - modules/nixos/recurring-tasks/promql.nix — The recurring-task SLO checks as PromQL, shared by the Grafana rules (../monitoring-alerts.nix) and the VM test (./test… <- m/monitoring-alerts.nix, m/recurring-tasks/default.nix, m/recurring-tasks/test.nix
 - modules/nixos/recurring-tasks/recurring_tasks.py — - <- m/recurring-tasks/default.nix
 - modules/nixos/recurring-tasks/registry.nix — The fleet's recurring tasks, as data: <- m/monitoring-alerts.nix, m/recurring-tasks/default.nix

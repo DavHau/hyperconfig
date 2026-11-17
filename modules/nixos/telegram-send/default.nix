@@ -10,7 +10,9 @@
   on som, ../infra-space/default.nix; the private half is a credential
   of the guest that runs the brief), authorized as
   `restrict,command="fleet-brief-dispatch"`: ./dispatch.sh allows exactly
-  `send`, `send-nostamp` (the message on stdin) and `digest-json` by
+  `send`, `send-nostamp` (the message on stdin), `digest-json` and
+  `recurring-json` (the recurring tasks' freshness from Mimir,
+  ../recurring-tasks) by
   SSH_ORIGINAL_COMMAND, each through one sudo rule to the root helper
   below, which runs the work as a DynamicUser transient unit with the
   digest's sandbox, capped at RuntimeMaxSec=120. Sends run one at a time
@@ -106,6 +108,13 @@ let
     echo "fleet-telegram-send: the send unit ended with $rc; it may have arrived" >&2
     exit 3
   '';
+  # The recurring tasks' freshness from Mimir (loopback, no auth), as
+  # ../recurring-tasks judges it, in the digest's sandbox.
+  mimir = config.services.mimir.configuration.server;
+  mimirUrl = "http://127.0.0.1:${toString mimir.http_listen_port}${mimir.http_path_prefix}/prometheus";
+  recurringCmd = pkgs.writeShellScript "fleet-recurring-json-run" ''
+    exec ${run} -p After=mimir.service ${config.hyper.recurringTasks.statusCommand mimirUrl}
+  '';
   digestCmd = pkgs.writeShellScript "fleet-alert-digest-json-run" ''
     exec ${run} -p ${lib.escapeShellArg "LoadCredential=${digest.tokenCredential}"} \
       -p After=grafana.service -p Wants=fleet-alert-digest-token.service -p After=fleet-alert-digest-token.service \
@@ -118,6 +127,7 @@ let
       send) exec ${sendCmd} --mark-brief ;;
       send-nostamp) exec ${sendCmd} ;;
       digest-json) exec ${digestCmd} ;;
+      recurring-json) exec ${recurringCmd} ;;
     esac
     exit 2
   '';
@@ -129,6 +139,7 @@ let
   # For root on edi (by hand): the same runs.
   cliSend = pkgs.writeShellScriptBin "fleet-telegram-send" ''exec ${sendCmd} "$@"'';
   cliDigest = pkgs.writeShellScriptBin "fleet-alert-digest-json" "exec ${digestCmd}";
+  cliRecurring = pkgs.writeShellScriptBin "fleet-recurring-json" "exec ${recurringCmd}";
 
   skipIfBriefSent = pkgs.writeShellScript "fleet-alert-digest-skip-if-briefed" ''
     today=$(TZDIR=${pkgs.tzdata}/share/zoneinfo TZ=Asia/Bangkok ${pkgs.coreutils}/bin/date +%F)
@@ -143,6 +154,7 @@ in
     environment.systemPackages = [
       cliSend
       cliDigest
+      cliRecurring
     ];
 
     users.users.${user} = {
@@ -168,6 +180,7 @@ in
               "send"
               "send-nostamp"
               "digest-json"
+              "recurring-json"
             ];
       }
     ];

@@ -714,7 +714,53 @@ def decided_for_him(store, at, hours=24):
     return [d for _, d in sorted(out, key=lambda x: x[0], reverse=True)]
 
 
-def brief(store, digest, at=None, digest_failed=False, bump_log_dir=None):
+def span(seconds):
+    """A duration for the brief: 45min, 30h, 12d."""
+    m = int(seconds) // 60
+    if m < 120:
+        return f"{m}min"
+    if m < 48 * 60:
+        return f"{m // 60}h"
+    return f"{m // 1440}d"
+
+
+RECURRING_SHOWN = 6
+
+
+def recurring_lines(status):
+    """The recurring tasks' section (`recurring-tasks status`: {total,
+    fresh, tasks: [{task, fresh, what, problems: [{kind, why, age, slo}]}]}),
+    read leniently: [] when it has no tasks."""
+    if not isinstance(status, dict) or not isinstance(status.get("tasks"), list) or not status["tasks"]:
+        return []
+    tasks = [t for t in status["tasks"] if isinstance(t, dict)]
+    stale = [t for t in tasks if t.get("fresh") is not True]
+    out = [f"Recurring: {len(tasks) - len(stale)}/{len(tasks)} fresh"]
+    for t in stale[:RECURRING_SHOWN]:
+        name = clean(t.get("task"), "title")
+        whys = []
+        for p in t.get("problems") or []:
+            if not isinstance(p, dict):
+                continue
+            age, slo = p.get("age"), p.get("slo")
+            num = isinstance(age, (int, float)) and isinstance(slo, (int, float))
+            kind, why = p.get("kind"), p.get("why")
+            if kind == "exporter":
+                whys.append("its host reports nothing" + (f" for {span(age)}" if isinstance(age, (int, float)) else ""))
+            elif kind == "result":
+                what = clean(t.get("what"), "title") or "result"
+                whys.append(f"{what} {span(age)} old (SLO {span(slo)})" if num and why == "old"
+                            else f"{what} not measured")
+            elif kind == "run":
+                whys.append(f"last success {span(age)} ago (SLO {span(slo)})" if num and why == "late"
+                            else "no successful run on record")
+        out.append(f"- {name}: {'; '.join(whys) or 'stale'}")
+    if len(stale) > RECURRING_SHOWN:
+        out.append(f"- and {len(stale) - RECURRING_SHOWN} more (Grafana: Recurring task stale)")
+    return out
+
+
+def brief(store, digest, at=None, digest_failed=False, bump_log_dir=None, recurring=None, recurring_failed=False):
     """The morning brief: (text, notice ids shown). Empty text = nothing
     to send. Notices beyond BRIEF_NOTICES stay for the next brief.
     Only decisions that cleared the bar (needs_dave) are listed; the
@@ -761,6 +807,12 @@ def brief(store, digest, at=None, digest_failed=False, bump_log_dir=None):
         if parts:
             parts.append("")
         parts.append("Nightly nixpkgs bump failed last night (~/nixpkgs-bump in infra-space).")
+    rec = recurring_lines(recurring)
+    if rec or recurring_failed:
+        # always, all fresh included: the line is the proof they ran
+        if parts:
+            parts.append("")
+        parts.extend(rec or ["Recurring tasks: status could not be read (check Grafana)."])
     shown_notices = notices[:BRIEF_NOTICES]
     if notices:
         if parts:
@@ -910,6 +962,8 @@ def main(argv=None, store_dir=DIR):
     br.add_argument("--digest-json", metavar="FILE", help="the alert digest's JSON output")
     br.add_argument("--digest-failed", action="store_true", help="say the digest could not be read")
     br.add_argument("--bump-log-dir", metavar="DIR", help="the nightly bump's logs: a line when last night's failed")
+    br.add_argument("--recurring-json", metavar="FILE", help="the recurring tasks' freshness (recurring-tasks status)")
+    br.add_argument("--recurring-failed", action="store_true", help="say the recurring tasks' status could not be read")
     br.add_argument("--json", action="store_true", help='{"text": ..., "notices": [ids shown], "send": "send" | "send-nostamp"}')
 
     args = p.parse_args(argv)
@@ -1155,7 +1209,16 @@ def run(st, args, by, ingested):
             except (OSError, ValueError) as e:
                 print(f"decision: digest unreadable, left out: {e}", file=sys.stderr)
         failed = args.digest_failed or (bool(args.digest_json) and not digest_ok)
-        text, ids = brief(st, digest, digest_failed=failed, bump_log_dir=args.bump_log_dir)
+        recurring, rec_failed = None, args.recurring_failed
+        if args.recurring_json and not rec_failed:
+            try:
+                with open(args.recurring_json) as f:
+                    recurring = json.loads(f.read(INBOX_MAX_BYTES))
+            except (OSError, ValueError) as e:
+                print(f"decision: recurring status unreadable, left out: {e}", file=sys.stderr)
+                rec_failed = True
+        text, ids = brief(st, digest, digest_failed=failed, bump_log_dir=args.bump_log_dir,
+                          recurring=recurring, recurring_failed=rec_failed)
         if args.json:
             # send: "send" stamps the day on edi (its own 09:30 digest is
             # skipped); only a brief that really carries the digest may.

@@ -42,12 +42,16 @@
       open questions that cleared the bar (urgent first), a "decided for
       you since yesterday" count with two examples, the warning digest (space.decisions.digestCommand;
       a line when it could not be read), a line when last night's
-      nixpkgs bump failed (nobody is paged for that) and the night's
-      notices (six; the rest wait); nothing to say, nothing sent. It is
+      nixpkgs bump failed (nobody is paged for that), "Recurring: N/M
+      fresh" with a line per stale task, its age against its SLO
+      (space.decisions.recurringCommand: edi's `recurring-json`, Mimir's
+      view of ../recurring-tasks; always there, so the brief goes out
+      every day) and the night's notices (six; the rest wait); nothing
+      to say, nothing sent. It is
       sent by space.decisions.sendCommand. By default both go to edi
       (../telegram-send) over ssh with the dedicated `brief-ssh` key as
       the unprivileged `fleet-brief`, whose forced command allows only
-      `send`, `send-nostamp` and `digest-json`: the bot token never
+      `send`, `send-nostamp`, `digest-json` and `recurring-json`: the bot token never
       leaves edi. That is defence in depth, not a trust boundary: the
       agent's fleet root key reaches edi anyway. A brief carrying the
       digest goes out with `send`, which stamps the day on edi; its own
@@ -67,10 +71,11 @@
   ./nixpkgs-bump.nix (wants/after the gateway, restartIfChanged off,
   explicit zone).
 
-  Known gap, as for the bump: a failed unit in the guest pages nobody
-  (no exporter in the container). A failed brief shows in the guest's
-  journal and as no message; the warnings still come, from edi's 09:30
-  fallback digest (unstamped day).
+  A failed run of either unit shows as a stale recurring task
+  (../recurring-tasks reads the guest's units from som's host): a
+  warning in the next digest. A failed brief also shows as no message;
+  the warnings still come, from edi's 09:30 fallback digest (unstamped
+  day).
 */
 {
   config,
@@ -146,6 +151,7 @@ let
   '';
 
   digestScript = lib.mapNullable (pkgs.writeShellScript "decisions-digest") cfg.digestCommand;
+  recurringScript = lib.mapNullable (pkgs.writeShellScript "decisions-recurring") cfg.recurringCommand;
   # $1: send (stamps the day on edi) or send-nostamp
   sendScript = pkgs.writeShellScript "decisions-send" cfg.sendCommand;
 
@@ -166,7 +172,16 @@ let
         digest=(--digest-failed)
       fi
     ''}
-    ${bin} --by morning-brief brief --json --bump-log-dir ${home}/nixpkgs-bump "''${digest[@]}" >"$tmp/brief.json" || exit 1
+    recurring=()
+    ${lib.optionalString (recurringScript != null) ''
+      if timeout 180 ${recurringScript} >"$tmp/recurring.json" 2>"$tmp/recurring.err"; then
+        recurring=(--recurring-json "$tmp/recurring.json")
+      else
+        echo "decisions-brief: the recurring tasks' status failed: $(head -c 400 "$tmp/recurring.err")" >&2
+        recurring=(--recurring-failed)
+      fi
+    ''}
+    ${bin} --by morning-brief brief --json --bump-log-dir ${home}/nixpkgs-bump "''${digest[@]}" "''${recurring[@]}" >"$tmp/brief.json" || exit 1
     jq -r .text "$tmp/brief.json" >"$tmp/text"
     if ! grep -q '[^[:space:]]' "$tmp/text"; then
       echo "decisions-brief: nothing to say, nothing sent"
@@ -245,6 +260,16 @@ in
       description = ''
         Shell command printing the warning digest as JSON (fleet-alert-digest
         --json's list) for the morning brief; null leaves warnings out.
+      '';
+    };
+    recurringCommand = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = "${briefSsh} recurring-json";
+      defaultText = lib.literalMD "`recurring-json` over the brief's ssh";
+      description = ''
+        Shell command printing the recurring tasks' freshness as JSON
+        (`recurring-tasks status`, ../recurring-tasks) for the brief's
+        "Recurring: N/M fresh" section; null leaves it out.
       '';
     };
     sendCommand = lib.mkOption {

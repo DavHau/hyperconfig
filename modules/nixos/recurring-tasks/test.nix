@@ -111,7 +111,12 @@ pkgs.testers.runNixOSTest {
       ];
     };
 
-  testScript = ''
+  testScript =
+    { nodes, ... }:
+    let
+      status = nodes.machine.hyper.recurringTasks.statusCommand "http://127.0.0.1:9090";
+    in
+    ''
     import json, time, urllib.parse
 
     def q(expr):
@@ -230,5 +235,16 @@ pkgs.testers.runNixOSTest {
         assert q(${builtins.toJSON (promql.exporterSilent [ "never-deployed" ])}) == []
         r = q(${builtins.toJSON (promql.exporterSilent [ "machine" "silent-host" "never-deployed" ])})
         assert [x["metric"].get("instance") for x in r] == ["silent-host"], r
+
+    with subtest("status (the brief's section) reads the same verdict from the metrics store"):
+        st = json.loads(machine.succeed("${status}"))
+        by = {t["task"]: t for t in st["tasks"]}
+        assert (st["fresh"], st["total"]) == (0, 3), st
+        assert [p["why"] for p in by["guest-fake"]["problems"]] == ["late"], by
+        assert {p["why"] for p in by["fake"]["problems"]} == {"late", "not measured"}, by
+        assert [p["kind"] for p in by["elsewhere"]["problems"]] == ["exporter"], by
+        machine.succeed("systemctl -M guest start guest-task.service")
+        export()
+        machine.wait_until_succeeds("${status} | jq -e '.tasks[] | select(.task == \"guest-fake\") | .fresh'", timeout=60)
   '';
 }

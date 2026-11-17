@@ -1,10 +1,13 @@
 """Unit tests of ./recurring_tasks.py, run by ./default.nix at build time."""
 
+import io
 import json
 import os
 import stat
 import tempfile
+import urllib.parse
 import unittest
+from contextlib import redirect_stdout
 from unittest import mock
 
 import recurring_tasks as rt
@@ -193,6 +196,56 @@ class Probe(unittest.TestCase):
             with open(out) as f:
                 data = json.load(f)
             self.assertEqual(data, {"at": NOW, "results": {"ok": 1792773339.0, "float": 1792773339.5}})
+
+
+class Status(unittest.TestCase):
+    REG = {
+        "bump": {"host": "som", "run_slo": 100, "result_slo": 1000, "result_what": "main's nixpkgs", "repair": "nixpkgs-bump"},
+        "brief": {"host": "som", "run_slo": 100},
+        "pin": {"host": "som", "result_slo": 1000, "result_what": "pin"},
+        "sync": {"host": "bam", "run_slo": 100},
+    }
+
+    def opener(self, series):
+        def op(url, timeout=30):
+            expr = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["query"][0]
+            res = [{"metric": {"instance": i, **({"task": t} if t else {})}, "value": [NOW, str(v)]}
+                   for (name, i, t), v in series.items() if name == expr]
+            return io.BytesIO(json.dumps({"status": "success", "data": {"result": res}}).encode())
+        return op
+
+    def status(self, series):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rt.cmd_status(self.REG, "http://m", now=NOW, opener=self.opener(series))
+        return json.loads(out.getvalue())
+
+    def test_judgement(self):
+        beat = "recurring_tasks_exporter_last_run_seconds"
+        last = "recurring_task_last_success_seconds"
+        age = "recurring_task_result_age_seconds"
+        r = self.status({
+            (beat, "som", ""): NOW - 60,
+            (beat, "bam", ""): NOW - 7200,
+            (last, "som", "bump"): NOW - 50,
+            (age, "som", "bump"): 2000,
+            (last, "som", "brief"): NOW - 10,
+            (last, "bam", "sync"): NOW,
+        })
+        by = {t["task"]: t for t in r["tasks"]}
+        self.assertEqual((r["fresh"], r["total"]), (1, 4))
+        self.assertTrue(by["brief"]["fresh"])
+        self.assertEqual(by["bump"]["problems"], [{"kind": "result", "why": "old", "age": 2000, "slo": 1000}])
+        self.assertEqual(by["bump"]["what"], "main's nixpkgs")
+        self.assertEqual(by["pin"]["problems"][0]["why"], "not measured")
+        # bam's exporter silent: its last success is not trusted
+        self.assertEqual([p["kind"] for p in by["sync"]["problems"]], ["exporter"])
+
+    def test_query_error(self):
+        def op(url, timeout=30):
+            return io.BytesIO(b'{"status": "error", "error": "bad"}')
+        with self.assertRaises(ValueError):
+            rt.cmd_status(self.REG, "http://m", now=NOW, opener=op)
 
 
 if __name__ == "__main__":

@@ -197,10 +197,12 @@ class Dispatch(unittest.TestCase):
         self.assertEqual(calls, "-n ROOT send-nostamp\nno digest")
         rc, calls, _ = self.run_dispatch("digest-json")
         self.assertEqual((rc, calls), (0, "-n ROOT digest-json\n"))
+        rc, calls, _ = self.run_dispatch("recurring-json")
+        self.assertEqual((rc, calls), (0, "-n ROOT recurring-json\n"))
 
     def test_refused(self):
         for bad in (None, "", "bash", "send; id", "send x", " send", "send\n", "digest-json --dry-run",
-                    "send-nostamp x", "send-nostamp --mark-brief", "send nostamp", "send-",
+                    "send-nostamp x", "send-nostamp --mark-brief", "recurring-json x", "recurring", "send nostamp", "send-",
                     "fleet-telegram-send", "scp -t /tmp", "internal-sftp", "$(id)"):
             rc, calls, err = self.run_dispatch(bad)
             self.assertEqual(rc, 2, bad)

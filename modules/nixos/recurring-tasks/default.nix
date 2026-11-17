@@ -139,6 +139,18 @@ let
   };
 
   agents = config.services.hyperhermes.agents or { };
+
+  # For `status` (the brief, on the monitoring server): every host's tasks.
+  registryJson = pkgs.writeText "recurring-tasks-registry.json" (
+    builtins.toJSON (
+      lib.mapAttrs (_: t: {
+        inherit (t) host repair;
+        run_slo = t.runSlo;
+        result_slo = if t.result == null then null else t.result.slo;
+        result_what = if t.result == null then null else t.result.what;
+      }) cfg.tasks
+    )
+  );
 in
 {
   options.hyper.recurringTasks = {
@@ -156,6 +168,13 @@ in
       ) agents;
       defaultText = lib.literalMD "every `services.hyperhermes.agents` entry's HERMES_HOME";
       description = "Hermes agents whose cron jobs are counted (agent -> HERMES_HOME); the name is the agent's user, whose rights the files are read with.";
+    };
+    statusCommand = lib.mkOption {
+      type = lib.types.functionTo lib.types.str;
+      readOnly = true;
+      default = url: "${bin} status --registry ${registryJson} --url ${lib.escapeShellArg url}";
+      defaultText = lib.literalMD "`recurring-tasks status` of the whole registry";
+      description = "Given Mimir's Prometheus API URL: a command printing every task's freshness as JSON (the morning brief's section).";
     };
   };
 

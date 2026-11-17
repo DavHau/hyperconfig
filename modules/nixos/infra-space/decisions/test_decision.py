@@ -481,6 +481,43 @@ class Registry(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("left out", err)
 
+    def test_brief_recurring(self):
+        rec = os.path.join(self.dir, "recurring.json")
+        with open(rec, "w") as f:
+            json.dump({"total": 3, "fresh": 1, "tasks": [
+                {"task": "decisions-brief", "fresh": True, "problems": []},
+                {"task": "nixpkgs-bump", "fresh": False, "what": "main's nixpkgs", "problems": [
+                    {"kind": "run", "why": "late", "age": 30 * 3600, "slo": 26 * 3600},
+                    {"kind": "result", "why": "old", "age": 25 * 86400, "slo": 7 * 86400}]},
+                {"task": "storagebox-sync", "fresh": False, "problems": [{"kind": "exporter", "why": "host not reporting", "age": None}]},
+            ]}, f)
+        text = self.ok("brief", "--recurring-json", rec)
+        self.assertIn("Recurring: 1/3 fresh", text)
+        self.assertIn("- nixpkgs-bump: last success 30h ago (SLO 26h); main's nixpkgs 25d old (SLO 7d)", text)
+        self.assertIn("- storagebox-sync: its host reports nothing", text)
+        self.assertNotIn("decisions-brief", text)
+        # all fresh: one line, still sent
+        with open(rec, "w") as f:
+            json.dump({"tasks": [{"task": "a", "fresh": True}, {"task": "b", "fresh": True}]}, f)
+        self.assertEqual(self.ok("brief", "--recurring-json", rec).strip(), "Recurring: 2/2 fresh")
+        # unreadable or failed: a line instead
+        with open(rec, "w") as f:
+            f.write("{broken")
+        rc, out, err = self.cli("brief", "--recurring-json", rec)
+        self.assertEqual(rc, 0)
+        self.assertIn("status could not be read", out)
+        self.assertIn("could not be read", self.ok("brief", "--recurring-failed"))
+        # many stale: capped
+        with open(rec, "w") as f:
+            json.dump({"tasks": [{"task": f"t{i}", "fresh": False, "problems": [{"kind": "run", "why": "no success on record"}]}
+                                 for i in range(9)]}, f)
+        text = self.ok("brief", "--recurring-json", rec)
+        self.assertIn("Recurring: 0/9 fresh", text)
+        self.assertIn("- t0: no successful run on record", text)
+        self.assertIn("- and 3 more", text)
+        self.assertNotIn("- t6", text)
+        self.assertEqual(decision.span(90 * 60), "90min")
+
     def test_digest_failure_alone_is_sent(self):
         # no open decisions, no notices: the failed digest is still a line
         # (edi skips its own digest once the brief went out)

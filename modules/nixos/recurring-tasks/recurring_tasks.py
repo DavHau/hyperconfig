@@ -3,6 +3,7 @@
 
     recurring-tasks probe  --config FILE   run the result probes, write their JSON
     recurring-tasks export --config FILE   write the textfile metrics
+    recurring-tasks status --registry FILE --url MIMIR   fresh/stale per task as JSON
 
 probe (unprivileged, network): each task's result command prints the unix
 time its result was made (e.g. main's nixpkgs lastModified); the times go
@@ -26,6 +27,10 @@ export (root, every 5 min): per task of this host
       user (read_cron_as), so a path the agent controls can never lead
       root's reads elsewhere, and whatever its files hold can only lose
       that agent's own counts, never the metrics file.
+
+status (edi, for the morning brief): the registry's tasks against
+Mimir's current series, judged as the alert rule does (../promql.nix),
+plus "not reported at all" (the host or its exporter is down).
 """
 
 import argparse
@@ -37,6 +42,8 @@ import re
 import subprocess
 import sys
 import time
+import urllib.parse
+import urllib.request
 
 # systemd's SD_MESSAGE_UNIT_SUCCESS ("<unit>: Deactivated successfully.")
 MSG_UNIT_SUCCESS = "7ad2d189f7e94e70a38c781354912448"
@@ -306,12 +313,79 @@ def cmd_probe(cfg, now=None):
     return 0
 
 
+# ---- status (edi) -------------------------------------------------------
+
+def query(url, expr, opener=urllib.request.urlopen):
+    """{(instance, task): value} of an instant query."""
+    q = urllib.parse.urlencode({"query": expr})
+    with opener(f"{url}/api/v1/query?{q}", timeout=30) as r:
+        data = json.load(r)
+    if data.get("status") != "success":
+        raise ValueError(f"query failed: {data.get('error')}")
+    return {(s["metric"].get("instance", ""), s["metric"].get("task", "")): float(s["value"][1])
+            for s in data["data"]["result"]}
+
+
+EXPORTER_SILENT = 3600
+
+
+def judge(registry, last, age, beat, now):
+    """Per registry task: fresh, or the reasons it is not (the alert
+    rule's four cases; a host whose exporter is silent says only that)."""
+    tasks = []
+    for name, t in sorted(registry.items()):
+        key = (t["host"], name)
+        problems = []
+        b = beat.get((t["host"], ""))
+        if b is None or now - b > EXPORTER_SILENT:
+            problems.append({"kind": "exporter", "why": "host not reporting", "age": None if b is None else now - b})
+            tasks.append({"task": name, "host": t["host"], "fresh": False, "problems": problems,
+                          "repair": t.get("repair"), "what": t.get("result_what")})
+            continue
+        if t.get("run_slo"):
+            ls = last.get(key)
+            if ls is None:
+                problems.append({"kind": "run", "why": "no success on record", "slo": t["run_slo"]})
+            elif now - ls > t["run_slo"]:
+                problems.append({"kind": "run", "why": "late", "age": now - ls, "slo": t["run_slo"]})
+        if t.get("result_slo"):
+            a = age.get(key)
+            if a is None:
+                problems.append({"kind": "result", "why": "not measured", "slo": t["result_slo"]})
+            elif a > t["result_slo"]:
+                problems.append({"kind": "result", "why": "old", "age": a, "slo": t["result_slo"]})
+        tasks.append({"task": name, "host": t["host"], "fresh": not problems, "problems": problems,
+                      "repair": t.get("repair"), "what": t.get("result_what")})
+    return {"total": len(tasks), "fresh": sum(1 for t in tasks if t["fresh"]), "tasks": tasks}
+
+
+def cmd_status(registry, url, now=None, opener=urllib.request.urlopen):
+    now = now or time.time()
+    last = query(url, "recurring_task_last_success_seconds", opener)
+    age = query(url, "recurring_task_result_age_seconds", opener)
+    beat = query(url, "recurring_tasks_exporter_last_run_seconds", opener)
+    json.dump(judge(registry, last, age, beat, now), sys.stdout, sort_keys=True)
+    sys.stdout.write("\n")
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="recurring-tasks")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for c in ("probe", "export"):
         sub.add_parser(c).add_argument("--config", required=True)
+    st = sub.add_parser("status")
+    st.add_argument("--registry", required=True)
+    st.add_argument("--url", required=True, help="Mimir's Prometheus API base, e.g. http://127.0.0.1:3001/mimir/prometheus")
     args = ap.parse_args(argv)
+    if args.cmd == "status":
+        with open(args.registry) as f:
+            registry = json.load(f)
+        try:
+            return cmd_status(registry, args.url.rstrip("/"))
+        except (OSError, ValueError, KeyError, TypeError, IndexError) as e:
+            log(f"status: {e}")
+            return 1
     with open(args.config) as f:
         cfg = json.load(f)
     return cmd_probe(cfg) if args.cmd == "probe" else cmd_export(cfg)
