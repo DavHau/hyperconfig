@@ -53,6 +53,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.openrouterApiKey.keyFile: modules/nixos/openrouter-api-key.nix
 - hyper.perUserTmp.enable: modules/nixos/per-user-tmp/default.nix
 - hyper.porkbunRecords: modules/nixos/porkbun-records/default.nix
+- hyper.recurringTasks: modules/nixos/recurring-tasks/default.nix
 - hyper.rgbOff.colorfulArgb: modules/nixos/rgb-off.nix
 - hyper.rgbOff.dramMode: modules/nixos/rgb-off.nix
 - hyper.scanTrigger: modules/nixos/scan-trigger/default.nix

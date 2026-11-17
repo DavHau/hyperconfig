@@ -291,6 +291,12 @@
           import ./modules/nixos/noctalia-anthropic-usage/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
+        # Recurring tasks' freshness exporter (host + nspawn guest) and
+        # the alert rule's PromQL against a local Prometheus.
+        recurring-tasks =
+          import ./modules/nixos/recurring-tasks/test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          };
         # bam's storagebox automount errors out instead of hanging.
         storagebox =
           import ./modules/nixos/storagebox-test.nix {

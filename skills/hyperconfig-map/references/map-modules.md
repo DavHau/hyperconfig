@@ -77,12 +77,12 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/llama-swap.nix — Extra llama-swap config for hyperconfig machines. <- amy
 - modules/nixos/locale.nix — Time zone, locale and console keymap for Dave's desktops. <- m/dave.nix
 - modules/nixos/low-battery-power-off.nix — - <- m/laptop.nix
-- modules/nixos/monitoring-alerts.nix — Fleet alerts: Grafana unified alerting on the monitoring server (edi), evaluated against the Mimir datasource the clan-… <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/nixpkgs-bump.nix, m/telegram-send/default.nix
+- modules/nixos/monitoring-alerts.nix — Fleet alerts: Grafana unified alerting on the monitoring server (edi), evaluated against the Mimir datasource the clan-… <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/nixpkgs-bump.nix, m/recurring-tasks/default.nix, m/telegram-send/default.nix
 - modules/nixos/monitoring-exec-usage.nix — "Unused packages" dashboard on the monitoring server's Grafana (stats.davhau.com/d/exec-usage), fed by ./exec-usage on… <- modules/flake-parts/nixosConfigurations.nix
 - modules/nixos/monitoring-grafana-sso.nix — Grafana of the clan-core monitoring server, published at stats.davhau.com behind the clan's pocket-id (modules/clan/oid… <- edi
 - modules/nixos/monitoring-server.nix — Local overrides for the clan-core monitoring server (Mimir + Loki). <- modules/flake-parts/nixosConfigurations.nix
 - modules/nixos/monitoring-teamclaude.nix — "TeamClaude usage" dashboard on the monitoring server's Grafana (stats.davhau.com/d/teamclaude-usage), fed by som's exp… <- modules/flake-parts/nixosConfigurations.nix
-- modules/nixos/monitoring-zfs-pools.nix — Pushes ZFS pool health and capacity to Mimir for ./monitoring-alerts.nix. <- modules/flake-parts/nixosConfigurations.nix
+- modules/nixos/monitoring-zfs-pools.nix — Pushes ZFS pool health and capacity to Mimir for ./monitoring-alerts.nix. <- modules/flake-parts/nixosConfigurations.nix, m/recurring-tasks/default.nix
 - modules/nixos/nautilus.nix — Nautilus right-click "Open in Ghostty" (folder background and folder items), via the nautilus-open-any-terminal extensi… <- m/dave.nix
 - modules/nixos/networking-desktop.nix — Desktop networking: NetworkManager, tailscale, and the wired link-local address (./wired-link-local.nix). <- m/dave.nix
 - modules/nixos/networkmanager-restart-late.nix — Keep the network up through switch-to-configuration's daemon-reload. <- modules/flake-parts/nixosConfigurations.nix
@@ -289,6 +289,12 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/porkbun-records/stub.py — A stand-in for porkbun's JSON API v3, for the VM tests: <- m/porkbun-records/test.nix
 - modules/nixos/porkbun-records/sync.sh — porkbun-records-sync [--dry-run] <config.json> <- m/porkbun-records/default.nix
 - modules/nixos/porkbun-records/test.nix — ./default.nix against ./stub.py (porkbun's API on 127.0.0.1:8053): <- flake.nix
+- modules/nixos/recurring-tasks/default.nix — Freshness of the fleet's recurring tasks: <- modules/flake-parts/nixosConfigurations.nix, m/recurring-tasks/test.nix
+- modules/nixos/recurring-tasks/promql.nix — The recurring-task SLO checks as PromQL, shared by the Grafana rules (../monitoring-alerts.nix) and the VM test (./test… <- m/monitoring-alerts.nix, m/recurring-tasks/default.nix, m/recurring-tasks/test.nix
+- modules/nixos/recurring-tasks/recurring_tasks.py — - <- m/recurring-tasks/default.nix
+- modules/nixos/recurring-tasks/registry.nix — The fleet's recurring tasks, as data: <- m/monitoring-alerts.nix, m/recurring-tasks/default.nix
+- modules/nixos/recurring-tasks/test.nix — ./default.nix on one machine with an nspawn guest: <- flake.nix, m/recurring-tasks/default.nix
+- modules/nixos/recurring-tasks/test_recurring_tasks.py — - <- m/recurring-tasks/default.nix
 - modules/nixos/role-iodine/default.nix — - <- nas
 - modules/nixos/role-sshuttle-server/default.nix — - <- nas
 - modules/nixos/scan-trigger/default.nix — scan-trigger: a LAN web page that pulls flatbed scans from a network MFP over eSCL (AirScan), builds one searchable PDF… <- machines/bam/scan-trigger.nix, m/scan-trigger/test.nix
@@ -393,7 +399,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/flake-parts/hermes-onboard.nix — -
 - modules/flake-parts/hermes-one.nix — -
 - modules/flake-parts/hygiene.nix — Repo hygiene lint (../../tools/hygiene, rules in ../../CONVENTIONS.md):
-- modules/flake-parts/nixosConfigurations.nix — - <- m/hermes-agents-backup/default.nix
+- modules/flake-parts/nixosConfigurations.nix — - <- m/hermes-agents-backup/default.nix, m/recurring-tasks/default.nix
 - modules/flake-parts/porkbun-dns.nix — -
 - modules/flake-parts/repo-map.nix — The hyperconfig-map agent skill's generated part (../../skills/hyperconfig-map, ../../tools/repo-map):
 - modules/flake-parts/router-ais.nix — -

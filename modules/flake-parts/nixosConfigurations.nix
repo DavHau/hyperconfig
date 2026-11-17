@@ -431,12 +431,16 @@ in {
             # Grafana at http://edi.d/grafana/. The service sets no retention,
             # so the server role adds it plus a loopback ring fix. Alerts
             # (Grafana unified alerting, Telegram) live in monitoring-alerts.nix;
-            # clients add ZFS pool health and capacity for its pool rules.
+            # clients add ZFS pool health and capacity for its pool rules,
+            # and the recurring tasks' freshness (recurring-tasks/).
             monitoring = {
               module.name = "monitoring";
               module.input = "clan-core";
               roles.client.tags.all = {};
-              roles.client.extraModules = [ ../../modules/nixos/monitoring-zfs-pools.nix ];
+              roles.client.extraModules = [
+                ../../modules/nixos/monitoring-zfs-pools.nix
+                ../../modules/nixos/recurring-tasks
+              ];
               roles.server.machines.edi.settings.grafana.enable = true;
               roles.server.extraModules = [
                 ../../modules/nixos/monitoring-server.nix

@@ -12,6 +12,11 @@
 #     held 30 min
 #   - SearXNG (som, ./searxng-canary) degraded for 1 h: < 2 relevant canary
 #     queries, >= 4 engines unresponsive, or the canary stale (warning)
+#   - a recurring task (./recurring-tasks: registry, exporter) past its SLO:
+#     no successful run in time, or its result too old (warning, held
+#     15 min); one generic rule, the SLOs come with the metrics
+#   - a recurring-tasks exporter silent for 1 h (critical): the dead man's
+#     switch, evaluated here on edi, independent of the exporting host
 # ZFS is judged per pool from ./monitoring-zfs-pools.nix (pool health and the
 # root dataset's used/avail) plus per-dataset quota usage from the same
 # exporter; per-dataset filesystem series are skipped.
@@ -201,6 +206,9 @@ let
     };
 
   telegram = config.clan.core.vars.generators.grafana-telegram.files;
+
+  recurring = import ./recurring-tasks/promql.nix { inherit lib; };
+  recurringHosts = lib.unique (lib.mapAttrsToList (_: t: t.host) (import ./recurring-tasks/registry.nix));
 in
 {
   options.hyper.monitoringAlerts = {
@@ -369,6 +377,22 @@ in
                 for = "1h";
                 severity = "warning";
                 summary = "SearXNG on {{ .Labels.instance }} degraded for an hour: {{ .Labels.tripped }}";
+              })
+              (rule {
+                uid = "recurring-task-stale";
+                title = "Recurring task stale";
+                expr = recurring.stale;
+                for = "15m";
+                severity = "warning";
+                summary = "Recurring task {{ .Labels.task }} ({{ .Labels.instance }}): {{ .Labels.why }}";
+              })
+              (rule {
+                uid = "recurring-tasks-exporter-silent";
+                title = "Recurring-task exporter silent";
+                expr = recurring.exporterSilent recurringHosts;
+                for = "5m";
+                severity = "critical";
+                summary = "{{ .Labels.instance }} has not reported its recurring tasks for over an hour: nothing watches them";
               })
             ];
           }
