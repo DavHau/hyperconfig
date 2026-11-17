@@ -42,7 +42,10 @@
   172.16/12, 192.168/16, 169.254/16) and ignoring any route there
   shorter than /16: a KVM's or board's DHCP (a hostile /1 netmask, or a
   public lease like 1.1.1.5/16, included) can't take the guest's
-  internet. Left: the leased address itself (the kernel's local route).
+  internet. Left: the leased address itself (the kernel's local route),
+  and a lease of /16 or longer inside those private ranges still wins
+  there (a device leasing 192.168.18.x/24 takes that subnet for the
+  guest, e.g. a home LAN reached through the host).
 
   Listing a port gives the guest unfiltered network through whatever
   adapter appears there: this host's firewall never sees that traffic,

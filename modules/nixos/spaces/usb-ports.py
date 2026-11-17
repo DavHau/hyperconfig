@@ -325,7 +325,9 @@ def main():
     if action == "revoke":
         space = arg
         if space not in spaces:
-            die(f"unknown space {space}")
+            # the space lost its ports: nothing of it is allowed any more
+            log(f"{space}: no longer configured, nothing to revoke")
+            return
         lock(space)
         d = f"{STATE}/{space}"
         if os.path.isdir(d) and any(f.endswith(".revoking") for f in os.listdir(d)):
