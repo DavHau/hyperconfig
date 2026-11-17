@@ -10,8 +10,8 @@
       (../space-gui on the desktop user's session);
     - ./hermes-one.nix: "Hermes One" and "Hermes One (<isolated label>)",
       the third-party Hermes One app on the same agents, the same way;
-    - the shells: "infra-space (<member>)" (../infra-space/launchers.nix)
-      and "<space> space" plus herdr machines for the named spaces
+    - the shells: "<space> (<machine>)" plus a herdr machine of the same
+      label for every copy of infra-space and of the named spaces
       (../spaces/client.nix).
 
   Which agent gets which kind of app: ./apps.nix.
@@ -29,7 +29,6 @@ in
     ./shared-app.nix
     ./isolated-apps.nix
     ./hermes-one.nix
-    ../infra-space/launchers.nix
     ../spaces/client.nix
     ../voxtype-archive.nix
   ];

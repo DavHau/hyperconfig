@@ -60,7 +60,7 @@ gets 403.
   nginx's uid (and root) into the guest's window; the guest admits only
   the host's veth address. Ports outside the window are not published.
 - Fallback without the browser login: ssh port forwarding from Dave's
-  machine, e.g. `ssh -L 8095:127.0.0.1:8095 space-geninf-space`, then
+  machine, e.g. `ssh -L 8095:127.0.0.1:8095 geninf-space-som`, then
   http://127.0.0.1:8095/ (the guest's sshd allows TCP forwarding,
   sshd's default).
 

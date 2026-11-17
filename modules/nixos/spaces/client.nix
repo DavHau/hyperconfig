@@ -1,25 +1,29 @@
 /*
-  Dave's way into the named spaces (./default.nix), on his desktops
-  (../dave-desktop): per space of ./public.nix
+  Dave's way into every space-like container, on his desktops
+  (../dave-desktop): the named spaces (./default.nix) on each of their
+  machines and infra-space (../infra-space) on each member, one entry per
+  copy of ./public.nix, all named alike:
 
     - the guest's host key pinned for `[address]:port` (so it never stands
       in for the host's own sshd on port 22), from its public clan var;
-    - a launcher "<name> space", ghostty with an ssh login as the space's
-      user, attached to tmux session `main` (as ../infra-space/launchers.nix);
-    - with `hyper.spacesClient.herdrUser` set, a saved herdr SSH machine labelled
-      <name>, target the ssh alias `space-<name>` (/etc/ssh/ssh_config: address,
-      port, user), session `default`, in
-      that user's herdr (herdr-space-machines.py, run by
-      the user's nixos-activation.service, i.e. at every switch and login).
-      Open herdr clients pick it up within a second. herdr starts the
-      space's herdr server itself on first attach (the guest has the same
-      herdr, ./guest.nix); ssh authenticates with Dave's agent keys, which
-      the spaces authorize.
+    - the ssh alias `<space>-<machine>` (/etc/ssh/ssh_config: address,
+      port, user); `ssh infra-space-som` works as from inside infra-space;
+    - a launcher "<space> (<machine>)", ghostty with an ssh login through
+      the alias, attached to tmux session `main` (a closed window leaves
+      the shell and any afk session running);
+    - with `hyper.spacesClient.herdrUser` set, a saved herdr SSH machine
+      labelled "<space> (<machine>)", target the alias, session `default`,
+      in that user's herdr (herdr-space-machines.py, run by the user's
+      nixos-activation.service, i.e. at every switch and login). Open herdr
+      clients pick it up within a second. herdr starts the guest's herdr
+      server itself on first attach (the guests have the same herdr,
+      ./guest.nix, ../infra-space/guest.nix); ssh authenticates with
+      Dave's agent keys, which the guests authorize.
 
-  Only public values: nothing here evaluates the spaces' machine's config.
-  A space whose host key is not generated yet is skipped (./public.nix).
-  A managed herdr entry Dave removes comes back at the next switch:
-  remove the space from the registry instead.
+  Only public values: nothing here evaluates the containers' machines'
+  configs. A space whose host key is not generated yet is skipped
+  (./public.nix). A managed herdr entry Dave removes comes back at the
+  next switch: remove the space from the registry instead.
 */
 {
   config,
@@ -31,17 +35,17 @@
 let
   cfg = config.hyper.spacesClient;
   inherit (cfg) spaces;
-  # An ssh alias per space: herdr's targets and the launchers use it.
-  # (OpenSSH rejects a bracketed v6 address in an ssh:// target.)
-  alias = name: "space-${name}";
+  # (OpenSSH rejects a bracketed v6 address in an ssh:// target, hence an
+  # alias for herdr's targets; the launchers use it too.)
+  label = s: "${s.space} (${s.machine})";
 
   entry =
-    name: s:
+    alias: s:
     pkgs.makeDesktopItem {
-      name = "space-${name}";
-      desktopName = "${name} space";
-      comment = "Shell as ${s.user} in the ${name} space (${s.machine})";
-      exec = "ghostty -e ssh -t ${alias name} tmux new -A -s main";
+      name = alias;
+      desktopName = label s;
+      comment = "Shell as ${s.user} in ${s.space} on ${s.machine}";
+      exec = "ghostty -e ssh -t ${alias} tmux new -A -s main";
       categories = [
         "Network"
         "System"
@@ -50,10 +54,10 @@ let
 
   machinesFile = pkgs.writeText "herdr-space-machines.json" (
     builtins.toJSON (
-      lib.mapAttrsToList (name: s: {
-        inherit name;
-        label = name;
-        target = alias name;
+      lib.mapAttrsToList (alias: s: {
+        id = s.herdrId;
+        label = label s;
+        target = alias;
         session = "default";
       }) spaces
     )
@@ -72,40 +76,46 @@ in
     };
     spaces = lib.mkOption {
       type = lib.types.attrsOf (
-        lib.types.submodule {
-          options = {
-            machine = lib.mkOption { type = lib.types.str; };
-            user = lib.mkOption { type = lib.types.str; };
-            address = lib.mkOption { type = lib.types.str; };
-            sshPort = lib.mkOption { type = lib.types.port; };
-            hostKey = lib.mkOption { type = lib.types.str; };
-          };
-        }
+        lib.types.submodule (
+          { name, ... }:
+          {
+            options = {
+              space = lib.mkOption { type = lib.types.str; };
+              machine = lib.mkOption { type = lib.types.str; };
+              user = lib.mkOption { type = lib.types.str; };
+              address = lib.mkOption { type = lib.types.str; };
+              sshPort = lib.mkOption { type = lib.types.port; };
+              hostKey = lib.mkOption { type = lib.types.str; };
+              herdrId = lib.mkOption {
+                type = lib.types.str;
+                default = name;
+                description = "Name the herdr entry's fixed id derives from (./public.nix).";
+              };
+            };
+          }
+        )
       );
       default = import ./public.nix {
         inherit lib;
         inherit (inputs.clan-core) clanLib;
         flake = config.clan.core.settings.directory;
       };
-      defaultText = lib.literalMD "every space of ./registry.nix whose host key is generated (./public.nix)";
-      description = "The spaces to reach from here.";
+      defaultText = lib.literalMD "every copy of every space of ./registry.nix whose host key is generated, and infra-space on every member (./public.nix)";
+      description = "The containers to reach from here, by ssh alias `<space>-<machine>`.";
     };
   };
 
   config = {
     environment.systemPackages = lib.mapAttrsToList entry spaces;
 
-    programs.ssh.knownHosts = lib.mapAttrs' (
-      name: s:
-      lib.nameValuePair "space-${name}" {
-        hostNames = [ "[${s.address}]:${toString s.sshPort}" ];
-        publicKey = s.hostKey;
-      }
-    ) spaces;
+    programs.ssh.knownHosts = lib.mapAttrs (alias: s: {
+      hostNames = [ "[${s.address}]:${toString s.sshPort}" ];
+      publicKey = s.hostKey;
+    }) spaces;
 
     programs.ssh.extraConfig = lib.concatStrings (
-      lib.mapAttrsToList (name: s: ''
-        Host ${alias name}
+      lib.mapAttrsToList (alias: s: ''
+        Host ${alias}
           HostName ${s.address}
           Port ${toString s.sshPort}
           User ${s.user}

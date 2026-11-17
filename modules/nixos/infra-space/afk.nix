@@ -5,7 +5,7 @@
   credentials in /run/infra-space/secrets. The p0, TeamClaude and
   OpenRouter keys come from the same clan vars the desktops use, all
   shared and deployed on som and amy through ../dave.nix; ./default.nix passes them in. Dave's
-  launcher (./launchers.nix) attaches to tmux session `main`.
+  launcher (../spaces/client.nix) attaches to tmux session `main`.
 */
 { config, lib, ... }:
 let

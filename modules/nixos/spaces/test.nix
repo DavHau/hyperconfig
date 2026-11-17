@@ -24,10 +24,11 @@
 #     forwards a 127.0.0.1-only app; the URL scheme in env, motd, skill
 #     (nginx, login, TLS are som's ./publish.nix, checked live there);
 #   - herdr: Dave's user activation saves the spaces as herdr machines
-#     (`herdr machine list`, targets the ssh aliases `space-<name>`); the
+#     (`herdr machine list`, targets the ssh aliases `<name>-som`); the
 #     bridge herdr runs over ssh at attach starts each guest's herdr
 #     server, and `herdr machine status` then finds them ok; an entry of a
-#     space no longer declared (retired) is removed, Dave's own kept;
+#     space no longer declared (retired) is removed, Dave's own kept, one
+#     of the old naming relabelled in place (no duplicate);
 #   - infra-space beside them still starts and admits its own ssh port;
 #   - deploys (specialisations, `switch-to-configuration test`): a change
 #     of the guests alone reloads each container (the guest's own switch
@@ -180,13 +181,18 @@ pkgs.testers.runNixOSTest {
       };
       hyper.spacesClient = {
         herdrUser = "dave";
-        spaces = lib.mapAttrs (name: r: {
-          machine = lib.head r.machines;
-          inherit (r) sshPort;
-          user = name;
-          inherit address;
-          hostKey = pub "hostkey-${name}.pub";
-        }) registry;
+        spaces = lib.mapAttrs' (
+          name: r:
+          lib.nameValuePair "${name}-som" {
+            space = name;
+            machine = "som";
+            herdrId = name;
+            inherit (r) sshPort;
+            user = name;
+            inherit address;
+            hostKey = pub "hostkey-${name}.pub";
+          }
+        ) registry;
       };
 
       # A later deploy: a change of the guests alone (every space and
@@ -224,7 +230,9 @@ pkgs.testers.runNixOSTest {
         "test-vars/inference-api-key/token" = fake "p0-token";
         "test-vars/teamclaude-api-key/key" = fake "teamclaude-key";
         "test-vars/openrouter/apikey" = fake "openrouter-key";
-        "test-vars/space-geninf-space-hostkey/ssh_host_ed25519_key" = secret (keys + "/hostkey-geninf-space");
+        "test-vars/space-geninf-space-hostkey/ssh_host_ed25519_key" = secret (
+          keys + "/hostkey-geninf-space"
+        );
         "test-vars/space-geninf-space-root-ssh/id_ed25519" = fake "geninf-space-root-ssh";
         "test-vars/space-geninf-space-root-ssh-agave/id_ed25519" = fake "geninf-space-root-ssh-agave";
         "test-vars/space-geninf-space-git-geninf/id_ed25519" = fake "geninf-space-git-geninf";
@@ -308,7 +316,9 @@ pkgs.testers.runNixOSTest {
           assert host.succeed("stat -c %u /var/lib/spaces/geninf-space/home/owned").strip() == "${toString registry.geninf-space.uid}"
           # the TPM ACL names the guest user's host uid
           acl = host.succeed("getfacl -n /dev/tpmrm0")
-          assert "\nuser:${toString (1342177280 + 65536 * registry.geninf-space.index + registry.geninf-space.uid)}:rw" in acl, acl
+          assert "\nuser:${
+            toString (1342177280 + 65536 * registry.geninf-space.index + registry.geninf-space.uid)
+          }:rw" in acl, acl
           # no host user walks into a container's tree
           assert host.succeed("stat -c %a /var/lib/nixos-containers").strip() == "700"
 
@@ -459,30 +469,36 @@ pkgs.testers.runNixOSTest {
 
       with subtest("Dave's herdr: the spaces as machines, attached over ssh"):
           host.wait_for_unit("nixos-activation.service", "dave")
-          # a retired space's entry the script made earlier goes, Dave's own stays
+          # a retired space's entry the script made earlier goes (also when
+          # herdr had it selected), Dave's own stays; an entry of the old
+          # naming (label = space name, managed list without labels) is
+          # relabelled in place, never added a second time
           import hashlib
           retired = hashlib.sha256(b"hyperconfig-space:agave").hexdigest()[:32]
           state = "/home/dave/.local/state/herdr/client"
           catalog = json.loads(host.succeed(f"cat {state}/endpoints.json"))
+          for e in catalog["ssh"]:
+              e["label"] = e["target"].removesuffix("-som")
           catalog["ssh"] += [
               {"id": retired, "label": "agave", "target": "space-agave", "session": "default", "enabled": True},
               {"id": "0" * 32, "label": "mine", "target": "dave@example.org", "session": "default", "enabled": True},
           ]
-          managed = json.loads(host.succeed(f"cat {state}/hyperconfig-spaces.json")) + [retired]
+          catalog["selected_profile"] = retired
+          managed = list(json.loads(host.succeed(f"cat {state}/hyperconfig-spaces.json"))) + [retired]
           host.succeed(f"echo {shlex.quote(json.dumps(catalog))} > {state}/endpoints.json")
           host.succeed(f"echo {shlex.quote(json.dumps(managed))} > {state}/hyperconfig-spaces.json")
           host.succeed("systemctl --user -M dave@ restart nixos-activation.service")
           out = host.succeed("runuser -u dave -- herdr machine list")
-          assert "space-agave" not in out and "dave@example.org" in out, out
-          out = host.succeed("runuser -u dave -- herdr machine list")
           print(out)
-          for name, s in spaces.items():
-              assert f"\tspace-{name}\t" in out, out
+          assert "space-agave" not in out and "dave@example.org" in out, out
+          for name in spaces:
+              lines = [l for l in out.splitlines() if f"\t{name}-som\t" in l]
+              assert len(lines) == 1 and f"\t{name} (som)\t" in lines[0], out
           host.succeed("install -d -m 0700 -o dave /home/dave/.ssh && install -m 0400 -o dave /etc/dave-ssh/id_ed25519 /home/dave/.ssh/id_ed25519")
           # what herdr's attach runs over ssh: the bridge, which starts the
           # space's herdr server on demand (`machine status` only checks)
           for name in spaces:
-              host.execute(f"runuser -u dave -- timeout 20 ssh -o BatchMode=yes space-{name} 'exec herdr remote-client-bridge </dev/null'")
+              host.execute(f"runuser -u dave -- timeout 20 ssh -o BatchMode=yes {name}-som 'exec herdr remote-client-bridge </dev/null'")
               host.wait_until_succeeds(f"nixos-container run {name} -- pgrep -u {name} -f 'herdr server'", timeout=30)
           # exits 1 for Dave's own placeholder entry (example.org, no DNS
           # here); the spaces' lines are what counts
@@ -490,10 +506,10 @@ pkgs.testers.runNixOSTest {
           print(out)
           # all reached and their herdr servers found (status: ok)
           for name in spaces:
-              line = next(l for l in out.splitlines() if f"\t{name}\t" in l)
+              line = next(l for l in out.splitlines() if f"\t{name} (som)\t" in l)
               assert "error" not in line and "unreachable" not in line, out
           # Dave's login through the alias (the launchers' way)
-          assert host.succeed("runuser -u dave -- ssh -o BatchMode=yes space-geninf-space id -un").strip() == "geninf-space"
+          assert host.succeed("runuser -u dave -- ssh -o BatchMode=yes geninf-space-som id -un").strip() == "geninf-space"
 
       users = {"infra-space": "infra", **{n: n for n in spaces}}
       def system_path(name):
@@ -550,7 +566,9 @@ pkgs.testers.runNixOSTest {
           # Dave's herdr and ssh reconnect at once when the restart drops
           # them: a connection in the switch's window must not start the
           # container from the old unit (the old guest, the old credentials)
-          peer.succeed("(while [ ! -e /tmp/knock-stop ]; do for p in ${lib.concatMapStringsSep " " (s: toString s.port) (lib.attrValues spaces)} 2223; do nc -z -w 1 ${hostV6} $p; done; sleep 0.05; done) >/dev/null 2>&1 &")
+          peer.succeed("(while [ ! -e /tmp/knock-stop ]; do for p in ${
+            lib.concatMapStringsSep " " (s: toString s.port) (lib.attrValues spaces)
+          } 2223; do nc -z -w 1 ${hostV6} $p; done; sleep 0.05; done) >/dev/null 2>&1 &")
           before = leader("geninf-space")
           out = switch("host-change")
           assert listed(out, "stopping", "container@geninf-space.service") and listed(out, "starting", "container@geninf-space.service"), out

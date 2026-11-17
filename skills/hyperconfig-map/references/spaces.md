@@ -11,7 +11,7 @@
 | `<space>.nix` (geninf-space) | the space's own generators (`space-<name>-*`), credentials, repos cloned, forges |
 | `forges.nix` | `space.forges.<host>` -> tea logins; `<name>-forge-cli.service` writes tea's config from the credential to `/run/<name>/tea/tea/config.yml` (tmpfs); skill `forge-prs-skill/` |
 | `afk.nix` | afk in a guest: pinned settings (no web), keys from secretsDir |
-| `client.nix` | Dave's desktops: launchers, pinned host keys, herdr machines |
+| `client.nix`, `public.nix` | Dave's desktops: launchers, ssh aliases `<space>-<machine>`, pinned host keys, herdr machines, for every copy of every space AND infra-space |
 | `public.nix` | registry + mesh addresses (no other machine's config) |
 | `publish.nix`, `publish-guest.nix`, `publish-skill/` | web apps on the window 8000-8099 at https://<port>.<space>.davhau.fyi (som's nginx + the agents' serve login; guest `space-publish`, env, skill); owners in `registry.nix` -> pocket-id group `space-<name>` (nixosConfigurations.nix) |
 | `test.nix` | `checks.x86_64-linux.spaces` (VM test; names machines: grep it on moves) |
@@ -40,5 +40,5 @@ infra-space + nixpkgs-bump + hyperconfig-map; skills disabled list),
 `hermes-skill/SKILL.md` the orchestrator skill, `nixpkgs-bump.nix` +
 `nixpkgs-bump/` (SKILL.md, guard.sh), `dashboard.nix` (som),
 `fleet-access.nix` (its root key on every machine), `age-recipients.nix`,
-`gcroots.nix`, `launchers.nix` (Dave's desktops), `test.nix`
+`gcroots.nix`, `test.nix`
 (`checks...infra-space`).

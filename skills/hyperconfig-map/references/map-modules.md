@@ -32,7 +32,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/common-tools.nix — Small CLI toolset (bat, git, htop, tmux, vim, ...) on every server and desktop, plus ./prune-gcroots.nix. <- bam, cm-pi, edi, joy, nas, sgp, m/shell-profile.nix
 - modules/nixos/common.nix — Fleet-wide defaults for every machine but the installer (imported by each machine's configuration.nix): <- bam, cm-pi, edi, joy, nas, sgp, modules/flake-parts/nixosConfigurations.nix, m/dave.nix, +3
 - modules/nixos/cpu-powersave-cap.nix — Apply an extra CPU frequency ceiling on top of power-profiles-daemon's `power-saver` profile, going below what PPD does… <- m/laptop.nix
-- modules/nixos/dave.nix — Dave's desktops and workstations (amy, som, vit): <- amy, som, vit, m/dave-desktop/default.nix, m/infra-space/afk.nix, m/infra-space/launchers.nix
+- modules/nixos/dave.nix — Dave's desktops and workstations (amy, som, vit): <- amy, som, vit, m/dave-desktop/default.nix, m/infra-space/afk.nix
 - modules/nixos/deluge.nix — - <- m/dave.nix
 - modules/nixos/desktop.nix — X11/libinput basics and session variables (terminal = ghostty) on Dave's desktops; <- m/dave.nix
 - modules/nixos/dyndns-porkbun.nix — Dynamic DNS through the Porkbun API: <- edi, machines/nas/porkbun.nix
@@ -53,7 +53,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/greetd-idle-restart-test.nix — greetd-idle-restart.sh (greetd.nix) against fake inputs: <- flake.nix
 - modules/nixos/greetd-idle-restart.sh — shellcheck shell=bash Restart greetd when the running greetd is definitely an old one and seat0 is idle: <- m/greetd-idle-restart-test.nix, m/greetd.nix
 - modules/nixos/greetd.nix — - <- m/dave.nix
-- modules/nixos/herdr-jj.nix — jj workspace support for herdr via the community herdr-jj plugin (OliverGilan/herdr-jj, MIT): <- m/dave.nix, m/spaces/guest.nix, m/spaces/test.nix
+- modules/nixos/herdr-jj.nix — jj workspace support for herdr via the community herdr-jj plugin (OliverGilan/herdr-jj, MIT): <- m/dave.nix, m/infra-space/guest.nix, m/spaces/guest.nix, m/spaces/test.nix
 - modules/nixos/herdr-pin-config.py — - <- m/herdr-jj.nix
 - modules/nixos/hermes-agents-gpu-host.nix — GPU host for som's hermes agents: <- vit
 - modules/nixos/home-manager.nix — home-manager as a NixOS module on Dave's desktops (shared settings for every home-manager user; <- m/dave.nix
@@ -212,12 +212,11 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/infra-space/default.nix — infra-space: a NixOS container on every member machine (./members.nix), identical on each, from which the fleet is mana… <- amy, som, m/infra-space/afk.nix, m/infra-space/agent-tools-test.nix, m/infra-space/dashboard.nix, m/infra-space/fleet-access.nix, m/infra-space/gcroots.nix, m/infra-space/guest.nix, +9
 - modules/nixos/infra-space/fleet-access.nix — infra-space's root access on every clan machine (wired via the `sshd` instance's server extraModules in modules/flake-p… <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/default.nix, m/infra-space/test.nix, m/telegram-send/default.nix
 - modules/nixos/infra-space/gcroots.nix — GC roots on this host for systems built from the infra-space guest (a host module, imported by ./default.nix; <- m/infra-space/default.nix, m/infra-space/fleet-bump/default.nix
-- modules/nixos/infra-space/guest.nix — The system inside the infra-space container (./default.nix sets the options below from the host side). <- m/infra-space/default.nix, m/infra-space/fleet-bump/default.nix, m/infra-space/gcroots.nix, m/infra-space/hermes.nix, m/infra-space/secret-prompt/default.nix, m/spaces/guest-base.nix
+- modules/nixos/infra-space/guest.nix — The system inside the infra-space container (./default.nix sets the options below from the host side). <- m/infra-space/default.nix, m/infra-space/fleet-bump/default.nix, m/infra-space/gcroots.nix, m/infra-space/hermes.nix, m/infra-space/secret-prompt/default.nix, m/spaces/client.nix, m/spaces/guest-base.nix
 - modules/nixos/infra-space/hermes.nix — The infra-space's hermes agent, inside the container (./default.nix appends this to the guest's modules on every member… <- m/infra-space/agent-tools-guest.nix, m/infra-space/dashboard.nix, m/infra-space/decisions.nix, m/infra-space/default.nix, m/infra-space/fleet-bump/default.nix, m/infra-space/nixpkgs-bump.nix, m/infra-space/voice-api.nix
-- modules/nixos/infra-space/launchers.nix — Dave's way into infra-space, on his desktops (../dave.nix): <- m/dave-desktop/default.nix, m/infra-space/afk.nix, m/spaces/client.nix
 - modules/nixos/infra-space/members.nix — The machines that run an infra-space container (./default.nix), and the port on the machine's yggdrasil address that re… <- m/infra-space/default.nix, m/infra-space/public-members.nix
 - modules/nixos/infra-space/nixpkgs-bump.nix — The nightly nixpkgs-unstable bump, run by the infra-space agent itself (./nixpkgs-bump/SKILL.md says what it does: <- m/infra-space/decisions.nix, m/infra-space/fleet-bump/default.nix, m/infra-space/hermes.nix
-- modules/nixos/infra-space/public-members.nix — Every member of ./members.nix with its mesh address and its container's pinned host key, from the members' public clan… <- m/infra-space/default.nix, m/infra-space/launchers.nix
+- modules/nixos/infra-space/public-members.nix — Every member of ./members.nix with its mesh address and its container's pinned host key, from the members' public clan… <- m/infra-space/default.nix, m/spaces/public.nix
 - modules/nixos/infra-space/test-clan-stub.nix — What clan provides to ./default.nix in the VM tests (./test.nix, ./agent-tools-test.nix): <- m/infra-space/agent-tools-test.nix, m/infra-space/test.nix
 - modules/nixos/infra-space/test-oidc.py — - <- m/infra-space/test.nix
 - modules/nixos/infra-space/test-toolsets.py — - <- m/infra-space/test.nix
@@ -319,7 +318,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/space-gui/test.nix — space-gui (./default.nix) on one machine: <- flake.nix, m/space-gui/default.nix
 - modules/nixos/spaces/afk.nix — afk in a space's guest, for Dave's interactive sessions: <- m/infra-space/afk.nix, m/spaces/default.nix, m/spaces/guest.nix
 - modules/nixos/spaces/blocked-destinations.nix — What a confined space's guest may not reach (./host.nix `confine`): <- m/dave-desktop/isolated-apps.nix, m/spaces/default.nix
-- modules/nixos/spaces/client.nix — Dave's way into the named spaces (./default.nix), on his desktops (../dave-desktop): <- m/dave-desktop/default.nix, m/spaces/default.nix, m/spaces/guest.nix, m/spaces/test.nix
+- modules/nixos/spaces/client.nix — Dave's way into every space-like container, on his desktops (../dave-desktop): <- m/dave-desktop/default.nix, m/infra-space/afk.nix, m/spaces/default.nix, m/spaces/guest.nix, m/spaces/test.nix
 - modules/nixos/spaces/default.nix — Named agent spaces: NixOS containers like infra-space (../infra-space), each for one job, none of them a fleet admin. h… <- amy, som, m/spaces/afk.nix, m/spaces/client.nix, m/spaces/forges.nix, m/spaces/geninf-space.nix, m/spaces/guest.nix, m/spaces/host.nix, +3
 - modules/nixos/spaces/forge-check.sh — Post-deploy check of a space's forge logins (./forges.nix), run in the space as its user: <- m/spaces/forges.nix
 - modules/nixos/spaces/forge-cli-config.sh — Writes tea's config for the space's user: <- m/spaces/forges.nix
@@ -331,7 +330,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/spaces/herdr-space-machines.py — - <- m/spaces/client.nix
 - modules/nixos/spaces/host.nix — The host side of one space container: <- m/dave-desktop/isolated-apps.nix, m/infra-space/default.nix, m/space-gui/default.nix, m/space-gui/test.nix, m/spaces/default.nix, m/spaces/guest-base.nix, m/spaces/guest.nix, m/spaces/publish-guest.nix, +1
 - modules/nixos/spaces/immutable-helper.py — One request of a space guest's root (./host.nix, immutableHelper): <- m/spaces/host.nix
-- modules/nixos/spaces/public.nix — Every space of ./registry.nix on each of its machines, with that machine's mesh address and the guest's pinned host key… <- m/spaces/client.nix, m/spaces/default.nix
+- modules/nixos/spaces/public.nix — Every space-like container Dave reaches from his desktops, one entry per copy: <- m/spaces/client.nix, m/spaces/default.nix
 - modules/nixos/spaces/publish-guest.nix — A space's published web apps, the guest's side (./publish.nix has the host's, ./default.nix wires both from hyper.space… <- m/spaces/default.nix, m/spaces/publish.nix
 - modules/nixos/spaces/publish.nix — The spaces' published web apps, the host's front (som: <- som, m/spaces/default.nix, m/spaces/publish-guest.nix
 - modules/nixos/spaces/registry.nix — The named agent spaces (./default.nix): <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/default.nix, m/spaces/client.nix, m/spaces/default.nix, m/spaces/geninf-space.nix, m/spaces/public.nix, m/spaces/publish.nix, m/spaces/test.nix

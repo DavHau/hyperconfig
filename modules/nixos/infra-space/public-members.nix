@@ -1,7 +1,7 @@
 # Every member of ./members.nix with its mesh address and its container's
 # pinned host key, from the members' public clan vars (read from the flake
 # directory, not from their evaluated configs). Used by ./default.nix (the
-# members' default) and ./launchers.nix (Dave's desktops).
+# members' default) and ../spaces/public.nix (Dave's desktops).
 {
   lib,
   clanLib,

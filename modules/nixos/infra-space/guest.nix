@@ -352,6 +352,9 @@ in
   imports = [
     ../shell-profile.nix
     ../spaces/guest-base.nix
+    # herdr's server, for Dave's herdr machine "infra-space (<member>)"
+    # (../spaces/client.nix), the same version as on the desktops
+    ../herdr-jj.nix
     # off unless the dashboard is published (./dashboard.nix)
     ./secret-prompt
   ];
