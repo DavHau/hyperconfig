@@ -132,6 +132,9 @@ pkgs.testers.runNixOSTest {
       virtualisation.memorySize = 4096;
       virtualisation.cores = 2;
       virtualisation.tpm.enable = true;
+      # an xHCI controller at a fixed address for ./usb-ports.nix: a stick
+      # plugged into its port 1 goes into geninf-space, one in port 2 not
+      virtualisation.qemu.options = [ "-device qemu-xhci,id=xhci,addr=0x1e" ];
       # the guests' test builds' builder
       virtualisation.additionalPaths = [
         pkgs.pkgsStatic.busybox
@@ -167,12 +170,20 @@ pkgs.testers.runNixOSTest {
         };
       };
 
-      hyper.spaces = lib.genAttrs spaceNames (_: {
-        enable = true;
-        inherit address;
-        meshInterface = "eth1";
-        adminKeys.dave = pub "admin.pub";
-      });
+      hyper.spaces = lib.mkMerge [
+        (lib.genAttrs spaceNames (_: {
+          enable = true;
+          inherit address;
+          meshInterface = "eth1";
+          adminKeys.dave = pub "admin.pub";
+        }))
+        {
+          # port 1 of the controller's buses (USB 2 or 3, whichever takes the stick)
+          geninf-space.usbPorts = lib.mkForce (
+            map (b: "0000:00:1e.0/usb${toString b}/${toString b}-1") (lib.range 1 8)
+          );
+        }
+      ];
 
       # Dave on amy: his herdr gets the spaces as machines.
       users.users.dave = {
@@ -466,6 +477,101 @@ pkgs.testers.runNixOSTest {
           host.wait_until_succeeds(f"nixos-container run {name} -- journalctl -u {unit} | grep -q 'trying again in 15 min'", timeout=120)
           assert space_root(name, f"systemctl show -p Result --value {unit}").strip() == "success"
           space_root(name, f"systemctl list-timers {name}-clone-org-git.geninf.io.timer | grep -q clone-org")
+
+      with subtest("usb ports: a device on a listed port, only it, only while plugged"):
+          import os
+          def leader(name):
+              return host.succeed(f"machinectl show {name} -p Leader --value").strip()
+          cg = "/sys/fs/cgroup/machine.slice/container@geninf-space.service/payload/init.scope/cgroup.procs"
+          def guest_cmd(cmd):
+              # in the container's cgroup (its DeviceAllow) and namespaces, as its root
+              return "sh -c " + shlex.quote(f"echo $$ > {cg} && exec nsenter --all -t {leader('geninf-space')} -- sh -c " + shlex.quote(cmd))
+          def as_guest(cmd, check=True):
+              return host.succeed(guest_cmd(cmd)) if check else host.execute(guest_cmd(cmd))
+          def plug(port, ident):
+              img = os.path.join(host.state_dir, f"{ident}.img")
+              with open(img, "wb") as f:
+                  f.truncate(1 << 20)
+              host.send_monitor_command(f"drive_add 0 if=none,id={ident},format=raw,file={img}")
+              host.send_monitor_command(f"device_add usb-storage,bus=xhci.0,port={port},drive={ident},id={ident}")
+          def unplug(ident):
+              host.send_monitor_command(f"device_del {ident}")
+          allow = host.succeed("systemctl show -p DeviceAllow container@geninf-space.service")
+          assert "block-sd" not in allow and "usb_device" not in allow and "hidraw" not in allow, allow
+          base = int(host.succeed(f"cat /proc/{leader('geninf-space')}/uid_map").split()[1])
+          tpm_owner = host.succeed("stat -c %u:%g /dev/tpmrm0").strip()
+          # the guest's root plants a link where the node will go
+          as_guest("ln -sf /dev/tpmrm0 /dev/sda")
+          plug(1, "stick1")
+          host.wait_until_succeeds("test -b /dev/sda", timeout=60)
+          try:
+              host.wait_until_succeeds("systemctl is-active 'space-usb@geninf-space:sda.service'", timeout=60)
+          finally:
+              print(host.execute("udevadm info /dev/sda | grep -E 'DEVPATH|SYSTEMD'; journalctl -b --no-pager -u 'space-usb*' | tail -40")[1])
+          print(host.succeed("udevadm info -q path /sys/class/block/sda; systemctl list-units 'space-usb*'"))
+          assert host.succeed("stat -c %u:%g /dev/tpmrm0").strip() == tpm_owner
+          out = as_guest("stat -c '%F %t:%T %u:%g %a' /dev/sda").strip()
+          assert out == "block special file 8:0 ${toString registry.geninf-space.uid}:${toString registry.geninf-space.uid} 660", out
+          assert host.succeed("stat -c '%u:%g' /proc/" + leader("geninf-space") + "/root/dev/sda").strip() == f"{base + ${toString registry.geninf-space.uid}}:{base + ${toString registry.geninf-space.uid}}"
+          # the space's user, not root, reads it
+          as_guest("runuser -u geninf-space -- dd if=/dev/sda of=/dev/null bs=512 count=1")
+          as_guest("dd if=/dev/sda of=/dev/null bs=512 count=1")
+          # its usb_device node too, owned by the guest's root
+          host.wait_until_succeeds("systemctl list-units --plain --no-legend 'space-usb@geninf-space:usb-*' | grep -q active", timeout=30)
+          as_guest("ls /dev/bus/usb/*/* && for n in /dev/bus/usb/*/*; do exec 3<$n || exit 1; done")
+          # a hard link the guest keeps, and the node itself, open nothing after unplug
+          as_guest("ln /dev/sda /dev/keep")
+          unplug("stick1")
+          host.wait_until_succeeds(guest_cmd("test ! -e /dev/sda"), timeout=60)
+          host.wait_until_succeeds("! systemctl -q is-active 'space-usb@geninf-space:sda.service'", timeout=60)
+          # the next device on another (unlisted) port gets the same number
+          plug(2, "stick2")
+          host.wait_until_succeeds("test -b /dev/sda", timeout=60)
+          assert host.succeed("stat -c %t:%T /dev/sda").strip() == "8:0"
+          host.succeed("! systemctl -q is-active 'space-usb@geninf-space:sda.service'")
+          rc, out = as_guest("dd if=/dev/keep of=/dev/null bs=512 count=1 2>&1", check=False)
+          assert rc != 0 and "Operation not permitted" in out, (rc, out)
+          as_guest("rm /dev/keep")
+          unplug("stick2")
+          host.wait_until_succeeds("! test -e /dev/sda", timeout=60)
+          # a directory on the way swapped for a link: refused, nothing made there
+          as_guest("rm -rf /dev/bus && mkdir -p /tmp/elsewhere && ln -s /tmp/elsewhere /dev/bus")
+          plug(1, "stick3")
+          host.wait_until_succeeds("systemctl is-active 'space-usb@geninf-space:sda.service'", timeout=60)
+          host.wait_until_succeeds("systemctl list-units --plain --no-legend --all 'space-usb@geninf-space:usb-*' | grep -q failed", timeout=30)
+          as_guest("test -z \"$(ls -A /tmp/elsewhere)\"")
+          as_guest("rm /dev/bus")
+          # a restarted container gets the plugged devices again
+          before = leader("geninf-space")
+          host.succeed("systemctl restart container@geninf-space.service")
+          host.wait_until_succeeds("nixos-container run geninf-space -- systemctl is-active multi-user.target sshd.service", timeout=120)
+          assert leader("geninf-space") != before
+          host.wait_until_succeeds(f"test -b /proc/{leader('geninf-space')}/root/dev/sda", timeout=60)
+          as_guest("dd if=/dev/sda of=/dev/null bs=512 count=1")
+          host.wait_until_succeeds(f"ls /proc/{leader('geninf-space')}/root/dev/bus/usb/*/*", timeout=30)
+          unplug("stick3")
+          host.wait_until_succeeds(f"! test -e /proc/{leader('geninf-space')}/root/dev/sda", timeout=60)
+          allow = host.succeed("systemctl show -p DeviceAllow container@geninf-space.service")
+          assert "/dev/block/" not in allow, allow
+          # a network adapter on the port: into the guest's netns, DHCP on
+          # it there, no default route or DNS from it; the host keeps none
+          host.send_monitor_command("netdev_add user,id=usbnet0,net=10.95.117.0/24")
+          host.send_monitor_command("device_add usb-net,bus=xhci.0,port=1,netdev=usbnet0,id=nic1")
+          host.wait_until_succeeds("nixos-container run geninf-space -- ip -4 -br addr show | grep -q '^usb.*10.95.117.'", timeout=90)
+          routes = space_root("geninf-space", "ip -4 route")
+          assert not any(l.startswith("default") and "dev usb" in l for l in routes.splitlines()), routes
+          assert "10.95.117" not in host.succeed("ip -4 addr; ip -4 route")
+          assert "10.95.117" not in space_root("geninf-space", "cat /etc/resolv.conf")
+          host.fail("for n in /sys/class/net/*; do readlink -f $n | grep -q 0000:00:1e.0 && exit 0; done; exit 1")
+          # replug: a new interface, moved again
+          host.send_monitor_command("device_del nic1")
+          host.wait_until_succeeds("! nixos-container run geninf-space -- ip -br link | grep -q ^usb", timeout=60)
+          host.send_monitor_command("device_add usb-net,bus=xhci.0,port=1,netdev=usbnet0,id=nic2")
+          host.wait_until_succeeds("nixos-container run geninf-space -- ip -4 -br addr show | grep -q '^usb.*10.95.117.'", timeout=90)
+          # a container restart: moved into the new one
+          host.succeed("systemctl restart container@geninf-space.service")
+          host.wait_until_succeeds("nixos-container run geninf-space -- ip -4 -br addr show | grep -q '^usb.*10.95.117.'", timeout=120)
+          host.send_monitor_command("device_del nic2")
 
       with subtest("Dave's herdr: the spaces as machines, attached over ssh"):
           host.wait_for_unit("nixos-activation.service", "dave")

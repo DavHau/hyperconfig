@@ -13,15 +13,38 @@
 
   How: nspawn binds nothing after start and refuses `machinectl bind` with
   a user namespace, so a udev rule on the port starts
-  `space-usb@<name>:<kernel name>`, which mknods the node inside the
-  guest's mount namespace, owned by the guest's root and its disk (block),
-  dialout (tty) or root group, and removes it on unplug. The container's
-  cgroup allows the device classes boards and sticks use (block-sd,
-  char-usb_device, ttyUSB, ttyACM, hidraw); the nodes decide which
-  devices: only those on the listed ports get one. Re-enumeration (DFU,
-  BOOTSEL, JTAG/serial switches) is just another add event.
+  `space-usb@<name>:<kernel name>` (./usb-ports.py), which allows that one
+  device's major:minor in the container's cgroup (a runtime DeviceAllow:
+  the unit's own list plus the devices handed over now) and mknods its node
+  inside the guest's mount namespace, 0660 and owned by the space's user
+  and group (libusb, hidraw, serial, block without root): every node on
+  the port, whatever its kind or USB id. On unplug it revokes the
+  number first, then removes the node: a node the guest copied or
+  hard-linked opens nothing once the number goes to the next device. No
+  device class is allowed as such; the container's unit file has no USB in
+  it. Re-enumeration (DFU, BOOTSEL, JTAG/serial switches) is just another
+  add event. The node is made in a fresh directory of host root's and
+  renamed into place, every directory opened without following symlinks
+  and checked to be on the guest's /dev tmpfs, so the guest's root can't
+  redirect it onto a host file; the namespace is entered through a pidfd
+  of the leader, checked to be the container's pid 1.
 
-  Everything on a listed port is handed over, keyboards and mice too
+  Network adapters on a port go into the guest's network namespace
+  (`space-usb-net@<name>:<ifindex>`, after udev renamed them; usb<N>
+  there; this host's NetworkManager and networkd leave them alone): the guest's networkd takes an
+  address by DHCP on them but no route, gateway or DNS (a KVM's or
+  board's DHCP must not take the guest's internet). Input devices on a
+  port are ignored by this host's libinput (the desktop doesn't type
+  with them); their nodes go to the guest like the rest.
+
+  A restarted container starts with an empty /dev, its unit's own list
+  and none of the adapters (back in the host's namespace):
+  `space-usb-replay-<name>` (wanted by the container's unit through a
+  .wants link, the unit file unchanged) moves the adapters and restarts
+  the plugged devices' units.
+
+  Everything on a listed port is handed over, keyboards, mice and network
+  adapters too
   (Dave's KVM devices have both): the guest can read their raw reports,
   i.e. what is typed on them, while this host's input layer still gets
   them as well. Don't list a port a keyboard used on this host sits on.
@@ -44,76 +67,79 @@ let
       p = config.containers.${name}.privateUsers;
     in
     if p == "no" then 0 else p;
-  want = name: inst: ''TAG+="systemd", ENV{SYSTEMD_WANTS}+="space-usb@${name}:${inst}.service"'';
+  want = name: inst: ''TAG+="systemd", ENV{SYSTEMD_WANTS}+="${inst}.service"'';
   rules = lib.concatStrings (
     lib.mapAttrsToList (
       name: s:
       lib.concatMapStrings (port: ''
-        ACTION!="remove", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk|partition", DEVPATH=="*/${port}/*", ${want name "%k"}
-        ACTION!="remove", SUBSYSTEM=="tty", KERNEL=="ttyUSB*|ttyACM*", DEVPATH=="*/${port}/*", ${want name "%k"}
-        ACTION!="remove", SUBSYSTEM=="hidraw", DEVPATH=="*/${port}/*", ${want name "%k"}
-        ACTION!="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", DEVPATH=="*/${port}", ${want name "usb-%k"}
-        ACTION!="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", DEVPATH=="*/${port}/*", ${want name "usb-%k"}
+        DEVPATH=="*/${port}/*", SUBSYSTEM=="input", ENV{LIBINPUT_IGNORE_DEVICE}="1"
+        ACTION=="add|move", DEVPATH=="*/${port}/*", SUBSYSTEM=="net", ENV{NM_UNMANAGED}="1", ENV{ID_NET_MANAGED_BY}="space-usb", ${want name "space-usb-net@${name}:$attr{ifindex}"}
+        ACTION!="remove", DEVPATH=="*/${port}/*", SUBSYSTEM!="usb", ENV{DEVNAME}=="?*", ${want name "space-usb@${name}:%k"}
+        ACTION!="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", DEVPATH=="*/${port}", ${want name "space-usb@${name}:usb-%k"}
+        ACTION!="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", DEVPATH=="*/${port}/*", ${want name "space-usb@${name}:usb-%k"}
       '') s.usbPorts
     ) spaces
   );
-  bases = lib.concatStrings (
-    lib.mapAttrsToList (name: _: ''
-      ${name}) base=${toString (guestIdBase name)} ;;
-    '') spaces
+  # per space: its ports, the guest's id base, the container unit's own
+  # DeviceAllow (./usb-ports.py rewrites the runtime list from it)
+  spaceConfig = pkgs.writeText "space-usb.json" (
+    builtins.toJSON (
+      lib.mapAttrs (name: s: {
+        ports = s.usbPorts;
+        base = guestIdBase name;
+        # the space's user (and its group, gid = uid) inside the guest
+        uid = (import ./registry.nix).${name}.uid;
+        deviceAllow = config.systemd.services."container@${name}".serviceConfig.DeviceAllow or [ ];
+      }) spaces
+    )
   );
-  attach = pkgs.writeShellScript "space-usb" ''
-    set -eu
-    export PATH=${lib.makeBinPath [ pkgs.coreutils pkgs.util-linux pkgs.systemd ]}
-    inst=$1 action=$2
-    name=''${inst%%:*} dev=''${inst#*:}
-    case $name in
-    ${bases}
-      *) echo "space-usb: unknown space $name" >&2; exit 1 ;;
-    esac
-    state=/run/space-usb/$inst
-    leader=$(machinectl show "$name" -p Leader --value 2>/dev/null || true)
-    ns() { nsenter -t "$leader" -m -- "$@"; }
-    if [ "$action" = remove ]; then
-      if [ -r "$state" ] && [ -n "$leader" ] && [ "$leader" != 0 ]; then
-        ns rm -f "$(cat "$state")" || true
-      fi
-      rm -f "$state"
-      exit 0
-    fi
-    case $dev in
-      usb-*) node=/dev/$(udevadm info -q name -p "/sys/bus/usb/devices/''${dev#usb-}") ;;
-      *) node=/dev/$dev ;;
-    esac
-    [ -e "$node" ] || exit 0
-    [ -n "$leader" ] && [ "$leader" != 0 ] || { echo "space-usb: $name not running"; exit 0; }
-    maj=$((0x$(stat -c %t "$node"))) min=$((0x$(stat -c %T "$node")))
-    type=c; [ -b "$node" ] && type=b
-    case $node in
-      /dev/sd*) grp=6 ;;
-      /dev/tty*) grp=27 ;;
-      *) grp=0 ;;
-    esac
-    ns mkdir -p "$(dirname "$node")"
-    ns rm -f "$node"
-    ns mknod -m 0660 "$node" "$type" "$maj" "$min"
-    ns chown "$base:$((base + grp))" "$node"
-    mkdir -p /run/space-usb
-    echo "$node" > "$state"
-    echo "space-usb: $node ($type $maj:$min) into $name"
-  '';
+  attach = "${pkgs.python3.interpreter} ${./usb-ports.py} ${spaceConfig}";
+  path = [
+    pkgs.systemd
+  ];
+  # The guest's side of a network interface on a port (usb<N> there): DHCP
+  # for an address on its link, nothing else from it (no default route,
+  # no DNS: a KVM's or board's DHCP must not take the guest's internet).
+  # networkd touches nothing but these.
+  guestNet = {
+    systemd.network = {
+      enable = true;
+      wait-online.enable = false;
+      config.networkConfig = {
+        ManageForeignRoutes = false;
+        ManageForeignRoutingPolicyRules = false;
+      };
+      networks."50-space-usb" = {
+        matchConfig.Name = "usb*";
+        networkConfig = {
+          DHCP = "ipv4";
+          LinkLocalAddressing = "ipv6";
+          IPv6AcceptRA = false;
+        };
+        dhcpV4Config = {
+          UseRoutes = false;
+          UseGateway = false;
+          UseDNS = false;
+          UseNTP = false;
+          UseHostname = false;
+          UseDomains = false;
+        };
+      };
+    };
+  };
 in
 {
   options.hyper.spaces = lib.mkOption {
     type = lib.types.attrsOf (
-      lib.types.submodule {
+      lib.types.submodule (sub: {
+        config.guestModules = lib.mkIf (sub.config.usbPorts != [ ]) [ guestNet ];
         options.usbPorts = lib.mkOption {
           type = lib.types.listOf (lib.types.strMatching "[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\\.[0-9]/usb[0-9]+/[0-9]+-[0-9.]+");
           default = [ ];
           example = [ "0000:0a:00.0/usb2/2-2" "0000:0a:00.0/usb1/1-1" ];
           description = "Physical USB ports of this host whose devices appear in the guest (./usb-ports.nix).";
         };
-      }
+      })
     );
   };
 
@@ -127,24 +153,42 @@ in
           # The rules match every event but remove: a later bind/change
           # event re-reads them, and one without the want would stop this.
           unitConfig.StopWhenUnneeded = true;
+          inherit path;
           serviceConfig = {
             Type = "oneshot";
             RemainAfterExit = true;
-            ExecStart = "${attach} %i add";
-            ExecStop = "${attach} %i remove";
+            ExecStart = "${attach} add %i";
+            ExecStop = "${attach} remove %i";
+          };
+        };
+        # a network interface on a port into the guest's netns, once per
+        # appearance (each replug or reset is a new ifindex)
+        "space-usb-net@" = {
+          description = "USB network interface %i into its space";
+          path = path ++ [ pkgs.iproute2 ];
+          serviceConfig = {
+            Type = "oneshot";
+            ExecStart = "${attach} net %i";
           };
         };
       }
+      # A (re)started container has an empty /dev and its unit's own
+      # DeviceAllow: hand over again what is plugged in. Wanted by the
+      # container's unit from outside (a .wants link), so the container's
+      # unit file stays as it is.
       // lib.mapAttrs' (
         name: _:
-        lib.nameValuePair "container@${name}" {
-          serviceConfig.DeviceAllow = [
-            "block-sd rw"
-            "char-usb_device rw"
-            "char-ttyUSB rw"
-            "char-ttyACM rw"
-            "char-hidraw rw"
-          ];
+        lib.nameValuePair "space-usb-replay-${name}" {
+          description = "USB devices into the restarted ${name}";
+          wantedBy = [ "container@${name}.service" ];
+          after = [ "container@${name}.service" ];
+          partOf = [ "container@${name}.service" ];
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+            ExecStart = "${attach} replay ${name}";
+          };
+          path = path ++ [ pkgs.iproute2 ];
         }
       ) spaces;
   };

@@ -58,7 +58,9 @@
 
   No TPM identity is made, but the TPM stays bound in (`tpm`, as the
   gi-infra space had it): an `age-plugin-tpm` identity needs AGE_KEYFILE
-  unset. The keys are clan vars of this clan, readable by whoever
+  unset. Such an identity is sealed to one host's TPM: one made on
+  som opens nothing on amy, so gi-infra's vars encrypted to it don't
+  decrypt in amy's copy until amy's own identity is a recipient there too. The keys are clan vars of this clan, readable by whoever
   decrypts this clan's vars (infra-space, Dave), which Dave chose.
 
   Host keys pinned: the forges' published keys (./forge-host-keys.nix);
