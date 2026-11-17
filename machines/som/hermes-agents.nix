@@ -73,6 +73,8 @@ in
     inputs.hyperhermes.nixosModules.dashboards
     inputs.hyperhermes.nixosModules.clan
     ./hermes-inference.nix
+    # dave-hermes's HA token for the TV rack plug.
+    ./dave-hermes-ha.nix
     inputs.hyperhermes.nixosModules.browser
     ../../modules/nixos/searxng-canary
     # Nightly borg backup of the agents' homes and state to nas.

@@ -136,6 +136,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - cctl-${instanceName}: modules/clan/cctl/default.nix
 - clan-secrets-pull: modules/nixos/clan-secrets-mirror.nix
 - grafana-telegram: modules/nixos/monitoring-alerts.nix
+- ha-rack-plug-token: machines/som/dave-hermes-ha.nix
 - inference-api-key: modules/nixos/inference-api-key.nix
 - infra-space-brief: modules/nixos/infra-space/default.nix
 - initrd-ssh: modules/nixos/initrd-ssh.nix
