@@ -1,7 +1,7 @@
 /*
   Named agent spaces: NixOS containers like infra-space (../infra-space),
   each for one job, none of them a fleet admin. hyper.spaces.<name> on the
-  machine ./registry.nix assigns it to produces container <name>, its
+  machines ./registry.nix assigns it to produces container <name>, its
   user <name>, its home /var/lib/spaces/<name>/home here.
 
   The same host side as infra-space (./host.nix: private veth, NAT,
@@ -83,8 +83,8 @@ let
       {
         assertions = [
           {
-            assertion = r.machine == machine;
-            message = "hyper.spaces.${name}: ./registry.nix puts it on ${r.machine}, not ${machine}";
+            assertion = lib.elem machine r.machines;
+            message = "hyper.spaces.${name}: ./registry.nix puts it on ${lib.concatStringsSep ", " r.machines}, not ${machine}";
           }
           {
             assertion = !(cfg.credentials ? ${hostKeyCredential});
@@ -174,7 +174,7 @@ in
 
   options.hyper.spaces = lib.mkOption {
     default = { };
-    description = "Named agent spaces on this machine (./registry.nix assigns each its machine, port, subnet and ids).";
+    description = "Named agent spaces on this machine (./registry.nix assigns each its machines, port, subnet and ids).";
     type = lib.types.attrsOf (
       lib.types.submodule (
         { name, ... }:

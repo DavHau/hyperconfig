@@ -41,7 +41,7 @@
   # login (modules/nixos/spaces/publish.nix): the client hermes-serve gets
   # a callback pattern per space and admits its group space-<name>, which
   # the space's owners (registry.nix) join.
-  somSpaces = lib.filterAttrs (_: s: s.machine == "som") (import ../nixos/spaces/registry.nix);
+  somSpaces = lib.filterAttrs (_: s: lib.head s.machines == "som") (import ../nixos/spaces/registry.nix);
   spaceGroupOf = name: "space-${name}";
   spaceGroups = lib.foldlAttrs (acc: name: s:
     lib.foldl' (a: o: a // { ${o} = (a.${o} or [ ]) ++ [ (spaceGroupOf name) ]; }) acc (s.owners or [ "dave" ])

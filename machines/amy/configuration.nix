@@ -41,6 +41,8 @@
     # The fleet-managing container (also on som). Its desktop app is
     # ../../modules/nixos/dave-desktop's (a container of its own).
     ../../modules/nixos/infra-space
+    # geninf-space, as on som (same shared keys; modules/nixos/spaces)
+    ../../modules/nixos/spaces
     ./disko.nix
   ];
 
@@ -58,6 +60,11 @@
   hyper.encryptedDns.captiveInterface = "wlp192s0";
 
   hyper.infraSpace.enable = true;
+  # som's twin (shared keys); its web apps are published from som only.
+  hyper.spaces.geninf-space = {
+    enable = true;
+    publish.enable = false;
+  };
 
   # Dave's desktop session here is grmpf's (../../modules/nixos/dave-desktop).
   hyper.daveDesktop.user = "grmpf";

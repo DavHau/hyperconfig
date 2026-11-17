@@ -1,16 +1,19 @@
 # Named agent spaces
 
 `hyper.spaces.<name>`: a NixOS container per job, built like infra-space
-(`../infra-space`) but with none of its fleet rights. One on som:
-`geninf-space`. Design and isolation: `./default.nix` (host side
+(`../infra-space`) but with none of its fleet rights. One, on som and
+amy: `geninf-space` (a container on each, separate homes, the same
+shared keys). Design and isolation: `./default.nix` (host side
 `./host.nix`, shared with infra-space; guest `./guest.nix` on
 `./guest-base.nix`, also infra-space's base).
 
-| space        | ssh                        | user         | veth             | TPM | own keys (clan vars of som) |
+| space        | ssh                        | user         | veth             | TPM | own keys (shared clan vars) |
 |--------------|----------------------------|--------------|------------------|-----|-----------------------------|
-| geninf-space | `[som's ygg address]:2224` | geninf-space | 10.235.0.4/30, fd23:5ace:0:1::/64 | yes | root-ssh, root-ssh-agave, git-geninf, git-clan-lol, token-geninf, token-clan-lol |
+| geninf-space | `[som's/amy's ygg address]:2224` | geninf-space | 10.235.0.4/30, fd23:5ace:0:1::/64 | yes | root-ssh, root-ssh-agave, git-geninf, git-clan-lol, token-geninf, token-clan-lol |
 
-Homes persist on som at `/var/lib/spaces/<name>/home`. Dave's admin keys
+Homes persist per machine at `/var/lib/spaces/<name>/home` (not
+synced). Its web apps are published from som only. amy's copy is the
+herdr machine / ssh alias `geninf-space-amy` (`./public.nix`). Dave's admin keys
 log in. On amy (Dave's desktop), the launcher "geninf-space space" and
 the herdr machine `geninf-space` (`./client.nix`) appear once the host
 key is generated; entries of retired spaces leave Dave's herdr at the

@@ -1,9 +1,14 @@
-# The named agent spaces (./default.nix): which machine runs each, the
+# The named agent spaces (./default.nix): which machines run each, the
 # port on that machine's yggdrasil address that reaches the space's sshd,
 # its veth subnet and its ids. Plain data: the host (./default.nix) and
 # Dave's desktops (./client.nix: launchers, pinned host keys, herdr
 # machines) read it, never another machine's evaluated config.
 #
+#   machines  where the space runs, each its own container and home with
+#             the same index, ports and ids; the first is its primary (the
+#             one its published apps are on, ./publish.nix). Identities
+#             meant to be the same on every machine are shared clan vars
+#             (./geninf-space.nix).
 #   index     the veth subnet: v4 10.235.0.<4i>/30 (this host .<4i+1>,
 #             the guest .<4i+2>), v6 fd23:5ace:0:<i>::/64 (::1, ::2).
 #             0 is infra-space's (10.235.0.0/30, fd23:5ace::/64).
@@ -26,7 +31,10 @@
 # took over gi-infra's slot (index 1, 2224, 1205/1206) with its keys.
 {
   geninf-space = {
-    machine = "som";
+    machines = [
+      "som"
+      "amy"
+    ];
     index = 1;
     sshPort = 2224;
     uid = 1205;

@@ -181,7 +181,8 @@ pkgs.testers.runNixOSTest {
       hyper.spacesClient = {
         herdrUser = "dave";
         spaces = lib.mapAttrs (name: r: {
-          inherit (r) machine sshPort;
+          machine = lib.head r.machines;
+          inherit (r) sshPort;
           user = name;
           inherit address;
           hostKey = pub "hostkey-${name}.pub";

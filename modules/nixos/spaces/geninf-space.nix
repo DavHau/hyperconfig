@@ -10,8 +10,14 @@
   History): gi-infra's registry slot, ids and keys under the new name,
   agave's root key as a second credential, both homes merged.
 
-  Identities (clan vars of the space's machine, no prompts; Dave adds each
-  public value where it opens something, ./README.md has the steps):
+  Identities (shared clan vars, vars/shared/space-geninf-space-*: one
+  value each that every machine of the space (./registry.nix: som, amy)
+  decrypts, so each copy has the same keys and permissions; no prompts;
+  Dave adds each public value where it opens something, ./README.md has
+  the steps). They were som's per-machine vars until 2026-11-17, moved
+  unchanged (`clan vars get` som's, `clan vars set` the shared one,
+  `clan vars fix`): never regenerate them, they are registered elsewhere.
+  Only the guest's ssh host key stays per machine (./default.nix).
     space-geninf-space-root-ssh        root on gi-infra's machines;
                                        credential `root-ssh`, the guest's
                                        default identity for every host but
@@ -77,9 +83,9 @@ let
   vars = config.clan.core.vars.generators;
   containerUnit = "container@${name}.service";
   secretsDir = "/run/${name}/secrets";
-  machine = config.clan.core.settings.machine.name;
 
   sshKey = comment: {
+    share = true;
     files.id_ed25519.restartUnits = [ containerUnit ];
     files."id_ed25519.pub".secret = false;
     runtimeInputs = [ pkgs.openssh ];
@@ -88,6 +94,7 @@ let
     '';
   };
   token = description: {
+    share = true;
     prompts.token = {
       type = "hidden";
       persist = true;
@@ -134,10 +141,10 @@ in
 {
   config = {
     clan.core.vars.generators = lib.mkIf cfg.enable {
-      "${gen}-root-ssh" = sshKey "${name}@${machine} (root on gi-infra)";
-      "${gen}-root-ssh-agave" = sshKey "${name}@${machine} (root on agave-infra)";
-      "${gen}-git-geninf" = sshKey "${name}@${machine} (git.geninf.io)";
-      "${gen}-git-clan-lol" = sshKey "${name}@${machine} (git.clan.lol)";
+      "${gen}-root-ssh" = sshKey "${name} (root on gi-infra)";
+      "${gen}-root-ssh-agave" = sshKey "${name} (root on agave-infra)";
+      "${gen}-git-geninf" = sshKey "${name} (git.geninf.io)";
+      "${gen}-git-clan-lol" = sshKey "${name} (git.clan.lol)";
       # API tokens of the forge bot accounts (PRs: open, comment, merge),
       # entered by Dave: `clan vars generate <machine> --generator <name>`.
       "${gen}-token-geninf" =
@@ -151,14 +158,24 @@ in
     hyper.spaces.${name} = {
       # for an age identity of gi-infra's vars sealed to this host (above)
       tpm = true;
-      # The USB socket Dave picked on som (hardware projects: flashing,
-      # tinkering, KVM devices): its USB 3 port 2-2 and its USB 2 twin 1-1
-      # (firmware peers). Everything on them goes into the guest,
+      # The USB socket Dave picked per machine (hardware projects:
+      # flashing, tinkering, KVM devices): its USB 3 port and its USB 2
+      # twin (firmware peers). Everything on them goes into the guest,
       # keyboards and mice included (./usb-ports.nix).
-      usbPorts = [
-        "0000:0a:00.0/usb2/2-2"
-        "0000:0a:00.0/usb1/1-1"
-      ];
+      usbPorts =
+        {
+          som = [
+            "0000:0a:00.0/usb2/2-2"
+            "0000:0a:00.0/usb1/1-1"
+          ];
+          # amy's USB-C socket Dave picked (an Ethernet dongle in it at
+          # first): USB 3 port 8-1 and its USB 2 twin 7-1.
+          amy = [
+            "0000:c3:00.4/usb8/8-1"
+            "0000:c3:00.4/usb7/7-1"
+          ];
+        }
+        .${config.clan.core.settings.machine.name} or [ ];
       credentials = {
         root-ssh = vars."${gen}-root-ssh".files.id_ed25519.path;
         root-ssh-agave = vars."${gen}-root-ssh-agave".files.id_ed25519.path;
