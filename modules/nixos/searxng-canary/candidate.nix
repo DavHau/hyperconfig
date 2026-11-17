@@ -12,8 +12,8 @@
 # will see.
 #
 # Interface, like ../infra-space/gcroots.nix: the guest connects to
-# /run/searxng-candidate/socket (the directory bound read-only into the
-# guest; the socket 0660 root:infra-space-gcroot, the memberless host
+# /run/searxng-candidate/socket (the directory bound read-only and
+# idmapped into the guest, as gcroots' is; the socket 0660 root:infra-space-gcroot, the memberless host
 # group with the guest's gid) and sends one line, `<package> <rev>`:
 #   <package>  the SearXNG package the guest built from the bump workspace
 #              (.#nixosConfigurations.som.config.services.searx.package):
@@ -289,11 +289,16 @@ in
       };
     };
 
-    # the guest's end of it
-    containers.infra-space.bindMounts.${socketDir} = {
-      hostPath = socketDir;
-      isReadOnly = true;
-    };
+    # the guest's end of it, bound like ../infra-space/gcroots.nix's:
+    # idmapped where the guest has its own user namespace
+    # (../spaces/host.nix), so the socket's host gid is the guest's infra
+    # group there. A plain bindMounts entry (no idmap) shows it as
+    # nobody:nogroup 0660 in the guest, and infra cannot connect.
+    containers.infra-space.extraFlags = [
+      "--bind-ro=${socketDir}:${socketDir}${
+        lib.optionalString (config.containers.infra-space.privateUsers != "no") ":idmap"
+      }"
+    ];
     systemd.services."container@infra-space" = {
       wants = [ "searxng-candidate.socket" ];
       after = [ "searxng-candidate.socket" ];
