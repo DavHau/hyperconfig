@@ -15,9 +15,16 @@
 # Plugins: every `plugins.<name>` dir (plugin.toml + .luau) is copied into one
 # store dir, served as a read-only `path` plugin source and enabled as
 # `hyperconfig/<name>`.
+#
+# Patched: no Bluetooth reconnect-all on adapter power-on
+# (no-bluetooth-auto-reconnect.patch; reasons there and in
+# ../bluetooth-resume-fix.nix).
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.noctalia;
+  package = cfg.package.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [ ./no-bluetooth-auto-reconnect.patch ];
+  });
   toml = pkgs.formats.toml { };
 
   pluginDir = pkgs.runCommand "noctalia-plugins" { } (
@@ -50,7 +57,7 @@ let
   # Fails the build on config errors (bad keys are only warnings).
   checkedConfig = pkgs.runCommand "noctalia-nixos-checked.toml" { } ''
     export HOME=$TMPDIR
-    ${lib.getExe cfg.package} config validate ${configFile}
+    ${lib.getExe package} config validate ${configFile}
     cp ${configFile} $out
   '';
 
@@ -91,7 +98,7 @@ in
 
   config = lib.mkIf cfg.enable {
     environment.systemPackages = [
-      cfg.package
+      package
       pkgs.libnotify
       pkgs.wl-clipboard
       pkgs.xdg-utils
@@ -107,12 +114,12 @@ in
       after = [ "graphical-session.target" ];
       wantedBy = [ "graphical-session.target" ];
       restartTriggers = [
-        cfg.package
+        package
         linkConfig
       ];
       serviceConfig = {
         ExecStartPre = "${linkConfig}/bin/noctalia-link-config";
-        ExecStart = lib.getExe cfg.package;
+        ExecStart = lib.getExe package;
         # noctalia exits 0 when the compositor drops its connection (e.g. a
         # refused session lock), so on-failure would leave the bar dead.
         Restart = "always";

@@ -1,0 +1,19 @@
+--- a/src/dbus/bluetooth/bluetooth_service.cpp
++++ b/src/dbus/bluetooth/bluetooth_service.cpp
+@@ -844,11 +844,12 @@
+ }
+ 
+ void BluetoothService::scheduleAutoReconnect() {
+-  if (!m_state.powered) {
+-    return;
+-  }
++  // hyperconfig: disabled. Calling Device.Connect on every trusted device pages
++  // absent BR/EDR headsets (5 s page timeout each, serialised by the controller)
++  // and aborts the LE auto-connect of present HID devices: a BLE mouse came back
++  // only after ~40 s of failed pages. BlueZ already reconnects LE HID itself
++  // (auto-connect list) and headsets page the host when switched on.
+   m_autoReconnectAttempt = 0;
+-  armAutoReconnect();
+ }
+ 
+ void BluetoothService::armAutoReconnect() {
