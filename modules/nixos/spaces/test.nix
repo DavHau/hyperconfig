@@ -218,6 +218,7 @@ pkgs.testers.runNixOSTest {
         "test-vars/infra-space-ssh/id_ed25519" = secret (isKeys + "/infra-space");
         "test-vars/infra-space-github/id_ed25519" = fake "infra-space-github";
         "test-vars/infra-space-secrets-github/id_ed25519" = fake "infra-space-secrets-github";
+        "test-vars/agave-geninf-ro/id_ed25519" = fake "agave-geninf-ro";
         "test-vars/infra-space-hostkey/ssh_host_ed25519_key" = secret (isKeys + "/hostkey-memberA");
         "test-vars/inference-api-key/token" = fake "p0-token";
         "test-vars/teamclaude-api-key/key" = fake "teamclaude-key";

@@ -348,6 +348,7 @@ let
         "test-vars/infra-space-brief/id_ed25519" = secret (keys + "/brief");
         "test-vars/infra-space-github/id_ed25519" = secret (pkgs.writeText "github" "not a key\n");
         "test-vars/infra-space-secrets-github/id_ed25519" = secret (pkgs.writeText "secrets-github" "not a key\n");
+        "test-vars/agave-geninf-ro/id_ed25519" = secret (pkgs.writeText "agave-geninf-ro" "not a key\n");
         "test-vars/infra-space-hostkey/ssh_host_ed25519_key" = secret (keys + "/hostkey-${me}");
         "test-vars/inference-api-key/token" = secret (pkgs.writeText "p0-token" "test-p0-token\n");
         "test-vars/teamclaude-api-key/key" = secret (pkgs.writeText "teamclaude-key" "sk-ant-oat01-test\n");
@@ -436,7 +437,7 @@ pkgs.testers.runNixOSTest {
 
       with subtest("credentials: 0400 infra on the guest's own /run"):
           for m in members.values():
-              for name in ["ssh", "github", "secrets-github"]:
+              for name in ["ssh", "github", "secrets-github", "agave-geninf-ro"]:
                   out = guest_root(m, f"stat -c '%a %U %G' /run/infra-space/secrets/{name}").strip()
                   assert out == "400 infra infra", (name, out)
               out = guest_root(m, "findmnt -n -o TARGET,FSTYPE -T /run/infra-space/secrets/ssh").split()

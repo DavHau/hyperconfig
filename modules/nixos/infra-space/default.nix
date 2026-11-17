@@ -112,6 +112,12 @@
                          above); credential `secrets-github`. Manual: add
                          its public value on that repository as a deploy key
                          with write access.
+    agave-geninf-ro      shared: read-only ssh key for agave's repositories
+                         on git.geninf.io (agave, agave-vm-host,
+                         agave-marketplace, tranquil-pds; granted by
+                         gi-infra, never write); credential
+                         `agave-geninf-ro`. Also meant for the agave-host
+                         space.
     infra-space-brief    shared, made and used on the hermes member only:
                          the morning brief's key to edi, a forced command
                          for an unprivileged user (../telegram-send);
@@ -340,6 +346,13 @@ in
         runtimeInputs = [ pkgs.openssh ];
         script = sshKeygen "infra-space@DavHau/hyperconfig-secrets";
       };
+      agave-geninf-ro = {
+        share = true;
+        files.id_ed25519.restartUnits = [ containerUnit ];
+        files."id_ed25519.pub".secret = false;
+        runtimeInputs = [ pkgs.openssh ];
+        script = sshKeygen "agave-geninf-ro";
+      };
       infra-space-hostkey = {
         files.ssh_host_ed25519_key.restartUnits = [ containerUnit ];
         files."ssh_host_ed25519_key.pub".secret = false;
@@ -354,6 +367,7 @@ in
       ssh = vars.infra-space-ssh.files.id_ed25519.path;
       github = vars.infra-space-github.files.id_ed25519.path;
       secrets-github = vars.infra-space-secrets-github.files.id_ed25519.path;
+      agave-geninf-ro = vars.agave-geninf-ro.files.id_ed25519.path;
       # Inference for the guest's hermes (./hermes.nix) and afk (./afk.nix):
       # p0's token (../inference-api-key.nix) and the TeamClaude client key
       # (../teamclaude-api-key.nix), both shared vars of every member.
