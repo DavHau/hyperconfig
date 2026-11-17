@@ -19,6 +19,16 @@ the herdr machine `geninf-space` (`./client.nix`) appear once the host
 key is generated; entries of retired spaces leave Dave's herdr at the
 next switch (`./herdr-space-machines.py`).
 
+The copies of a space on different machines reach each other: from
+inside geninf-space on som `ssh geninf-space-amy`, on amy `ssh
+geninf-space-som` (alias `<space>-<machine>` per sibling, the sibling's
+host key pinned). They log in as the space's user with the space's
+shared `space-<name>-root-ssh` key, which every copy authorizes; the
+host lets the guest through to exactly the siblings' ssh forwards
+(`[<ygg address>]:<sshPort>`, `siblingForwards` in `./host.nix`), the
+rest of the mesh stays refused. Generic for every space with more than
+one machine and a shared root-ssh var (`./default.nix`).
+
 geninf-space clones every repository of the generational-infrastructure
 org on git.geninf.io that davhau-gi-bot sees (listed from the API every
 15 min, new ones included; `space.orgCheckouts`, `./guest.nix`).

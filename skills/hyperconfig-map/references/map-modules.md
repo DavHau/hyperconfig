@@ -331,7 +331,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/spaces/herdr-space-machines.py — - <- m/spaces/client.nix
 - modules/nixos/spaces/host.nix — The host side of one space container: <- m/dave-desktop/isolated-apps.nix, m/infra-space/default.nix, m/space-gui/default.nix, m/space-gui/test.nix, m/spaces/default.nix, m/spaces/guest-base.nix, m/spaces/guest.nix, m/spaces/publish-guest.nix, +1
 - modules/nixos/spaces/immutable-helper.py — One request of a space guest's root (./host.nix, immutableHelper): <- m/spaces/host.nix
-- modules/nixos/spaces/public.nix — Every space of ./registry.nix on each of its machines, with that machine's mesh address and the guest's pinned host key… <- m/spaces/client.nix
+- modules/nixos/spaces/public.nix — Every space of ./registry.nix on each of its machines, with that machine's mesh address and the guest's pinned host key… <- m/spaces/client.nix, m/spaces/default.nix
 - modules/nixos/spaces/publish-guest.nix — A space's published web apps, the guest's side (./publish.nix has the host's, ./default.nix wires both from hyper.space… <- m/spaces/default.nix, m/spaces/publish.nix
 - modules/nixos/spaces/publish.nix — The spaces' published web apps, the host's front (som: <- som, m/spaces/default.nix, m/spaces/publish-guest.nix
 - modules/nixos/spaces/registry.nix — The named agent spaces (./default.nix): <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/default.nix, m/spaces/client.nix, m/spaces/default.nix, m/spaces/geninf-space.nix, m/spaces/public.nix, m/spaces/publish.nix, m/spaces/test.nix

@@ -22,6 +22,9 @@
       fleet over this host's mesh address nor the LANs this host is on;
       and of this host it reaches DNS on hostAddress only (no sshd, no
       other space's or infra-space's ssh proxy, no other host service).
+      `siblingForwards` ({ address, port } each) are the exceptions: the
+      ssh forwards of the same space's copies on its other machines
+      (./default.nix), accepted before the rejects, that port only.
     - The guest's home at homeDir here, read-write.
     - `tpm`: /dev/tpmrm0 bound in, a POSIX ACL for the guest's uid set at
       every container start.
@@ -114,6 +117,7 @@
   specialArgs,
   toGuestRules ? "",
   confine ? false,
+  siblingForwards ? [ ],
   blockedDestinations ? {
     v4 = [ ];
     v6 = [ ];
@@ -217,6 +221,11 @@ let
 
     chain confine-forward {
       type filter hook forward priority filter; policy accept;
+      ${lib.concatMapStrings (
+        f:
+        ''iifname "${veth}" ${if lib.hasInfix ":" f.address then "ip6" else "ip"} daddr ${f.address} tcp dport ${toString f.port} accept
+        ''
+      ) siblingForwards}
       ${lib.optionalString (blockedDestinations.v4 != [ ]) ''iifname "${veth}" ip daddr ${set blockedDestinations.v4} reject with icmpx admin-prohibited''}
       ${lib.optionalString (blockedDestinations.v6 != [ ]) ''iifname "${veth}" ip6 daddr ${set blockedDestinations.v6} reject with icmpx admin-prohibited''}
     }

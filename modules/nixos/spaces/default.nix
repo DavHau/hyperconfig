@@ -61,6 +61,11 @@ let
   spaceHost = import ./host.nix { inherit config lib pkgs; };
   machine = config.clan.core.settings.machine.name;
   meshAddress = vars.yggdrasil.files.address.value;
+  publicSpaces = import ./public.nix {
+    inherit lib;
+    inherit (inputs.clan-core) clanLib;
+    flake = config.clan.core.settings.directory;
+  };
 
   # Mesh, LANs, overlays, the other spaces and infra-space (./host.nix).
   blockedDestinations = import ./blocked-destinations.nix;
@@ -78,6 +83,26 @@ let
       guestHome = "/home/${name}";
       v4 = n: "10.235.0.${toString (4 * r.index + n)}";
       v6 = n: "fd23:5ace:0:${toString r.index}::${toString n}";
+
+      # The copies of this space on its other machines (./registry.nix),
+      # from the public clan vars (./public.nix). They reach each other's
+      # ssh forward (./host.nix `siblingForwards`) as the space's user
+      # with the shared root-ssh key, the space's identity on every
+      # machine: authorized here, and ssh alias <name>-<machine> with the
+      # sibling's pinned host key. Only for a space with a shared
+      # space-<name>-root-ssh var passed in as a credential.
+      rootSsh = vars."space-${name}-root-ssh" or null;
+      rootSshCredential =
+        if rootSsh == null || !(rootSsh.share or false) then
+          null
+        else
+          lib.findFirst (
+            n: cfg.credentials.${n} == rootSsh.files.id_ed25519.path
+          ) null (lib.attrNames cfg.credentials);
+      siblings = lib.optionals (rootSshCredential != null) (
+        lib.filter (s: s.user == name && s.machine != machine) (lib.attrValues publicSpaces)
+      );
+      siblingAlias = s: "${name}-${s.machine}";
     in
     lib.mkIf cfg.enable (lib.mkMerge [
       {
@@ -125,6 +150,10 @@ let
         };
         confine = true;
         inherit blockedDestinations;
+        siblingForwards = map (s: {
+          inherit (s) address;
+          port = s.sshPort;
+        }) siblings;
         # this host's nginx into the published port window (./publish.nix)
         toGuestRules = lib.optionalString (cfg.publish.enable && config.services.nginx.enable) "meta skuid ${
           toString config.users.users.${config.services.nginx.user}.uid
@@ -135,6 +164,29 @@ let
             ./guest.nix
             (import ./afk.nix "/run/${name}/secrets")
             ./publish-guest.nix
+            {
+              # before the space's own `Host *` (./geninf-space.nix)
+              programs.ssh.extraConfig = lib.mkBefore (
+                lib.concatMapStrings (s: ''
+                  Host ${siblingAlias s}
+                    HostName ${s.address}
+                    Port ${toString s.sshPort}
+                    User ${s.user}
+                    IdentityFile /run/${name}/secrets/${rootSshCredential}
+                    IdentitiesOnly yes
+
+                '') siblings
+              );
+              programs.ssh.knownHosts = lib.listToAttrs (
+                map (
+                  s:
+                  lib.nameValuePair (siblingAlias s) {
+                    hostNames = [ "[${s.address}]:${toString s.sshPort}" ];
+                    publicKey = s.hostKey;
+                  }
+                ) siblings
+              );
+            }
           ]
           ++ cfg.guestModules;
           space = {
@@ -144,7 +196,9 @@ let
             home = guestHome;
             description = "${name} space";
             credentials = lib.attrNames cfg.credentials;
-            authorizedKeys = lib.attrValues cfg.adminKeys;
+            authorizedKeys =
+              lib.attrValues cfg.adminKeys
+              ++ lib.optional (siblings != [ ]) rootSsh.files."id_ed25519.pub".value;
             resolver = v4 1;
             hostAddress = v4 1;
             hostAddress6 = v6 1;
