@@ -38,9 +38,11 @@
   The guest's networkd takes an address by DHCP on it, no gateway or DNS,
   and the lease's prefix route only into a table of its own (4242) that
   the guest consults after its own specific routes and before its
-  default route, ignoring any route there shorter than /16: a KVM's or
-  board's DHCP (a hostile /1 netmask included) can't take the guest's
-  internet.
+  default route, only for private and link-local destinations (10/8,
+  172.16/12, 192.168/16, 169.254/16) and ignoring any route there
+  shorter than /16: a KVM's or board's DHCP (a hostile /1 netmask, or a
+  public lease like 1.1.1.5/16, included) can't take the guest's
+  internet. Left: the leased address itself (the kernel's local route).
 
   Listing a port gives the guest unfiltered network through whatever
   adapter appears there: this host's firewall never sees that traffic,
@@ -54,14 +56,24 @@
   as power or sleep buttons (no `power-switch` tag), and libinput
   ignores them. The guest reads them through hidraw (raw reports,
   hid core keeps those flowing); their event nodes stay silent there
-  too. Left: the few milliseconds between the kernel registering the
-  device and udev processing it.
+  too. In the few milliseconds between the kernel registering the
+  device and udev processing it, the VT keyboard still sees its keys:
+  so on a host with any such port Ctrl-Alt-Del does nothing
+  (ctrl-alt-del.target is a no-op target, CtrlAltDelBurstAction=none),
+  for every keyboard: a local Ctrl-Alt-Del no longer reboots this host.
+  A device re-enumerating to send it in its first report gets nothing.
+  Left in that window: SysRq (if enabled) and evdev readers.
 
   Block devices on a port are left alone by this host: udev doesn't
-  probe them for filesystems (so no LVM, md, bcache or ZFS scan, no
-  by-uuid/by-label link, also in the initrd) and udisks hides them (no
-  automount, no desktop entry, mounting needs admin). The guest has raw
-  write access to them.
+  probe them for filesystems (so no LVM, md or bcache activation) and
+  makes no /dev/disk/by-* link (by-id, by-path, by-uuid, by-label, ...),
+  also in the initrd: a ZFS import from /dev/disk/by-id (boot.zfs.devNodes
+  on som and amy, the initrd's `zpool import -d`) never sees them, so a
+  guest-written stick with a fake pool of the root pool's name left in at
+  reboot can't break the import. udisks hides them (no automount, no
+  desktop entry, mounting needs admin). The guest has raw write access to
+  them. A manual `zpool import`, `lvm`/`pvscan` or `mdadm --scan` without
+  a device filter (-d) still reads every disk, these too.
 
   A restarted container starts with an empty /dev, its unit's own list
   and none of the adapters (back in the host's namespace):
@@ -111,14 +123,15 @@ let
       '') s.usbPorts
     ) spaces
   );
-  # Before 60-persistent-storage.rules: no blkid probe of block devices on
-  # the ports, so no ID_FS_TYPE, which LVM's pvscan, mdadm's incremental
-  # assembly, bcache and the by-uuid/by-label links all key on. Not
-  # SYSTEMD_READY=0: that would stop the device unit, and with it the
-  # SYSTEMD_WANTS hand-over above.
+  # Before 60-persistent-storage.rules: none of it for block devices on
+  # the ports (its first test is the RULES flag): no blkid probe, so no
+  # ID_FS_TYPE, which LVM's pvscan, mdadm's incremental assembly and
+  # bcache key on, and no /dev/disk/by-* links, which ZFS's imports from
+  # /dev/disk/by-id scan. Not SYSTEMD_READY=0: that would stop the device
+  # unit, and with it the SYSTEMD_WANTS hand-over above.
   noProbe = pkgs.writeTextDir "lib/udev/rules.d/59-space-usb-no-probe.rules" (
     lib.concatMapStrings (port: ''
-      SUBSYSTEM=="block", DEVPATH=="*/${port}/*", ENV{UDEV_DISABLE_PERSISTENT_STORAGE_BLKID_FLAG}="1"
+      SUBSYSTEM=="block", DEVPATH=="*/${port}/*", ENV{UDEV_DISABLE_PERSISTENT_STORAGE_RULES_FLAG}="1", ENV{UDEV_DISABLE_PERSISTENT_STORAGE_BLKID_FLAG}="1"
     '') ports
   );
   # per space: its ports, the guest's id base, the container unit's own
@@ -143,10 +156,18 @@ let
   # no DNS: a KVM's or board's DHCP must not take the guest's internet).
   # The lease's prefix route goes into its own table, consulted after the
   # main table's specific routes (rule 1: main without its default) and
-  # before the default, and only for routes of /16 or longer (a hostile
-  # /1 netmask would otherwise take half the internet).
+  # before the default, only for private and link-local destinations (a
+  # public lease like 1.1.1.5/16 would otherwise take 1.1/16) and only
+  # for routes of /16 or longer (a hostile /1 netmask would otherwise take
+  # half the internet). v4 only: the link gets no v6 but its fe80::/64.
   # networkd touches nothing but these.
   usbTable = 4242;
+  usbDests = [
+    "10.0.0.0/8"
+    "172.16.0.0/12"
+    "192.168.0.0/16"
+    "169.254.0.0/16"
+  ];
   guestNet = {
     systemd.network = {
       enable = true;
@@ -168,12 +189,13 @@ let
             SuppressPrefixLength = 0;
             Priority = 4240;
           }
-          {
-            Table = usbTable;
-            SuppressPrefixLength = 15;
-            Priority = 4242;
-          }
-        ];
+        ]
+        ++ map (to: {
+          To = to;
+          Table = usbTable;
+          SuppressPrefixLength = 15;
+          Priority = 4242;
+        }) usbDests;
         dhcpV4Config = {
           RouteTable = usbTable;
           UseRoutes = false;
@@ -205,8 +227,19 @@ in
   config = lib.mkIf (spaces != { }) {
     services.udev.extraRules = rules;
     services.udev.packages = [ noProbe ];
-    # a stick on the port at boot: no LVM/md activation in the initrd either
+    # a stick on the port at boot: no LVM/md activation or by-id link in
+    # the initrd either (its zpool import scans /dev/disk/by-id)
     boot.initrd.services.udev.packages = [ noProbe ];
+    # A keyboard on a port reaches the VT keyboard before udev inhibits it
+    # (see the header): Ctrl-Alt-Del, also pressed 7 times in 2 s, does
+    # nothing on this host, from any keyboard.
+    systemd.ctrlAltDelUnit = "space-usb-ctrl-alt-del.target";
+    systemd.targets.space-usb-ctrl-alt-del = {
+      description = "No-op key target (spaces' USB ports)";
+      # no-op: pulls in nothing
+      unitConfig.DefaultDependencies = false;
+    };
+    systemd.settings.Manager.CtrlAltDelBurstAction = "none";
     systemd.services =
       {
         "space-usb@" = {
@@ -221,6 +254,22 @@ in
             RemainAfterExit = true;
             ExecStart = "${attach} add %i";
             ExecStop = "${attach} remove %i";
+          };
+        };
+        # a revocation that failed (the space's devices' records left as
+        # .revoking), retried with backoff until a list without them is
+        # set; started by ./usb-ports.py when one fails
+        "space-usb-revoke@" = {
+          description = "Revoke USB devices of %i";
+          inherit path;
+          unitConfig.StartLimitIntervalSec = 0;
+          serviceConfig = {
+            Type = "oneshot";
+            ExecStart = "${attach} revoke %i";
+            Restart = "on-failure";
+            RestartSec = 1;
+            RestartSteps = 5;
+            RestartMaxDelaySec = 30;
           };
         };
         # a network interface on a port into the guest's netns, once per

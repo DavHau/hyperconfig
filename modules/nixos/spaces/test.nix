@@ -563,6 +563,10 @@ pkgs.testers.runNixOSTest {
           allow = host.succeed("systemctl show -p DeviceAllow container@geninf-space.service")
           assert "/dev/block/" not in allow, allow
           assert "/dev/tpmrm0" in allow and "/dev/net/tun" in allow, allow
+          # the revocation retry: nothing pending, done at once
+          host.succeed("systemctl start space-usb-revoke@geninf-space.service")
+          assert host.succeed("systemctl show -p Result --value space-usb-revoke@geninf-space.service").strip() == "success"
+          host.succeed("! ls /run/space-usb/geninf-space | grep -q revoking")
           import time
           def stays(cmd, seconds=5):
               # cmd keeps succeeding for a while (1 s steps)
@@ -581,11 +585,12 @@ pkgs.testers.runNixOSTest {
           host.succeed("pvcreate -y /dev/sda && vgcreate spusbtest /dev/sda && lvcreate -y -L 4M -n lv spusbtest && vgchange -an spusbtest")
           forget = "rm -rf /run/lvm/pvs_online/* /run/lvm/vgs_online/* /run/lvm/pvs_lookup/*"
           host.succeed(forget)
-          host.succeed("udevadm trigger --settle --action=change /dev/sda")
+          host.succeed("udevadm trigger --settle --action=add /dev/sda")
           host.succeed("udevadm info -q property /dev/sda | grep -qx ID_FS_TYPE=LVM2_member")
-          # the baseline: on an unlisted port this host's LVM activates it
-          rc, _ = host.execute("for i in $(seq 30); do test -e /dev/spusbtest/lv && exit 0; sleep 1; done; exit 1")
-          print(f"unlisted port: LVM event activation {'seen' if rc == 0 else 'not seen'}")
+          # the baseline: on an unlisted port this host's LVM activates
+          # it, and udev links it under /dev/disk
+          host.wait_until_succeeds("test -e /dev/spusbtest/lv", timeout=30)
+          host.succeed("find /dev/disk -lname '*/sda' | grep -q by-path")
           host.succeed("vgchange -an spusbtest")
           host.wait_until_succeeds("! dmsetup ls | grep -q spusbtest", timeout=30)
           unplug("lvm1")
@@ -597,6 +602,9 @@ pkgs.testers.runNixOSTest {
           props = host.succeed("udevadm info -q property /dev/sda")
           print(props)
           assert "ID_FS_TYPE=" not in props and "UDISKS_IGNORE=1" in props and "UDISKS_AUTO=0" in props, props
+          # no /dev/disk/by-* link (by-id: ZFS's import dir on som and amy)
+          assert "DEVLINKS=" not in props, props
+          host.succeed("test -z \"$(find /dev/disk -lname '*/sda')\"")
           stays("! test -e /dev/spusbtest/lv && ! dmsetup ls | grep -q spusbtest && ! ls /run/lvm/pvs_online | grep -q .")
           host.wait_until_succeeds("udisksctl info -b /dev/sda | grep -Eq 'HintIgnore: +true'", timeout=30)
           info = host.succeed("udisksctl info -b /dev/sda")
@@ -608,7 +616,18 @@ pkgs.testers.runNixOSTest {
 
           # a keyboard on the port: the guest reads its reports by hidraw,
           # this host's kernel and logind act on none of its keys
+          # Ctrl-Alt-Del at once, before udev inhibits it: does nothing
+          # here (nor from any keyboard, nor the target started by hand)
+          cursor = host.succeed("journalctl -n0 --show-cursor | tail -1 | sed 's/^-- cursor: //'").strip()
           host.send_monitor_command("device_add usb-kbd,bus=xhci.0,port=1,id=kbd1")
+          host.send_key("ctrl-alt-delete")
+          host.succeed("systemctl start ctrl-alt-del.target")
+          assert host.succeed("readlink /etc/systemd/system/ctrl-alt-del.target").strip().endswith("space-usb-ctrl-alt-del.target")
+          stays("! systemctl -q is-active reboot.target poweroff.target && systemctl -q is-active multi-user.target")
+          jlog = host.succeed(f"journalctl --after-cursor={shlex.quote(cursor)} --no-pager")
+          assert "reboot.target" not in jlog and "Reboot" not in jlog, jlog
+          host.succeed("systemctl -q is-active space-usb-ctrl-alt-del.target")
+          host.succeed("systemctl stop space-usb-ctrl-alt-del.target")
           find_input = "for d in /sys/class/input/input*; do readlink -f $d | grep -q 0000:00:1e.0 && echo $d; done"
           host.wait_until_succeeds(f"test -n \"$({find_input})\"", timeout=60)
           inputs = host.succeed(find_input).split()
@@ -630,6 +649,9 @@ pkgs.testers.runNixOSTest {
           stays("! systemctl -q is-active reboot.target poweroff.target ctrl-alt-del.target && systemctl -q is-active multi-user.target")
           jlog = host.succeed(f"journalctl --after-cursor={shlex.quote(cursor)} --no-pager")
           assert "Power key pressed" not in jlog and "Ctrl-Alt-Del" not in jlog and "ctrl-alt-del" not in jlog, jlog
+          # nor did it reach the kernel's VT keyboard (systemd would start
+          # the no-op target again)
+          host.succeed("! systemctl -q is-active space-usb-ctrl-alt-del.target")
           host.send_monitor_command("device_del kbd1")
           host.wait_until_succeeds(f"test -z \"$({find_input})\"", timeout=60)
           # a network adapter on the port: into the guest's netns, DHCP on
@@ -651,6 +673,10 @@ pkgs.testers.runNixOSTest {
           # table 4242, ignored when shorter than /16
           rules = space_root("geninf-space", "ip -4 rule")
           assert "4242" in rules and "suppress_prefixlength 15" in rules, rules
+          # only for private and link-local destinations
+          for to in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"):
+              assert f"to {to} lookup 4242" in rules, rules
+          assert "from all lookup 4242" not in rules, rules
           assert "10.95.117" not in space_root("geninf-space", "ip -4 route show table main"), rules
           assert "10.95.117.0/24" in space_root("geninf-space", "ip -4 route show table 4242")
           # a container restart: moved into the new one

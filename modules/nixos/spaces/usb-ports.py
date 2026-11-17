@@ -5,6 +5,7 @@
   space-usb <config.json> add|remove <space>:<dev>
   space-usb <config.json> replay <space>
   space-usb <config.json> net <space>:<ifindex>
+  space-usb <config.json> revoke <space>
 
 <dev> is a kernel name (sdb1, ttyUSB0, hidraw3) or usb-<sysfs name>
 (usb-2-2.1) for the raw usb_device node. The guest's root must not be able
@@ -16,8 +17,9 @@ to turn any step into a write on something else of the host's, so:
   hard link the guest kept opens nothing once the number goes to another
   device. On remove the device's state becomes `<dev>.revoking` (out of
   the list) and goes only once a list without it is set (retried; a
-  failure fails the unit and the next successful update clears it), so
-  no record is lost while the cgroup may still allow the number;
+  failure starts space-usb-revoke@<space>, which retries with backoff
+  until it is set), so no record is lost while the cgroup may still
+  allow the number;
 - the node is made in a fresh directory of host root's (mode 0700, owner
   unmapped in the guest), chowned there without following anything and
   renamed into place; every directory on the way is opened one component
@@ -284,11 +286,13 @@ def states(space):
     return out
 
 
-def set_allow(cfg, space):
+def set_allow(cfg, space, retry_unit=True):
     """The container's DeviceAllow: the unit's own list plus the devices handed over now.
 
     Retried: a revocation must not be skipped because systemd was busy.
     Once set, the revocations pending before are done (their files go).
+    If it still fails with revocations pending, space-usb-revoke@<space>
+    keeps retrying (Restart=on-failure, backoff) until one is set.
     """
     d = f"{STATE}/{space}"
     pending = [f for f in os.listdir(d) if f.endswith(".revoking")] if os.path.isdir(d) else []
@@ -302,6 +306,8 @@ def set_allow(cfg, space):
             return
         log(f"{unit(space)}: DeviceAllow not set (try {attempt + 1})")
         time.sleep(0.5)
+    if retry_unit and pending:
+        subprocess.run(["systemctl", "start", "--no-block", f"space-usb-revoke@{space}.service"], check=False)
     raise subprocess.CalledProcessError(r.returncode, "systemctl set-property")
 
 
@@ -316,6 +322,16 @@ def main():
     config, action, arg = sys.argv[1:4]
     with open(config) as f:
         spaces = json.load(f)
+    if action == "revoke":
+        space = arg
+        if space not in spaces:
+            die(f"unknown space {space}")
+        lock(space)
+        d = f"{STATE}/{space}"
+        if os.path.isdir(d) and any(f.endswith(".revoking") for f in os.listdir(d)):
+            set_allow(spaces[space], space, retry_unit=False)  # fails: the unit restarts
+            log(f"{space}: pending revocations done")
+        return
     if action == "replay":
         space = arg
         if space not in spaces:
@@ -382,8 +398,8 @@ def main():
             d = None
         # revoke first: a node or link the guest kept opens nothing. The
         # record stays (as .revoking, out of the list) until a list
-        # without it is set: a failure here fails the unit, and the next
-        # add/remove/replay revokes it.
+        # without it is set: a failure here fails the unit and starts
+        # space-usb-revoke@<space>, which retries until it is set.
         os.replace(state, state + ".revoking")
         try:
             set_allow(cfg, space)
