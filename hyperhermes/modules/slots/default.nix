@@ -124,6 +124,25 @@
 #        the slot.
 #   IPv6 is untouched: the AAAA points at the slot, not at this host.
 #
+# Other backends (slots.sniBackends, public mode): the same two ports for
+# a backend that is not an agent slot (a space's container), given as
+# data: its hostnames (`*.` wildcards allowed) pass through by SNI to its
+# `https` address over the second hop, like a slot's, and its `http` URL,
+# if set, gets the port-80 vhost (ACME HTTP-01 and redirects in the
+# backend). Their DNS is managed elsewhere. The backend must admit nginx
+# (this host's uid nginx, from this host's address on its link; a space:
+# its `toGuestRules`). The router exists only with at least one slot
+# (asserted). Refused, since the router would take connections from
+# their owner: a name at or below the deployment's domains, a wildcard
+# with one of them at or below its root (`*.example.com` over
+# hermes.example.com), a name (exact or wildcard) matching one of this
+# host's own nginx vhosts (slot extra names alike), and an `https` on a
+# port this host's nginx listens on at one of its addresses (a loop).
+# A slot's exact name beats a backend's wildcard over it. On port 80 the
+# client address arrives as the LAST X-Forwarded-For entry (nginx
+# appends it): a backend trusts only that hop, never earlier entries,
+# which the client writes itself.
+#
 # Resources: memoryMax/cpuQuota per slot (defaults below), and all slots
 # together in agent-slots.slice (`limits`): a host with many slots at 4G
 # each must not give all of them that much at once. reset-hard also drops
@@ -213,6 +232,7 @@ let
   # admin's extras (the header).
   hostsOf = name: a: [ (hostOf name) ] ++ a.slot.extraHostnames;
   extraHostnames = lib.concatMap (a: a.slot.extraHostnames) (lib.attrValues agents);
+  backendHostnames = lib.concatMap (b: b.hostnames) (lib.attrValues cfg.sniBackends);
   # The deployment's domains (the slots' own names are below the first): no
   # extra name may be one of them or below one.
   deploymentDomains = [
@@ -227,10 +247,97 @@ let
   atOrBelow = domain: host: host == domain || lib.hasSuffix ".${domain}" host;
   label = "[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?";
   isHostname = h: lib.stringLength h <= 253 && builtins.match "(${label}\\.)+${label}" h != null;
+  # sniBackends may also name every subdomain of a name (nginx's `*.`)
+  isBackendHostname = h: isHostname (lib.removePrefix "*." h);
+  backendRoot = lib.removePrefix "*.";
+  isWildcard = lib.hasPrefix "*.";
+  # Whether two nginx server names (exact, `*.x` or `.x`) can match one
+  # name: nginx prefers an exact name and then the longest wildcard, so
+  # any overlap lets the more specific one take names from the other.
+  # Regex names (`~...`) are not compared.
+  namesOverlap =
+    a: b:
+    let
+      expand =
+        n:
+        if lib.hasPrefix "." n then
+          [
+            (lib.removePrefix "." n)
+            "*${n}"
+          ]
+        else
+          [ n ];
+      one =
+        x: y:
+        if isWildcard x && isWildcard y then
+          atOrBelow (backendRoot x) (backendRoot y) || atOrBelow (backendRoot y) (backendRoot x)
+        else if isWildcard x then
+          lib.hasSuffix ".${backendRoot x}" y
+        else if isWildcard y then
+          lib.hasSuffix ".${backendRoot y}" x
+        else
+          x == y;
+    in
+    lib.any (x: lib.any (y: one x y) (expand b)) (expand a);
+  # This host's own nginx names (its vhosts but the slots' and the
+  # backends' own): no slot extra name or backend name may match one, or
+  # the SNI router would take that site's connections away from it.
+  hostVhostNames = lib.unique (
+    lib.concatLists (
+      lib.mapAttrsToList (
+        n: v:
+        lib.optionals (!(lib.hasPrefix "slot-" n || lib.hasPrefix "sni-" n)) (
+          [ (if v.serverName != null then v.serverName else n) ] ++ v.serverAliases
+        )
+      ) nginxCfg.virtualHosts
+    )
+  );
+  hostVhostClashes = names: lib.filter (h: lib.any (namesOverlap h) hostVhostNames) names;
+  # sniBackends' `https`: an IPv4 address or hostname, or [IPv6], and a port.
+  backendTarget =
+    s:
+    let
+      m = builtins.match "(\\[[0-9a-f:.]+]|[a-z0-9.-]+):([0-9]{1,5})" s;
+    in
+    if m == null then
+      null
+    else
+      {
+        host = lib.removeSuffix "]" (lib.removePrefix "[" (lib.elemAt m 0));
+        port = lib.toInt (lib.elemAt m 1);
+      };
+  # Where this host's nginx itself listens (any address: the defaults bind
+  # all of them), so a backend there would loop through the router.
+  nginxPorts = lib.unique (
+    [
+      sniPort
+      nginxCfg.defaultHTTPListenPort
+      nginxCfg.defaultSSLListenPort
+    ]
+    ++ lib.concatMap (v: lib.filter (p: p != null) (map (l: l.port or null) v.listen)) (
+      lib.attrValues nginxCfg.virtualHosts
+    )
+  );
+  # This host's own addresses, as far as the configuration names them.
+  hostAddresses = [
+    "localhost"
+    "0.0.0.0"
+    "::"
+    "::1"
+  ]
+  ++ lib.optional (publicIPv4 != null) publicIPv4
+  ++ lib.concatMap (i: map (a: a.address) (i.ipv4.addresses ++ i.ipv6.addresses)) (
+    lib.attrValues config.networking.interfaces
+  )
+  ++ lib.concatMap (c: lib.filter (a: a != null) [ (c.hostAddress or null) (c.hostAddress6 or null) ]) (
+    lib.attrValues config.containers
+  );
+  isHostAddress = h: lib.elem h hostAddresses || lib.hasPrefix "127." h;
 
   # What the slot's port 80 gets through nginx (both modes).
+  # (or a { url } of sniBackends)
   slotLocation = a: {
-    proxyPass = "http://${ipv4Of a}:80";
+    proxyPass = a.url or "http://${ipv4Of a}:80";
     proxyWebsockets = true;
     recommendedProxySettings = true;
     extraConfig = ''
@@ -666,6 +773,44 @@ in
         example = "slots.example.com";
         description = "Public mode, transition: the slots' old parent domain. https://<agent>.<legacyDomain>/ answers 301 to the slot's hostname from this host's nginx, nothing else.";
       };
+      sniBackends = mkOption {
+        type = types.attrsOf (
+          types.submodule {
+            options = {
+              hostnames = mkOption {
+                type = types.nonEmptyListOf types.str;
+                example = [
+                  "app.example.org"
+                  "*.app.example.org"
+                ];
+                description = "Lowercase hostnames, `*.` wildcards allowed; none at or below the deployment's domains, none on a slot or another backend.";
+              };
+              https = mkOption {
+                type = types.str;
+                example = "10.235.0.10:443";
+                description = "host:port (IPv6 as [addr]:port) the TLS connections for `hostnames` pass through to (TLS ends there; the peer is this host, no PROXY header). Never a port this host's nginx listens on at one of its own addresses.";
+              };
+              http = mkOption {
+                type = types.nullOr types.str;
+                default = null;
+                example = "http://10.235.0.10:80";
+                description = "URL the port-80 vhost for `hostnames` proxies to (Host kept); null: port 80 stays with this host's nginx for them. The client address is the last X-Forwarded-For entry; earlier ones come from the client and must not be trusted.";
+              };
+            };
+          }
+        );
+        default = { };
+        example = lib.literalExpression ''
+          {
+            agave-host = {
+              hostnames = [ "agave.example.org" "*.agave.example.org" ];
+              https = "10.235.0.14:443";
+              http = "http://10.235.0.14:80";
+            };
+          }
+        '';
+        description = "Public mode: backends other than the slots on the public IPv4's 80/443, as data (see the module header).";
+      };
       egress = mkOption {
         type = types.str;
         default = "this host's uplink";
@@ -769,7 +914,17 @@ in
     };
   };
 
-  config = lib.mkIf (agents != { }) (
+  config = lib.mkMerge [
+    {
+      # The router (and with it every backend) exists only with a slot.
+      assertions = [
+        {
+          assertion = cfg.sniBackends != { } -> agents != { };
+          message = "services.hyperhermes.slots.sniBackends needs at least one agent with slot.enable: the SNI router exists only with a slot.";
+        }
+      ];
+    }
+    (lib.mkIf (agents != { }) (
     lib.mkMerge [
       {
         assertions = [
@@ -794,6 +949,10 @@ in
           {
             assertion = extraHostnames != [ ] -> public;
             message = "services.hyperhermes.agents.<name>.slot.extraHostnames needs exposure.mode = public.";
+          }
+          {
+            assertion = cfg.sniBackends != { } -> public;
+            message = "services.hyperhermes.slots.sniBackends needs exposure.mode = public.";
           }
         ];
 
@@ -1000,8 +1159,13 @@ in
             bad = lib.filter (h: !isHostname h) extraHostnames;
             twice = lib.unique (lib.filter (h: lib.count (x: x == h) extraHostnames > 1) extraHostnames);
             ours = lib.filter (h: lib.any (d: atOrBelow d h) deploymentDomains) extraHostnames;
+            vhosts = hostVhostClashes extraHostnames;
           in
           [
+            {
+              assertion = vhosts == [ ];
+              message = "services.hyperhermes.agents.<name>.slot.extraHostnames: ${toString vhosts} match a name of this host's own nginx (${toString hostVhostNames}); the SNI router would take its https connections.";
+            }
             {
               assertion = bad == [ ];
               message = "services.hyperhermes.agents.<name>.slot.extraHostnames: not lowercase hostnames: ${toString bad}.";
@@ -1013,6 +1177,49 @@ in
             {
               assertion = ours == [ ];
               message = "services.hyperhermes.agents.<name>.slot.extraHostnames: ${toString ours} at or below the deployment's domains (${toString deploymentDomains}), slot.<agent>.<domain> included.";
+            }
+          ]
+        )
+        ++ (
+          let
+            bad = lib.filter (h: !isBackendHostname h) backendHostnames;
+            all = extraHostnames ++ backendHostnames;
+            twice = lib.unique (lib.filter (h: lib.count (x: x == h) all > 1) all);
+            # at or below a deployment domain, or a wildcard whose root has
+            # one at or below it (`*.example.com` over hermes.example.com)
+            ours = lib.filter (
+              h:
+              lib.any (d: atOrBelow d (backendRoot h) || (isWildcard h && atOrBelow (backendRoot h) d)) deploymentDomains
+            ) backendHostnames;
+            vhosts = hostVhostClashes backendHostnames;
+            badTarget = lib.filterAttrs (
+              _: b:
+              let
+                t = backendTarget b.https;
+              in
+              t == null || t.port < 1 || t.port > 65535 || t.port == sniPort || (isHostAddress t.host && lib.elem t.port nginxPorts)
+            ) cfg.sniBackends;
+          in
+          [
+            {
+              assertion = vhosts == [ ];
+              message = "services.hyperhermes.slots.sniBackends: ${toString vhosts} match a name of this host's own nginx (${toString hostVhostNames}); the SNI router would take its https connections.";
+            }
+            {
+              assertion = badTarget == { };
+              message = "services.hyperhermes.slots.sniBackends.<name>.https: ${toString (lib.attrNames badTarget)}: not host:port (IPv6 as [addr]:port), or a port this host's own nginx listens on (${toString nginxPorts}) at one of its addresses (${toString sniPort} anywhere): the connection would loop through the router.";
+            }
+            {
+              assertion = bad == [ ];
+              message = "services.hyperhermes.slots.sniBackends.<name>.hostnames: not lowercase hostnames (optionally `*.`-prefixed): ${toString bad}.";
+            }
+            {
+              assertion = twice == [ ];
+              message = "services.hyperhermes.slots.sniBackends: hostnames listed twice (one backend or slot each): ${toString twice}.";
+            }
+            {
+              assertion = ours == [ ];
+              message = "services.hyperhermes.slots.sniBackends: ${toString ours} at or below the deployment's domains (${toString deploymentDomains}).";
             }
           ]
         );
@@ -1078,7 +1285,7 @@ in
               lib.mapAttrsToList (
                 name: a: lib.concatMapStrings (host: "  ${host} unix:${hopSock};\n") (hostsOf name a)
               ) agents
-            )}
+            )}${lib.concatMapStrings (host: "  ${host} unix:${hopSock};\n") backendHostnames}
             }
             map $ssl_preread_server_name $agent_slots_backend {
               hostnames;
@@ -1088,6 +1295,8 @@ in
               lib.mapAttrsToList (
                 name: a: lib.concatMapStrings (host: "  ${host} ${ipv4Of a}:443;\n") (hostsOf name a)
               ) agents
+            )}${lib.concatStrings (
+              lib.mapAttrsToList (_: b: lib.concatMapStrings (host: "  ${host} ${b.https};\n") b.hostnames) cfg.sniBackends
             )}
             }
             server {
@@ -1101,6 +1310,9 @@ in
               listen unix:${hopSock} proxy_protocol;
               ssl_preread on;
               proxy_pass $agent_slots_backend;
+              # a stopped slot or backend fails fast instead of holding the
+              # client for nginx's 60s default
+              proxy_connect_timeout 5s;
               proxy_timeout 1h;
             }
           '';
@@ -1116,6 +1328,15 @@ in
                 locations."/" = slotLocation a;
               }
             ) agents
+            # sniBackends' port 80; "sni-*" sorts after hyperhermes' own too
+            // lib.mapAttrs' (
+              name: b:
+              lib.nameValuePair "sni-${name}" {
+                serverName = lib.head b.hostnames;
+                serverAliases = lib.tail b.hostnames;
+                locations."/" = slotLocation { url = b.http; };
+              }
+            ) (lib.filterAttrs (_: b: b.http != null) cfg.sniBackends)
             // lib.optionalAttrs (cfg.legacyDomain != null) {
               # Transition only (the header): 301 to the new name, never a
               # slot, on 80 and 443 alike; no ACME challenge answer. Sorts after
@@ -1147,5 +1368,6 @@ in
         security.acme.certs.${legacyCert} = exposure.acmeCert "*.${cfg.legacyDomain}";
       })
     ]
-  );
+  ))
+  ];
 }

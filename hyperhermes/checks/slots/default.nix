@@ -26,7 +26,13 @@
 # address; the old names <agent>.<legacyDomain> only answer this host's 301
 # to the new one, path kept, and never reach a slot; each slot's hostname
 # gets its A and AAAA, each old name its A, in exposure.dnsRecords (the
-# extra names none: their DNS is kept elsewhere).
+# extra names none: their DNS is kept elsewhere); an sniBackends entry (a
+# stand-in for a space on loopback) gets its names, wildcard included, on
+# both ports the same way, while a slot's exact name beats a backend's
+# wildcard over it. Evaluation only (evalCases): a backend wildcard above
+# the deployment's domain, a backend or slot name on this host's own
+# nginx vhosts, a backend `https` that is no host:port or loops into this
+# host's nginx, and backends without any slot are refused.
 #
 # The agent registry is a stub (agentsStub): what slots reads of core
 # (uid, sshKeyFile, the PATH and skill collection points), without running
@@ -81,8 +87,72 @@ let
       networking.hostName = "";
       system.stateVersion = lib.trivial.release;
     }).toplevel;
+  # Evaluation-only cases (below): what the server node refuses with one
+  # setting changed. Each is the list of its failed assertions' messages.
+  refusals =
+    test: module:
+    map (a: a.message) (
+      lib.filter (a: !a.assertion) (test.extend { modules = [ { nodes.server = module; } ]; }).nodes.server.assertions
+    );
+  refusedWith =
+    test: module: needle:
+    lib.any (m: lib.hasInfix needle m) (refusals test module);
+  evalCases = test: {
+    # a wildcard above the deployment's domain would capture its names
+    wildcard-above-domain = refusedWith test {
+      services.hyperhermes.exposure.domain = lib.mkForce "agents.example.net";
+      services.hyperhermes.slots.sniBackends.wild = {
+        hostnames = [ "*.example.net" ];
+        https = "10.0.0.5:443";
+      };
+    } "*.example.net at or below the deployment's domains";
+    # this host's own sites stay its own: exact, and under a wildcard
+    backend-host-vhost = refusedWith test {
+      services.hyperhermes.slots.sniBackends.wild = {
+        hostnames = [ "server.test" ];
+        https = "10.0.0.5:443";
+      };
+    } "server.test match a name of this host's own nginx";
+    backend-host-vhost-wildcard = refusedWith test {
+      services.nginx.virtualHosts.other.serverName = "www.other.test";
+      services.hyperhermes.slots.sniBackends.wild = {
+        hostnames = [ "*.other.test" ];
+        https = "10.0.0.5:443";
+      };
+    } "*.other.test match a name of this host's own nginx";
+    slot-extra-host-vhost = refusedWith test {
+      services.hyperhermes.agents.bob.slot.extraHostnames = [ "server.test" ];
+    } "slot.extraHostnames: server.test match a name of this host's own nginx";
+    # `https`: host:port, and never this host's nginx (a loop)
+    https-not-host-port = refusedWith test {
+      services.hyperhermes.slots.sniBackends.space.https = lib.mkForce "127.0.0.2";
+    } "sniBackends.<name>.https: space";
+    https-router-port = refusedWith test {
+      services.hyperhermes.slots.sniBackends.space.https = lib.mkForce "10.0.0.5:444";
+    } "sniBackends.<name>.https: space";
+    https-own-nginx = refusedWith test {
+      services.hyperhermes.slots.sniBackends.space.https = lib.mkForce "[::1]:443";
+    } "sniBackends.<name>.https: space";
+    https-elsewhere-ok =
+      refusals test {
+        services.hyperhermes.slots.sniBackends.space.https = lib.mkForce "[fd00::5]:443";
+      } == [ ];
+    # backends without a slot have no router: refused, not ignored
+    backends-without-slot = refusedWith test {
+      services.hyperhermes.agents = lib.mkForce { };
+    } "sniBackends needs at least one agent with slot.enable";
+  };
+  checked =
+    test:
+    let
+      failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) (evalCases test));
+    in
+    if failed != [ ] then
+      throw "hyperhermes slots: evaluation cases failed: ${lib.concatStringsSep ", " failed}"
+    else
+      test;
 in
-pkgs.testers.runNixOSTest {
+checked (pkgs.testers.runNixOSTest {
   name = "hyperhermes-slots";
   globalTimeout = 1800;
 
@@ -280,6 +350,20 @@ pkgs.testers.runNixOSTest {
           };
         };
         slots.legacyDomain = "slots.test";
+        # a backend that is not a slot (a space's container in production)
+        slots.sniBackends.space = {
+          hostnames = [
+            "app.example.net"
+            "*.app.example.net"
+          ];
+          https = "127.0.0.2:8443";
+          http = "http://127.0.0.2:8080";
+        };
+        # a wildcard over alice's extra names: her exact names stay hers
+        slots.sniBackends.over-alice = {
+          hostnames = [ "*.alice.example.org" ];
+          https = "127.0.0.2:8443";
+        };
         agents = lib.mapAttrs (name: id: {
           uid = config.users.users.${name}.uid;
           sshKeyFile = "/etc/agent-keys/${name}";
@@ -324,6 +408,15 @@ pkgs.testers.runNixOSTest {
         extraConfig = "default_type text/plain;";
       };
       security.acme.defaults.server = "https://127.0.0.1:1/directory";
+      # the sniBackends stand-in
+      systemd.services.space-https = {
+        wantedBy = [ "multi-user.target" ];
+        serviceConfig.ExecStart = "${pkgs.socat}/bin/socat OPENSSL-LISTEN:8443,bind=127.0.0.2,cert=${cert}/cert.pem,key=${cert}/key.pem,verify=0,fork,reuseaddr EXEC:'${responder} space-tls'";
+      };
+      systemd.services.space-http = {
+        wantedBy = [ "multi-user.target" ];
+        serviceConfig.ExecStart = "${pkgs.socat}/bin/socat TCP-LISTEN:8080,bind=127.0.0.2,fork,reuseaddr EXEC:'${responder} space-http'";
+      };
 
       system.extraDependencies = [ broken ];
       # the agents' tools (hyperhermes puts them on the agents' PATH;
@@ -487,6 +580,18 @@ pkgs.testers.runNixOSTest {
             assert out.strip() == "alice-http peer=10.43.4.1 xff=${clientIPv4}", (host, out)
             out = client.succeed(get + f"-k --resolve {host}:443:${publicIPv4} https://{host}/")
             assert out.strip() == "alice-tls peer=10.43.4.1 xff=", (host, out)
+        # sniBackends: its names and its wildcard, both ports
+        server.wait_for_unit("space-https.service")
+        server.wait_for_unit("space-http.service")
+        for host in ["app.example.net", "x.app.example.net"]:
+            out = client.succeed(get + f"-H 'Host: {host}' http://${publicIPv4}/")
+            assert out.strip() == "space-http peer=127.0.0.1 xff=${clientIPv4}", (host, out)
+            out = client.succeed(get + f"-k --resolve {host}:443:${publicIPv4} https://{host}/")
+            assert out.startswith("space-tls peer="), (host, out)
+        # a slot's exact name beats a backend's wildcard over it (nginx's
+        # hostnames map: exact first), the rest of the wildcard is the backend's
+        out = client.succeed(get + "-k --resolve other.alice.example.org:443:${publicIPv4} https://other.alice.example.org/")
+        assert out.startswith("space-tls peer="), out
         # a name nobody listed stays with this host's nginx: exposure's
         # default server, its 301 to https on 80 and its 404 on 443
         out = client.succeed(get + "-o /dev/null -w '%{http_code} %{redirect_url}' -H 'Host: carol.example.org' http://${publicIPv4}/")
@@ -730,4 +835,4 @@ pkgs.testers.runNixOSTest {
         # per action: a start still goes through
         server.succeed("runuser -u bob -- slot start")
   '';
-}
+})
