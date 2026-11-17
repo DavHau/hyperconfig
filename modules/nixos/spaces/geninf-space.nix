@@ -152,9 +152,9 @@ in
       # for an age identity of gi-infra's vars sealed to this host (above)
       tpm = true;
       # The USB socket Dave picked on som (hardware projects: flashing,
-      # tinkering): its USB 3 port 2-2 and its USB 2 twin 1-1 (firmware
-      # peers; som's keyboard sits on 1-1 and stays on the host, as
-      # ./usb-ports.nix never hands keyboards or mice over).
+      # tinkering, KVM devices): its USB 3 port 2-2 and its USB 2 twin 1-1
+      # (firmware peers). Everything on them goes into the guest,
+      # keyboards and mice included (./usb-ports.nix).
       usbPorts = [
         "0000:0a:00.0/usb2/2-2"
         "0000:0a:00.0/usb1/1-1"

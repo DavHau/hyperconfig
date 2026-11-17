@@ -21,9 +21,10 @@
   devices: only those on the listed ports get one. Re-enumeration (DFU,
   BOOTSEL, JTAG/serial switches) is just another add event.
 
-  Keyboards and mice (HID boot interfaces) are never handed over, even on
-  a listed port: their raw reports are what is typed on this host. Debug
-  probes (CMSIS-DAP and other non-boot HID) still are.
+  Everything on a listed port is handed over, keyboards and mice too
+  (Dave's KVM devices have both): the guest can read their raw reports,
+  i.e. what is typed on them, while this host's input layer still gets
+  them as well. Don't list a port a keyboard used on this host sits on.
 
   Trust: whatever is plugged into such a port talks to this host's kernel
   drivers (usb-storage, cdc-acm, ...) like any USB device; the guest gets
@@ -44,12 +45,7 @@ let
     in
     if p == "no" then 0 else p;
   want = name: inst: ''TAG+="systemd", ENV{SYSTEMD_WANTS}+="space-usb@${name}:${inst}.service"'';
-  rules = ''
-    # Keyboards and mice (HID boot interfaces) stay on the host even on a
-    # listed port: their raw reports are the keystrokes typed here.
-    ACTION=="add", SUBSYSTEM=="hidraw", ATTRS{bInterfaceClass}=="03", ATTRS{bInterfaceSubClass}=="01", GOTO="space_usb_end"
-    ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}=="*:0301*", GOTO="space_usb_end"
-  '' + lib.concatStrings (
+  rules = lib.concatStrings (
     lib.mapAttrsToList (
       name: s:
       lib.concatMapStrings (port: ''
@@ -60,9 +56,7 @@ let
         ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", DEVPATH=="*/${port}/*", ${want name "usb-%k"}
       '') s.usbPorts
     ) spaces
-  ) + ''
-    LABEL="space_usb_end"
-  '';
+  );
   bases = lib.concatStrings (
     lib.mapAttrsToList (name: _: ''
       ${name}) base=${toString (guestIdBase name)} ;;
