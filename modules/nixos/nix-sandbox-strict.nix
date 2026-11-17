@@ -38,6 +38,11 @@ let
 in
 {
   nix.settings.sandbox = lib.mkForce true;
+  # Builds' scratch trees (sandbox /build) on the store's zfs dataset, not
+  # /tmp. Nix's default today; pinned so a default change can't move the
+  # multi-GB CUDA/VM build trees elsewhere. (The 11-16 "No space left on
+  # device" in nvcc was the whole pool full, store growth, not this dir.)
+  nix.settings.build-dir = "/nix/var/nix/builds";
 
   networking.nftables.enable = true;
   networking.nftables.tables.nix-build-egress = {
