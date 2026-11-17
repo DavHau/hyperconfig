@@ -42,6 +42,9 @@ let
     config = pkgs.config // {
       allowUnfree = true;
       cudaSupport = true;
+      # vit's RTX 5080 only (compute 12.0): one arch instead of nixpkgs'
+      # default list, a fraction of nvcc's time and /build size.
+      cudaCapabilities = [ "12.0" ];
     };
   };
 
