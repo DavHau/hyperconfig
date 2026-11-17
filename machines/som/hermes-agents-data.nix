@@ -11,6 +11,9 @@
 # values here must match.
 #
 # `wallet = false` / `rea = false` leave those off on som (default on).
+# `lan = false` refuses the agent's uid every LAN, yggdrasil and retiolum
+# destination on som and vit (hyper.ztEuLanGuard.noLan: ./hermes-agents.nix,
+# ../../modules/nixos/hermes-agents-gpu-host.nix; default: LAN reachable).
 #
 # `vault = false` keeps an agent out of `vault-ro` on som and vit. That
 # alone does not lock it out: /vault/parquet is world-readable on bam, so
@@ -34,6 +37,13 @@
   # Project FPV, shared by dave and adam (both its owning accounts,
   # ./hermes-dashboards.nix).
   fpv.uid = 1120;
+  # Janine's agent: vault-ro, GPU account on vit, wallet and REA like
+  # adam's. `lan = false`: her uid reaches no LAN address on som or vit
+  # (hyper.ztEuLanGuard.noLan; on som vit's ssh, captcha and OCR only).
+  janine = {
+    uid = 1121;
+    lan = false;
+  };
   thaigersprint = {
     uid = 1114;
     vault = false;

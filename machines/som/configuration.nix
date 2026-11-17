@@ -341,8 +341,8 @@ in
   # Container slots for other repos to deploy into (hyperhermes'
   # nixosModules.container-slots, generic). enp6s0 is a port of br0, which
   # keeps its MAC and som's DHCP/SLAAC addresses (networking.publicIPv6
-  # above). Add a slot as `slots.<name> = { id; mode; }`; ids 4..23: agent
-  # slots (slotIds below), 24: ./stefan-pq.nix, next free 25. Inbound from
+  # above). Add a slot as `slots.<name> = { id; mode; }`; ids 4..23 and 25: agent
+  # slots (slotIds below), 24: ./stefan-pq.nix, next free 26. Inbound from
   # the internet needs an allow rule for the slot's v6 on both routers, AIS ZTE first, then Beryl:
   #   router-ais ipv6-rules add --address <v6> --name <slot>
   #   router-cm-beryl -J root@som.d ipv6-rules add --address <v6> --name <slot>
@@ -529,6 +529,8 @@ in
         daniel-meli = 21;
         voice = 22;
         fpv = 23;
+        # 24: ./stefan-pq.nix (services.container-slots), not an agent.
+        janine = 25;
       };
       # Container names are capped at 11 chars (nspawn veth names,
       # hyperhermes container-slots); longer agent names get a short one

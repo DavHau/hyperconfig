@@ -76,7 +76,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.wyomingLocalSpeech.btSpeaker: modules/nixos/wyoming-local-speech/bt-speaker.nix
 - hyper.zfsArcMax: modules/nixos/zfs-arc-max.nix
 - hyper.zfsEphemeralTmp.dataset: modules/nixos/zfs-ephemeral-tmp.nix
-- hyper.ztEuLanGuard.refusedUsers: modules/nixos/zt-eu-lan-guard/default.nix
+- hyper.ztEuLanGuard: modules/nixos/zt-eu-lan-guard/default.nix
 - infraSpace: modules/nixos/infra-space/guest.nix
 - infraSpace.agentTools: modules/nixos/infra-space/agent-tools-guest.nix
 - infraSpace.fleetBump: modules/nixos/infra-space/fleet-bump/default.nix

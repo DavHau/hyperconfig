@@ -17,6 +17,25 @@ let
   inStore = path: lib.hasPrefix builtins.storeDir (toString path);
   yaml = pkgs.formats.yaml { };
 
+  # config.yaml's `model`: the host-wide initialModel and an agent's own.
+  modelType = lib.types.submodule {
+    options = {
+      provider = lib.mkOption {
+        type = lib.types.str;
+        description = "Provider name of the model.";
+      };
+      base_url = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "OpenAI-compatible endpoint of the provider. Null omits the base_url key.";
+      };
+      default = lib.mkOption {
+        type = lib.types.str;
+        description = "Model id inside that provider.";
+      };
+    };
+  };
+
   # Keys that are both host-wide and per agent.
   sharedOptions = with lib; {
     settings = mkOption {
@@ -77,25 +96,7 @@ in
       };
 
       initialModel = mkOption {
-        type = types.nullOr (
-          types.submodule {
-            options = {
-              provider = mkOption {
-                type = types.str;
-                description = "Provider name of the model.";
-              };
-              base_url = mkOption {
-                type = types.nullOr types.str;
-                default = null;
-                description = "OpenAI-compatible endpoint of the provider. Null omits the base_url key.";
-              };
-              default = mkOption {
-                type = types.str;
-                description = "Model id inside that provider.";
-              };
-            };
-          }
-        );
+        type = types.nullOr modelType;
         default = null;
         description = ''
           Seed-once model. preStart writes it into config.yaml only when no
@@ -253,6 +254,16 @@ in
                 type = types.nullOr types.str;
                 default = null;
                 description = "Account description; null leaves it to another module.";
+              };
+              initialModel = mkOption {
+                type = types.nullOr modelType;
+                default = null;
+                description = ''
+                  This agent's seed-once model, in place of the host-wide
+                  services.hyperhermes.initialModel (same semantics: written
+                  only when config.yaml has no model yet). Null: the
+                  host-wide one.
+                '';
               };
               sshKeys = mkOption {
                 type = types.listOf types.str;

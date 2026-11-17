@@ -151,19 +151,28 @@ rec {
       ++ acfg.extraPackages;
     };
 
-  # config.yaml's `model` from cfg.initialModel.
-  initialModelSettings = lib.filterAttrs (_: v: v != null) {
-    inherit (cfg.initialModel) provider base_url;
-    default = cfg.initialModel.default;
-  };
+  # The agent's seed-once model: its own initialModel, else the host-wide
+  # one (null: none).
+  initialModelFor = acfg: if acfg.initialModel != null then acfg.initialModel else cfg.initialModel;
+
+  # config.yaml's `model` from initialModelFor.
+  initialModelSettings =
+    acfg:
+    let
+      m = initialModelFor acfg;
+    in
+    lib.filterAttrs (_: v: v != null) {
+      inherit (m) provider base_url;
+      default = m.default;
+    };
 
   # Seed-once model. This writes to config.yaml only when no model is
   # configured. Then it writes a sentinel. So it never clobbers the user's
   # runtime /model choice. It runs in preStart, after config.yaml exists.
   # The Nix settings never contain model keys.
   modelSeedScript =
-    stateDir:
-    lib.optionalString (cfg.initialModel != null) ''
+    acfg: stateDir:
+    lib.optionalString (initialModelFor acfg != null) ''
       sentinel=${stateDir}/.hermes/.model-seeded
       if [ ! -e "$sentinel" ]; then
         ${pkgs.python3.withPackages (ps: [ ps.pyyaml ])}/bin/python3 - \
@@ -175,7 +184,7 @@ rec {
           with open(path) as f:
               data = yaml.safe_load(f) or {}
       if not data.get("model"):
-          data["model"] = ${builtins.toJSON initialModelSettings}
+          data["model"] = ${builtins.toJSON (initialModelSettings acfg)}
           with open(path, "w") as f:
               yaml.dump(data, f, default_flow_style=False)
       SEED

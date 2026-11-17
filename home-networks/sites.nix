@@ -55,6 +55,15 @@
       #   - (pre-existing, unnamed) D8:BC:38:58:E7:C0 -> 192.168.8.10
       lan.ipv4 = "192.168.8.0/24";
       lan.ipv6 = null; # relayed provider prefix, no ULA
+      # Public v6 that is LAN all the same: the provider /64 the Beryl
+      # relays (som's container slots live in it), and the AIS ZTE's WAN
+      # link (its upstream hop 2405:9800:b014::1, as seen from som
+      # 2026-10-17; som's isolatedBlockedDestinations). Refused to
+      # zt-eu-lan-guard's noLan users (../modules/nixos/zt-eu-lan-guard).
+      lan.publicIpv6 = [
+        "2405:9800:b901:94e3::/64"
+        "2405:9800:b014::/64"
+      ];
       routeLan = false;
       masqueradeFromLan = true;
       masqueradeToLan = false;

@@ -117,7 +117,7 @@ let
       hermesHome = hlib.lockedHermesHome user;
       settings =
         ac.agentSettings user ucfg
-        // lib.optionalAttrs (cfg.initialModel != null) { model = ac.initialModelSettings; };
+        // lib.optionalAttrs (ac.initialModelFor ucfg != null) { model = ac.initialModelSettings ucfg; };
       # JSON is YAML.
       files = pkgs.runCommand "hermes-locked-${user}" {
         configText = builtins.toJSON settings;

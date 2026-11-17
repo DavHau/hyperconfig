@@ -5,7 +5,7 @@ Agents run natively on som via hyperhermes (`services.hyperhermes.agents.<name>`
 | file | holds |
 |---|---|
 | `machines/som/hermes-agents.nix` | per-agent entry: description, `sshKeys`, `teamclaude.enable`, `openrouter`, `mail.enable`, skillDirs; host-wide hermes settings; deny-ACL assertion |
-| `machines/som/hermes-agents-data.nix` | plain data read by som AND vit: `<name>.uid` (+ `vault = false`) for agents with vault/GPU account |
+| `machines/som/hermes-agents-data.nix` | plain data read by som AND vit: `<name>.uid` (+ `vault`/`wallet`/`rea`/`lan = false`) for agents with vault/GPU account |
 | `machines/som/hermes-dashboards.nix` | agent -> pocket-id account, or a list of owning accounts (`accounts`), `domain` davhau.fyi, front door |
 | `machines/som/hermes-inference.nix` | models/providers (p0 Qwen, auxiliary vision/titles) |
 | `machines/som/configuration.nix` | `slotIds.<name>` (never reuse; 18 retired), `slotNames` (>11 chars), set `hermes-agents-data.nix // { roman = {}; ... }` for non-data agents |
@@ -36,6 +36,13 @@ Deploy som + edi (pocket-id client) + vit (data-file agents). Welcome
 message: `nix run .#hermes-onboard -- som <name>` (tools/hermes-onboard).
 
 ## Facts
+
+- Per-agent default model: `agents.<n>.initialModel` (seed-once, overrides
+  the host-wide p0 Qwen of `hermes-inference.nix`; e.g. janine:
+  `anthropic`/`claude-opus-5-5`); thinking level: `settings.agent.reasoning_effort`.
+- No LAN for an agent: `lan = false` in `hermes-agents-data.nix` ->
+  `hyper.ztEuLanGuard.noLan` (som `configuration.nix`). Default agents DO
+  reach the home LAN: mullvad-egress's kill switch passes RFC1918/ULA.
 
 - Host-wide `services.hyperhermes.settings` reach every agent on som.
 - `teamclaude` client keys: `hyper.teamclaudeGateway.clientKeys` in

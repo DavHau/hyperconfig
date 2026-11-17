@@ -235,7 +235,7 @@ let
           echo "# END hermes-native environment"
         } >> "$env_file"
         ${ac.envRewriteScript stateDir}
-        ${ac.modelSeedScript stateDir}
+        ${ac.modelSeedScript ucfg stateDir}
         ${pruneMovedBundledSkills} ${ac.hermesPackage}/share/hermes-agent/skills ${hermesHome}/skills
         ${replayMemoryPending}
       '';

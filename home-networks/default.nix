@@ -93,6 +93,9 @@ in
     s: [ s.lan.ipv4 ] ++ lib.optional (s.lan.ipv6 != null) s.lan.ipv6
   ) routedSites;
 
+  # Public v6 prefixes that are a site's LAN (or its router's WAN link).
+  publicLanPrefixes = lib.concatMap (s: s.lan.publicIpv6 or [ ]) (lib.attrValues sites);
+
   # One router's state as ./apply.py converges it (rendered to JSON).
   routerState =
     adminKeys: site:

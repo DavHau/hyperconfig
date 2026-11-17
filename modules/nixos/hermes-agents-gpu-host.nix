@@ -10,6 +10,16 @@
 # ~/.venv over a CUDA python set (torch etc.),
 # first on PATH in login shells. The venv is --system-site-packages, so it
 # only holds what the agent pip-installs on top.
+#
+# Network: the agents reach vit with plain ssh sessions only (`ssh vit.d
+# <cmd>`, rsync; the gpu-host and tv-camera skills, nothing uses -L/-R/-D),
+# so no agent account gets any sshd forwarding (TCP, unix sockets, X11,
+# agent, tunnels; stefan's, also Stefan's own login, excepted). An agent marked `lan = false` in the data file also gets
+# the same uid guard as on som (./zt-eu-lan-guard, `noLan`): its jobs here
+# reach the internet and vit's own addresses (its GPU work is local), no
+# LAN, yggdrasil or retiolum; replies to som's ssh are established traffic.
+# vit's nix-daemon builds for no agent (trusted-users root, dave, wheel;
+# remote building is som's), so no build user carries their traffic.
 {
   config,
   lib,
@@ -51,7 +61,24 @@ let
     };
 in
 {
-  imports = [ ./vault-ids.nix ];
+  imports = [
+    ./vault-ids.nix
+    ./zt-eu-lan-guard
+  ];
+
+  hyper.ztEuLanGuard.noLan.users = lib.attrNames (lib.filterAttrs (_: a: !(a.lan or true)) agents);
+
+  # Every agent-only account: no forwarding of any kind (the noLan users
+  # get the same from the guard as well). stefan's is also Stefan's own
+  # login (./users/stefan-vault.nix, his keys), left as it was.
+  services.openssh.extraConfig = lib.mkAfter ''
+    Match User ${lib.concatStringsSep "," (lib.attrNames (removeAttrs agents [ "stefan" ]))}
+      DisableForwarding yes
+      PermitTunnel no
+      PermitListen none
+      PermitOpen none
+    Match all
+  '';
 
   users.users = lib.mapAttrs (name: a: {
     isNormalUser = true;

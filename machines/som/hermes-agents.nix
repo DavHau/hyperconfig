@@ -279,6 +279,25 @@ in
         openrouter = true;
       };
 
+      # janine: Janine's agent, read-only vault consumer, no LAN
+      # (`lan = false` in ./hermes-agents-data.nix). Logs in with Daniel's
+      # key (the `daniel` entry's, referenced, not copied); she uses the
+      # dashboard. Claude Opus 5.5 through TeamClaude as her seed-once
+      # default model, thinking at medium.
+      janine = {
+        description = "janine - hermes agent, read-only vault consumer";
+        sshKeys = config.services.hyperhermes.agents.daniel.sshKeys;
+        # Claude through the TeamClaude gateway, as client `janine`.
+        teamclaude.enable = true;
+        # Instead of p0's Qwen (./hermes-inference.nix): written once into
+        # her config.yaml, her own /model choice persists after that.
+        initialModel = {
+          provider = "anthropic";
+          default = "claude-opus-5-5";
+        };
+        settings.agent.reasoning_effort = "medium";
+      };
+
       # daniel-meli: a second agent of Daniel's. In
       # ./hermes-agents-data.nix for its GPU account on vit, but without
       # vault-ro (../../modules/nixos/vault-ids.nix denies it bam's /vault),
@@ -380,9 +399,7 @@ in
       # app on the dashboard (../../modules/nixos/dave-desktop/isolated-apps.nix).
       tuiKeyless = lib.filter (name: (agents.${name}.sshKeys or [ ]) == [ ]) (
         lib.attrNames (
-          lib.filterAttrs (_: a: !(a ? isolated)) (
-            import ../../modules/nixos/dave-desktop/apps.nix
-          )
+          lib.filterAttrs (_: a: !(a ? isolated)) (import ../../modules/nixos/dave-desktop/apps.nix)
         )
       );
     in
@@ -497,9 +514,11 @@ in
   # its own listener 127.0.0.1:8890 (replies to the agents) and the
   # tunnel's DNS on 127.0.0.153:53: no other loopback service, no LAN
   # (mullvad-egress's tunnelOnly: cgroup filter + nftables by uid).
-  hyper.mullvadEgress.tunnelOnly.searx = lib.mkIf (lib.elem "searx" config.hyper.mullvadEgress.users) [
-    "127.0.0.1:${toString config.services.searx.settings.server.port}"
-  ];
+  hyper.mullvadEgress.tunnelOnly.searx =
+    lib.mkIf (lib.elem "searx" config.hyper.mullvadEgress.users)
+      [
+        "127.0.0.1:${toString config.services.searx.settings.server.port}"
+      ];
   # web_search's 10-min canary and the nightly bump's sandboxed scratch
   # SearXNG (its own Mullvad user, like searx).
   hyper.searxngCanary.candidate.enable = true;
@@ -509,6 +528,53 @@ in
   # loopback SearXNG.
   services.hermes-microvm.enable = false;
   services.spaces-searxng.enable = false;
+
+  # Agents with `lan = false` (./hermes-agents-data.nix) reach no LAN at
+  # all (../../modules/nixos/zt-eu-lan-guard, imported by
+  # ./configuration.nix): no private/ULA/link-local/multicast range, no home
+  # LAN /64 or router WAN link (other slots, bam, the routers), no
+  # yggdrasil or retiolum (every fleet machine's open ports). What they
+  # need stays: som's own addresses (TeamClaude, the dashboards, the
+  # wallet, loopback services; /vault is som's NFS mount over wg-vault,
+  # opened by the kernel, not their sockets), vit over yggdrasil on ssh
+  # (gpu-host skill), CaptchaKraken and OCR only (vit applies the same
+  # guard to their accounts there, ../../modules/nixos/hermes-agents-gpu-host.nix),
+  # the internet through Mullvad, their own slot, and p0's inference API.
+  hyper.ztEuLanGuard.noLan =
+    let
+      noLan = lib.attrNames (lib.filterAttrs (_: a: !(a.lan or true)) data);
+      slotOf = name: config.services.hyperhermes.agents.${name}.slot.id;
+      vitYgg = inputs.clan-core.clanLib.getPublicValue {
+        flake = config.clan.core.settings.directory;
+        machine = "vit";
+        generator = "yggdrasil";
+        file = "address";
+      };
+    in
+    {
+      users = noLan;
+      prefixes = [ "${config.services.container-slots.ipv6Prefix}::/64" ];
+      allow = lib.genAttrs noLan (name: [
+        { address = "10.43.${toString (slotOf name)}.2"; }
+        {
+          address = "${config.services.container-slots.ipv6Prefix}::5107:${lib.toLower (lib.toHexString (slotOf name))}";
+        }
+        # inference.p0.contact (../../modules/nixos/virtualisation.nix).
+        {
+          address = "2405:9800:b901:94e3::feed:da7a";
+          ports = [ 443 ];
+        }
+        # vit.d: ssh (GPU jobs), captchaSolver and ocr (browser above).
+        {
+          address = vitYgg;
+          ports = [
+            22
+            8096
+            8098
+          ];
+        }
+      ]);
+    };
 
   # Host-wide (merged into every agent's config.yaml): one shared session per
   # group chat. By default hermes keys a group session per sender, so

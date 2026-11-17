@@ -11,7 +11,7 @@
 #              Members: slot-asof, slot-mm (som; the asof and mm container
 #              slots' shares, machines/som/configuration.nix).
 #   `vault-ro` (gid 1103) read-only on /vault/parquet. Members: stefan,
-#              momentum, hsjobeki, dave-hermes, egg, pinpox, adam, j, willi, domi, rti, chris, b3x, joe, daniel, voice, fpv - each user's own
+#              momentum, hsjobeki, dave-hermes, egg, pinpox, adam, j, willi, domi, rti, chris, b3x, joe, daniel, voice, fpv, janine - each user's own
 #              module adds the group (users/*-vault.nix, *-hermes.nix);
 #              slot-stefan-pq (som; primary group, the stefan-pq container
 #              slot's read-only share, machines/som/stefan-pq.nix).
@@ -64,7 +64,7 @@
 # Home Assistant agent, no vault access, denied above), 1117 daniel,
 # 1118 daniel-meli (no vault access, denied above), 1119 voice (the Voice
 # PE's untrusted agent, modules/nixos/voice-gateway), 1120 fpv (Project
-# FPV, dave's and adam's shared agent),
+# FPV, dave's and adam's shared agent), 1121 janine,
 # 1200 agent,
 # 1201 slot-asof, 1202 slot-mm, 1203 infra (uid and gid; the infra-space
 # container's user, no host account: infra-space/default.nix; on members
