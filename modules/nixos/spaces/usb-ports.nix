@@ -49,11 +49,11 @@ let
     lib.mapAttrsToList (
       name: s:
       lib.concatMapStrings (port: ''
-        ACTION=="add", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk|partition", DEVPATH=="*/${port}/*", ${want name "%k"}
-        ACTION=="add", SUBSYSTEM=="tty", KERNEL=="ttyUSB*|ttyACM*", DEVPATH=="*/${port}/*", ${want name "%k"}
-        ACTION=="add", SUBSYSTEM=="hidraw", DEVPATH=="*/${port}/*", ${want name "%k"}
-        ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", DEVPATH=="*/${port}", ${want name "usb-%k"}
-        ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", DEVPATH=="*/${port}/*", ${want name "usb-%k"}
+        ACTION!="remove", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk|partition", DEVPATH=="*/${port}/*", ${want name "%k"}
+        ACTION!="remove", SUBSYSTEM=="tty", KERNEL=="ttyUSB*|ttyACM*", DEVPATH=="*/${port}/*", ${want name "%k"}
+        ACTION!="remove", SUBSYSTEM=="hidraw", DEVPATH=="*/${port}/*", ${want name "%k"}
+        ACTION!="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", DEVPATH=="*/${port}", ${want name "usb-%k"}
+        ACTION!="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", DEVPATH=="*/${port}/*", ${want name "usb-%k"}
       '') s.usbPorts
     ) spaces
   );
@@ -123,7 +123,9 @@ in
       {
         "space-usb@" = {
           description = "USB device %i into its space";
-          # wanted by the device unit: stopped (node removed) when it goes
+          # wanted by the device unit: stopped (node removed) when it goes.
+          # The rules match every event but remove: a later bind/change
+          # event re-reads them, and one without the want would stop this.
           unitConfig.StopWhenUnneeded = true;
           serviceConfig = {
             Type = "oneshot";
