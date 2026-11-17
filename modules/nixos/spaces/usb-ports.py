@@ -14,7 +14,10 @@ to turn any step into a write on something else of the host's, so:
   handed over now (`systemctl set-property --runtime`, the full list each
   time: the static one from the unit plus these), revoked on remove, so a
   hard link the guest kept opens nothing once the number goes to another
-  device;
+  device. On remove the device's state becomes `<dev>.revoking` (out of
+  the list) and goes only once a list without it is set (retried; a
+  failure fails the unit and the next successful update clears it), so
+  no record is lost while the cgroup may still allow the number;
 - the node is made in a fresh directory of host root's (mode 0700, owner
   unmapped in the guest), chowned there without following anything and
   renamed into place; every directory on the way is opened one component
@@ -267,21 +270,39 @@ def move_net(cfg, space, ifindex, lead):
 
 
 def states(space):
+    """{dev: state} of the devices handed over now (a state file each)."""
     d = f"{STATE}/{space}"
-    out = []
+    out = {}
     for f in sorted(os.listdir(d)) if os.path.isdir(d) else []:
-        if f.endswith(".tmp"):
+        if f.endswith((".tmp", ".revoking")):
             continue
-        with open(f"{d}/{f}") as fh:
-            out.append(json.load(fh))
+        try:
+            with open(f"{d}/{f}") as fh:
+                out[f] = json.load(fh)
+        except ValueError:
+            log(f"{d}/{f}: unreadable, ignored")
     return out
 
 
 def set_allow(cfg, space):
-    """The container's DeviceAllow: the unit's own list plus the devices handed over now."""
-    extra = [f"/dev/{'block' if s['block'] else 'char'}/{s['major']}:{s['minor']} rw" for s in states(space)]
+    """The container's DeviceAllow: the unit's own list plus the devices handed over now.
+
+    Retried: a revocation must not be skipped because systemd was busy.
+    Once set, the revocations pending before are done (their files go).
+    """
+    d = f"{STATE}/{space}"
+    pending = [f for f in os.listdir(d) if f.endswith(".revoking")] if os.path.isdir(d) else []
+    extra = [f"/dev/{'block' if s['block'] else 'char'}/{s['major']}:{s['minor']} rw" for s in states(space).values()]
     args = ["DeviceAllow="] + [f"DeviceAllow={e}" for e in cfg["deviceAllow"] + extra]
-    subprocess.run(["systemctl", "set-property", "--runtime", unit(space), *args], check=True)
+    for attempt in range(10):
+        r = subprocess.run(["systemctl", "set-property", "--runtime", unit(space), *args])
+        if r.returncode == 0:
+            for f in pending:
+                os.unlink(f"{d}/{f}")
+            return
+        log(f"{unit(space)}: DeviceAllow not set (try {attempt + 1})")
+        time.sleep(0.5)
+    raise subprocess.CalledProcessError(r.returncode, "systemctl set-property")
 
 
 def lock(space):
@@ -300,15 +321,26 @@ def main():
         if space not in spaces:
             die(f"unknown space {space}")
         lfd = lock(space)
+        # Once per run of the container: a start job on the running one
+        # (it pulls this in again) has nothing to replay.
+        inv = subprocess.run(["systemctl", "show", "--value", "-p", "InvocationID", unit(space)], capture_output=True, text=True).stdout.strip()
+        seen = f"{STATE}/{space}.invocation"
+        if inv and os.path.exists(seen) and open(seen).read() == inv:
+            log(f"{space}: already replayed for this run ({inv})")
+            return
         # A new container: its /dev is a new tmpfs, none of the old nodes
         # (nor links to them: links don't leave a filesystem, and the guest
-        # can't make device nodes) is left. Forget them; the list back to
-        # the unit's own if a runtime one is set (a hand-over by hand
-        # included), and the plugged devices' units add them again.
+        # can't make device nodes) is left. The list back to the unit's
+        # own if a runtime one is set (a hand-over by hand included), then
+        # forget them; the plugged devices' units add them again.
         for f in os.listdir(f"{STATE}/{space}"):
-            os.unlink(f"{STATE}/{space}/{f}")
+            if not f.endswith(".revoking"):
+                os.replace(f"{STATE}/{space}/{f}", f"{STATE}/{space}/{f.removesuffix('.tmp')}.revoking")
         if os.path.exists(f"/run/systemd/system.control/{unit(space)}.d/50-DeviceAllow.conf"):
             set_allow(spaces[space], space)
+        else:
+            for f in os.listdir(f"{STATE}/{space}"):
+                os.unlink(f"{STATE}/{space}/{f}")
         os.close(lfd)
         # its network interfaces: those on the ports back in the host's netns
         lead = leader(space)
@@ -320,6 +352,10 @@ def main():
                     log(f"ifindex {ifindex}: {e}")
         # loaded instances only: the devices plugged now (none: no-op)
         subprocess.run(["systemctl", "restart", "--no-block", f"space-usb@{space}:*"], check=False)
+        if inv:
+            with open(seen + ".tmp", "w") as f:
+                f.write(inv)
+            os.rename(seen + ".tmp", seen)
         return
     space, _, dev = arg.partition(":")
     if space not in spaces or not DEV.fullmatch(dev):
@@ -336,19 +372,25 @@ def main():
     state = f"{STATE}/{space}/{dev}"
     if action == "remove":
         if not os.path.exists(state):
+            if os.path.exists(state + ".revoking"):
+                set_allow(cfg, space)  # an earlier revocation that failed
             return
         try:
             with open(state) as f:
                 d = json.load(f)
         except ValueError:
-            os.unlink(state)
-            return
-        # revoke first: a node or link the guest kept opens nothing
-        os.unlink(state)
-        set_allow(cfg, space)
-        lead = leader(space)
-        if lead is not None:
-            in_guest(lead, guest_remove, d)
+            d = None
+        # revoke first: a node or link the guest kept opens nothing. The
+        # record stays (as .revoking, out of the list) until a list
+        # without it is set: a failure here fails the unit, and the next
+        # add/remove/replay revokes it.
+        os.replace(state, state + ".revoking")
+        try:
+            set_allow(cfg, space)
+        finally:
+            lead = leader(space) if d is not None else None
+            if lead is not None:
+                in_guest(lead, guest_remove, d)
         return
     if action != "add":
         die(f"bad action {action!r}")
@@ -364,7 +406,7 @@ def main():
     os.rename(state + ".tmp", state)
     set_allow(cfg, space)
     if not in_guest(lead, guest_add, d, cfg["base"], cfg["uid"]):
-        os.unlink(state)
+        os.replace(state, state + ".revoking")
         set_allow(cfg, space)
         die(f"/dev/{d['node']} not made in {space}")
     log(f"/dev/{d['node']} ({'b' if d['block'] else 'c'} {d['major']}:{d['minor']}) into {space}")

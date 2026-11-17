@@ -31,27 +31,54 @@
 
   Network adapters on a port go into the guest's network namespace
   (`space-usb-net@<name>:<ifindex>`, after udev renamed them; usb<N>
-  there; this host's NetworkManager and networkd leave them alone): the guest's networkd takes an
-  address by DHCP on them but no route, gateway or DNS (a KVM's or
-  board's DHCP must not take the guest's internet). Input devices on a
-  port are ignored by this host's libinput (the desktop doesn't type
-  with them); their nodes go to the guest like the rest.
+  there; this host's NetworkManager and networkd leave them alone). An
+  adapter that comes back to this host (the guest's namespace went away)
+  is renamed `spusb<ifindex>` on its way in, never kept under a name the
+  guest chose, stays down and unmanaged, and goes into the next guest.
+  The guest's networkd takes an address by DHCP on it, no gateway or DNS,
+  and the lease's prefix route only into a table of its own (4242) that
+  the guest consults after its own specific routes and before its
+  default route, ignoring any route there shorter than /16: a KVM's or
+  board's DHCP (a hostile /1 netmask included) can't take the guest's
+  internet.
+
+  Listing a port gives the guest unfiltered network through whatever
+  adapter appears there: this host's firewall never sees that traffic,
+  and the guest's root can add any route or address over it. List only
+  ports whose devices the space may talk to freely.
+
+  Input devices on a port are switched off for this host's kernel the
+  moment udev sees them (`inhibited` on the input device: no event
+  reaches the VT keyboard, Ctrl-Alt-Del, SysRq, evdev readers or a
+  writer injecting into an event node), logind doesn't take their keys
+  as power or sleep buttons (no `power-switch` tag), and libinput
+  ignores them. The guest reads them through hidraw (raw reports,
+  hid core keeps those flowing); their event nodes stay silent there
+  too. Left: the few milliseconds between the kernel registering the
+  device and udev processing it.
+
+  Block devices on a port are left alone by this host: udev doesn't
+  probe them for filesystems (so no LVM, md, bcache or ZFS scan, no
+  by-uuid/by-label link, also in the initrd) and udisks hides them (no
+  automount, no desktop entry, mounting needs admin). The guest has raw
+  write access to them.
 
   A restarted container starts with an empty /dev, its unit's own list
   and none of the adapters (back in the host's namespace):
   `space-usb-replay-<name>` (wanted by the container's unit through a
   .wants link, the unit file unchanged) moves the adapters and restarts
-  the plugged devices' units.
+  the plugged devices' units. It is a plain oneshot (no
+  RemainAfterExit), so every start of the container runs it again,
+  including the automatic one after a reboot from inside the guest.
 
   Everything on a listed port is handed over, keyboards, mice and network
-  adapters too
-  (Dave's KVM devices have both): the guest can read their raw reports,
-  i.e. what is typed on them, while this host's input layer still gets
-  them as well. Don't list a port a keyboard used on this host sits on.
+  adapters too (Dave's KVM devices have both): the guest can read their
+  raw reports, i.e. what is typed on them; this host gets nothing from
+  them. Don't list a port a keyboard used on this host sits on.
 
   Trust: whatever is plugged into such a port talks to this host's kernel
-  drivers (usb-storage, cdc-acm, ...) like any USB device; the guest gets
-  raw access to it, nothing else.
+  drivers (usb-storage, cdc-acm, hid, ...) like any USB device; the guest
+  gets raw access to it, nothing else.
 */
 {
   config,
@@ -68,17 +95,31 @@ let
     in
     if p == "no" then 0 else p;
   want = name: inst: ''TAG+="systemd", ENV{SYSTEMD_WANTS}+="${inst}.service"'';
+  ports = lib.concatMap (s: s.usbPorts) (lib.attrValues spaces);
   rules = lib.concatStrings (
     lib.mapAttrsToList (
       name: s:
       lib.concatMapStrings (port: ''
-        DEVPATH=="*/${port}/*", SUBSYSTEM=="input", ENV{LIBINPUT_IGNORE_DEVICE}="1"
-        ACTION=="add|move", DEVPATH=="*/${port}/*", SUBSYSTEM=="net", ENV{NM_UNMANAGED}="1", ENV{ID_NET_MANAGED_BY}="space-usb", ${want name "space-usb-net@${name}:$attr{ifindex}"}
+        ACTION!="remove", DEVPATH=="*/${port}/*", SUBSYSTEM=="input", KERNEL=="input*", ATTR{inhibited}="1"
+        ACTION!="remove", DEVPATH=="*/${port}/*", SUBSYSTEM=="input", ENV{LIBINPUT_IGNORE_DEVICE}="1", TAG-="power-switch"
+        ACTION!="remove", DEVPATH=="*/${port}/*", SUBSYSTEM=="block", ENV{UDISKS_IGNORE}="1", ENV{UDISKS_AUTO}="0", ENV{UDISKS_SYSTEM}="1"
+        ACTION=="add", DEVPATH=="*/${port}/*", SUBSYSTEM=="net", NAME="spusb$attr{ifindex}"
+        ACTION!="remove", DEVPATH=="*/${port}/*", SUBSYSTEM=="net", ENV{NM_UNMANAGED}="1", ENV{ID_NET_MANAGED_BY}="space-usb", ${want name "space-usb-net@${name}:$attr{ifindex}"}
         ACTION!="remove", DEVPATH=="*/${port}/*", SUBSYSTEM!="usb", ENV{DEVNAME}=="?*", ${want name "space-usb@${name}:%k"}
         ACTION!="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", DEVPATH=="*/${port}", ${want name "space-usb@${name}:usb-%k"}
         ACTION!="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", DEVPATH=="*/${port}/*", ${want name "space-usb@${name}:usb-%k"}
       '') s.usbPorts
     ) spaces
+  );
+  # Before 60-persistent-storage.rules: no blkid probe of block devices on
+  # the ports, so no ID_FS_TYPE, which LVM's pvscan, mdadm's incremental
+  # assembly, bcache and the by-uuid/by-label links all key on. Not
+  # SYSTEMD_READY=0: that would stop the device unit, and with it the
+  # SYSTEMD_WANTS hand-over above.
+  noProbe = pkgs.writeTextDir "lib/udev/rules.d/59-space-usb-no-probe.rules" (
+    lib.concatMapStrings (port: ''
+      SUBSYSTEM=="block", DEVPATH=="*/${port}/*", ENV{UDEV_DISABLE_PERSISTENT_STORAGE_BLKID_FLAG}="1"
+    '') ports
   );
   # per space: its ports, the guest's id base, the container unit's own
   # DeviceAllow (./usb-ports.py rewrites the runtime list from it)
@@ -100,7 +141,12 @@ let
   # The guest's side of a network interface on a port (usb<N> there): DHCP
   # for an address on its link, nothing else from it (no default route,
   # no DNS: a KVM's or board's DHCP must not take the guest's internet).
+  # The lease's prefix route goes into its own table, consulted after the
+  # main table's specific routes (rule 1: main without its default) and
+  # before the default, and only for routes of /16 or longer (a hostile
+  # /1 netmask would otherwise take half the internet).
   # networkd touches nothing but these.
+  usbTable = 4242;
   guestNet = {
     systemd.network = {
       enable = true;
@@ -116,7 +162,20 @@ let
           LinkLocalAddressing = "ipv6";
           IPv6AcceptRA = false;
         };
+        routingPolicyRules = [
+          {
+            Table = "main";
+            SuppressPrefixLength = 0;
+            Priority = 4240;
+          }
+          {
+            Table = usbTable;
+            SuppressPrefixLength = 15;
+            Priority = 4242;
+          }
+        ];
         dhcpV4Config = {
+          RouteTable = usbTable;
           UseRoutes = false;
           UseGateway = false;
           UseDNS = false;
@@ -145,6 +204,9 @@ in
 
   config = lib.mkIf (spaces != { }) {
     services.udev.extraRules = rules;
+    services.udev.packages = [ noProbe ];
+    # a stick on the port at boot: no LVM/md activation in the initrd either
+    boot.initrd.services.udev.packages = [ noProbe ];
     systemd.services =
       {
         "space-usb@" = {
@@ -180,12 +242,15 @@ in
         name: _:
         lib.nameValuePair "space-usb-replay-${name}" {
           description = "USB devices into the restarted ${name}";
+          # Every start of the container pulls this in again (Wants=):
+          # an explicit restart, and the automatic one after a reboot from
+          # inside the guest (exit 133, Restart=), which PartOf= would miss.
+          # No RemainAfterExit: an active leftover would make that start a
+          # no-op.
           wantedBy = [ "container@${name}.service" ];
           after = [ "container@${name}.service" ];
-          partOf = [ "container@${name}.service" ];
           serviceConfig = {
             Type = "oneshot";
-            RemainAfterExit = true;
             ExecStart = "${attach} replay ${name}";
           };
           path = path ++ [ pkgs.iproute2 ];

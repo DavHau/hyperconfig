@@ -135,6 +135,11 @@ pkgs.testers.runNixOSTest {
       # an xHCI controller at a fixed address for ./usb-ports.nix: a stick
       # plugged into its port 1 goes into geninf-space, one in port 2 not
       virtualisation.qemu.options = [ "-device qemu-xhci,id=xhci,addr=0x1e" ];
+      # what a stick or keyboard on the port must not reach (as on som and
+      # amy): udisks' automount, LVM's event activation, logind's power
+      # key, the kernel's Ctrl-Alt-Del (reboot.target)
+      services.udisks2.enable = true;
+      services.lvm.enable = true;
       # the guests' test builds' builder
       virtualisation.additionalPaths = [
         pkgs.pkgsStatic.busybox
@@ -488,10 +493,11 @@ pkgs.testers.runNixOSTest {
               return "sh -c " + shlex.quote(f"echo $$ > {cg} && exec nsenter --all -t {leader('geninf-space')} -- sh -c " + shlex.quote(cmd))
           def as_guest(cmd, check=True):
               return host.succeed(guest_cmd(cmd)) if check else host.execute(guest_cmd(cmd))
-          def plug(port, ident):
-              img = os.path.join(host.state_dir, f"{ident}.img")
-              with open(img, "wb") as f:
-                  f.truncate(1 << 20)
+          def plug(port, ident, img=None, size=1 << 20):
+              if img is None:
+                  img = os.path.join(host.state_dir, f"{ident}.img")
+                  with open(img, "wb") as f:
+                      f.truncate(size)
               host.send_monitor_command(f"drive_add 0 if=none,id={ident},format=raw,file={img}")
               host.send_monitor_command(f"device_add usb-storage,bus=xhci.0,port={port},drive={ident},id={ident}")
           def unplug(ident):
@@ -510,6 +516,9 @@ pkgs.testers.runNixOSTest {
               print(host.execute("udevadm info /dev/sda | grep -E 'DEVPATH|SYSTEMD'; journalctl -b --no-pager -u 'space-usb*' | tail -40")[1])
           print(host.succeed("udevadm info -q path /sys/class/block/sda; systemctl list-units 'space-usb*'"))
           assert host.succeed("stat -c %u:%g /dev/tpmrm0").strip() == tpm_owner
+          # the rewritten list keeps the unit's own entries
+          allow = host.succeed("systemctl show -p DeviceAllow container@geninf-space.service")
+          assert "/dev/tpmrm0" in allow and "/dev/net/tun" in allow and "8:0" in allow, allow
           out = as_guest("stat -c '%F %t:%T %u:%g %a' /dev/sda").strip()
           assert out == "block special file 8:0 ${toString registry.geninf-space.uid}:${toString registry.geninf-space.uid} 660", out
           assert host.succeed("stat -c '%u:%g' /proc/" + leader("geninf-space") + "/root/dev/sda").strip() == f"{base + ${toString registry.geninf-space.uid}}:{base + ${toString registry.geninf-space.uid}}"
@@ -553,6 +562,76 @@ pkgs.testers.runNixOSTest {
           host.wait_until_succeeds(f"! test -e /proc/{leader('geninf-space')}/root/dev/sda", timeout=60)
           allow = host.succeed("systemctl show -p DeviceAllow container@geninf-space.service")
           assert "/dev/block/" not in allow, allow
+          assert "/dev/tpmrm0" in allow and "/dev/net/tun" in allow, allow
+          import time
+          def stays(cmd, seconds=5):
+              # cmd keeps succeeding for a while (1 s steps)
+              for _ in range(seconds):
+                  host.succeed(cmd)
+                  time.sleep(1)
+
+          # a stick with an LVM PV: on another port this host probes it
+          # (LVM2_member); on the listed port neither blkid, LVM, md nor
+          # udisks touch it
+          lvm_img = os.path.join(host.state_dir, "lvm.img")
+          with open(lvm_img, "wb") as f:
+              f.truncate(32 << 20)
+          plug(2, "lvm1", img=lvm_img)
+          host.wait_until_succeeds("test -b /dev/sda", timeout=60)
+          host.succeed("pvcreate -y /dev/sda && vgcreate spusbtest /dev/sda && lvcreate -y -L 4M -n lv spusbtest && vgchange -an spusbtest")
+          forget = "rm -rf /run/lvm/pvs_online/* /run/lvm/vgs_online/* /run/lvm/pvs_lookup/*"
+          host.succeed(forget)
+          host.succeed("udevadm trigger --settle --action=change /dev/sda")
+          host.succeed("udevadm info -q property /dev/sda | grep -qx ID_FS_TYPE=LVM2_member")
+          # the baseline: on an unlisted port this host's LVM activates it
+          rc, _ = host.execute("for i in $(seq 30); do test -e /dev/spusbtest/lv && exit 0; sleep 1; done; exit 1")
+          print(f"unlisted port: LVM event activation {'seen' if rc == 0 else 'not seen'}")
+          host.succeed("vgchange -an spusbtest")
+          host.wait_until_succeeds("! dmsetup ls | grep -q spusbtest", timeout=30)
+          unplug("lvm1")
+          host.wait_until_succeeds("! test -e /dev/sda", timeout=60)
+          # forget what LVM saw on the other port, so a scan would activate again
+          host.succeed(forget)
+          plug(1, "lvm2", img=lvm_img)
+          host.wait_until_succeeds("systemctl is-active 'space-usb@geninf-space:sda.service'", timeout=60)
+          props = host.succeed("udevadm info -q property /dev/sda")
+          print(props)
+          assert "ID_FS_TYPE=" not in props and "UDISKS_IGNORE=1" in props and "UDISKS_AUTO=0" in props, props
+          stays("! test -e /dev/spusbtest/lv && ! dmsetup ls | grep -q spusbtest && ! ls /run/lvm/pvs_online | grep -q .")
+          host.wait_until_succeeds("udisksctl info -b /dev/sda | grep -Eq 'HintIgnore: +true'", timeout=30)
+          info = host.succeed("udisksctl info -b /dev/sda")
+          assert re.search(r"HintAuto:\s+false", info) and re.search(r"HintSystem:\s+true", info), info
+          assert "/dev/sda" not in host.succeed("cat /proc/mounts")
+          as_guest("dd if=/dev/sda of=/dev/null bs=512 count=1")
+          unplug("lvm2")
+          host.wait_until_succeeds(f"! test -e /proc/{leader('geninf-space')}/root/dev/sda", timeout=60)
+
+          # a keyboard on the port: the guest reads its reports by hidraw,
+          # this host's kernel and logind act on none of its keys
+          host.send_monitor_command("device_add usb-kbd,bus=xhci.0,port=1,id=kbd1")
+          find_input = "for d in /sys/class/input/input*; do readlink -f $d | grep -q 0000:00:1e.0 && echo $d; done"
+          host.wait_until_succeeds(f"test -n \"$({find_input})\"", timeout=60)
+          inputs = host.succeed(find_input).split()
+          host.wait_until_succeeds(" && ".join(f"grep -qx 1 {d}/inhibited" for d in inputs), timeout=30)
+          for d in inputs:
+              for ev in host.succeed(f"ls -d {d}/event* 2>/dev/null || true").split():
+                  props = host.succeed(f"udevadm info -q property /dev/input/{os.path.basename(ev)}")
+                  assert "LIBINPUT_IGNORE_DEVICE=1" in props, props
+                  tags = [l for l in props.splitlines() if l.startswith("CURRENT_TAGS=")]
+                  assert not any("power-switch" in t for t in tags), props
+          host.wait_until_succeeds(guest_cmd("ls /dev/hidraw*"), timeout=60)
+          hidraw = as_guest("ls /dev/hidraw*").split()[0]
+          as_guest(f"(timeout 60 head -c 8 {hidraw} > /tmp/hid.out 2>&1 &) </dev/null >/dev/null 2>&1")
+          time.sleep(1)
+          cursor = host.succeed("journalctl -n0 --show-cursor | tail -1 | sed 's/^-- cursor: //'").strip()
+          host.send_key("ctrl-alt-delete")
+          host.send_key("power")
+          host.wait_until_succeeds(guest_cmd("test -s /tmp/hid.out"), timeout=30)
+          stays("! systemctl -q is-active reboot.target poweroff.target ctrl-alt-del.target && systemctl -q is-active multi-user.target")
+          jlog = host.succeed(f"journalctl --after-cursor={shlex.quote(cursor)} --no-pager")
+          assert "Power key pressed" not in jlog and "Ctrl-Alt-Del" not in jlog and "ctrl-alt-del" not in jlog, jlog
+          host.send_monitor_command("device_del kbd1")
+          host.wait_until_succeeds(f"test -z \"$({find_input})\"", timeout=60)
           # a network adapter on the port: into the guest's netns, DHCP on
           # it there, no default route or DNS from it; the host keeps none
           host.send_monitor_command("netdev_add user,id=usbnet0,net=10.95.117.0/24")
@@ -568,9 +647,39 @@ pkgs.testers.runNixOSTest {
           host.wait_until_succeeds("! nixos-container run geninf-space -- ip -br link | grep -q ^usb", timeout=60)
           host.send_monitor_command("device_add usb-net,bus=xhci.0,port=1,netdev=usbnet0,id=nic2")
           host.wait_until_succeeds("nixos-container run geninf-space -- ip -4 -br addr show | grep -q '^usb.*10.95.117.'", timeout=90)
+          # a hostile netmask: the prefix route stays in the guest's
+          # table 4242, ignored when shorter than /16
+          rules = space_root("geninf-space", "ip -4 rule")
+          assert "4242" in rules and "suppress_prefixlength 15" in rules, rules
+          assert "10.95.117" not in space_root("geninf-space", "ip -4 route show table main"), rules
+          assert "10.95.117.0/24" in space_root("geninf-space", "ip -4 route show table 4242")
           # a container restart: moved into the new one
           host.succeed("systemctl restart container@geninf-space.service")
           host.wait_until_succeeds("nixos-container run geninf-space -- ip -4 -br addr show | grep -q '^usb.*10.95.117.'", timeout=120)
+          # the guest reboots itself (nspawn exits 133, the unit restarts
+          # it): devices (the adapter's usb_device node; qemu's port 1 is
+          # taken by it) and adapter come back without anyone's help
+          host.wait_until_succeeds(f"ls /proc/{leader('geninf-space')}/root/dev/bus/usb/*/*", timeout=60)
+          before = leader("geninf-space")
+          host.execute("timeout 30 nixos-container run geninf-space -- systemctl reboot")
+          host.wait_until_succeeds(f"l=$(machinectl show geninf-space -p Leader --value) && [ -n \"$l\" ] && [ \"$l\" != {before} ]", timeout=120)
+          host.wait_until_succeeds("nixos-container run geninf-space -- systemctl is-active multi-user.target", timeout=120)
+          host.wait_until_succeeds(f"ls /proc/{leader('geninf-space')}/root/dev/bus/usb/*/*", timeout=60)
+          as_guest("for n in /dev/bus/usb/*/*; do exec 3<$n || exit 1; done")
+          host.wait_until_succeeds("nixos-container run geninf-space -- ip -4 -br addr show | grep -q '^usb.*10.95.117.'", timeout=120)
+          # powered off from inside: the adapter returns to this host under
+          # a name of ours, down and unmanaged; started again, all is back
+          host.execute("timeout 30 nixos-container run geninf-space -- systemctl poweroff")
+          host.wait_until_succeeds("! systemctl -q is-active container@geninf-space.service", timeout=120)
+          host.wait_until_succeeds("ip -br link | grep -q '^spusb[0-9]'", timeout=60)
+          link = host.succeed("ip -br link | grep '^spusb[0-9]'")
+          assert "DOWN" in link, link
+          assert "10.95.117" not in host.succeed("ip -4 addr")
+          host.succeed("systemctl start container@geninf-space.service")
+          host.wait_until_succeeds("nixos-container run geninf-space -- systemctl is-active multi-user.target", timeout=120)
+          host.wait_until_succeeds(f"ls /proc/{leader('geninf-space')}/root/dev/bus/usb/*/*", timeout=60)
+          host.wait_until_succeeds("nixos-container run geninf-space -- ip -4 -br addr show | grep -q '^usb.*10.95.117.'", timeout=120)
+          host.fail("ip -br link | grep -q '^spusb[0-9]'")
           host.send_monitor_command("device_del nic2")
 
       with subtest("Dave's herdr: the spaces as machines, attached over ssh"):

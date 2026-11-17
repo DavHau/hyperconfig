@@ -64,6 +64,27 @@ gets 403.
   http://127.0.0.1:8095/ (the guest's sshd allows TCP forwarding,
   sshd's default).
 
+## USB ports: `usbPorts`
+
+geninf-space gets one physical socket per machine (both of its ports,
+`./geninf-space.nix`). Everything plugged in there goes into the guest
+(`./usb-ports.nix` has the details):
+
+- **Network:** an adapter on the port is the guest's, with no filter.
+  This host's firewall never sees that traffic, and the guest's root can
+  add any address or route over it. Listing a port grants the guest
+  unfiltered network through whatever is plugged in. The guest's DHCP on
+  it gets an address only; a hostile netmask can't take its internet
+  (prefix routes shorter than /16 are ignored). An adapter that drops
+  back to the host is renamed `spusb<N>`, kept down and unmanaged.
+- **Keyboards and mice:** the host's kernel ignores them (no typing on
+  the console, no Ctrl-Alt-Del, SysRq or power key); the guest reads
+  their raw reports through hidraw.
+- **Disks:** the host doesn't probe them (no automount, no LVM or md
+  activation); the guest has raw write access.
+- A container restart, including a reboot or poweroff from inside the
+  guest, hands everything over again.
+
 ## History
 
 The gi-infra and agave spaces ran on amy until 2026-11-10 and moved to
