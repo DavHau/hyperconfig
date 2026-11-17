@@ -81,6 +81,7 @@
           {
             config,
             lib,
+            pkgs,
             inputs,
             ...
           }:
@@ -111,6 +112,13 @@
             );
           in
           {
+            # libsqlite3-sys (sqlx) links the system sqlite, which nixpkgs'
+            # stdenv no longer brings into the link: add it to the build.
+            services.ncro.package =
+              (pkgs.callPackage "${inputs.ncro}/nix/package.nix" { }).overrideAttrs (old: {
+                buildInputs = (old.buildInputs or [ ]) ++ [ pkgs.sqlite ];
+              });
+
             imports = [ inputs.ncro.nixosModules.ncro ];
 
             services.ncro = {
