@@ -115,7 +115,7 @@
     # (herdr, pi and omp-joy too), so an afk bump is one line here. afk's
     # nixpkgs is deliberately not ours: agents track nixpkgs faster than we
     # do (2026-09: omp 18.2.10 needs bun >= 1.3.14).
-    afk.url = "github:DavHau/afk/24b7822e1fe4e122ded09296c3027d59639842dc";
+    afk.url = "github:DavHau/afk/7ea1b673843de2f5d401a5fc2afe6b9126f9aaa0";
     llm-agents.follows = "afk/llm-agents";
 
     # ntop: nix-native htop (live builds, transfers, store, remotes).
