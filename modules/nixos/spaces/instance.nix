@@ -96,6 +96,15 @@ lib.mkMerge [
         message = "${name}: credential `${hostKeyCredential}` is the guest's ssh host key";
       }
       {
+        # set by the core (allCredentials above); a space's own entry would be dropped silently
+        assertion = lib.all (n: !(credentials ? ${n})) [
+          "p0-api-key"
+          "teamclaude-api-key"
+          "openrouter-api-key"
+        ];
+        message = "${name}: credentials p0-api-key, teamclaude-api-key and openrouter-api-key come from the spaces core";
+      }
+      {
         assertion = siblings == [ ] || siblingIdentity != null;
         message = "${name}: siblings need a siblingIdentity credential";
       }

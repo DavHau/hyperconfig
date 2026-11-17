@@ -299,6 +299,7 @@ pkgs.testers.runNixOSTest {
         };
         "test-vars/infra-space-github/id_ed25519" = secret "not a key\n";
         "test-vars/infra-space-secrets-github/id_ed25519" = secret "not a key\n";
+        "test-vars/agave-geninf-ro/id_ed25519" = secret "not a key\n";
         "test-vars/inference-api-key/token" = secret "test-p0-token\n";
         "test-vars/teamclaude-api-key/key" = secret "test-teamclaude\n";
         "test-vars/openrouter/apikey" = secret "test-openrouter\n";
