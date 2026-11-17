@@ -2135,11 +2135,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1793414493,
-        "narHash": "sha256-A0QTtl8sKE/PoI0toJVqLG89JGV3jyqnyqilVqt5/No=",
+        "lastModified": 1794799507,
+        "narHash": "sha256-oSbOCR8iWog30pC+VgXk4HE6pA/2B+6ptAe1eCprRpw=",
         "owner": "KarpelesLab",
         "repo": "teamclaude",
-        "rev": "19b871d1b901843d2d001accbfdbc9e406fd24e6",
+        "rev": "4c044d3295af4975ce06b1206ce409f0daec572c",
         "type": "github"
       },
       "original": {

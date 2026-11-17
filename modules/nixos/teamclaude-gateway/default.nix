@@ -104,6 +104,15 @@ let
       };
       upstream = "https://api.anthropic.com";
       switchThreshold = usageCap;
+      # The quota probe (docs/quota.md#quota-probe), off upstream by policy:
+      # every 5 min it reads each OAuth account's zero-spend
+      # /api/oauth/usage (no message quota). Without it an account's quota
+      # is learned only from the headers of requests it serves, and an
+      # account at its maxUsage cap is sent none, so a reading at the cap
+      # (or a manual usage reset on claude.ai) is never re-read before the
+      # cached window reset: the account stays `capped` here and full in
+      # the bar (../noctalia-anthropic-usage) until then.
+      quotaProbeSeconds = 300;
       warmupSeconds = 0;
       distributeSessions = true;
     }
