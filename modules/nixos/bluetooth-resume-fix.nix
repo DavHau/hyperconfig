@@ -11,8 +11,9 @@
 # device whenever the adapter powered on: it paged absent headsets one by
 # one (5 s page timeout each, serialised by the controller) and aborted the
 # LE mouse's own reconnect ("le-connection-abort-by-local"), so the mouse
-# came back ~35-45 s after resume (journals of 2026-11-10/12/17). That is
-# patched out in ./noctalia (no-bluetooth-auto-reconnect.patch). Now:
+# came back ~35-45 s after resume (journals of 2026-11-10/12/17). Noctalia
+# >= 5.5 only does that when opted in ([bluetooth].connect_when_enabled,
+# default false; see ./noctalia). Now:
 # - LE HID (mouse, joystick): bluez puts bonded HOG devices on the kernel's
 #   auto-connect list when hci0 comes back; they reconnect by themselves as
 #   soon as they advertise. Never Device.Connect them here (that aborts the

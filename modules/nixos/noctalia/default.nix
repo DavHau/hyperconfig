@@ -16,15 +16,14 @@
 # store dir, served as a read-only `path` plugin source and enabled as
 # `hyperconfig/<name>`.
 #
-# Patched: no Bluetooth reconnect-all on adapter power-on
-# (no-bluetooth-auto-reconnect.patch; reasons there and in
-# ../bluetooth-resume-fix.nix).
+# No Bluetooth reconnect-all on adapter power-on: noctalia >= 5.5 only does
+# that when opted in (`[bluetooth].connect_when_enabled`, default false), so
+# no-bluetooth-auto-reconnect.patch is no longer applied (reasons there and
+# in ../bluetooth-resume-fix.nix).
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.noctalia;
-  package = cfg.package.overrideAttrs (old: {
-    patches = (old.patches or [ ]) ++ [ ./no-bluetooth-auto-reconnect.patch ];
-  });
+  package = cfg.package;
   toml = pkgs.formats.toml { };
 
   pluginDir = pkgs.runCommand "noctalia-plugins" { } (
