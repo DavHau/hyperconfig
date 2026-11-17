@@ -111,7 +111,7 @@ in
         CLAN_SECRET_PROMPT_CLAN = lib.getExe config.infraSpace.clanWrapper;
         CLAN_SECRET_PROMPT_STORE = "${home}/clan-secrets";
         # the host's nginx is the only client
-        CLAN_SECRET_PROMPT_PEER = config.infraSpace.hostAddress;
+        CLAN_SECRET_PROMPT_PEER = config.space.hostAddress;
         PYTHONDONTWRITEBYTECODE = "1";
         PYTHONUNBUFFERED = "1";
       };

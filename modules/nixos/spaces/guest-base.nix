@@ -16,6 +16,10 @@
       from the host. The ssh host key goes to sshd only.
     - sshd: key-only, the one user only, its host key from the credential
       (never one made up here).
+    - git, jj, nix (builds through the host's nix-daemon, whose socket the
+      container gets; this is only the client's config), commits as
+      `gitIdentity`; with `tpm` (the host binds its TPM in), age and
+      age-plugin-tpm for an identity sealed to it.
 */
 {
   config,
@@ -95,6 +99,15 @@ in
       default = "";
       description = "/etc/hosts additions.";
     };
+    tpm = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "The host binds its TPM in (age identity tools on PATH).";
+    };
+    gitIdentity = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      description = "{ name, email } of the user's commits.";
+    };
   };
 
   config = {
@@ -156,5 +169,26 @@ in
       requires = [ "${cfg.name}-secrets.service" ];
       after = [ "${cfg.name}-secrets.service" ];
     };
+
+    environment.systemPackages = [
+      pkgs.git
+      pkgs.jujutsu
+      pkgs.openssh
+      config.nix.package
+    ]
+    ++ lib.optionals cfg.tpm [
+      pkgs.age
+      pkgs.age-plugin-tpm
+    ];
+    nix.settings.experimental-features = [
+      "nix-command"
+      "flakes"
+    ];
+    programs.git = {
+      enable = true;
+      config.user = cfg.gitIdentity;
+    };
+    environment.variables.JJ_USER = cfg.gitIdentity.name;
+    environment.variables.JJ_EMAIL = cfg.gitIdentity.email;
   };
 }

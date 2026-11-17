@@ -149,27 +149,15 @@ let
   cfg = config.hyper.infraSpace;
   vars = config.clan.core.vars.generators;
 
-  spaceHost = import ../spaces/host.nix { inherit config lib pkgs; };
+  spaceInstance = import ../spaces/instance.nix { inherit config lib pkgs inputs; };
 
   name = "infra-space";
   containerUnit = "container@${name}.service";
+  # veth slot 0 (10.235.0.1/.2, fd23:5ace::1/::2; ../spaces/registry.nix)
   hostAddress = "10.235.0.1";
-  localAddress = "10.235.0.2";
-  hostAddress6 = "fd23:5ace::1";
-  localAddress6 = "fd23:5ace::2";
   # The guest's `infra`; owns the state directory here. Id ladder in
   # ../vault-ids.nix; no host user has it.
   uid = 1203;
-  stateDir = "/var/lib/infra-space";
-  homeDir = "${stateDir}/home";
-  # The guest's sshd forwarder's uid here, the one the output gate admits
-  # to port 22 (id ladder in ../vault-ids.nix).
-  sshProxyUser = "infra-space-ssh";
-  sshProxyUid = 1204;
-
-  # Credential carrying the guest's ssh host key; not in `credentials`, so
-  # never copied out for `infra`.
-  hostKeyCredential = "ssh-host-key";
 
   publicMembers = import ./public-members.nix {
     inherit lib;
@@ -184,10 +172,8 @@ let
   '';
 in
 {
-  # afk for Dave's sessions in the guest (a guest module); the hermes
-  # dashboard (som only).
+  # the hermes dashboard (som only)
   imports = [
-    ./afk.nix
     ./dashboard.nix
     ./gcroots.nix
   ];
@@ -313,18 +299,12 @@ in
         assertion = cfg.members ? ${cfg.member};
         message = "hyper.infraSpace: ${cfg.member} is not in hyper.infraSpace.members (./members.nix)";
       }
-      {
-        assertion = !(cfg.credentials ? ${hostKeyCredential});
-        message = "hyper.infraSpace.credentials: `${hostKeyCredential}` is the guest's ssh host key";
-      }
     ];
 
     # nspawn reads --load-credential only when the container starts: every
     # var the guest consumes restarts it when it changes (a rotation).
+    # The host key and the afk keys: ../spaces/instance.nix.
     clan.core.vars.generators = {
-      inference-api-key.files.token.restartUnits = [ containerUnit ];
-      teamclaude-api-key.files.key.restartUnits = [ containerUnit ];
-      openrouter.files.apikey.restartUnits = [ containerUnit ];
       infra-space-ssh = {
         share = true;
         files.id_ed25519.restartUnits = [ containerUnit ];
@@ -353,14 +333,6 @@ in
         runtimeInputs = [ pkgs.openssh ];
         script = sshKeygen "agave-geninf-ro";
       };
-      infra-space-hostkey = {
-        files.ssh_host_ed25519_key.restartUnits = [ containerUnit ];
-        files."ssh_host_ed25519_key.pub".secret = false;
-        runtimeInputs = [ pkgs.openssh ];
-        script = ''
-          ssh-keygen -q -t ed25519 -N "" -C "" -f "$out"/ssh_host_ed25519_key
-        '';
-      };
     };
 
     hyper.infraSpace.credentials = {
@@ -368,14 +340,8 @@ in
       github = vars.infra-space-github.files.id_ed25519.path;
       secrets-github = vars.infra-space-secrets-github.files.id_ed25519.path;
       agave-geninf-ro = vars.agave-geninf-ro.files.id_ed25519.path;
-      # Inference for the guest's hermes (./hermes.nix) and afk (./afk.nix):
-      # p0's token (../inference-api-key.nix) and the TeamClaude client key
-      # (../teamclaude-api-key.nix), both shared vars of every member.
-      p0-api-key = vars.inference-api-key.files.token.path;
-      teamclaude-api-key = vars.teamclaude-api-key.files.key.path;
-      # OpenRouter for the guest's afk (../openrouter-api-key.nix; the
-      # shared var of ../pi-chat-openrouter.nix).
-      openrouter-api-key = vars.openrouter.files.apikey.path;
+      # p0-api-key, teamclaude-api-key, openrouter-api-key (also the
+      # guest's hermes', ./hermes.nix): ../spaces/instance.nix.
     };
     # The always-on agent, where enabled (som); its dashboard: ./dashboard.nix.
     hyper.infraSpace.guestModules = lib.optional cfg.hermes ./hermes.nix;
@@ -393,60 +359,48 @@ in
     };
     hyper.infraSpace.credentials.brief-ssh = vars.infra-space-brief.files.id_ed25519.path;
   })
-    # The container itself, its network, isolation and sshd forward: the
-    # host side shared with the named spaces (../spaces/host.nix).
-    (spaceHost {
-      inherit
-        name
-        uid
-        hostAddress
-        localAddress
-        hostAddress6
-        localAddress6
-        stateDir
-        homeDir
-        ;
-      proxyUser = sshProxyUser;
-      proxyUid = sshProxyUid;
+    # The container, its network, isolation, sshd forward, host key,
+    # afk and herdr: the core every space shares (../spaces/instance.nix).
+    (spaceInstance {
+      inherit name uid;
+      user = "infra";
+      index = 0;
+      description = "infra-space";
+      proxyUser = "infra-space-ssh";
+      # the guest's sshd forwarder (id ladder in ../vault-ids.nix)
+      proxyUid = 1204;
+      stateDir = "/var/lib/infra-space";
       guestHome = "/home/infra";
       inherit (self) address sshPort;
-      inherit (cfg) meshInterface;
+      inherit (cfg) meshInterface privateUsers credentials;
       tpm = true;
-      inherit (cfg) privateUsers;
+      hostKeyGenerator = "infra-space-hostkey";
+      authorizedKeys = [ cfg.sshPublicKey ] ++ lib.attrValues cfg.adminKeys;
+      # every member (this one too), as `ssh infra-space-<member>` with
+      # the shared key
+      siblings = lib.mapAttrsToList (machine: m: {
+        inherit machine;
+        inherit (m) address sshPort hostKey;
+        user = "infra";
+      }) cfg.members;
+      siblingIdentity = "ssh";
       # hermes' lockedConfig pins (./hermes.nix): the entries of its
       # locked home only
       immutableHelper = if cfg.hermes then inputs.hyperhermes.lib.lockedHermesHome "infra" else null;
-      credentials = cfg.credentials // {
-        ${hostKeyCredential} = vars.infra-space-hostkey.files.ssh_host_ed25519_key.path;
-      };
-      specialArgs = { inherit inputs; };
-      guestConfig = {
-        imports = [ ./guest.nix ] ++ cfg.guestModules;
-        infraSpace = {
-          inherit uid hostKeyCredential;
-          inherit (cfg)
-            member
-            sshPublicKey
-            fleetCertAuthority
-            buildOnHost
-            ;
-          members = lib.mapAttrs (_: m: { inherit (m) address sshPort hostKey; }) cfg.members;
-          credentials = lib.attrNames cfg.credentials;
-          adminKeys = lib.attrValues cfg.adminKeys;
-          resolver = hostAddress;
-          inherit hostAddress hostAddress6;
-          # minus the named spaces' `<name>.containers` lines (the
-          # containers module adds one per container): nothing of theirs
-          # is infra-space's business, nor reachable from it
-          extraHosts = lib.concatStringsSep "\n" (
-            lib.filter (
-              line:
-              !lib.any (space: lib.hasSuffix " ${space}.containers" line) (
-                lib.attrNames (import ../spaces/registry.nix)
-              )
-            ) (lib.splitString "\n" config.networking.extraHosts)
-          );
-        };
+      guest = ./guest.nix;
+      inherit (cfg) guestModules;
+      guestSpace = {
+        # minus the named spaces' `<name>.containers` lines (the
+        # containers module adds one per container): nothing of theirs
+        # is infra-space's business, nor reachable from it
+        extraHosts = lib.concatStringsSep "\n" (
+          lib.filter (
+            line:
+            !lib.any (space: lib.hasSuffix " ${space}.containers" line) (
+              lib.attrNames (import ../spaces/registry.nix)
+            )
+          ) (lib.splitString "\n" config.networking.extraHosts)
+        );
       };
       # som's nginx to the dashboard port (./dashboard.nix)
       # and to clan-secret-prompt's page (./secret-prompt)
@@ -455,5 +409,15 @@ in
         ++ cfg.extraToGuestRules
       );
     })
+    {
+      containers.${name}.config.infraSpace = {
+        inherit (cfg)
+          member
+          fleetCertAuthority
+          buildOnHost
+          ;
+        members = lib.mapAttrs (_: m: { inherit (m) address sshPort hostKey; }) cfg.members;
+      };
+    }
   ]);
 }

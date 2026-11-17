@@ -1,8 +1,8 @@
 /*
   afk in a space's guest, for Dave's interactive sessions: the guest
   module for a space whose credentials sit in `secretsDir`. Shared by
-  infra-space (../infra-space/afk.nix) and the named spaces
-  (./default.nix). The same wrapper as on the desktops (../afk.nix), minus
+  every space-like container, infra-space and the named spaces
+  (./instance.nix). The same wrapper as on the desktops (../afk.nix), minus
   what a space must not have:
 
     - No personal skills: those (mail, signal, ...) reach the desktops

@@ -237,8 +237,6 @@ let
     '';
   };
 
-  aliasOf = member: "infra-space-${member}";
-
   # The host's GC roots for this guest's builds (./gcroots.nix): the
   # guest's own result links are no roots there. Sends `<machine> <drv>`
   # to the host's root-owned socket, prints its answer, fails unless it
@@ -343,18 +341,11 @@ let
   };
 in
 {
-  # The base every space shares (../spaces/guest-base.nix): resolver,
-  # inbound rule, the user `infra`, the credentials, sshd; and through it
-  # Dave's shell (fish, aliases, zoxide, direnv, tmux) for the launcher
-  # sessions.
-  # (shell-profile first: the base imports it too, and this order keeps
-  # the guest's package list as it was before the base was factored out.)
+  # The base every space shares, afk, herdr and the other members as
+  # `ssh infra-space-<member>`: ../spaces/instance.nix (resolver, inbound
+  # rule, the user `infra`, the credentials, sshd, git/jj/nix, Dave's
+  # shell for the launcher sessions).
   imports = [
-    ../shell-profile.nix
-    ../spaces/guest-base.nix
-    # herdr's server, for Dave's herdr machine "infra-space (<member>)"
-    # (../spaces/client.nix), the same version as on the desktops
-    ../herdr-jj.nix
     # off unless the dashboard is published (./dashboard.nix)
     ./secret-prompt
   ];
@@ -364,49 +355,13 @@ in
       type = lib.types.str;
       description = "The host's name among the members.";
     };
-    uid = lib.mkOption {
-      type = lib.types.int;
-      description = "uid and gid of `infra` (owns the host's state directory).";
-    };
-    credentials = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      description = "Names of the credentials the host passes in, installed for `infra`.";
-    };
-    hostKeyCredential = lib.mkOption {
-      type = lib.types.str;
-      description = "Name of the credential holding sshd's host key.";
-    };
     members = lib.mkOption {
       type = lib.types.attrsOf (lib.types.attrsOf lib.types.anything);
       description = "Every member: { address, sshPort, hostKey } (the host's hyper.infraSpace.members).";
     };
-    sshPublicKey = lib.mkOption {
-      type = lib.types.str;
-      description = "The shared infra-space identity.";
-    };
-    adminKeys = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      description = "Dave's keys.";
-    };
     fleetCertAuthority = lib.mkOption {
       type = lib.types.attrsOf lib.types.anything;
       description = "{ publicKey, hostNames } of the CA certifying the fleet's host keys.";
-    };
-    resolver = lib.mkOption {
-      type = lib.types.str;
-      description = "DNS server (the host's resolved stub on its veth address).";
-    };
-    hostAddress = lib.mkOption {
-      type = lib.types.str;
-      description = "The host's v4 address on the veth; the only v4 source admitted inbound.";
-    };
-    hostAddress6 = lib.mkOption {
-      type = lib.types.str;
-      description = "The host's v6 address on the veth; the only v6 source admitted inbound.";
-    };
-    extraHosts = lib.mkOption {
-      type = lib.types.lines;
-      description = "The host's /etc/hosts additions (`<machine>.d` from clan yggdrasil).";
     };
     buildOnHost = lib.mkOption {
       type = lib.types.bool;
@@ -429,26 +384,11 @@ in
   };
 
   config = {
-    space = {
-      name = "infra-space";
-      user = "infra";
-      inherit (cfg)
-        uid
-        credentials
-        hostKeyCredential
-        resolver
-        hostAddress
-        hostAddress6
-        extraHosts
-        ;
-      inherit home;
-      description = "infra-space";
-      authorizedKeys = [ cfg.sshPublicKey ] ++ cfg.adminKeys;
-    };
+    space.gitIdentity = identity;
 
     # Fleet host keys through the CA the hosts' certificates come from,
-    # the members' guests by their pinned keys (HostKeyAlias below), GitHub
-    # by its published keys: no prompt anywhere.
+    # GitHub by its published keys, the members' guests by their pinned
+    # keys (../spaces/instance.nix): no prompt anywhere.
     programs.ssh.knownHosts = {
       fleet-ca = {
         certAuthority = true;
@@ -463,27 +403,9 @@ in
           publicKey = key;
         }
       ) githubHostKeys
-    )
-    // lib.mapAttrs' (
-      member: m:
-      lib.nameValuePair (aliasOf member) {
-        hostNames = [ (aliasOf member) ];
-        publicKey = m.hostKey;
-      }
-    ) cfg.members;
+    );
 
     programs.ssh.extraConfig = ''
-      ${lib.concatStrings (
-        lib.mapAttrsToList (member: m: ''
-          Host ${aliasOf member}
-            HostName ${m.address}
-            Port ${toString m.sshPort}
-            User infra
-            HostKeyAlias ${aliasOf member}
-            IdentityFile ${secretsDir}/ssh
-            IdentitiesOnly yes
-        '') cfg.members
-      )}
       Host github.com
         User git
         IdentityFile ${secretsDir}/github
@@ -507,28 +429,7 @@ in
       clanWrapper
       secretsSync
       gcroot
-      pkgs.git
-      pkgs.jujutsu
-      pkgs.openssh
-      config.nix.package
-      # the TPM age identity (./default.nix, Identities)
-      pkgs.age
-      pkgs.age-plugin-tpm
     ];
-
-    # Builds go through the host's nix-daemon (the container gets its
-    # socket); this is only the client's config.
-    nix.settings.experimental-features = [
-      "nix-command"
-      "flakes"
-    ];
-
-    programs.git = {
-      enable = true;
-      config.user = identity;
-    };
-    environment.variables.JJ_USER = identity.name;
-    environment.variables.JJ_EMAIL = identity.email;
 
     # The checkouts each instance works in (cloneService above).
     systemd.services.infra-space-clone = cloneService checkouts.hyperconfig;

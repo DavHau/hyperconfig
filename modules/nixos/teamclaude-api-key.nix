@@ -18,7 +18,7 @@
 # and deploy som plus every machine importing this module.
 #
 # Also imported where clan is not (the infra-space container,
-# ./infra-space/afk.nix): there `keyFile` points at a credential and the
+# ./spaces/instance.nix): there `keyFile` points at a credential and the
 # var, its group and owner are left out.
 { config, lib, pkgs, options, ... }:
 let

@@ -1,14 +1,9 @@
 /*
-  The system inside a named space's container (./default.nix sets
-  `space.*` from the host side): the shared base (./guest-base.nix: the
-  host's resolver, the inbound rule, the one user, its credentials,
-  sshd), plus the tools infra-space has (git, jj, nix, tmux from the
-  shell profile, afk from ./afk.nix) and herdr's server, so Dave's herdr
-  on his desktop attaches to it as a saved machine (./client.nix): herdr
-  finds /run/current-system/sw/bin/herdr over ssh, and its bridge starts
-  the server on demand. The same herdr as on the desktops
-  (../herdr-jj.nix: the same version, which the client requires, with the
-  jj plugin).
+  What a named space's guest has beyond the core every space shares
+  (./instance.nix: ./guest-base.nix with the user, credentials, sshd,
+  git/jj/nix, the TPM tools; afk; herdr's server for Dave's herdr): its
+  checkouts, its forges (./forges.nix), its published port window
+  (./publish-guest.nix). ./default.nix sets `space.*` from the host side.
 
   No fleet: no infra-space key, no fleet CA, no `<machine>.d` names. The
   space's own ssh/git targets come with its module (./geninf-space.nix)
@@ -124,22 +119,13 @@ let
   };
 in
 {
+  # the base, afk and herdr: ./instance.nix
   imports = [
-    ./guest-base.nix
     ./forges.nix
-    ../herdr-jj.nix
+    ./publish-guest.nix
   ];
 
   options.space = {
-    tpm = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = "The host binds its TPM in (age identity tools on PATH).";
-    };
-    gitIdentity = lib.mkOption {
-      type = lib.types.attrsOf lib.types.str;
-      description = "{ name, email } of the space's commits.";
-    };
     checkouts = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
       default = { };
@@ -166,31 +152,6 @@ in
   };
 
   config = {
-    environment.systemPackages = [
-      pkgs.git
-      pkgs.jujutsu
-      pkgs.openssh
-      config.nix.package
-    ]
-    ++ lib.optionals cfg.tpm [
-      pkgs.age
-      pkgs.age-plugin-tpm
-    ];
-
-    # Builds go through the host's nix-daemon (the container gets its
-    # socket); this is only the client's config.
-    nix.settings.experimental-features = [
-      "nix-command"
-      "flakes"
-    ];
-
-    programs.git = {
-      enable = true;
-      config.user = cfg.gitIdentity;
-    };
-    environment.variables.JJ_USER = cfg.gitIdentity.name;
-    environment.variables.JJ_EMAIL = cfg.gitIdentity.email;
-
     assertions = lib.mapAttrsToList (host: o: {
       assertion = lib.elem o.credential cfg.credentials;
       message = "space.orgCheckouts.${host}.credential: `${o.credential}` is not a credential of the ${cfg.name} space";

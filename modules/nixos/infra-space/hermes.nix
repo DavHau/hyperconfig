@@ -404,7 +404,7 @@ in
         };
 
         agents.${user} = {
-          inherit (config.infraSpace) uid;
+          inherit (config.space) uid;
           lockedConfig = true;
           # TeamClaude as the Anthropic endpoint, with the fleet's shared
           # client key (hermes seeds its env:ANTHROPIC_TOKEN credential with

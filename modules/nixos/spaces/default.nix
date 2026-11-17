@@ -4,13 +4,13 @@
   machines ./registry.nix assigns it to produces container <name>, its
   user <name>, its home /var/lib/spaces/<name>/home here.
 
-  The same host side as infra-space (./host.nix: private veth, NAT,
-  DNS from this host's resolved, sshd at [<this host's mesh
+  The same core as infra-space (./instance.nix on ./host.nix: private
+  veth, NAT, DNS from this host's resolved, sshd at [<this host's mesh
   address>]:<sshPort> through a socket proxy, nothing but this host into
   the guest and on this host only root and the proxy, the home persisted
-  here, credentials as systemd credentials), and the same guest base
-  (./guest.nix on ./guest-base.nix: fish, jj, git, nix, tmux, afk, herdr).
-  Dave's admin keys log in.
+  here, credentials as systemd credentials, the host key and afk keys, the
+  sibling copies; and the same guest base, ./guest-base.nix: fish, jj,
+  git, nix, tmux, afk, herdr), plus ./guest.nix. Dave's admin keys log in.
 
   What a space does NOT get, unlike infra-space: the infra-space key (root
   on this clan), the hyperconfig deploy keys, the clan-secrets key, this
@@ -58,7 +58,7 @@
 let
   vars = config.clan.core.vars.generators;
   registry = import ./registry.nix;
-  spaceHost = import ./host.nix { inherit config lib pkgs; };
+  spaceInstance = import ./instance.nix { inherit config lib pkgs inputs; };
   machine = config.clan.core.settings.machine.name;
   meshAddress = vars.yggdrasil.files.address.value;
   publicSpaces = import ./public.nix {
@@ -67,30 +67,19 @@ let
     flake = config.clan.core.settings.directory;
   };
 
-  # Mesh, LANs, overlays, the other spaces and infra-space (./host.nix).
-  blockedDestinations = import ./blocked-destinations.nix;
-
-  hostKeyCredential = "ssh-host-key";
-
   # Over the registry, not over hyper.spaces: this sets options of
   # hyper.spaces itself.
   spaceConfig =
     name: r:
     let
       cfg = config.hyper.spaces.${name};
-      containerUnit = "container@${name}.service";
-      stateDir = "/var/lib/spaces/${name}";
-      guestHome = "/home/${name}";
-      v4 = n: "10.235.0.${toString (4 * r.index + n)}";
-      v6 = n: "fd23:5ace:0:${toString r.index}::${toString n}";
 
       # The copies of this space on its other machines (./registry.nix),
-      # from the public clan vars (./public.nix). They reach each other's
-      # ssh forward (./host.nix `siblingForwards`) as the space's user
-      # with the shared root-ssh key, the space's identity on every
-      # machine: authorized here, and ssh alias <name>-<machine> with the
-      # sibling's pinned host key. Only for a space with a shared
-      # space-<name>-root-ssh var passed in as a credential.
+      # from the public clan vars (./public.nix), reached as
+      # <name>-<machine> with the shared root-ssh key, the space's identity
+      # on every machine, which is authorized here (./instance.nix
+      # `siblings`). Only for a space with a shared space-<name>-root-ssh
+      # var passed in as a credential.
       rootSsh = vars."space-${name}-root-ssh" or null;
       rootSshCredential =
         if rootSsh == null || !(rootSsh.share or false) then
@@ -100,9 +89,8 @@ let
             n: cfg.credentials.${n} == rootSsh.files.id_ed25519.path
           ) null (lib.attrNames cfg.credentials);
       siblings = lib.optionals (rootSshCredential != null) (
-        lib.filter (s: s.user == name && s.machine != machine) (lib.attrValues publicSpaces)
+        lib.filter (s: s.space == name && s.machine != machine) (lib.attrValues publicSpaces)
       );
-      siblingAlias = s: "${name}-${s.machine}";
     in
     lib.mkIf cfg.enable (lib.mkMerge [
       {
@@ -111,108 +99,47 @@ let
             assertion = lib.elem machine r.machines;
             message = "hyper.spaces.${name}: ./registry.nix puts it on ${lib.concatStringsSep ", " r.machines}, not ${machine}";
           }
-          {
-            assertion = !(cfg.credentials ? ${hostKeyCredential});
-            message = "hyper.spaces.${name}.credentials: `${hostKeyCredential}` is the guest's ssh host key";
-          }
         ];
-
-        clan.core.vars.generators = {
-          # nspawn reads credentials only at container start: a rotation
-          # restarts it.
-          inference-api-key.files.token.restartUnits = [ containerUnit ];
-          teamclaude-api-key.files.key.restartUnits = [ containerUnit ];
-          openrouter.files.apikey.restartUnits = [ containerUnit ];
-          "space-${name}-hostkey" = {
-            files.ssh_host_ed25519_key.restartUnits = [ containerUnit ];
-            files."ssh_host_ed25519_key.pub".secret = false;
-            runtimeInputs = [ pkgs.openssh ];
-            script = ''
-              ssh-keygen -q -t ed25519 -N "" -C "" -f "$out"/ssh_host_ed25519_key
-            '';
-          };
-        };
-
       }
-      (spaceHost {
-        inherit name stateDir guestHome;
-        inherit (r) uid sshPort proxyUid;
+      (spaceInstance {
+        inherit name siblings;
+        inherit (r) index uid sshPort proxyUid;
+        user = name;
+        description = "${name} space";
         proxyUser = "${name}-ssh";
-        hostAddress = v4 1;
-        localAddress = v4 2;
-        hostAddress6 = v6 1;
-        localAddress6 = v6 2;
-        homeDir = "${stateDir}/home";
-        address = cfg.address;
-        inherit (cfg) meshInterface tpm privateUsers;
-        credentials = cfg.credentials // {
-          ${hostKeyCredential} = vars."space-${name}-hostkey".files.ssh_host_ed25519_key.path;
-        };
+        stateDir = "/var/lib/spaces/${name}";
+        guestHome = "/home/${name}";
+        inherit (cfg)
+          address
+          meshInterface
+          tpm
+          privateUsers
+          credentials
+          guestModules
+          ;
+        hostKeyGenerator = "space-${name}-hostkey";
+        authorizedKeys =
+          lib.attrValues cfg.adminKeys ++ lib.optional (siblings != [ ]) rootSsh.files."id_ed25519.pub".value;
+        siblingIdentity = rootSshCredential;
+        # Mesh, LANs, overlays, the other spaces and infra-space (./host.nix).
         confine = true;
-        inherit blockedDestinations;
-        siblingForwards = map (s: {
-          inherit (s) address;
-          port = s.sshPort;
-        }) siblings;
+        blockedDestinations = import ./blocked-destinations.nix;
         # this host's nginx into the published port window (./publish.nix)
         toGuestRules = lib.optionalString (cfg.publish.enable && config.services.nginx.enable) "meta skuid ${
           toString config.users.users.${config.services.nginx.user}.uid
         } tcp dport ${toString cfg.publish.from}-${toString cfg.publish.to} return";
-        specialArgs = { inherit inputs; };
-        guestConfig = {
-          imports = [
-            ./guest.nix
-            (import ./afk.nix "/run/${name}/secrets")
-            ./publish-guest.nix
-            {
-              # before the space's own `Host *` (./geninf-space.nix)
-              programs.ssh.extraConfig = lib.mkBefore (
-                lib.concatMapStrings (s: ''
-                  Host ${siblingAlias s}
-                    HostName ${s.address}
-                    Port ${toString s.sshPort}
-                    User ${s.user}
-                    IdentityFile /run/${name}/secrets/${rootSshCredential}
-                    IdentitiesOnly yes
-
-                '') siblings
-              );
-              programs.ssh.knownHosts = lib.listToAttrs (
-                map (
-                  s:
-                  lib.nameValuePair (siblingAlias s) {
-                    hostNames = [ "[${s.address}]:${toString s.sshPort}" ];
-                    publicKey = s.hostKey;
-                  }
-                ) siblings
-              );
-            }
-          ]
-          ++ cfg.guestModules;
-          space = {
-            inherit name hostKeyCredential;
-            user = name;
-            inherit (r) uid;
-            home = guestHome;
-            description = "${name} space";
-            credentials = lib.attrNames cfg.credentials;
-            authorizedKeys =
-              lib.attrValues cfg.adminKeys
-              ++ lib.optional (siblings != [ ]) rootSsh.files."id_ed25519.pub".value;
-            resolver = v4 1;
-            hostAddress = v4 1;
-            hostAddress6 = v6 1;
-            inherit (cfg) tpm gitIdentity;
-            publish = {
-              inherit (cfg.publish)
-                enable
-                from
-                to
-                domain
-                accounts
-                ;
-              address = v4 2;
-            };
+        guest = ./guest.nix;
+        guestSpace = {
+          inherit (cfg) gitIdentity;
+          publish = {
+            inherit (cfg.publish)
+              enable
+              from
+              to
+              domain
+              accounts
+              ;
+            address = "10.235.0.${toString (4 * r.index + 2)}";
           };
         };
       })
@@ -248,7 +175,7 @@ in
             credentials = lib.mkOption {
               type = lib.types.attrsOf lib.types.str;
               default = { };
-              description = "Credential name -> path of a secret file here; installed at /run/${name}/secrets/<name> (0400, the space's user).";
+              description = "Credential name -> path of a secret file here; installed at /run/${name}/secrets/<name> (0400, the space's user). The p0, TeamClaude and OpenRouter keys come on top (./instance.nix).";
             };
             guestModules = lib.mkOption {
               type = lib.types.listOf lib.types.deferredModule;
@@ -315,16 +242,5 @@ in
     );
   };
 
-  config = lib.mkMerge (
-    lib.mapAttrsToList spaceConfig registry
-    # Not under the `enable` above: defining hyper.spaces.<name> under its
-    # own enable would recurse. Inert while the space is off.
-    ++ lib.mapAttrsToList (name: _: {
-      hyper.spaces.${name}.credentials = {
-        p0-api-key = vars.inference-api-key.files.token.path;
-        teamclaude-api-key = vars.teamclaude-api-key.files.key.path;
-        openrouter-api-key = vars.openrouter.files.apikey.path;
-      };
-    }) registry
-  );
+  config = lib.mkMerge (lib.mapAttrsToList spaceConfig registry);
 }

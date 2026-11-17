@@ -26,7 +26,7 @@
 # neither file is readable.
 #
 # Also imported where clan is not (the infra-space container,
-# ./infra-space/afk.nix): there `tokenFile` points at a credential and the
+# ./spaces/instance.nix): there `tokenFile` points at a credential and the
 # var declaration is left out.
 { config, lib, pkgs, options, ... }:
 let

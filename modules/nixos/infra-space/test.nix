@@ -35,7 +35,7 @@
 # The members run networkd as som and amy do: it keeps off the veth, also
 # across a restart. managed also plays a LAN peer routing to a member's
 # guest net: refused on sshd and on a host-only guest service the guest's
-# firewall opened, which the host itself reaches. afk (./afk.nix) runs as
+# firewall opened, which the host itself reaches. afk (../spaces/afk.nix) runs as
 # infra, `p0-api-key`, `teamclaude-api-key` and `openrouter-api-key` print
 # the credentials, and web_search, fetch and browser stay off even against
 # infra's own config.yml.
@@ -1088,7 +1088,7 @@ pkgs.testers.runNixOSTest {
           # sets the ACL again, the container's start must
           m = memberB
           # the guest's infra, here (its own user namespace, ../spaces/host.nix)
-          uid = "${toString (nodes.memberB.containers.infra-space.privateUsers + nodes.memberB.containers.infra-space.config.infraSpace.uid)}"
+          uid = "${toString (nodes.memberB.containers.infra-space.privateUsers + nodes.memberB.containers.infra-space.config.space.uid)}"
           m.succeed(f"getfacl -n /dev/tpmrm0 | grep -q '^user:{uid}:rw'")
           m.succeed(f"setfacl -x u:{uid} /dev/tpmrm0")
           m.fail(f"getfacl -n /dev/tpmrm0 | grep -q '^user:{uid}:'")
