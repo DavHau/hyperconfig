@@ -337,6 +337,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/spaces/registry.nix — The named agent spaces (./default.nix): <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/default.nix, m/spaces/client.nix, m/spaces/default.nix, m/spaces/public.nix, m/spaces/publish.nix, m/spaces/test.nix
 - modules/nixos/spaces/test-daemon.nix — Shared by the `spaces`, `infra-space` and `infra-space-agent-tools` VM tests (./test.nix, ../infra-space/test.nix, ../i… <- m/infra-space/agent-tools-test.nix, m/infra-space/test.nix, m/space-gui/test.nix, m/spaces/test.nix
 - modules/nixos/spaces/test.nix — The named spaces (./default.nix) on one host beside infra-space, and Dave's side of them (./client.nix) on the same hos… <- flake.nix
+- modules/nixos/spaces/usb-ports.nix — USB ports of this host handed to a space container (hyper.spaces.<name>.usbPorts): <- m/spaces/default.nix
 - modules/nixos/spaces/forge-prs-skill/SKILL.md — > <- m/spaces/forges.nix
 - modules/nixos/spaces/publish-skill/SKILL.md — >
 - modules/nixos/teamclaude-gateway/default.nix — TeamClaude: pooled Claude subscription gateway at https://teamclaude.davhau.com/, after project-zero's pubproxy01 setup… <- som

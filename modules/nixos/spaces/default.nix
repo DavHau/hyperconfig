@@ -167,6 +167,7 @@ in
 {
   imports = [
     ./geninf-space.nix
+    ./usb-ports.nix
   ];
   # The host's front of the published apps (nginx, login, TLS) is
   # ./publish.nix, imported where hyperhermes' publish runs (som).

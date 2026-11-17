@@ -59,7 +59,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.scanTrigger: modules/nixos/scan-trigger/default.nix
 - hyper.searxngCanary.candidate: modules/nixos/searxng-canary/candidate.nix
 - hyper.spaceGui: modules/nixos/space-gui/default.nix
-- hyper.spaces: modules/nixos/spaces/default.nix
+- hyper.spaces: modules/nixos/spaces/default.nix, modules/nixos/spaces/usb-ports.nix
 - hyper.spacesClient: modules/nixos/spaces/client.nix
 - hyper.tangClient: modules/nixos/tang-client.nix
 - hyper.tangServer: modules/nixos/tang-server.nix
@@ -126,6 +126,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - teamclaude: hyperhermes/modules/teamclaude.nix
 - tempfail-on-error: hyperhermes/modules/mail/default.nix
 - testSecret: modules/nixos/clan-vars-restart-units-test.nix
+- usbPorts: modules/nixos/spaces/usb-ports.nix
 - wallet.enable: hyperhermes/modules/wallet/default.nix
 - zfsKeylocationSync: modules/nixos/zfs-keylocation-sync/default.nix
 
