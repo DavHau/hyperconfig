@@ -361,6 +361,11 @@
         nixpkgs-bump-workspace = import ./modules/nixos/infra-space/nixpkgs-bump/workspace-test.nix {
           pkgs = nixpkgs.legacyPackages.x86_64-linux;
         };
+        # The deterministic bump (branch-only): a toy flake with a good and
+        # a bad job, local bare repos, red/green/error, lock, GC roots.
+        fleet-bump = import ./modules/nixos/infra-space/fleet-bump/test.nix {
+          pkgs = nixpkgs.legacyPackages.x86_64-linux;
+        };
       };
     };
 }

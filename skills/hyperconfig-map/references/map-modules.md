@@ -211,12 +211,12 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/infra-space/decisions.nix — The fleet's decision registry: <- m/infra-space/hermes.nix, m/telegram-send/default.nix
 - modules/nixos/infra-space/default.nix — infra-space: a NixOS container on every member machine (./members.nix), identical on each, from which the fleet is mana… <- amy, som, m/infra-space/afk.nix, m/infra-space/agent-tools-test.nix, m/infra-space/dashboard.nix, m/infra-space/fleet-access.nix, m/infra-space/gcroots.nix, m/infra-space/guest.nix, +9
 - modules/nixos/infra-space/fleet-access.nix — infra-space's root access on every clan machine (wired via the `sshd` instance's server extraModules in modules/flake-p… <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/default.nix, m/infra-space/test.nix, m/telegram-send/default.nix
-- modules/nixos/infra-space/gcroots.nix — GC roots on this host for systems built from the infra-space guest (a host module, imported by ./default.nix; <- m/infra-space/default.nix
-- modules/nixos/infra-space/guest.nix — The system inside the infra-space container (./default.nix sets the options below from the host side). <- m/infra-space/default.nix, m/infra-space/gcroots.nix, m/infra-space/hermes.nix, m/infra-space/secret-prompt/default.nix, m/spaces/guest-base.nix
-- modules/nixos/infra-space/hermes.nix — The infra-space's hermes agent, inside the container (./default.nix appends this to the guest's modules on every member… <- m/infra-space/agent-tools-guest.nix, m/infra-space/dashboard.nix, m/infra-space/decisions.nix, m/infra-space/default.nix, m/infra-space/nixpkgs-bump.nix, m/infra-space/voice-api.nix
+- modules/nixos/infra-space/gcroots.nix — GC roots on this host for systems built from the infra-space guest (a host module, imported by ./default.nix; <- m/infra-space/default.nix, m/infra-space/fleet-bump/default.nix
+- modules/nixos/infra-space/guest.nix — The system inside the infra-space container (./default.nix sets the options below from the host side). <- m/infra-space/default.nix, m/infra-space/fleet-bump/default.nix, m/infra-space/gcroots.nix, m/infra-space/hermes.nix, m/infra-space/secret-prompt/default.nix, m/spaces/guest-base.nix
+- modules/nixos/infra-space/hermes.nix — The infra-space's hermes agent, inside the container (./default.nix appends this to the guest's modules on every member… <- m/infra-space/agent-tools-guest.nix, m/infra-space/dashboard.nix, m/infra-space/decisions.nix, m/infra-space/default.nix, m/infra-space/fleet-bump/default.nix, m/infra-space/nixpkgs-bump.nix, m/infra-space/voice-api.nix
 - modules/nixos/infra-space/launchers.nix — Dave's way into infra-space, on his desktops (../dave.nix): <- m/dave-desktop/default.nix, m/infra-space/afk.nix, m/spaces/client.nix
 - modules/nixos/infra-space/members.nix — The machines that run an infra-space container (./default.nix), and the port on the machine's yggdrasil address that re… <- m/infra-space/default.nix, m/infra-space/public-members.nix
-- modules/nixos/infra-space/nixpkgs-bump.nix — The nightly nixpkgs-unstable bump, run by the infra-space agent itself (./nixpkgs-bump/SKILL.md says what it does: <- m/infra-space/decisions.nix, m/infra-space/hermes.nix
+- modules/nixos/infra-space/nixpkgs-bump.nix — The nightly nixpkgs-unstable bump, run by the infra-space agent itself (./nixpkgs-bump/SKILL.md says what it does: <- m/infra-space/decisions.nix, m/infra-space/fleet-bump/default.nix, m/infra-space/hermes.nix
 - modules/nixos/infra-space/public-members.nix — Every member of ./members.nix with its mesh address and its container's pinned host key, from the members' public clan… <- m/infra-space/default.nix, m/infra-space/launchers.nix
 - modules/nixos/infra-space/test-clan-stub.nix — What clan provides to ./default.nix in the VM tests (./test.nix, ./agent-tools-test.nix): <- m/infra-space/agent-tools-test.nix, m/infra-space/test.nix
 - modules/nixos/infra-space/test-oidc.py — - <- m/infra-space/test.nix
@@ -227,6 +227,9 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/infra-space/decisions/decision.py — - <- m/infra-space/decisions.nix
 - modules/nixos/infra-space/decisions/test_decision.py — - <- m/infra-space/decisions.nix
 - modules/nixos/infra-space/decisions/curate/SKILL.md — The daily 08:00 curation of the decision registry - decide what does not need Dave, re-check every open decision, obsole <- m/infra-space/decisions.nix, m/infra-space/hermes.nix
+- modules/nixos/infra-space/fleet-bump/default.nix — fleet-bump: the deterministic nightly nixpkgs bump (the recurring-tasks redesign, step 4: branch-only mode). A guest mo… <- modules/flake-parts/fleet-jobs.nix, m/infra-space/fleet-bump/test.nix, m/infra-space/hermes.nix
+- modules/nixos/infra-space/fleet-bump/fleet-bump.sh — fleet-bump: the deterministic nightly nixpkgs bump (./default.nix says where it runs and why). No agent: fetch main, mo… <- m/infra-space/fleet-bump/default.nix
+- modules/nixos/infra-space/fleet-bump/test.nix — ./fleet-bump.sh in a VM, offline: <- flake.nix
 - modules/nixos/infra-space/hermes-skill/SKILL.md — Manage Dave's NixOS fleet from infra-space - change hyperconfig, push it, deploy machines with clan, reach the other inf <- m/infra-space/agent-tools.nix, m/infra-space/guest.nix, m/infra-space/hermes.nix
 - modules/nixos/infra-space/nixpkgs-bump/SKILL.md — The nightly nixpkgs-unstable bump of hyperconfig - update nixpkgs, build every machine, fix, review, guard, merge to mai <- m/infra-space/hermes.nix, m/infra-space/nixpkgs-bump.nix
 - modules/nixos/infra-space/nixpkgs-bump/guard-test.nix — ./guard.sh against a scratch repository, without network: <- flake.nix
@@ -386,6 +389,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/flake-parts/apps.playa-isp-apply.nix — `nix run .#playa-isp-apply -- [--dry-run] [--allow-pool-change]`:
 - modules/flake-parts/apps.site-routers-apply.nix — `nix run .#site-routers-apply -- [--dry-run] [home/playa/casa/<router> ...]`:
 - modules/flake-parts/clan-tests.nix — Clan service tests, exposed as checks.<system>.<name> via clan-core's test harness (container tests;
+- modules/flake-parts/fleet-jobs.nix — fleetJobs: the jobs the nixpkgs bump must build, one flake attribute (docs: the recurring-tasks redesign, DESIGN 3.1 A.…
 - modules/flake-parts/hermes-onboard.nix — -
 - modules/flake-parts/hermes-one.nix — -
 - modules/flake-parts/hygiene.nix — Repo hygiene lint (../../tools/hygiene, rules in ../../CONVENTIONS.md):

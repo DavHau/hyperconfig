@@ -109,6 +109,7 @@ Shared vars generated (vars/shared): clan-secrets-pull esphome-casa esphome-cm-p
 - spaces: modules/nixos/spaces/test.nix
 - nixpkgs-bump-guard: modules/nixos/infra-space/nixpkgs-bump/guard-test.nix
 - nixpkgs-bump-workspace: modules/nixos/infra-space/nixpkgs-bump/workspace-test.nix
+- fleet-bump: modules/nixos/infra-space/fleet-bump/test.nix
 - remote-building (clan test): modules/flake-parts/clan-tests.nix
 - hygiene: modules/flake-parts/hygiene.nix
 - repo-map: modules/flake-parts/repo-map.nix

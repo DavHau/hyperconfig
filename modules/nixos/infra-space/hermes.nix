@@ -67,6 +67,8 @@
       bundled claude-code skill is another one, disabled).
     - the nightly nixpkgs bump (./nixpkgs-bump.nix): a timer that starts
       the agent with ./nixpkgs-bump/SKILL.md; here only, so on som only.
+      Beside it the deterministic bump (./fleet-bump), branch-only for
+      now: it builds .#fleetJobs and pushes auto/nixpkgs, never main.
     - the decision registry (./decisions.nix): `decision`, the 08:00
       curation run, the 09:00 brief and the /decisions skill; som only.
 
@@ -294,6 +296,7 @@ in
   imports = [
     inputs.hyperhermes.nixosModules.core
     ./nixpkgs-bump.nix
+    ./fleet-bump
     ./decisions.nix
   ];
 
@@ -353,6 +356,12 @@ in
 
   config = lib.mkMerge [
     {
+      # branch-only (auto/nixpkgs) beside the agent's bump (./fleet-bump)
+      infraSpace.fleetBump = {
+        enable = true;
+        waitFor = [ "nixpkgs-bump.service" ];
+      };
+
       # The guest's root has no CAP_LINUX_IMMUTABLE in its user namespace
       # (../spaces/host.nix, privateUsers): lockedConfig's pins get their
       # flag from the host's helper (immutableHelper, ./default.nix).

@@ -78,6 +78,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.ztEuLanGuard.refusedUsers: modules/nixos/zt-eu-lan-guard/default.nix
 - infraSpace: modules/nixos/infra-space/guest.nix
 - infraSpace.agentTools: modules/nixos/infra-space/agent-tools-guest.nix
+- infraSpace.fleetBump: modules/nixos/infra-space/fleet-bump/default.nix
 - infraSpace.hermes.dashboard: modules/nixos/infra-space/hermes.nix
 - infraSpace.hermes.extraSkills: modules/nixos/infra-space/hermes.nix
 - infraSpace.hermes.extraToolsets: modules/nixos/infra-space/hermes.nix
