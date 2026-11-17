@@ -142,6 +142,18 @@ in
     description = "The tunnel resolver's loopback address (port 53).";
   };
 
+  # for ./egress.nix's sources, whose DNS is redirected there
+  options.hyper.mullvadEgress.dns.upstream = lib.mkOption {
+    type = lib.types.attrsOf lib.types.str;
+    default = {
+      v4 = upstream4;
+      v6 = upstream6;
+    };
+    readOnly = true;
+    internal = true;
+    description = "Mullvad's resolver inside the tunnel.";
+  };
+
   config = {
     assertions = [
       {

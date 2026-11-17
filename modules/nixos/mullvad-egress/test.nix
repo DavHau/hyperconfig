@@ -4,7 +4,8 @@
 # the tunnel" and 192.168.1.1 / 2001:db8:1::1 means "came over the plain
 # uplink". Its DNS server is both Mullvad's in-tunnel resolver and the
 # uplink's: marker.example.net is 203.0.113.53 when asked through the tunnel
-# and 198.51.100.53 when asked over the uplink.
+# and 198.51.100.53 when asked over the uplink. The client's netns `guest`
+# behind veth ve-guest stands in for a container (`sources`).
 { pkgs }:
 let
   # Not under .test: unbound answers that itself (RFC 6761).
@@ -55,6 +56,15 @@ pkgs.testers.runNixOSTest {
         default = true;
         locations."/".return = ''200 "$remote_addr\n"'';
       };
+    };
+    # UDP on a port that is not DNS: answers (and logs) the sender's address
+    # (bound to the public address, so its replies come from there; `$$`:
+    # systemd would expand the variable itself)
+    systemd.services.udp-whoami = {
+      wantedBy = [ "multi-user.target" ];
+      after = [ "wireguard-wg0.service" ];
+      requires = [ "wireguard-wg0.service" ];
+      serviceConfig.ExecStart = "${pkgs.socat}/bin/socat UDP4-RECVFROM:9999,bind=203.0.113.10,fork SYSTEM:'echo $$SOCAT_PEERADDR | tee -a /tmp/udp.log'";
     };
     services.unbound = {
       enable = true;
@@ -241,6 +251,41 @@ pkgs.testers.runNixOSTest {
           "${pkgs.unbound}/bin/unbound -d -p -c ${conf}";
       };
 
+      # sources: netns `guest` behind ve-guest stands in for a space's
+      # container, NATed to the uplink as ../spaces/host.nix does.
+      hyper.mullvadEgress.sources = [ "ve-guest" ];
+      networking.nat = {
+        enable = true;
+        enableIPv6 = true;
+        internalInterfaces = [ "ve-guest" ];
+      };
+      systemd.network.networks."05-ve-guest" = {
+        matchConfig.Name = "ve-guest";
+        linkConfig.Unmanaged = true;
+      };
+      systemd.services.guest-netns = {
+        wantedBy = [ "multi-user.target" ];
+        after = [ "network.target" ];
+        path = [ pkgs.iproute2 ];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+        };
+        script = ''
+          ip netns add guest
+          ip link add ve-guest type veth peer name eth0 netns guest
+          ip addr add 10.250.0.1/30 dev ve-guest
+          ip -6 addr add fd99::1/64 dev ve-guest nodad
+          ip link set ve-guest up
+          ip -n guest link set lo up
+          ip -n guest addr add 10.250.0.2/30 dev eth0
+          ip -n guest -6 addr add fd99::2/64 dev eth0 nodad
+          ip -n guest link set eth0 up
+          ip -n guest route add default via 10.250.0.1
+          ip -n guest -6 route add default via fd99::1
+        '';
+      };
+
       # The test triggers failover itself; the timer would race it.
       systemd.timers.mullvad-egress-failover.enable = false;
 
@@ -248,6 +293,8 @@ pkgs.testers.runNixOSTest {
         pkgs.curl
         pkgs.wireguard-tools
         pkgs.dig
+        pkgs.socat
+        pkgs.iputils
       ];
     };
 
@@ -315,6 +362,65 @@ pkgs.testers.runNixOSTest {
     with subtest("the tunneled user leaves through the tunnel, v4 and v6"):
         assert curl("tunneled", public[0]) == "10.64.0.2"
         assert curl("tunneled", public[1]) == "fc00:bbbb:bbbb:bb01::2"
+
+    def guest(cmd):
+        return client.execute(f"ip netns exec guest {cmd} 2>&1")
+
+    def gcurl(url):
+        rc, out = guest(f"curl -sS --max-time 5 '{url}'")
+        if rc != 0:
+            diag()
+            print(client.execute("set -x; ip rule; ip -6 rule; nft list table inet mullvad-egress; ip -n guest addr; ip -n guest route")[1])
+            raise AssertionError(f"guest {url}: curl exited {rc}: {out}")
+        return out.strip()
+
+    def gudp(port, bind=None):
+        """One UDP datagram from the guest to the relay's port 9999: the
+        address it arrived from, or "" when nothing came back."""
+        src = f",bind={bind}" if bind else ""
+        out = guest(f"sh -c 'echo x | socat -t 3 -T 3 - UDP4:203.0.113.10:9999,sourceport={port}{src} 2>/dev/null'")[1]
+        # (socat may answer more than once per datagram)
+        return " ".join(sorted(set(out.split())))
+
+    def udp_senders():
+        return relay.execute("cat /tmp/udp.log")[1].split()
+
+    with subtest("sources: the container leaves through the tunnel, v4 and v6"):
+        client.wait_for_unit("guest-netns.service")
+        client.wait_until_succeeds("ip rule | grep -q 'iif ve-guest lookup 51830'", timeout=60)
+        client.wait_until_succeeds("ip -6 rule | grep -q 'iif ve-guest lookup 51830'", timeout=60)
+        assert gcurl(public[0]) == "10.64.0.2"
+        assert gcurl(public[1]) == "fc00:bbbb:bbbb:bb01::2"
+        # LAN and excluded prefixes direct, as for the users
+        assert gcurl("http://192.168.1.2/") == "192.168.1.1"
+        assert gcurl("http://[2001:db8:1::2]/") == "2001:db8:1::1"
+        assert gcurl("http://198.51.100.10/") == "192.168.1.1"
+        # the host itself (its nix-daemon fetching for it) stays direct
+        assert curl("root", public[0]) == "192.168.1.1"
+        # not only TCP: ICMP and UDP on a port that is not DNS take the tunnel
+        relay.wait_for_unit("udp-whoami.service")
+        assert guest("ping -c 1 -W 3 203.0.113.10")[0] == 0, guest("ping -c 1 -W 3 203.0.113.10")
+        out = gudp(40000)
+        if out != "10.64.0.2":
+            print(client.execute("conntrack -L 2>&1; nft list table inet mullvad-egress")[1])
+            print(relay.execute("cat /tmp/udp.log; journalctl -u udp-whoami --no-pager | tail")[1])
+            raise AssertionError(f"guest UDP: {out!r}")
+        # a spoofed source address (one of the LAN's) changes nothing: the
+        # interface decides, so it arrives through the tunnel or not at all
+        guest("ip addr add 192.168.1.50/32 dev eth0")
+        gudp(40001, bind="192.168.1.50")
+        guest("ip addr del 192.168.1.50/32 dev eth0")
+        senders = udp_senders()
+        assert set(senders) == {"10.64.0.2"}, f"guest UDP arrived from {senders}"
+
+    with subtest("sources: the container's DNS goes to the tunnel's resolver, whichever it asks"):
+        for server in ["192.168.1.2", "10.250.0.1", "2001:db8:1::2", "fd99::1", "198.51.100.10"]:
+            for tcp in ["", "+tcp"]:
+                rc, out = guest(f"dig +short +time=3 +tries=1 {tcp} @{server} ${marker}")
+                assert rc == 0 and out.strip() == "203.0.113.53", f"guest @{server} {tcp}: {rc} {out}"
+        # DoT off the tunnel: refused
+        rc, out = guest("curl -sS --max-time 5 telnet://192.168.1.2:853")
+        assert rc == 7, f"guest DoT to the LAN: {rc} {out}"
 
     with subtest("other users keep the uplink"):
         for user in ["direct", "root"]:
@@ -409,5 +515,18 @@ pkgs.testers.runNixOSTest {
         assert rc != 0 and out.strip() == "", f"tunnel down, yet ${marker}: {rc} {out}"
         assert resolves("dns-probe.service", "internal.example") == "192.168.1.77"
         assert client.succeed("getent ahostsv4 ${marker}").split()[0] == "198.51.100.53"
+        # sources: no internet and no DNS either, LAN still direct
+        relay.succeed("rm -f /tmp/udp.log")
+        assert guest("ping -c 1 -W 3 203.0.113.10")[0] != 0
+        # neither a new UDP flow nor the one established before (port 40000)
+        assert gudp(40002) == ""
+        assert gudp(40000) == ""
+        assert udp_senders() == [], f"guest UDP got out with the tunnel down: {udp_senders()}"
+        for url in public:
+            rc = guest(f"curl -sS --max-time 5 '{url}'")[0]
+            assert rc == 7, f"guest {url} with the tunnel down: curl exited {rc}"
+        assert gcurl("http://192.168.1.2/") == "192.168.1.1"
+        rc, out = guest("dig +short +time=3 +tries=1 @192.168.1.2 ${marker}")
+        assert "198.51.100.53" not in out and "203.0.113.53" not in out, f"guest DNS with the tunnel down: {rc} {out}"
   '';
 }

@@ -14,6 +14,24 @@
 # only go to ./dns.nix's 127.0.0.153. Residual: loopback resolvers on other
 # ports (hyprspace's 127.43.104.80:11355) stay reachable, which only
 # software pointed at them explicitly would use.
+#
+# `sources` (interfaces, e.g. a container's host-side veth) do the same for
+# traffic this host forwards: the same two rules with `iif <interface>`
+# instead of `uid X` (6000/6001), and the forward chain is their kill
+# switch (public destinations only through wg-mullvad, DNS never off it).
+# Their DNS (port 53, to whichever server, this host's stub included) is
+# redirected to Mullvad's in-tunnel resolver (./dns.nix's upstream); what
+# leaves through the tunnel is masqueraded to its addresses and MSS-clamped
+# to its MTU. What this host itself does for such a container stays
+# direct: its nix-daemon's fetches (the daemon is root, not a listed user)
+# and anything else the container reaches on this host's own addresses
+# (local delivery, never forwarded). The packets' interface decides, so a
+# container cannot leave the rules by spoofing its source address. The
+# routing rules match every forwarded packet from the interface, replies
+# included: meant for containers that get no forwarded inbound connections
+# (../spaces/host.nix drops them; this host's proxies reach the guest
+# locally). A confined space's destination filter lets the redirected DNS
+# through (../spaces/host.nix, `ct status dnat`).
 {
   config,
   lib,
@@ -55,6 +73,13 @@ let
 
   # The only DNS a tunneled uid may ask off the tunnel: ./dns.nix's unbound.
   tunnelResolver = "127.0.0.153";
+
+  sources = lib.concatMapStringsSep ", " (i: ''"${i}"'') cfg.sources;
+  # What a source may reach off the tunnel: direct4/6 without multicast
+  # and broadcast, which a container has no business sending through
+  # this host (link-local stays: it never leaves the veth anyway).
+  forwardDirect4 = lib.subtractLists [ "224.0.0.0/4" "255.255.255.255" ] direct4;
+  forwardDirect6 = lib.subtractLists [ "ff00::/8" ] direct6;
 
   # WireGuard's encrypted packets still carry the sending socket's uid, so
   # the kill switch must let them reach the relays over the uplink.
@@ -126,6 +151,17 @@ in
       default = [ ];
       description = "Public prefixes the users reach directly, bypassing the tunnel.";
     };
+    sources = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "ve-agave-host" ];
+      description = ''
+        Container host-side veths (`ve-*`) whose forwarded traffic
+        may leave only through the tunnel, its DNS redirected to Mullvad's
+        resolver (see the header). This host's own connections on their
+        behalf (nix-daemon fetches) stay direct.
+      '';
+    };
     tunnelOnly = lib.mkOption {
       type = lib.types.attrsOf (lib.types.listOf lib.types.str);
       default = { };
@@ -157,7 +193,7 @@ in
     };
   };
 
-  config = lib.mkIf (cfg.users != [ ]) (
+  config = lib.mkIf (cfg.users != [ ] || cfg.sources != [ ]) (
     lib.mkMerge [
       {
         assertions =
@@ -165,6 +201,11 @@ in
             assertion = config.users.users ? ${name} && config.users.users.${name}.uid != null;
             message = "hyper.mullvadEgress.users: '${name}' needs a static uid (uid rules and nftables match numbers).";
           }) cfg.users
+          ++ map (interface: {
+            # a container's host-side veth (nspawn: ve-<name>, IFNAMSIZ)
+            assertion = builtins.match "ve-[A-Za-z0-9_.-]+" interface != null && lib.stringLength interface <= 15;
+            message = "hyper.mullvadEgress.sources: '${interface}' is not a container veth name (ve-*, at most 15 characters).";
+          }) cfg.sources
           ++ lib.mapAttrsToList (name: listeners: {
             assertion =
               lib.elem (config.systemd.services.${name}.serviceConfig.User or null) cfg.users
@@ -244,6 +285,42 @@ in
               ip6 daddr { ${lib.concatStringsSep ", " direct6} } accept
               reject with icmpx no-route
             }
+          ''
+          + lib.optionalString (cfg.sources != [ ]) ''
+
+            # sources: the forwarded twin of `tunneled`
+            chain forward {
+              type filter hook forward priority filter; policy accept;
+              iifname { ${sources} } jump forwarded
+            }
+
+            chain forwarded {
+              meta l4proto { tcp, udp } th dport { 53, 853 } oifname != "${iface}" reject with icmpx port-unreachable
+              oifname "${iface}" accept
+              ip daddr { ${lib.concatStringsSep ", " forwardDirect4} } accept
+              ip6 daddr { ${lib.concatStringsSep ", " forwardDirect6} } accept
+              reject with icmpx no-route
+            }
+
+            # Their DNS, to whatever server, goes to Mullvad's resolver
+            # in the tunnel (with the tunnel down, `forwarded` refuses it).
+            chain dns-redirect {
+              type nat hook prerouting priority dstnat; policy accept;
+              iifname { ${sources} } meta nfproto ipv4 meta l4proto { tcp, udp } th dport 53 dnat ip to ${cfg.dns.upstream.v4}
+              iifname { ${sources} } meta nfproto ipv6 meta l4proto { tcp, udp } th dport 53 dnat ip6 to ${cfg.dns.upstream.v6}
+            }
+
+            chain tunnel-nat {
+              type nat hook postrouting priority srcnat; policy accept;
+              iifname { ${sources} } oifname "${iface}" masquerade
+            }
+
+            # The tunnel's MTU (1380) is below the veth's 1500.
+            chain tunnel-mss {
+              type filter hook forward priority mangle; policy accept;
+              iifname { ${sources} } oifname "${iface}" tcp flags syn tcp option maxseg size set rt mtu
+              iifname "${iface}" oifname { ${sources} } tcp flags syn tcp option maxseg size set rt mtu
+            }
           '';
         };
       }
@@ -298,7 +375,22 @@ in
                 Priority = 6001;
                 Family = "both";
               }
-            ]) uids;
+            ]) uids
+            ++ lib.concatMap (interface: [
+              {
+                IncomingInterface = interface;
+                Table = "main";
+                SuppressPrefixLength = 0;
+                Priority = 6000;
+                Family = "both";
+              }
+              {
+                IncomingInterface = interface;
+                Table = table;
+                Priority = 6001;
+                Family = "both";
+              }
+            ]) cfg.sources;
         };
 
         # Replies inside the tunnel come from internet addresses that the

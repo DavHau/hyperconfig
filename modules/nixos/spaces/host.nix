@@ -226,6 +226,10 @@ let
         ''iifname "${veth}" ${if lib.hasInfix ":" f.address then "ip6" else "ip"} daddr ${f.address} tcp dport ${toString f.port} accept
         ''
       ) siblingForwards}
+      ${lib.optionalString (lib.elem veth (config.hyper.mullvadEgress.sources or [ ])) ''
+        # DNS this host redirected (../mullvad-egress `sources`: Mullvad's
+        # in-tunnel resolver, a private address)
+        iifname "${veth}" ct status dnat meta l4proto { tcp, udp } th dport 53 return''}
       ${lib.optionalString (blockedDestinations.v4 != [ ]) ''iifname "${veth}" ip daddr ${set blockedDestinations.v4} reject with icmpx admin-prohibited''}
       ${lib.optionalString (blockedDestinations.v6 != [ ]) ''iifname "${veth}" ip6 daddr ${set blockedDestinations.v6} reject with icmpx admin-prohibited''}
     }
