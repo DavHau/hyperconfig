@@ -255,6 +255,7 @@ pkgs.testers.runNixOSTest {
         "test-vars/space-geninf-space-git-clan-lol/id_ed25519" = fake "geninf-space-git-clan-lol";
         "test-vars/space-geninf-space-token-geninf/token" = fake "geninf-space-token-geninf";
         "test-vars/space-geninf-space-token-clan-lol/token" = fake "geninf-space-token-clan-lol";
+        "test-vars/space-geninf-space-token-ci/token" = fake "geninf-space-token-ci";
         "dave-ssh/id_ed25519" = {
           source = keys + "/admin";
           mode = "0400";
@@ -292,7 +293,7 @@ pkgs.testers.runNixOSTest {
 
       spaces = json.loads('${builtins.toJSON spaces}')
       expected_creds = {
-          "geninf-space": {"p0-api-key", "teamclaude-api-key", "openrouter-api-key", "root-ssh", "root-ssh-agave", "git-geninf", "git-clan-lol", "token-geninf", "token-clan-lol"},
+          "geninf-space": {"p0-api-key", "teamclaude-api-key", "openrouter-api-key", "root-ssh", "root-ssh-agave", "git-geninf", "git-clan-lol", "token-geninf", "token-clan-lol", "token-ci"},
       }
       # tea's logins: forge -> (bot user, token credential, default)
       expected_forges = {
