@@ -170,7 +170,7 @@ in
 {
   options.hyper.geninfSpace.ciToken = lib.mkOption {
     type = lib.types.bool;
-    default = false;
+    default = true;
     description = "Give the space davhau-gi-bot's nixbot API token (generator ${gen}-token-ci, credential `token-ci`). Turn on together with setting the var: a declared, unset prompted var stops every `clan machines update`.";
   };
 
