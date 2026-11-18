@@ -1272,6 +1272,30 @@
         "url": "https://git.clan.lol/clan/nix-select/archive/main.tar.gz"
       }
     },
+    "nixbot": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "treefmt-nix": [
+          "buildbot-nix",
+          "treefmt-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1794475042,
+        "narHash": "sha256-3LONGj1ZR+wtga6LnmL2gfeXntRA9w7LXGssZx9Tfac=",
+        "owner": "Mic92",
+        "repo": "nixbot",
+        "rev": "171a8c77d6e8e2b5b99ce5870c042a2dbc2cda62",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Mic92",
+        "repo": "nixbot",
+        "type": "github"
+      }
+    },
     "nixlib": {
       "locked": {
         "lastModified": 1736643958,
@@ -1802,6 +1826,7 @@
         "nix-heuristic-gc": "nix-heuristic-gc",
         "nix-housing": "nix-housing",
         "nix-lazy": "nix-lazy",
+        "nixbot": "nixbot",
         "nixos-generators": "nixos-generators",
         "nixos-hardware": "nixos-hardware",
         "nixos-images": "nixos-images",

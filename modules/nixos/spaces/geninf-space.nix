@@ -42,6 +42,15 @@
                                        credential `token-geninf`.
     space-geninf-space-token-clan-lol  davhau-clan-bot on git.clan.lol;
                                        credential `token-clan-lol`.
+    space-geninf-space-token-ci        davhau-gi-bot's nixbot API token
+                                       (`bnix_...`) on https://ci.geninf.io
+                                       (made at /settings after the Gitea
+                                       login); credential `token-ci`, for
+                                       `nbo` (below). Only while
+                                       hyper.geninfSpace.ciToken is
+                                       on (off until Dave has set it: clan's
+                                       deploy runs every missing generator
+                                       and would stop at its prompt).
   One key per forge, not one for both: the two Gitea instances are run by
   different groups and each key is registered on one account there, so
   either can be revoked or rotated without touching the other, and a key
@@ -76,6 +85,7 @@
   config,
   lib,
   pkgs,
+  inputs,
   ...
 }:
 let
@@ -139,8 +149,31 @@ let
   agaveHostPatterns = lib.concatStringsSep " " (
     lib.concatLists (lib.mapAttrsToList (m: h: [ m ] ++ h.addresses) agaveHosts)
   );
+
+  # nixbot's CLI for the org's CI. Private repositories (agave) answer an
+  # anonymous request with 404, and nbo's token_command is only run after
+  # a 401/403, so the token goes in as NIXBOT_TOKEN on every call, read
+  # from the credential at each start (never written anywhere else);
+  # without the credential nbo reads anonymously (public repositories).
+  ciUrl = "https://ci.geninf.io";
+  nbo = pkgs.symlinkJoin {
+    name = "nbo-${name}";
+    paths = [ inputs.nixbot.packages.${pkgs.stdenv.hostPlatform.system}.nixbot-cli ];
+    nativeBuildInputs = [ pkgs.makeWrapper ];
+    postBuild = ''
+      wrapProgram $out/bin/nbo \
+        --set-default NIXBOT_URL ${ciUrl} \
+        --run 'if [ -z "''${NIXBOT_TOKEN:-}" ] && [ -r ${secretsDir}/token-ci ]; then IFS= read -r NIXBOT_TOKEN < ${secretsDir}/token-ci || true; export NIXBOT_TOKEN; fi'
+    '';
+  };
 in
 {
+  options.hyper.geninfSpace.ciToken = lib.mkOption {
+    type = lib.types.bool;
+    default = false;
+    description = "Give the space davhau-gi-bot's nixbot API token (generator ${gen}-token-ci, credential `token-ci`). Turn on together with setting the var: a declared, unset prompted var stops every `clan machines update`.";
+  };
+
   config = {
     clan.core.vars.generators = lib.mkIf cfg.enable {
       "${gen}-root-ssh" = sshKey "${name} (root on gi-infra)";
@@ -153,6 +186,9 @@ in
         token "git.geninf.io API token of davhau-gi-bot (write:repository, write:issue, read:user)";
       "${gen}-token-clan-lol" =
         token "git.clan.lol API token of davhau-clan-bot (write:repository, write:issue, read:user)";
+      "${gen}-token-ci" = lib.mkIf config.hyper.geninfSpace.ciToken (
+        token "nixbot API token (bnix_...) of davhau-gi-bot on ci.geninf.io, created at https://ci.geninf.io/settings"
+      );
     };
 
     # Its own definitions not under its `enable` (that would recurse);
@@ -185,6 +221,9 @@ in
         git-clan-lol = vars."${gen}-git-clan-lol".files.id_ed25519.path;
         token-geninf = vars."${gen}-token-geninf".files.token.path;
         token-clan-lol = vars."${gen}-token-clan-lol".files.token.path;
+      }
+      // lib.optionalAttrs config.hyper.geninfSpace.ciToken {
+        token-ci = vars."${gen}-token-ci".files.token.path;
       };
       guestModules = [
         {
@@ -244,6 +283,9 @@ in
             };
           };
           space.defaultForge = "git.geninf.io";
+          # CI logs on ci.geninf.io: `nbo` (above; the forge-prs skill)
+          environment.systemPackages = [ nbo ];
+          environment.variables.NIXBOT_URL = ciUrl;
           # Every repository of the org the bot sees, new ones included
           # (./guest.nix).
           space.orgCheckouts."git.geninf.io" = {

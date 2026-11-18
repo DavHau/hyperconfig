@@ -33,6 +33,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.entityStorage: modules/nixos/entity-storage/default.nix
 - hyper.execUsage: modules/nixos/exec-usage/default.nix
 - hyper.firmwareOnly: modules/nixos/firmware-only.nix
+- hyper.geninfSpace.ciToken: modules/nixos/spaces/geninf-space.nix
 - hyper.inferenceApiKey: modules/nixos/inference-api-key.nix
 - hyper.infraSpace: modules/nixos/infra-space/default.nix
 - hyper.infraSpace.agentTools.browser: modules/nixos/infra-space/agent-tools.nix

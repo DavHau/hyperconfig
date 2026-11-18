@@ -156,6 +156,12 @@
     searxng.url = "github:searxng/searxng";
     searxng.flake = false;
 
+    # nbo, the CLI of nixbot (the CI at https://ci.geninf.io), for
+    # geninf-space (modules/nixos/spaces/geninf-space.nix).
+    nixbot.url = "github:Mic92/nixbot";
+    nixbot.inputs.nixpkgs.follows = "nixpkgs";
+    nixbot.inputs.treefmt-nix.follows = "buildbot-nix/treefmt-nix";
+
     cctl.url = "github:allouis/cctl";
     cctl.inputs.nixpkgs.follows = "nixpkgs";
 

@@ -3,8 +3,9 @@ name: forge-prs
 description: >
   Use when opening, commenting on, reviewing or merging a pull request on
   git.geninf.io or git.clan.lol from this space, or when checking which
-  forge account and repositories the space has. `tea` is set up with the
-  bot accounts' API tokens; git pushes go over ssh.
+  forge account and repositories the space has, or reading CI build logs
+  on ci.geninf.io (`nbo`). `tea` is set up with the bot accounts' API
+  tokens; git pushes go over ssh.
 ---
 
 # Pull requests on the forges (tea)
@@ -90,3 +91,23 @@ merged branch.
     tea api --login git.geninf.io /user
     tea api --login git.geninf.io -X POST /repos/OWNER/REPO/pulls/12/requested_reviewers \
       -d '{"reviewers":["someone"]}'
+
+## CI logs (ci.geninf.io, nixbot)
+
+The org's CI is nixbot at https://ci.geninf.io (`NIXBOT_URL` is set).
+`nbo` is on PATH with davhau-gi-bot's nixbot token when the space has
+the `token-ci` credential (`ls /run/$USER/secrets`); without it only
+public repositories are visible, and private ones (agave) answer 404.
+Gitea tokens don't work there.
+
+    nbo auth status                                  # server, token, reachable?
+    nbo build list -R gitea/generational-infrastructure/agave --branch main
+    nbo build view 412 -R gitea/generational-infrastructure/agave
+    nbo log 412 -R gitea/generational-infrastructure/agave   # failures + log tails
+    nbo log 412 <attr-substring> --tail 200 -R gitea/generational-infrastructure/agave
+
+In a checkout `-R` and the build number come from `origin`/`HEAD`.
+Plain HTTP (docs: https://ci.geninf.io/docs):
+`curl -H "Authorization: Bearer $(cat /run/$USER/secrets/token-ci)"
+https://ci.geninf.io/api/repos/gitea/OWNER/REPO/builds/N/failures`
+(also `/builds`, `/builds/N`, `/builds/N/logs/ATTR/text?tail=200`).

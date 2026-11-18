@@ -146,6 +146,15 @@ boot, never to the home (`./forges.nix`). The agents' how-to is the
 space: `space-forge-check` (each token authenticates as its bot; the
 repositories it can push to).
 
+CI logs on https://ci.geninf.io (nixbot): `nbo` in geninf-space with
+davhau-gi-bot's nixbot token (`bnix_...`, made at
+https://ci.geninf.io/settings after the Gitea login; Gitea tokens are not
+accepted), the prompted shared var `space-geninf-space-token-ci`,
+credential `token-ci`. Off until set (`hyper.geninfSpace.ciToken`,
+`./geninf-space.nix`): set the option's default to true, then `clan vars
+generate som --generator space-geninf-space-token-ci` (one shared value
+for som and amy), commit, deploy both; the space restarts.
+
 ## Adding a space
 
 An entry in `./registry.nix` (next free index, port, uid pair; never a
