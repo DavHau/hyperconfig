@@ -12,7 +12,7 @@
     };
     # Our own nixpkgs, not spaces': fleet updates (security fixes) land on
     # our schedule. spaces keeps its own pin for its own outputs.
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     nixpkgs-riscv.follows = "nixpkgs";
     # Newer nixpkgs ONLY for llama-cpp: the fleet nixpkgs lags
     # the llama.cpp release train, and inference modules that need a recent
