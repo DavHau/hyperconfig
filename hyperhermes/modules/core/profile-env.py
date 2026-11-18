@@ -13,7 +13,13 @@ Per profile: every hermes-native block goes (also one the home no longer
 has, and an unterminated one up to the end of the file, as core's sed does),
 then the interpreter and managed-scope keys core drops from the home's .env,
 then the home's blocks are appended in their order. Everything else in the
-file stays. Only a file whose content changes is rewritten, through a 0600
+file stays, and wins: a key the profile sets itself outside the hermes-native
+blocks (its own ANTHROPIC_TOKEN, another provider's key, ANTHROPIC_BASE_URL,
+or what `hermes setup`/`hermes auth` wrote there) is left out of the copied
+blocks, whose comments and markers stay. The home's blocks fill in only what a
+profile doesn't set itself (hermes' dotenv is last-wins, so a copied line
+would override the profile's). On a failed write the temporary file, which
+holds secrets, is removed. Only a file whose content changes is rewritten, through a 0600
 temporary file in the profile's directory and a rename.
 
 A profile is what hermes takes for one (hermes_constants.py): a directory
@@ -39,6 +45,7 @@ PROFILE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 MARKERS = ("config.yaml", ".env", "SOUL.md", "profile.yaml", "auth.json", "state.db")
 BEGIN = re.compile(rb"^# BEGIN hermes-native \S.*$")
 END_PREFIX = b"# END hermes-native "
+KEY = re.compile(rb"^(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_.]*)[ \t]*=")
 DROP = re.compile(
     rb"^(export[ \t]+)?(PYTHONPATH|PYTHONHOME|PYTHONSTARTUP|NIX_PYTHONPATH|HERMES_MANAGED|HERMES_MANAGED_DIR)="
 )
@@ -105,7 +112,9 @@ def sync_profile(profiles_fd, name, blocks):
             finally:
                 os.close(fd)
         rest, _ = split_blocks(old)
-        new = [line for line in rest if not DROP.match(line)] + blocks
+        rest = [line for line in rest if not DROP.match(line)]
+        own = {m.group(1) for m in map(KEY.match, rest) if m}
+        new = rest + [line for line in blocks if not ((m := KEY.match(line)) and m.group(1) in own)]
         if new == old and lexists(".env"):
             return None
         tmp = f".env.hyperhermes-{os.getpid()}"
@@ -115,12 +124,22 @@ def sync_profile(profiles_fd, name, blocks):
             pass
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | NOFOLLOW, 0o600, dir_fd=dfd)
         try:
-            os.fchmod(fd, 0o600)
-            os.write(fd, b"".join(line + b"\n" for line in new))
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        os.rename(tmp, ".env", src_dir_fd=dfd, dst_dir_fd=dfd)
+            try:
+                os.fchmod(fd, 0o600)
+                data = b"".join(line + b"\n" for line in new)
+                while data:
+                    data = data[os.write(fd, data):]
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            os.rename(tmp, ".env", src_dir_fd=dfd, dst_dir_fd=dfd)
+        except BaseException:
+            # It holds the secrets: never leave it behind.
+            try:
+                os.unlink(tmp, dir_fd=dfd)
+            except OSError:
+                pass
+            raise
         return f"updated {name}/.env"
     finally:
         os.close(dfd)

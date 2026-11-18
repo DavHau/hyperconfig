@@ -196,6 +196,7 @@ let
       # profile created while the gateway runs has them within a second.
       # As the agent, which owns all of these files. Not for lockedConfig:
       # its profiles/ is root's, immutable and empty (./locked-config.nix).
+      # A profile's own keys win over the copied blocks (./profile-env.py).
       syncProfiles = "${profileEnv} ${hermesHome}";
       # Opt-in hardening of both units (options.nix, hardening).
       hardening = lib.optionalAttrs cfg.hardening.enable cfg.hardening.serviceConfig;
@@ -361,9 +362,11 @@ let
           description = "hermes-native .env blocks into the profiles of ${user}";
           unitConfig = {
             RequiresMountsFor = mounts;
-            # Each run is cheap and idempotent; the path unit's trigger
-            # limit bounds a burst, a start limit here would only drop
-            # changes.
+            # Each run is cheap and idempotent, and a start limit here
+            # would only drop changes. A burst past the path unit's own
+            # trigger limit leaves the path unit failed until it is
+            # restarted (the next deploy or reboot); the gateway's
+            # preStart still syncs every profile on its next start.
             StartLimitIntervalSec = 0;
           };
           serviceConfig = {
@@ -409,12 +412,14 @@ let
           environment = unitEnv;
           path = rt.path;
           # The profiles last, after every feature's block (camofox's is
-          # mkAfter).
+          # mkAfter); bounded like the memory replay, so a process of the
+          # agent holding the lock on profiles/ can't stall the start.
           preStart = lib.mkMerge (
             [ (if locked then lockedPreStart else agentPreStart) ]
             ++ lib.optional (!locked) (
               lib.mkOrder 2000 ''
-                ${syncProfiles} || echo "hermes: updating the profiles' .env failed; starting anyway" >&2
+                ${pkgs.coreutils}/bin/timeout 30s ${syncProfiles} \
+                  || echo "hermes: updating the profiles' .env failed or timed out; starting anyway" >&2
               ''
             )
           );

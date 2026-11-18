@@ -6,7 +6,10 @@
 # (credentials and environment, ANTHROPIC_BASE_URL among them): a
 # profile created while the gateway runs within seconds, all of them
 # again with the rotated value on restart, a stale hand-copied block
-# replaced rather than duplicated, a symlinked .env never followed; a key in
+# replaced rather than duplicated, a symlinked .env or profile directory
+# never followed, a tombstoned profile left alone, a key the profile sets
+# itself kept over the copied block's (the rest of the blocks still
+# arriving), bob's profiles getting none of alice's; a key in
 # alice's dashboardDropEnv is gone from her .env once the dashboard
 # restarts, while the others stay; the
 # root-held dashboard forward of each agent answers its owner and root,
@@ -131,7 +134,25 @@ pkgs.testers.runNixOSTest {
         # One made by hand, its marker a moment after the directory.
         as_alice(f"mkdir {profiles}/byhand && sleep 1 && touch {profiles}/byhand/config.yaml")
         machine.wait_until_succeeds(f"grep -qx 'HH_TEST_TOKEN=first-secret' {profiles}/byhand/.env", timeout=10)
-        machine.fail("grep -rq HH_TEST_TOKEN ${profilesOf "bob"}")
+
+    with subtest("bob's profiles get his blocks, none of alice's"):
+        bob_profiles = "${profilesOf "bob"}"
+        machine.succeed(f"runuser -u bob -- sh -c 'mkdir -p {bob_profiles}/.p.staging && touch {bob_profiles}/.p.staging/config.yaml && mv {bob_profiles}/.p.staging {bob_profiles}/p'")
+        machine.wait_until_succeeds(f"test -f {bob_profiles}/p/.env", timeout=10)
+        machine.fail(f"grep -rq -e HH_TEST_TOKEN -e first-secret {bob_profiles}")
+
+    with subtest("a profile's own key wins over the copied block's"):
+        publish_profile("mine", env_text="HH_TEST_TOKEN=own-token\n")
+        machine.wait_until_succeeds(f"grep -qx 'ANTHROPIC_BASE_URL=${baseUrl}' {profiles}/mine/.env", timeout=10)
+        blocks_once(f"{profiles}/mine/.env", "own-token")
+        machine.fail(f"grep -q first-secret {profiles}/mine/.env")
+
+    with subtest("a tombstoned profile is left alone"):
+        as_alice(f"mkdir -p {profiles}/.deleted && echo deleted > {profiles}/.deleted/gone")
+        publish_profile("gone")
+        publish_profile("trigger2")
+        machine.wait_until_succeeds(f"test -f {profiles}/trigger2/.env", timeout=10)
+        machine.fail(f"test -e {profiles}/gone/.env")
 
     with subtest("a symlinked profile .env is not followed"):
         write_as_alice("/home/alice/target", "untouched")
@@ -140,6 +161,13 @@ pkgs.testers.runNixOSTest {
         machine.wait_until_succeeds(f"test -f {profiles}/trigger/.env", timeout=10)
         machine.succeed(f"test -L {profiles}/linked/.env")
         assert machine.succeed("cat /home/alice/target") == "untouched"
+
+    with subtest("a symlinked profile directory is not followed"):
+        as_alice("mkdir -p /home/alice/elsewhere && touch /home/alice/elsewhere/config.yaml")
+        as_alice(f"ln -s /home/alice/elsewhere {profiles}/symdir")
+        publish_profile("trigger3")
+        machine.wait_until_succeeds(f"test -f {profiles}/trigger3/.env", timeout=10)
+        machine.fail("test -e /home/alice/elsewhere/.env")
 
     # What a hand copy of the blocks left in a profile, plus a key core
     # drops and one of the user's.
@@ -157,13 +185,19 @@ pkgs.testers.runNixOSTest {
         machine.wait_until_succeeds("grep -qx 'HH_TEST_TOKEN=second-secret' ${envOf "alice"}")
         machine.fail("grep -q first-secret ${envOf "alice"}")
         assert machine.succeed("grep -c '^HH_TEST_TOKEN=' ${envOf "alice"}").strip() == "1"
-        for name in ("fresh", "bare", "later", "trigger", "byhand"):
+        for name in ("fresh", "bare", "later", "trigger", "byhand", "trigger2", "trigger3"):
             env = f"{profiles}/{name}/.env"
             blocks_once(env, "second-secret")
             machine.fail(f"grep -q -e first-secret -e stale -e api.anthropic.com -e PYTHONPATH {env}")
         # A stale hand-copied block is replaced, not duplicated.
         machine.succeed(f"grep -qx KEEP_ME=1 {profiles}/fresh/.env")
         assert machine.succeed("cat /home/alice/target") == "untouched"
+        # The profile's own key survives the rotation, too.
+        blocks_once(f"{profiles}/mine/.env", "own-token")
+        machine.fail(f"grep -q -e first-secret -e second-secret {profiles}/mine/.env")
+        machine.fail(f"test -e {profiles}/gone/.env")
+        machine.fail("test -e /home/alice/elsewhere/.env")
+        machine.fail(f"ls {profiles}/*/.env.hyperhermes-*")
 
     with subtest("dashboardDropEnv keys are dropped before the dashboard starts"):
         machine.succeed("runuser -u alice -- sh -c 'echo HH_DROP_ME=x >> ${envOf "alice"}'")
