@@ -455,6 +455,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyperhermes/modules/core/locked-pins.py — - <- hyperhermes/modules/core/locked-config.nix
 - hyperhermes/modules/core/options.nix — The agent registry `services.hyperhermes.agents` and the host-wide collection points every agent's config.yaml, .env an… <- hyperhermes/modules/core/default.nix
 - hyperhermes/modules/core/package.nix — The hermes package the agents run: <- hyperhermes/modules/core/options.nix
+- hyperhermes/modules/core/profile-env.py — - <- hyperhermes/modules/core/agents.nix
 - hyperhermes/modules/core/reap-stray-gateway.py — Run as the agent's user before its gateway unit starts (./agents.nix, preStart): <- hyperhermes/modules/core/agents.nix
 - hyperhermes/modules/core/replay-memory-pending.py — Run in the hermes venv as the agent's user before its gateway unit starts (./agents.nix, preStart), once per HERMES_HOM… <- hyperhermes/modules/core/agents.nix
 - hyperhermes/modules/dashboards/default.nix — Every agent's hermes web dashboard at its own host name, <agent>.<domain> (exposure), with hermes' own OIDC login (sso)…

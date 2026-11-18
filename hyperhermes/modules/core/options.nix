@@ -277,8 +277,10 @@ in
                   Env var name -> host file path (raw secret value, no KEY=
                   prefix), read at runtime. Each entry rides a systemd
                   credential into hermes-agent-<name> and is rewritten into
-                  the owner's $HERMES_HOME/.env before the agent starts. It
-                  never enters the store; restart hermes-agent-<name> after a
+                  the owner's $HERMES_HOME/.env before the agent starts, and
+                  into each named profile's .env (at that start and when a
+                  profile appears, hermes-profile-env-<name>.path). It never
+                  enters the store; restart hermes-agent-<name> after a
                   rotation. With lockedConfig the credentials go to
                   hermes-locked-<name> instead, which writes them into root's
                   .env: restart hermes-locked-<name> after a rotation (that

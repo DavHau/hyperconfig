@@ -7,7 +7,9 @@
 #   - state in /var/lib/hermes/<agent>/state, 0700 the owner, inside a root
 #     0711 directory (agents.nix),
 #   - secrets as systemd credentials of hermes-agent-<agent>, rewritten
-#     into the owner's .env; never in the store (agent-config.nix),
+#     into the owner's .env, and with the other hermes-native blocks into
+#     each named profile's .env (hermes reads only a profile's own); never
+#     in the store (agent-config.nix, profile-env.py),
 #   - a per-agent managed config dir (HERMES_MANAGED_DIR) pinning exactly
 #     the Nix keys (agents.nix),
 #   - root-held dashboard ports (and those features add), bridged per

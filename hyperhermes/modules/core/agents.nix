@@ -124,6 +124,12 @@ let
     flakeIgnore = [ "E501" ];
   } (builtins.readFile ./drop-env-keys.py);
 
+  # Copies the home .env's hermes-native blocks into every named
+  # profile's .env (./profile-env.py).
+  profileEnv = pkgs.writers.writePython3 "hermes-profile-env" {
+    flakeIgnore = [ "E501" ];
+  } (builtins.readFile ./profile-env.py);
+
   perUser =
     user: ucfg:
     let
@@ -183,6 +189,14 @@ let
         ${pkgs.coreutils}/bin/timeout 30s ${replayMemoryHomes} ${hermesHome} \
           || echo "hermes: replaying staged memory writes failed or timed out; starting anyway" >&2
       '';
+      # Hermes reads a named profile's own .env only, so the blocks the
+      # preStart (core's and the features') wrote into the home's .env go
+      # into each profile's too: at the end of every start, and through
+      # hermes-profile-env-<agent>.path whenever profiles/ changes, so a
+      # profile created while the gateway runs has them within a second.
+      # As the agent, which owns all of these files. Not for lockedConfig:
+      # its profiles/ is root's, immutable and empty (./locked-config.nix).
+      syncProfiles = "${profileEnv} ${hermesHome}";
       # Opt-in hardening of both units (options.nix, hardening).
       hardening = lib.optionalAttrs cfg.hardening.enable cfg.hardening.serviceConfig;
       mounts = [
@@ -342,7 +356,27 @@ let
       # shim enters the workspace by path.
       shimCaseArm = if locked then lockedShimCaseArm else openShimCaseArm;
 
-      services = venv.services // {
+      services = venv.services // lib.optionalAttrs (!locked) {
+        "hermes-profile-env-${user}" = {
+          description = "hermes-native .env blocks into the profiles of ${user}";
+          unitConfig = {
+            RequiresMountsFor = mounts;
+            # Each run is cheap and idempotent; the path unit's trigger
+            # limit bounds a burst, a start limit here would only drop
+            # changes.
+            StartLimitIntervalSec = 0;
+          };
+          serviceConfig = {
+            Type = "oneshot";
+            User = user;
+            Group = "users";
+            ExecStart = syncProfiles;
+            UMask = "0077";
+          }
+          // hardening;
+        };
+      }
+      // {
         "hermes-agent-${user}" = {
           description = "Hermes Agent gateway for ${user}";
           wantedBy = [ "multi-user.target" ];
@@ -374,7 +408,16 @@ let
           };
           environment = unitEnv;
           path = rt.path;
-          preStart = if locked then lockedPreStart else agentPreStart;
+          # The profiles last, after every feature's block (camofox's is
+          # mkAfter).
+          preStart = lib.mkMerge (
+            [ (if locked then lockedPreStart else agentPreStart) ]
+            ++ lib.optional (!locked) (
+              lib.mkOrder 2000 ''
+                ${syncProfiles} || echo "hermes: updating the profiles' .env failed; starting anyway" >&2
+              ''
+            )
+          );
           serviceConfig = {
             User = user;
             Group = "users";
@@ -476,6 +519,19 @@ let
         };
       };
 
+      paths = lib.optionalAttrs (!locked) {
+        "hermes-profile-env-${user}" = {
+          description = "Watch the profiles of ${user} for new ones";
+          wantedBy = [ "multi-user.target" ];
+          # Entries created, renamed or removed in profiles/ (hermes
+          # publishes a new profile by renaming its staging directory in).
+          pathConfig = {
+            PathChanged = "${hermesHome}/profiles";
+            Unit = "hermes-profile-env-${user}.service";
+          };
+        };
+      };
+
       # The units hand their tools the owner's session bus and runtime dir
       # (withSession), so a tool can start a process under the owner's
       # lingering user manager (`systemd-run --user`), which is no child
@@ -518,6 +574,7 @@ in
 {
   config = lib.mkIf anyUser {
     systemd.services = forEachUser (u: u.services);
+    systemd.paths = forEachUser (u: u.paths);
     systemd.tmpfiles.rules = [
       "d ${hlib.stateRoot} 0755 root root - -"
     ]
