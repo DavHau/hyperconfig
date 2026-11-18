@@ -3,8 +3,10 @@
 # interpreter and rpath (https://github.com/NixOS/nixpkgs/issues/576412,
 # https://github.com/NixOS/patchelf/issues/674). Backport of the merged
 # nixpkgs fix https://github.com/NixOS/nixpkgs/pull/576397: two invocations,
-# rpath first. The assertion fails once the fleet nixpkgs carries the fix;
-# then delete this module and its import in ./nvidia.nix.
+# rpath first. Once the fleet nixpkgs carries the fix (its builder names
+# 576412) the stock driver is used as is; then delete this module and its
+# import in ./nvidia.nix. (Not an assertion: the nightly bump must not
+# have to edit this file to move nixpkgs past the fix.)
 { config, lib, pkgs, ... }:
 let
   stock = config.boot.kernelPackages.nvidiaPackages.stable;
@@ -20,7 +22,9 @@ let
 in
 {
   hardware.nvidia.package =
-    assert !lib.hasInfix "576412" stockBuilder;
-    assert patched != stockBuilder;
-    stock.overrideAttrs { builder = pkgs.writeText "nvidia-x11-builder.sh" patched; };
+    if lib.hasInfix "576412" stockBuilder then
+      stock
+    else
+      assert patched != stockBuilder;
+      stock.overrideAttrs { builder = pkgs.writeText "nvidia-x11-builder.sh" patched; };
 }
