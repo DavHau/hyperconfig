@@ -11,7 +11,8 @@
       v6 fd23:5ace:0:<i>::1|2, index 0 infra-space's fd23:5ace::1|2), NAT,
       DNS, the sshd forward [address]:sshPort through a socket proxy as
       proxyUid, the output gate (root, the proxy, `toGuestRules`), the
-      home at stateDir/home, TPM, own user namespace, credentials;
+      home at stateDir/home, TPM, own user namespace, credentials (the
+      user's, and `systemCredentials`, the guest's root's only);
       `confine` with `siblingForwards` for the named spaces;
     - the guest's ssh host key as clan var `hostKeyGenerator` (passed in
       as credential `ssh-host-key`, sshd's only) and the p0, TeamClaude and
@@ -56,6 +57,8 @@ in
   tpm,
   privateUsers,
   credentials,
+  # system credentials of the guest only (root's), not installed for `user`
+  systemCredentials ? { },
   hostKeyGenerator,
   authorizedKeys,
   # the kind's guest module (./guest.nix, ../infra-space/guest.nix), then
@@ -92,8 +95,12 @@ lib.mkMerge [
   {
     assertions = [
       {
-        assertion = !(credentials ? ${hostKeyCredential});
+        assertion = !(credentials ? ${hostKeyCredential}) && !(systemCredentials ? ${hostKeyCredential});
         message = "${name}: credential `${hostKeyCredential}` is the guest's ssh host key";
+      }
+      {
+        assertion = lib.intersectLists (lib.attrNames systemCredentials) (lib.attrNames allCredentials) == [ ];
+        message = "${name}: a credential is either the user's or a system credential, not both";
       }
       {
         # set by the core (allCredentials above); a space's own entry would be dropped silently
@@ -147,7 +154,7 @@ lib.mkMerge [
     hostAddress6 = v6 1;
     localAddress6 = v6 2;
     homeDir = "${stateDir}/home";
-    credentials = allCredentials // {
+    credentials = allCredentials // systemCredentials // {
       ${hostKeyCredential} = vars.${hostKeyGenerator}.files.ssh_host_ed25519_key.path;
     };
     siblingForwards = lib.optionals confine (

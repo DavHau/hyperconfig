@@ -156,10 +156,10 @@ in
     satelliteEntity = "assist_satellite.home_assistant_voice_09fcea_assist_satellite";
   };
 
-  # Its keys are the gi-infra and agave spaces' (renamed, not
-  # regenerated: they are registered at the forges and the other clans);
+  # geninf-space's keys are the gi-infra and agave spaces' (renamed, not
+  # regenerated); agave-host is Dave's Agave at https://agave.davhau.com;
   # modules/nixos/spaces/README.md has which public keys go where.
-  hyper.spaces.geninf-space.enable = true;
+  hyper.spaces = lib.genAttrs [ "geninf-space" "agave-host" ] (_: { enable = true; });
   # The infra-space agent's dashboard at https://infra-space.davhau.fyi/,
   # Dave only: its pocket-id client from the inventory
   # (../../modules/nixos/infra-space/dashboard-account.nix), TLS and the

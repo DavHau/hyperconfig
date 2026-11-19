@@ -41,4 +41,13 @@
     proxyUid = 1206;
     owners = [ "dave" ];
   };
+  # Dave's self-hosted Agave (./agave-host.nix), at https://agave.davhau.com
+  agave-host = {
+    machines = [ "som" ];
+    index = 3;
+    sshPort = 2226;
+    uid = 1220;
+    proxyUid = 1221;
+    owners = [ "dave" ];
+  };
 }

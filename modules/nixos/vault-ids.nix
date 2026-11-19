@@ -88,15 +88,17 @@
 # 1218 searxng-candidate (uid and gid; som's sandboxed scratch SearXNG of
 # the nightly bump, searxng-canary/candidate.nix, Mullvad-tunneled); none
 # are vault principals. 1219 slot-stefan-pq (som; vault-ro only, see the
-# tiers above). 1220/1221 are claimed by the agave-host space (its user
-# and sshd forwarder). 1222 residential-proxy (uid and gid; som's
-# Mullvad-tunneled gateway to Evomi, residential-proxy/; not a vault
-# principal). gid 1100 stays unallocated.
+# tiers above). 1220 agave-host and 1221 agave-host-ssh (the agave-host
+# space's user and sshd forwarder, as 1205/1206 above; not vault
+# principals; inside its guest Agave's t-infra/t-infra-tun are 59000/59001,
+# guest ids only, ./spaces/agave-host.nix). 1222 residential-proxy (uid and
+# gid; som's Mullvad-tunneled gateway to Evomi, residential-proxy/; not a
+# vault principal). gid 1100 stays unallocated.
 # These container uids are their on-disk owners only: inside, each space
 # container runs in its own user namespace (spaces/host.nix,
 # privateUsers), container uid n being host uid 0x50000000 +
 # 0x10000 * <veth slot> + n (slot 64 * <third octet of the guest's
-# 10.235.x.y> + y / 4: infra-space 0, geninf-space 1, the desktop app
+# 10.235.x.y> + y / 4: infra-space 0, geninf-space 1, agave-host 3, the desktop app
 # containers 64 + index); the hermes container slots have 0x60000000 up
 # (hyperhermes/modules/container-slots.nix). No host account in either.
 { lib, ... }:

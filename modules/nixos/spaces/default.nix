@@ -1,6 +1,8 @@
 /*
   Named agent spaces: NixOS containers like infra-space (../infra-space),
-  each for one job, none of them a fleet admin. hyper.spaces.<name> on the
+  each for one job, none of them a fleet admin but one: agave-host, whose
+  Agave tenant is root on every fleet machine (./agave-host.nix, the
+  fleet's tunnel module; never its login user). hyper.spaces.<name> on the
   machines ./registry.nix assigns it to produces container <name>, its
   user <name>, its home /var/lib/spaces/<name>/home here.
 
@@ -28,7 +30,9 @@
     whatever the space's own module adds (./geninf-space.nix),
                            each as a credential at
                            /run/<name>/secrets/<credential> (0400, the
-                           user), never in the home on this host.
+                           user), never in the home on this host;
+                           or with `systemCredentials` only the guest's
+                           system credential (root's, for its services).
   Plus the p0, TeamClaude and OpenRouter keys for afk (the same shared vars as
   infra-space and the desktops). nspawn copies credentials in at
   container start only, so a rotation of any of them (and every change
@@ -115,6 +119,7 @@ let
           tpm
           privateUsers
           credentials
+          systemCredentials
           guestModules
           ;
         hostKeyGenerator = "space-${name}-hostkey";
@@ -125,9 +130,18 @@ let
         confine = true;
         blockedDestinations = import ./blocked-destinations.nix;
         # this host's nginx into the published port window (./publish.nix)
-        toGuestRules = lib.optionalString (cfg.publish.enable && config.services.nginx.enable) "meta skuid ${
-          toString config.users.users.${config.services.nginx.user}.uid
-        } tcp dport ${toString cfg.publish.from}-${toString cfg.publish.to} return";
+        # and into the ports it fronts (`frontPorts`: the SNI router's
+        # passthrough, hyperhermes' slots.sniBackends)
+        toGuestRules =
+          let
+            nginxUid = toString config.users.users.${config.services.nginx.user}.uid;
+          in
+          lib.optionalString config.services.nginx.enable (
+            lib.optionalString cfg.publish.enable "meta skuid ${nginxUid} tcp dport ${toString cfg.publish.from}-${toString cfg.publish.to} return\n"
+            + lib.optionalString (cfg.frontPorts != [ ]) "meta skuid ${nginxUid} tcp dport { ${
+              lib.concatMapStringsSep ", " toString cfg.frontPorts
+            } } return\n"
+          );
         guest = ./guest.nix;
         guestSpace = {
           inherit (cfg) gitIdentity;
@@ -148,6 +162,7 @@ in
 {
   imports = [
     ./geninf-space.nix
+    ./agave-host.nix
     ./usb-ports.nix
   ];
   # The host's front of the published apps (nginx, login, TLS) is
@@ -176,6 +191,11 @@ in
               type = lib.types.attrsOf lib.types.str;
               default = { };
               description = "Credential name -> path of a secret file here; installed at /run/${name}/secrets/<name> (0400, the space's user). The p0, TeamClaude and OpenRouter keys come on top (./instance.nix).";
+            };
+            systemCredentials = lib.mkOption {
+              type = lib.types.attrsOf lib.types.str;
+              default = { };
+              description = "Credential name -> path of a secret file here; only a system credential of the guest (/run/credentials/@system/<name>, root's), never installed for the space's user: for guest services that take it with LoadCredential (./agave-host.nix).";
             };
             guestModules = lib.mkOption {
               type = lib.types.listOf lib.types.deferredModule;
@@ -235,6 +255,15 @@ in
               type = lib.types.str;
               default = "ygg";
               description = "Interface `address` lives on (firewall opening for the sshd port).";
+            };
+            frontPorts = lib.mkOption {
+              type = lib.types.listOf lib.types.port;
+              default = [ ];
+              example = [
+                80
+                443
+              ];
+              description = "Guest ports this host's nginx may open connections to, beside the published window: what it fronts for the space (the SNI passthrough of hyperhermes' slots.sniBackends, ./agave-host.nix).";
             };
           };
         }

@@ -256,6 +256,10 @@ pkgs.testers.runNixOSTest {
         "test-vars/space-geninf-space-token-geninf/token" = fake "geninf-space-token-geninf";
         "test-vars/space-geninf-space-token-clan-lol/token" = fake "geninf-space-token-clan-lol";
         "test-vars/space-geninf-space-token-ci/token" = fake "geninf-space-token-ci";
+        "test-vars/space-agave-host-hostkey/ssh_host_ed25519_key" = secret (keys + "/hostkey-agave-host");
+        "test-vars/space-agave-host-teamclaude/key" = fake "agave-host-teamclaude";
+        "test-vars/space-agave-host-github/id_ed25519" = fake "agave-host-github";
+        "test-vars/space-agave-host-tenant-ssh/id_ed25519" = fake "agave-host-tenant-ssh";
         "dave-ssh/id_ed25519" = {
           source = keys + "/admin";
           mode = "0400";
@@ -294,6 +298,7 @@ pkgs.testers.runNixOSTest {
       spaces = json.loads('${builtins.toJSON spaces}')
       expected_creds = {
           "geninf-space": {"p0-api-key", "teamclaude-api-key", "openrouter-api-key", "root-ssh", "root-ssh-agave", "git-geninf", "git-clan-lol", "token-geninf", "token-clan-lol", "token-ci"},
+          "agave-host": {"p0-api-key", "teamclaude-api-key", "openrouter-api-key", "teamclaude-key", "agave-geninf-ro"},
       }
       # tea's logins: forge -> (bot user, token credential, default)
       expected_forges = {
@@ -392,7 +397,7 @@ pkgs.testers.runNixOSTest {
               for cred in got:
                   out = space_root(name, f"stat -c '%a %U' /run/{name}/secrets/{cred}").strip()
                   assert out == f"400 {name}", (cred, out)
-              out = space_root(name, f"findmnt -n -o TARGET,FSTYPE -T /run/{name}/secrets/git-geninf").split()
+              out = space_root(name, f"findmnt -n -o TARGET,FSTYPE -T /run/{name}/secrets/p0-api-key").split()
               assert out == ["/run", "tmpfs"], out
               space_root(name, f"test ! -e /run/{name}/secrets/ssh-host-key")
               space_root(name, "test ! -e /run/infra-space")
@@ -476,6 +481,26 @@ pkgs.testers.runNixOSTest {
           in_space(name, 'grep -q space-publish "$(readlink -f "$(command -v afk)")"')
           space_root(name, "sh -c 'grep -q https://{port}.geninf-space.davhau.fyi $(grep -o \"motd=[^ ]*\" /etc/pam.d/sshd | cut -d= -f2)'")
           space_root(name, "systemctl stop pub-8095 pub-8100 pub-8096 pub-fwd")
+
+      with subtest("agave-host: this host's nginx reaches Agave's 80 and 443 (the SNI front), nobody else"):
+          g = spaces["agave-host"]["v4"]
+          as_nginx = "setpriv --reuid=nginx --regid=nginx --clear-groups --"
+          host.wait_until_succeeds("nixos-container run agave-host -- systemctl is-active agave.service", timeout=180)
+          # the public half of the guest's host key, where Agave reads it
+          assert space_root("agave-host", "cat /etc/ssh/ssh_host_ed25519_key.pub").split()[:2] == spaces["agave-host"]["hostKey"].split()[:2]
+          for port in (80, 443):
+              host.wait_until_succeeds(f"{as_nginx} nc -z -w 5 {g} {port}", timeout=120)
+              host.fail(f"runuser -u tenant -- nc -z -w 5 {g} {port}")
+          # the tunnel login is the second user sshd lets in
+          out = space_root("agave-host", "grep -i '^AllowUsers' /etc/ssh/sshd_config").split()
+          assert sorted(out[1:]) == ["agave-host", "t-infra-tun"], out
+          space_root("agave-host", "systemctl is-active sshd.service")
+          # the push key and the fleet's root key: root's system credentials
+          # only, never the login user's
+          for cred in ("github", "tenant-ssh"):
+              assert space_root("agave-host", f"cat /run/credentials/@system/{cred}").strip() == f"test agave-host-{cred}", cred
+              space_fails("agave-host", f"cat /run/credentials/@system/{cred}")
+              space_root("agave-host", f"test ! -e /run/agave-host/secrets/{cred}")
 
       with subtest("without the forges the org's clones give up softly"):
           name = "geninf-space"

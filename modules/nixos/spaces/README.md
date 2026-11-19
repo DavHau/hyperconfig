@@ -1,15 +1,19 @@
 # Named agent spaces
 
 `hyper.spaces.<name>`: a NixOS container per job, built like infra-space
-(`../infra-space`) but with none of its fleet rights. One, on som and
-amy: `geninf-space` (a container on each, separate homes, the same
-shared keys). Design and isolation: `./default.nix` (host side
+(`../infra-space`) but with none of its fleet rights, except one:
+agave-host's Agave tenant is root on every fleet machine
+(the fleet's tunnel module), its login user is not. Two:
+`geninf-space` on som and amy (a container on each, separate homes, the
+same shared keys), and `agave-host` on som, Dave's self-hosted Agave
+(`./agave-host.nix`, docs/agave-self-hosted.md). Design and isolation: `./default.nix` (host side
 `./host.nix`, shared with infra-space; guest `./guest.nix` on
 `./guest-base.nix`, also infra-space's base).
 
 | space        | ssh                        | user         | veth             | TPM | own keys (shared clan vars) |
 |--------------|----------------------------|--------------|------------------|-----|-----------------------------|
 | geninf-space | `[som's/amy's ygg address]:2224` | geninf-space | 10.235.0.4/30, fd23:5ace:0:1::/64 | yes | root-ssh, root-ssh-agave, git-geninf, git-clan-lol, token-geninf, token-clan-lol |
+| agave-host   | `[som's ygg address]:2226` | agave-host | 10.235.0.12/30, fd23:5ace:0:3::/64 | no | teamclaude-key (som's), agave-geninf-ro (infra-space's, shared); github, tenant-ssh (som's) for Agave's backend only |
 
 Homes persist per machine at `/var/lib/spaces/<name>/home` (not
 synced). Its web apps are published from som only. amy's copy is the
@@ -130,6 +134,15 @@ on the old machine.
 - `space-geninf-space-git-geninf`: davhau-gi-bot on git.geninf.io (team
   bots-write, every repository of the org).
 - `space-geninf-space-git-clan-lol`: davhau-clan-bot on git.clan.lol.
+
+`clan vars get som <generator>/id_ed25519.pub` for agave-host
+(`./agave-host.nix`):
+- `space-agave-host-github`: DavHau/hyperconfig on GitHub, Settings > Deploy
+  keys, with write access (Agave pushes confirmed changes to main).
+- `space-agave-host-tenant-ssh`: nothing to add; root on every fleet machine
+  trusts it from the repo (the fleet's tunnel module).
+- `space-agave-host-hostkey` (`ssh_host_ed25519_key.pub`): nothing to add;
+  every machine's tunnel pins it from the repo.
 
 agave-infra's machines' host keys are pinned from its `openssh` vars
 (`./geninf-space.nix`); update them there when a machine is added.

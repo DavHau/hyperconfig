@@ -8,13 +8,17 @@
 | `default.nix` | `hyper.spaces.<name>` options, host wiring, `credentials` (-> `/run/<name>/secrets/<cred>` in the guest), p0/TeamClaude keys; header = full design |
 | `host.nix` | host side per space: veth, NAT, `confine`, sshd socket proxy, restart vs switch-in-place |
 | `guest.nix`, `guest-base.nix` | the guest system (base shared with infra-space) |
-| `<space>.nix` (geninf-space) | the space's own generators (`space-<name>-*`), credentials, repos cloned, forges |
+| `<space>.nix` (geninf-space, agave-host) | the space's own generators (`space-<name>-*`), credentials (`systemCredentials`: the guest's root only), repos cloned, forges |
 | `forges.nix` | `space.forges.<host>` -> tea logins; `<name>-forge-cli.service` writes tea's config from the credential to `/run/<name>/tea/tea/config.yml` (tmpfs); skill `forge-prs-skill/` |
 | `afk.nix` | afk in a guest: pinned settings (no web), keys from secretsDir |
 | `client.nix`, `public.nix` | Dave's desktops: launchers, ssh aliases `<space>-<machine>`, pinned host keys, herdr machines, for every copy of every space AND infra-space |
 | `public.nix` | registry + mesh addresses (no other machine's config) |
 | `publish.nix`, `publish-guest.nix`, `publish-skill/` | web apps on the window 8000-8099 at https://<port>.<space>.davhau.fyi (som's nginx + the agents' serve login; guest `space-publish`, env, skill); owners in `registry.nix` -> pocket-id group `space-<name>` (nixosConfigurations.nix) |
 | `test.nix` | `checks.x86_64-linux.spaces` (VM test; names machines: grep it on moves) |
+
+No space is a fleet admin except agave-host: its Agave tenant (not its
+login user) is root on every fleet machine (the fleet's tunnel module, key
+`space-agave-host-tenant-ssh`).
 
 Token path, e.g. geninf-space: prompted generator `space-geninf-space-token-geninf`
 (geninf-space.nix) -> `hyper.spaces.geninf-space.credentials.token-geninf` -> nspawn
