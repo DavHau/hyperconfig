@@ -161,7 +161,6 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - sbox-age: modules/nixos/sbox-age.nix
 - storagebox: modules/nixos/storagebox.nix
 - tang: modules/nixos/tang-server.nix
-- tasmota-password: machines/nas/automount/default.nix
 - teamclaude-api-key: modules/nixos/provider-keys.nix
 - teamclaude-nmm: machines/som/configuration.nix
 - url: flake.nix

@@ -1,23 +1,10 @@
-{pkgs, config, ...}: let
-  tasmotaPasswordPath = config.clan.core.vars.generators.tasmota-password.files.password.path;
+{pkgs, ...}: let
+  roots = ["pool11/enc" "rpool/enc"];
+  rootsStr = builtins.concatStringsSep " " roots;
 in {
-  # Admin password of the Tasmota device (192.168.20.31) holding the ZFS
-  # passphrase in Var16. Per-machine, entered once:
-  #     clan vars set nas tasmota-password/password
-  # Default file ownership (root, 0400) suffices: both readers run as root.
-  # Deployed during activation ("services" phase), before automount starts.
-  clan.core.vars.generators.tasmota-password = {
-    # A persisted prompt IS the file — no generator script.
-    prompts.password = {
-      type = "hidden";
-      persist = true;
-      description = "Tasmota admin password (192.168.20.31, ZFS key store)";
-    };
-  };
-
   # The ZFS passphrase of pool11/enc and rpool/enc, kept in the clan vars
   # store only (deploy = false): manual recovery, and the input of the
-  # planned clevis/tang binding. Entered once by Dave:
+  # planned clevis/tang binding (branch nas-tang). Entered once by Dave:
   #     clan vars set nas zfs-passphrase/passphrase
   clan.core.vars.generators.zfs-passphrase = {
     prompts.passphrase = {
@@ -28,34 +15,59 @@ in {
     files.passphrase.deploy = false;
   };
 
+  # Until nas-tang lands, the keys are loaded by hand after a boot:
+  #     ssh -t root@nas.d enter-password
+  # It prompts once for the passphrase, loads it into both roots and
+  # restarts automount. The former key store, Var16 of the Tasmota at
+  # 192.168.20.31, is gone: that device runs ESPHome since 2026-11-01
+  # (locations/casa/esphome/rolladen-gz.yaml; it now serves tang).
   environment.systemPackages = [
-    # program to enter password by hand to be stored in temporary memory
-    (pkgs.writeShellScriptBin "enter-password" ''
-      export TASMOTA_PW_FILE=${tasmotaPasswordPath}
-      exec ${pkgs.bash}/bin/bash ${./enter-password.sh} "$@"
-    '')
+    (pkgs.writeShellApplication {
+      name = "enter-password";
+      runtimeInputs = [pkgs.zfs pkgs.systemd];
+      text = ''
+        for ds in ${rootsStr}; do
+          if [ "$(zfs get -H -o value keystatus "$ds")" = available ]; then
+            echo "$ds: key already loaded"
+            continue
+          fi
+          if [ -z "''${passwd+x}" ]; then
+            read -rsp "ZFS passphrase (${rootsStr}): " passwd
+            echo
+          fi
+          printf '%s' "$passwd" | zfs load-key "$ds"
+          echo "$ds: key loaded"
+        done
+        systemctl restart automount
+      '';
+    })
   ];
 
-  # services that reads the password from temporary memory
+  # Mounts the encrypted datasets once their keys are loaded. Succeeds when
+  # they are (already mounted is fine); fails, saying how to unlock, when not.
   systemd.services.automount = {
     description = "Automount Encrypted Dataset";
-    requires = ["network-online.target"];
-    after = ["network-online.target"];
     wantedBy = ["multi-user.target"];
     serviceConfig.Type = "oneshot";
-    path = with pkgs; [
-      curl
-      jq
-      zfs
-    ];
+    path = [pkgs.zfs];
     script = ''
-      set -e
-      passwd=$(curl -su admin:$(cat ${tasmotaPasswordPath}) "http://192.168.20.31/cm?cmnd=var16" | jq '.Var16' -r)
-      for ds in pool11/enc rpool/enc; do
-        echo $passwd | zfs load-key $ds && echo "key loaded successfully for $ds"
+      set -eu
+      locked=()
+      for ds in ${rootsStr}; do
+        [ "$(zfs get -H -o value keystatus "$ds")" = available ] || locked+=("$ds")
       done
+      if [ ''${#locked[@]} -gt 0 ]; then
+        echo "keys not loaded for: ''${locked[*]}; unlock with: ssh -t root@nas.d enter-password" >&2
+        exit 1
+      fi
       zfs mount -a
-      echo "all datasets mounted successfully"
+      for ds in ${rootsStr}; do
+        if [ "$(zfs get -H -o value mounted "$ds")" != yes ]; then
+          echo "$ds: key loaded but not mounted" >&2
+          exit 1
+        fi
+      done
+      echo "all encrypted datasets mounted"
     '';
   };
 }

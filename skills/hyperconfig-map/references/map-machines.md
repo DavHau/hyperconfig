@@ -49,7 +49,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 
 ### nas
 - header: Edit this configuration file to define what should be installed on your system.
-- own files: automount/default.nix, automount/enter-password.sh, file-browser-roman.nix, firewall.nix, hardware-configuration.nix, notes.md, porkbun.nix, smokeping.nix, sync-from-manu.nix, users.nix
+- own files: automount/default.nix, file-browser-roman.nix, firewall.nix, hardware-configuration.nix, notes.md, porkbun.nix, smokeping.nix, sync-from-manu.nix, users.nix
 - imports: m/common.nix, m/common-tools.nix, m/sbox.nix, m/role-parasit.nix, m/role-sshuttle-server/default.nix, m/role-iodine/default.nix
 - input modules: srvos.nixosModules.mixins-systemd-boot
 - vars generated: hyprspace openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version wireguard-keys-wg-casa wireguard-keys-wg-edi wireguard-network-wg-casa wireguard-network-wg-edi yggdrasil
