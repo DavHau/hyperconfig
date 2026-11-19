@@ -187,6 +187,10 @@ pkgs.testers.runNixOSTest {
           geninf-space.usbPorts = lib.mkForce (
             map (b: "0000:00:1e.0/usb${toString b}/${toString b}-1") (lib.range 1 8)
           );
+          # Repo mode clones GitHub, which this test has no route to:
+          # agave-setup would retry forever and fail every switch. The
+          # space's machinery is what this test covers.
+          agave-host.guestModules = [ { services.agave.repository = lib.mkForce null; } ];
         }
       ];
 

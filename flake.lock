@@ -32,11 +32,11 @@
         "nixpkgs": "nixpkgs_3"
       },
       "locked": {
-        "lastModified": 1795082219,
-        "narHash": "sha256-c0+ThsoLQu9HmN+fR6at5ORVDONoY3A0Tyi4pPY5fJA=",
+        "lastModified": 1795119702,
+        "narHash": "sha256-yyc20Ib7gKuUQ6jGYvomsLhQ+4rePK4Gf9QOGYVOTeg=",
         "ref": "davhau/self-hosted",
-        "rev": "31b96b57572158763f9398f8a27926a1c81d9e59",
-        "revCount": 1439,
+        "rev": "42ae0d04a283b2894095d619a6e0de5c161935f4",
+        "revCount": 1609,
         "type": "git",
         "url": "ssh://gitea@git.geninf.io/generational-infrastructure/agave"
       },

@@ -54,9 +54,10 @@
   /run/agave-host/secrets/<credential> (0400 agave-host). github and
   tenant-ssh are `systemCredentials` only: the guest's
   /run/credentials/@system/<credential>, root's, never the login user's.
-  Agave's repo mode (below, commented out) hands them to its own units
-  with LoadCredential (repository.keyFile, sshKeyFile); until then nothing
-  reads them.
+  Agave's repo mode (below) reads github (repository.keyFile) as root
+  alone, in agave-priv's mirror; no unit of the tenant holds it.
+  agave-setup takes tenant-ssh (sshKeyFile) with LoadCredential and
+  installs it as the tenant's ~/.ssh/id_ed25519.
   The guest's ssh host key (space-agave-host-hostkey, ./instance.nix) is
   also the key every tunnel pins; Agave reads its public half at
   /etc/ssh/ssh_host_ed25519_key.pub, derived from the credential at each
@@ -155,23 +156,28 @@ in
                 reportUses = false;
                 installerIso = null;
 
-                # Repo mode (agave PRs A2/A3/A5, branches repo-mode-*):
-                # ~/fleet becomes a clone of hyperconfig's main, pushed to
-                # with the deploy key. Enabled by uncommenting once the
-                # input is re-locked to a branch with
-                # `services.agave.repository`. Both keys are root's system
-                # credentials; Agave's units take them with LoadCredential,
-                # the agent's unit sees neither.
-                #
-                # repository = {
-                #   url = "git@github.com:DavHau/hyperconfig.git";
-                #   branch = "main";
-                #   keyFile = "${systemCredentialsDir}/github";
-                #   knownHosts = lib.concatMapStrings (k: "github.com ${k}\n") (
-                #     import ../../github-host-keys.nix
-                #   );
-                #   sshKeyFile = "${systemCredentialsDir}/tenant-ssh";
-                # };
+                # Repo mode: ~/fleet is a clone of hyperconfig's main and
+                # Agave lists its computers from the clan inventory. Both
+                # keys are root's system credentials. Only root reads
+                # keyFile: agave-priv fetches and pushes with it in its bare
+                # mirror (/var/lib/agave-priv/repo/repo.git), and the fleet
+                # trades commits with that mirror keylessly. Agave pushes a
+                # member's confirmed commit fast-forward only. The tenant,
+                # so the agent too, gets sshKeyFile alone: agave-setup's unit
+                # takes it with LoadCredential (root never writes into the
+                # tenant's home) and installs it as ~/.ssh/id_ed25519 (root
+                # on the computers trusts it). Setup reruns on every switch
+                # and takes a rotated key then. Before Dave adds the deploy
+                # key, main needs GitHub branch protection (no force-push,
+                # no deletion): the second guard, as keyFile's description
+                # says.
+                repository = {
+                  url = "git@github.com:DavHau/hyperconfig.git";
+                  branch = "main";
+                  keyFile = "${systemCredentialsDir}/github";
+                  knownHosts = lib.concatMapStrings (k: "github.com ${k}\n") (import ../../github-host-keys.nix);
+                  sshKeyFile = "${systemCredentialsDir}/tenant-ssh";
+                };
               };
 
               # Below the guest's 65536 ids (the header).
