@@ -59,6 +59,9 @@ let
     ./patches/hermes-vault-payment-consent-needs-card.patch
     ./patches/hermes-vault-payment-iframe-fill.patch
     ./patches/hermes-vault-payment-iframe-page-backend.patch
+    # After the three vault-payment patches: isolated world and two-phase
+    # writes for every fill script they and upstream send.
+    ./patches/hermes-vault-fill-isolated-world.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {

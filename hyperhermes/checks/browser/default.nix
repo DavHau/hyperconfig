@@ -34,7 +34,12 @@
 # vault-frames.patch): a test card is filled into the card iframe a checkout
 # embeds directly from the processor's origin (a second local site), and
 # refused for the same frame from an origin the shop controls and for the
-# processor frame nested in such a frame.
+# processor frame nested in such a frame. Isolation: on a login page and in
+# a card frame whose code hooks every built-in a fill script calls and walks
+# fn.caller, the fills succeed and no hook sees a value (Camoufox's Xray
+# sandbox, asserted by the vault-frames plugin); a card frame the checkout
+# navigates to a hostile page right after the vault's value-free check gets
+# nothing.
 { pkgs, self }:
 let
   inherit (pkgs) lib;
@@ -228,6 +233,12 @@ pkgs.testers.runNixOSTest {
         print(out)
         assert "ALL PASSED" in out
         # camofox-browser logs neither the fill script nor the card.
+        assert "4242424242424242" not in machine.succeed("journalctl -u hermes-camofox-alice --no-pager")
+
+    with subtest("page code that hooks the built-ins never sees the password or the card, nor after a frame hijack"):
+        out = machine.succeed("${vaultDriver "alice" "hostile http://127.0.0.1:8765 http://localhost:8767"}")
+        print(out)
+        assert "ALL PASSED" in out
         assert "4242424242424242" not in machine.succeed("journalctl -u hermes-camofox-alice --no-pager")
 
     with subtest("bob reaches neither alice's port nor her backend"):

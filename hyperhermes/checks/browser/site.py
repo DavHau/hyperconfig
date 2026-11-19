@@ -9,10 +9,17 @@ frame (number, expiry, CVC); /checkout embeds it from http://localhost:<card por
 http://localhost:<this port> (an origin the shop controls, not a processor),
 /checkout-nested embeds the processor frame inside /wrap from that origin.
 The card port is the second argument (default 8767).
+Hostile pages for the vault's isolation (any page code, attacker or XSS): /card-hostile
+is the card frame with every built-in a fill script could call hooked (Array.from,
+JSON.stringify, Object.keys, Function.prototype.call/toString, Array.prototype.*, DOM
+methods) and walking fn.caller from each hook; /checkout-hostile embeds it from the
+processor origin, /login-hostile is the login form with the same hooks. Each hook hit
+is sent to /leak on the serving origin; GET /leaks returns them (JSON) and clears them.
 
 Files are deterministic bytes; `site.py --sha <name>` prints a file's sha256.
 """
 import hashlib
+import json
 import socket
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -97,10 +104,51 @@ CARD = b"""<!doctype html><html><head><title>card</title></head><body>
 </body></html>"""
 
 
+# Page code that hunts for a vault script: hooks walk .caller and report its source (and their arguments).
+HOOKS = br"""<script>
+(() => {
+  const realToString = Function.prototype.toString, realStringify = JSON.stringify, realApply = Reflect.apply;
+  let busy = false;
+  const send = (what) => { const i = new Image(); i.src = '/leak?d=' + encodeURIComponent(String(what).slice(0, 4000)); };
+  function record(name, hook, args) {
+    if (busy) return; busy = true;
+    try {
+      let fn = null; try { fn = hook.caller; } catch (e) {}
+      for (let d = 0; fn && d < 12; d++) { try { send(name + ' caller: ' + realToString.call(fn)); } catch (e) {} try { fn = fn.caller; } catch (e) { break; } }
+      try { send(name + ' args: ' + realStringify(Array.prototype.slice.call(args))); } catch (e) {}
+    } finally { busy = false; }
+  }
+  const hookIt = (owner, key, label) => {
+    const real = owner[key]; if (typeof real !== 'function') return;
+    const hook = function hook() { record(label, hook, arguments); return realApply(real, this, arguments); };
+    try { Object.defineProperty(owner, key, { value: hook, writable: true, configurable: true }); } catch (e) {}
+  };
+  for (const k of ['from', 'isArray']) hookIt(Array, k, 'Array.' + k);
+  for (const k of ['stringify', 'parse']) hookIt(JSON, k, 'JSON.' + k);
+  for (const k of ['keys', 'getOwnPropertyDescriptor', 'assign']) hookIt(Object, k, 'Object.' + k);
+  for (const k of ['join', 'map', 'flatMap', 'forEach', 'filter', 'find', 'some', 'push', 'indexOf', 'includes']) hookIt(Array.prototype, k, 'Array.prototype.' + k);
+  for (const k of ['startsWith', 'trim', 'toLowerCase', 'replace']) hookIt(String.prototype, k, 'String.prototype.' + k);
+  for (const k of ['call', 'apply', 'toString']) hookIt(Function.prototype, k, 'Function.prototype.' + k);
+  for (const k of ['querySelectorAll', 'getAttribute', 'setAttribute', 'removeAttribute', 'dispatchEvent', 'focus']) {
+    for (const owner of [Document.prototype, Element.prototype, EventTarget.prototype, HTMLElement.prototype]) hookIt(owner, k, k);
+  }
+  window.hermesPageMarker = 'page-world';
+  // Control: the page's own sloppy call is caught, so the beacon path works.
+  (function control() { const marker = 'hook-control-marker'; Array.from([marker]); })();
+})();
+</script>"""
+
+CARD_HOSTILE = CARD.replace(b"<head>", b"<head>" + HOOKS)
+LOGIN_HOSTILE = LOGIN.replace(b"<head>", b"<head>" + HOOKS)
+LEAKS: list[str] = []
+
+
 def checkout(frame_url: str) -> bytes:
     return ('<!doctype html><html><head><title>checkout</title></head><body>\n'
             '<label>Email <input id="email" type="email" autocomplete="email"></label>\n'
             f'<iframe id="card" src="{frame_url}" width="400" height="200"></iframe>\n'
+            # any page script may move the card frame (the navigation race)
+            "<script>window.hijack = (to) => { document.getElementById('card').src = to; };</script>\n"
             '</body></html>').encode()
 
 
@@ -135,13 +183,29 @@ class H(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(page)))
             self.end_headers()
             self.wfile.write(page)
-        elif self.path in ("/card", "/checkout", "/checkout-evil", "/checkout-nested", "/wrap"):
+        elif self.path.startswith("/leak?"):
+            from urllib.parse import parse_qs, urlsplit
+            LEAKS.append(parse_qs(urlsplit(self.path).query).get("d", [""])[0])
+            self.send_response(204)
+            self.end_headers()
+        elif self.path == "/leaks":
+            body = json.dumps(LEAKS).encode()
+            LEAKS.clear()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path in ("/card", "/checkout", "/checkout-evil", "/checkout-nested", "/wrap", "/card-hostile",
+                           "/checkout-hostile", "/login-hostile"):
             port = self.server.server_address[1]
             processor = f"http://localhost:{CARD_PORT}/card"
             page = {"/card": CARD, "/checkout": checkout(processor),
                     "/checkout-evil": checkout(f"http://localhost:{port}/card"),
                     "/checkout-nested": checkout(f"http://localhost:{port}/wrap"),
-                    "/wrap": wrap(processor)}[self.path]
+                    "/wrap": wrap(processor), "/card-hostile": CARD_HOSTILE,
+                    "/checkout-hostile": checkout(processor + "-hostile"),
+                    "/login-hostile": LOGIN_HOSTILE}[self.path]
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.send_header("Content-Length", str(len(page)))

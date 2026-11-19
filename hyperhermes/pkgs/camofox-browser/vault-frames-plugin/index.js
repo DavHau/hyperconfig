@@ -13,6 +13,26 @@
  *   POST /tabs/:tabId/vault-frames/:frameId/evaluate { userId, expression }
  *     -> { ok, result }: evaluates in that frame, only while it is still a
  *        direct child of the tab's main frame and attached.
+ *   POST /tabs/:tabId/vault-evaluate { userId, expression }
+ *     -> { ok, result }: the same for the tab's main frame (the vault's
+ *        top-level password and card writes).
+ *
+ * Every script runs isolated from the page's own JavaScript: Camoufox's
+ * page.evaluate world is a Cu.Sandbox with Xray wrappers, so page code can
+ * neither replace the built-ins a fill script calls nor reach it through
+ * fn.caller (the script holds the card). These routes do not trust that
+ * default:
+ *   - the browser's launch config (browser:launching, read here in node,
+ *     out of any page's reach) must not set Camoufox's disableWorldIsolation
+ *     (evaluate in the page's own world) or allowMainWorld (the "mw:"
+ *     main-world escape); a browser launched with either gets no vault
+ *     script at all, and none runs before a launch was seen;
+ *   - a script starting with "mw:" is refused;
+ *   - each evaluation first asserts, in the same world, that the DOM is
+ *     seen through Xrays (document.wrappedJSObject exists only there). Page
+ *     code could fake that only where isolation is already gone, so it backs
+ *     the launch check against a Camoufox whose default changed.
+ * A failed assertion answers 409 and the script never runs.
  *
  * Deciding which frame may take a card is hermes' job: it reads the frame's
  * own origin and ancestry from inside it and re-checks both in the same
@@ -36,6 +56,42 @@ function idsFor(page) {
   return ids;
 }
 
+// Camoufox evaluates a script starting with this prefix in the page's main world (when allowMainWorld).
+const MAIN_WORLD_PREFIX = 'mw:';
+
+// The script runs only in an isolated world: see the header. Throws IsolationError otherwise.
+class IsolationError extends Error {}
+
+// Camoufox reads its config from the CAMOU_CONFIG_<n> env chunks (camoufox-js getEnvVars).
+const UNSAFE_CAMOU_KEYS = ['disableWorldIsolation', 'allowMainWorld'];
+// The options of the last launch (null: none seen yet), read at each evaluation: a listener that runs
+// after this one may still change them before the browser starts.
+let launchOptions = null;
+
+export function camouConfigIsolated(env) {
+  const chunks = Object.keys(env || {}).filter((k) => /^CAMOU_CONFIG_\d+$/.test(k))
+    .sort((a, b) => Number(a.slice(13)) - Number(b.slice(13)));
+  let config = {};
+  if (chunks.length) {
+    try { config = JSON.parse(chunks.map((k) => env[k]).join('')); } catch { return false; }
+  }
+  return !UNSAFE_CAMOU_KEYS.some((k) => config && config[k]);
+}
+
+async function evaluateIsolated(frame, expression) {
+  if (!launchOptions || !camouConfigIsolated(launchOptions.env)) {
+    throw new IsolationError('the browser was not seen launching with isolated worlds');
+  }
+  if (expression.trimStart().startsWith(MAIN_WORLD_PREFIX)) {
+    throw new IsolationError('main-world scripts are refused');
+  }
+  const xray = await frame.evaluate('typeof document.wrappedJSObject === "object" && document.wrappedJSObject !== document');
+  if (xray !== true) {
+    throw new IsolationError('this browser evaluates in the page\'s own world');
+  }
+  return frame.evaluate(expression);
+}
+
 function directChildren(page) {
   const main = page.mainFrame();
   return main.childFrames().filter((f) => !f.isDetached() && f.parentFrame() === main);
@@ -46,6 +102,14 @@ export async function register(app, ctx) {
     sessions, log, normalizeUserId, withUserLimit,
     findTab, withTabLock, destroyTimedOutTab, tabNotFoundResponse, handleRouteError,
   } = ctx;
+  // Every (re)launch: are its evaluate worlds isolated? (See the header.)
+  ctx.events.on('browser:launching', ({ options }) => {
+    launchOptions = options || {};
+    if (!camouConfigIsolated(launchOptions.env)) {
+      log('error', 'vault scripts disabled: browser launched with main-world evaluation');
+    }
+  });
+
   // A frame list or a fill is quick; a page that blocks longer loses the tab, like core's evaluate.
   const timeoutMs = () => 30000;
 
@@ -110,7 +174,7 @@ export async function register(app, ctx) {
           if (!frame || frame.isDetached() || frame.parentFrame() !== page.mainFrame()) {
             return { gone: true };
           }
-          return { value: await frame.evaluate(expression) };
+          return { value: await evaluateIsolated(frame, expression) };
         },
         timeoutMs(),
         () => destroyTimedOutTab(t.session, tabId, 'operation_timeout', t.userId),
@@ -121,9 +185,42 @@ export async function register(app, ctx) {
       log('info', 'vault frame evaluate', { reqId: req.reqId, tabId, resultType: typeof result.value });
       res.json({ ok: true, result: result.value });
     } catch (err) {
+      if (err instanceof IsolationError) {
+        log('error', 'vault frame evaluate refused: not isolated', { reqId: req.reqId, tabId });
+        return res.status(409).json({ error: 'not an isolated world' });
+      }
       // Not err.message: a page exception's text could quote the expression.
       log('error', 'vault frame evaluate failed', { reqId: req.reqId, tabId });
       res.status(500).json({ error: 'frame evaluate failed' });
+    }
+  });
+
+  // The tab's main frame, for the vault's top-level fills: core's /evaluate would also emit the
+  // expression (with the secret) on the tab:evaluate plugin event and asserts no isolation.
+  app.post('/tabs/:tabId/vault-evaluate', async (req, res) => {
+    const { tabId } = req.params;
+    try {
+      const expression = req.body?.expression;
+      if (!expression || typeof expression !== 'string') {
+        return res.status(400).json({ error: 'expression is required' });
+      }
+      const t = lookup(req, res);
+      if (!t) return;
+      const value = await withUserLimit(t.userId, () => withTabLock(
+        tabId,
+        () => evaluateIsolated(t.tabState.page.mainFrame(), expression),
+        timeoutMs(),
+        () => destroyTimedOutTab(t.session, tabId, 'operation_timeout', t.userId),
+      ));
+      log('info', 'vault evaluate', { reqId: req.reqId, tabId, resultType: typeof value });
+      res.json({ ok: true, result: value });
+    } catch (err) {
+      if (err instanceof IsolationError) {
+        log('error', 'vault evaluate refused: not isolated', { reqId: req.reqId, tabId });
+        return res.status(409).json({ error: 'not an isolated world' });
+      }
+      log('error', 'vault evaluate failed', { reqId: req.reqId, tabId });
+      res.status(500).json({ error: 'evaluate failed' });
     }
   });
 }

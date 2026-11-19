@@ -17,6 +17,15 @@ registry like the agent loop, against her real camofox-browser and the login and
                  nor into the processor frame nested inside such a frame. Consent is answered yes by a
                  stand-in (headless has no prompt) and counted: a refused checkout never asks.
 
+  hostile <site> <processor>
+                 the vault's scripts never run where page code can reach them (Camoufox evaluates in an
+                 Xray sandbox; the vault-frames plugin asserts it): on a login page and in a processor
+                 card frame whose code hooks every built-in a fill script could call and walks fn.caller
+                 from each hook (site.py /login-hostile, /checkout-hostile), the fill succeeds and no hook
+                 sees the password or the card; the page's world is not the one the vault evaluates in;
+                 and when the checkout navigates the card frame to a hostile page right after the vault's
+                 value-free check (the navigation race), the write is refused and that page gets nothing.
+
 Exits 1 on the first failed check; every check prints a PASS/FAIL line.
 """
 import json
@@ -192,9 +201,113 @@ def card(site, processor):
                     headers=bc._auth_headers(), timeout=30)
 
 
+def hostile(site, processor):
+    import time
+    from unittest.mock import patch
+
+    from agent.browser_page_registry import backend_for_task
+    from tools import browser_vault_tool as vault_tool
+
+    def leaks(origin):
+        time.sleep(1)  # the page's beacons are async
+        return requests.get(origin + "/leaks", timeout=10).json()
+
+    def frame_of(url_prefix):
+        page = backend_for_task(T)
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            frames = [f for f in page.child_frames(T) if f["url"].startswith(url_prefix)]
+            if frames:
+                return page, frames[0]["frame_id"]
+            time.sleep(0.5)
+        return page, None
+
+    secrets = [PASSWORD, CARD["card_number"], CARD["cvc"], "12/34", CARD["cardholder_name"]]
+
+    def clean(hits):
+        return not any(s in h for h in hits for s in secrets)
+
+    # A hostile login page: the password fill runs, no hook sees it.
+    check(call("browser_navigate", url=site + "/login-hostile").get("success") is True, "/login-hostile loads")
+    page = backend_for_task(T)
+    check(page.evaluate(T, "typeof window.hermesPageMarker", secret=False) == "undefined"
+          and page.evaluate(T, "typeof document.wrappedJSObject", secret=False) == "object",
+          "Camofox evaluates in an Xray sandbox, not the page's world")
+    check(any("hook-control-marker" in h for h in leaks(site)), "control: the page's hooks report a sloppy caller")
+    meta = get_vault_store().add_item("login", "hostile", {"identifier_type": "username", "identifier": "alice",
+                                                           "password": PASSWORD}, origin=site)
+    out = call("browser_vault", action="fill", handle=meta.id)
+    check(out.get("success") is True and out.get("filled_fields") == 1, "the password is filled on the hostile login page")
+    check(password_length() == len(PASSWORD), "the password field holds it")
+    hits = leaks(site)
+    check(clean(hits), f"no hook on the login page saw the password ({len(hits)} hook hits)")
+
+    card_meta = get_vault_store().add_item("payment", "hostile card", CARD, origin=site)
+    asked = []
+
+    def consent(*args, **kwargs):
+        asked.append(args)
+        return "accept"
+
+    with patch.object(vault_tool, "PAYMENT_FRAME_ORIGINS", vault_tool.PAYMENT_FRAME_ORIGINS | {processor}), \
+            patch("tools.approval_prompt.request_elicitation_consent", side_effect=consent):
+        # A hostile processor frame: the card fill runs, no hook sees it.
+        check(call("browser_navigate", url=site + "/checkout-hostile").get("success") is True, "/checkout-hostile loads")
+        page, fid = frame_of(processor + "/card-hostile")
+        check(fid is not None, "its hooked card frame is there")
+        leaks(processor)
+        out = call("browser_vault", action="fill", handle=card_meta.id)
+        check(out.get("success") is True and out.get("frames") == [processor], "the card is filled into the hooked frame")
+        page, fid = frame_of(processor + "/card-hostile")  # the vault's own listing retired the earlier id
+        check(page.evaluate_in_frame(T, fid, "document.getElementById('number').value", secret=False) == CARD["card_number"],
+              "the frame holds the card")
+        check(len(asked) == 1 and processor in asked[0][1], "consent named the processor frame's origin")
+        hits = leaks(processor)
+        check(clean(hits), f"no hook in the card frame saw the card ({len(hits)} hook hits)")
+
+        # The navigation race: right after the vault's value-free check, the checkout's own code moves the
+        # card frame to a hostile page on another origin (here the shop's: http://localhost:<site port>).
+        check(call("browser_navigate", url=site + "/checkout-hostile").get("success") is True, "/checkout-hostile reloads")
+        frame_of(processor + "/card-hostile")
+        attacker = site.replace("127.0.0.1", "localhost")
+        real_check = vault_tool._precheck_failure
+
+        attacker_hits = []
+
+        def check_then_hijack(evaluate, chk):
+            res = real_check(evaluate, chk)
+            if chk.ancestor:  # a frame write's phase 1 just passed
+                backend_for_task(T).evaluate(T, f"document.getElementById('card').src = {json.dumps(attacker + '/card-hostile')}",
+                                             secret=False)
+                # Wait for the hostile page to run (its hooks' control beacon), without listing frames:
+                # a new listing would retire the frame id the vault is about to write to.
+                deadline = time.monotonic() + 20
+                while time.monotonic() < deadline and not any("hook-control-marker" in h for h in attacker_hits):
+                    attacker_hits.extend(requests.get(attacker + "/leaks", timeout=10).json())
+                    time.sleep(0.5)
+            return res
+
+        leaks(attacker)
+        with patch.object(vault_tool, "_precheck_failure", side_effect=check_then_hijack):
+            out = call("browser_vault", action="fill", handle=card_meta.id)
+        check(any("hook-control-marker" in h for h in attacker_hits), "the checkout moved the card frame to the hostile page")
+        check(out.get("success") is False and out.get("error_type") == "origin_changed",
+              "the write into the hijacked frame is refused by its own origin check")
+        hits = attacker_hits + leaks(attacker)
+        check(clean(hits), f"the hostile page the frame moved to got no card ({len(hits)} hook hits)")
+        page, fid = frame_of(attacker + "/card-hostile")
+        check(fid is not None and page.evaluate_in_frame(T, fid, "document.getElementById('number').value",
+                                                         secret=False) == "", "and its fields stay empty")
+
+    requests.delete(f"{bc.get_camofox_url()}/sessions/{bc.get_session(T)['user_id']}",
+                    headers=bc._auth_headers(), timeout=30)
+
+
 if __name__ == "__main__":
     if sys.argv[1] == "card":
         card(sys.argv[2], sys.argv[3])
+    elif sys.argv[1] == "hostile":
+        hostile(sys.argv[2], sys.argv[3])
     else:
         vault(sys.argv[2])
     print("ALL PASSED", flush=True)

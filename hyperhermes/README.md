@@ -120,7 +120,8 @@ secrets; `lib.clan` has the per-agent ones):
 evaluation-only `client-features` and `clan-eval`; offline `vision` (image
 routing, vision backend and vision tools per main model, on the patched
 package; a consumer passes its own `settings` and package to it) and
-`vault-payment-frames` (the vault's card-frame fill, on the patched package).
+`vault-payment-frames` (the vault's card-frame fill and its isolation from
+page code, on the patched package).
 
 ## hermes patches
 
@@ -168,6 +169,22 @@ package; a consumer passes its own `settings` and package to it) and
   and redaction of the grouped card number. Not upstream yet (proposed on
   #136981 / #140788). Checks: `vault-payment-frames` (offline), `browser`
   (a real Camofox, a two-origin test checkout, a test card).
+- `hermes-vault-fill-isolated-world`: every vault fill script (password,
+  one-time code, card; page and card frame) ran in the page's own
+  JavaScript world, sloppy, so page code that replaced a built-in it calls
+  (`Array.from`, `JSON.stringify`) read the values through `fn.caller`, e.g.
+  after a checkout script moved the card frame to its own site between the
+  vault's check and the write. Now: CDP isolated world for every write and
+  frame read, a value-free check before the values are sent, strict
+  scripts that call nothing before their origin check; the consent names
+  the processor frame origin(s); redaction covers the combined expiry and
+  14/19-digit layouts. On Camofox the vault-frames plugin carries every
+  secret script (`/vault-evaluate` for the page) and runs it only in
+  Camoufox's Xray sandbox (refused for a browser launched with main-world
+  evaluation). To report upstream on #136981 and for the top-level
+  template. Checks: `vault-payment-frames` (hooked node document, the
+  navigation race), `browser` (hooked login page and card frame in a real
+  Camofox, the frame hijacked after the check).
 - `hermes-busy-message-yields-command`: a message sent while a foreground
   terminal command runs (with an image too, over the messaging gateway or
   the classic CLI) moves the command to the background, still running,

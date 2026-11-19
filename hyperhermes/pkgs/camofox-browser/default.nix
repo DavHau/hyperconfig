@@ -6,9 +6,10 @@
 # Two plugins are added: ./captcha-plugin (POST /tabs/:tabId/solve-captcha),
 # CaptchaKraken's driver on a tab's live page, with its engine from
 # pkgs/captchakraken; it answers only when the unit sets VLLM_BASE_URL.
-# ./vault-frames-plugin (POST /tabs/:tabId/vault-frames[/:frameId/evaluate]):
-# the tab's direct child iframes for browser_vault's hosted card-field fill
-# (pkgs/hermes-camofox-plugin/vault-frames.patch).
+# ./vault-frames-plugin (POST /tabs/:tabId/vault-frames[/:frameId/evaluate],
+# /tabs/:tabId/vault-evaluate): the tab's direct child iframes for
+# browser_vault's hosted card-field fill, and every vault script, run only in
+# Camoufox's isolated world (pkgs/hermes-camofox-plugin/vault-frames.patch).
 {
   lib,
   buildNpmPackage,

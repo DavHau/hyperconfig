@@ -1,0 +1,1163 @@
+hermes v0.23.0 (+ the three hermes-vault-payment-* patches): vault fill
+scripts are reachable from page JavaScript; card, password and code fills
+must run where the page cannot touch them.
+
+Symptom (security review of #136981, reproduced on V8 and SpiderMonkey):
+every secret-bearing fill script is evaluated with Runtime.evaluate in
+the page's (or the card frame's) own JavaScript world, in sloppy mode.
+Its first call into a page-replaceable built-in hands the page the
+calling function through `hook.caller`, whose source holds the values:
+- #136981's frame write starts with `Array.from(location.ancestorOrigins)`;
+  a script on the checkout (third party, XSS) navigates the processor
+  frame to its own site between the vault's check and the write (secret
+  resolution can take seconds), and the write runs in the attacker's
+  document and leaks number, expiry, CVC and name before it refuses;
+- upstream's own top-level template (`build_fill_js`) calls
+  `JSON.stringify` on its refusal path: a page that navigated after the
+  vault's check gets the password, card or one-time code the same way.
+The frame-context read (`_FRAME_CONTEXT_JS`) also ran in the frame's
+world, where page code can fake the ancestry the vault decides on.
+
+Fix:
+- CDPSupervisor.evaluate_isolated: Page.createIsolatedWorld in the target
+  frame (the page's main frame, or the OOPIF's own session), a random
+  world name per call (Chromium reuses a named world, and runs scripts
+  another CDP client registered for that name), Runtime.evaluate with that
+  contextId and no user gesture; no fallback to the main world, no
+  exception text back. Every secret write and every frame read (context,
+  inspection) runs there.
+- Two-phase writes: a value-free script first checks, in the same world,
+  the document's origin, (card frame) that the bound page is its only
+  ancestor, and that the inspection's stamps are still there; the values
+  go out only when it passes (a failed check is eval_failed, missing
+  stamps fields_changed). The fill script itself re-checks first. A write
+  without its check is refused.
+- Strict mode in the fill template, the frame ancestry guard and the
+  page-backend secret wrapper; no call of any kind before the origin and
+  ancestry checks (location reads, a plain-object refusal), so even a
+  script run in a hostile world gives a hook nothing.
+- The consent prompt names the processor frame origin(s) that will get
+  card fields; a processor frame that was not named (swapped in after
+  consent) gets nothing (frames_changed).
+- Redaction also covers the combined expiry (MM/YY, MM / YY, MM/YYYY)
+  and Diners 4-6-4 and 19-digit 6-13 card layouts.
+- BrowserPageBackend: a secret script must run isolated from page code.
+- Square's card-frame hosts (web.squarecdn.com, sandbox.) cite Square's
+  CSP docs, which name them the SDK's only script and frame origins.
+
+Tests: tests/tools/test_vault_fill_hostile_page.py runs the scripts in a
+node document whose every built-in is hooked and walks .caller (control:
+#136981's guard leaks there), the navigation race on the fill path, and
+the CDP calls of evaluate_isolated; existing fakes answer the new calls.
+
+Upstream: to report on NousResearch/hermes-agent#136981 (frames) and as
+its own issue for the top-level template. Drop when upstream isolates.
+
+diff --git a/agent/browser_page_backend.py b/agent/browser_page_backend.py
+index 253b8c26..d8bbd600 100644
+--- a/agent/browser_page_backend.py
++++ b/agent/browser_page_backend.py
+@@ -34,7 +34,10 @@ class BrowserPageBackend(ProviderBase):
+ 
+         Never open a tab. With ``secret=True`` the expression embeds a credential: send it only over a
+         transport that keeps it out of argv and off the network in clear text (loopback or HTTPS), never
+-        follow a redirect with it, and never log it. Exception text on that path is discarded by core."""
++        follow a redirect with it, and never log it. Exception text on that path is discarded by core.
++        Run it isolated from the page's own JavaScript (an isolated/utility world or sandbox, never the
++        page's main world): page code that replaced a built-in the script calls could otherwise read it.
++        Core sends a value-free check through this same method (``secret=True``) before the values."""
+ 
+     def child_frames(self, task_id: str) -> list[dict[str, str]]:
+         """The iframes embedded DIRECTLY in the task's current page: ``[{"frame_id", "url"}]``.
+@@ -47,6 +50,7 @@ class BrowserPageBackend(ProviderBase):
+ 
+     def evaluate_in_frame(self, task_id: str, frame_id: str, expression: str, *, secret: bool) -> Any:
+         """Evaluate ``expression`` inside one frame listed by :meth:`child_frames`; raise on failure,
+-        including when the frame is gone or no longer a direct child of the page. Same transport rules
+-        as :meth:`evaluate` for ``secret=True``."""
++        including when the frame is gone or no longer a direct child of the page. Same transport and
++        isolation rules as :meth:`evaluate`, for every script (core decides on a frame from what it reads
++        there)."""
+         raise NotImplementedError("this browser does not reach iframes")
+diff --git a/agent/vault_login_classifier.py b/agent/vault_login_classifier.py
+index adff9f6c..cde8a7bb 100644
+--- a/agent/vault_login_classifier.py
++++ b/agent/vault_login_classifier.py
+@@ -343,7 +343,8 @@ def build_fill_js(fills: list[dict[str, Any]], expected_origin: str, nonce: str
+ 
+     ``expected_origin`` is asserted against ``window.location.origin`` synchronously inside the SAME
+     evaluated script, immediately before any write. If the page navigated between inspection and fill
+-    (TOCTOU), the script writes nothing and returns ``{"refused": "origin_changed", "found": <actual>}``:
++    (TOCTOU), the script writes nothing and returns ``{"refused": "origin_changed", "found": <actual>}`` (an
++    object, not JSON text):
+     proof scope equals mutation scope (#88706). Targets resolve by the ``<nonce>:<index>`` stamp of
+     THIS inspection; a ``current-password`` or ``new-password`` fill additionally requires ``type=password``; ``<select>``
+     controls (country, state, expiry month) match an option by value or visible text. No marker is
+@@ -356,10 +357,17 @@ def build_fill_js(fills: list[dict[str, Any]], expected_origin: str, nonce: str
+             .replace("__FILLS__", payload).replace("__NONCE__", json.dumps(nonce)))
+ 
+ 
++# Strict mode, and the origin check is the first thing the script does, with no call before it: a page that
++# replaced a built-in (JSON.stringify, Array.from, a DOM getter) gets no handle on this function through
++# ``hook.caller`` (null for a strict caller), whose source holds the values. ``window.location.origin``
++# is unforgeable, and the refusal is a plain object (serialized by the browser, no page function runs).
++# The vault also evaluates this script in an isolated world (browser_vault_tool._eval_js_secret).
+ _FILL_JS_TEMPLATE = """(() => {
++  "use strict";
+   const expectedOrigin = __EXPECTED_ORIGIN__;
+-  if (window.location.origin !== expectedOrigin) {
+-    return JSON.stringify({ refused: "origin_changed", found: window.location.origin });
++  const foundOrigin = window.location.origin;
++  if (foundOrigin !== expectedOrigin) {
++    return { refused: "origin_changed", found: foundOrigin };
+   }
+   const fills = __FILLS__;
+   const nonce = __NONCE__;
+diff --git a/tests/tools/test_bot_desktop_browser_fence.py b/tests/tools/test_bot_desktop_browser_fence.py
+index e96efdd1..21a32404 100644
+--- a/tests/tools/test_bot_desktop_browser_fence.py
++++ b/tests/tools/test_bot_desktop_browser_fence.py
+@@ -147,9 +147,15 @@ def test_secret_write_re_admits_after_a_takeover_during_the_code_prompt(monkeypa
+             evaluated.append(expr)
+             return {"ok": True, "result": "{}"}
+ 
++        def evaluate_isolated(self, expr):  # secret writes run in an isolated world, after a value-free check
++            if "data-hermes-vault-slot" in expr:
++                return {"ok": True, "result": json.dumps({"origin": "https://x.test", "ancestors": [], "stamps": 1})}
++            return self.evaluate_runtime(expr)
++
+     monkeypatch.setattr(vault, "_ensure_supervisor", lambda tid: Sup())
+-    assert vault._eval_js_secret("default", "fill()")["success"] is True  # agent holds: writes
++    fill = vault._secret_script("fill()", "https://x.test", "n")
++    assert vault._eval_js_secret("default", fill)["success"] is True  # agent holds: writes
+     lease.acquire("human")  # takeover while the prompt was open
+-    res = vault._eval_js_secret("default", "fill()")
++    res = vault._eval_js_secret("default", fill)
+     assert res["success"] is False and res["error_type"] == "human_has_control"
+     assert evaluated == ["fill()"], "the credential must not reach the page under a human lease"
+diff --git a/tests/tools/test_browser_vault_origin_guard.py b/tests/tools/test_browser_vault_origin_guard.py
+index 77bbca76..355ee79a 100644
+--- a/tests/tools/test_browser_vault_origin_guard.py
++++ b/tests/tools/test_browser_vault_origin_guard.py
+@@ -53,6 +53,12 @@ class _FakePage:
+     def focus_page(self, origin: str, accept=None) -> dict:
+         return {"ok": bool(origin) and normalize_origin(self.href) == origin, "url": self.href}
+ 
++    def evaluate_isolated(self, expression: str, frame_id=None) -> dict:
++        if '"stamps"' in expression or "stamps" in expression and "data-hermes-vault-slot" in expression:
++            # phase 1 of a secret write (no values): still on this origin, the inspection's stamps present
++            return {"ok": True, "result": json.dumps({"origin": normalize_origin(self.href), "ancestors": [], "stamps": 1})}
++        return self.evaluate_runtime(expression)
++
+     def evaluate_runtime(self, expression: str) -> dict:
+         if expression.strip() == "window.location.href":
+             return {"ok": True, "result": self.href}
+diff --git a/tests/tools/test_browser_vault_page_backend.py b/tests/tools/test_browser_vault_page_backend.py
+index 2c5254e9..00848bb9 100644
+--- a/tests/tools/test_browser_vault_page_backend.py
++++ b/tests/tools/test_browser_vault_page_backend.py
+@@ -32,6 +32,8 @@ class FakePage(BrowserPageBackend):
+             raise RuntimeError(f"page.evaluate failed: {expression}")
+         if "location.href" in expression:
+             return self.url
++        if "data-hermes-vault-slot" in expression and "stamps" in expression:  # phase 1 of a write (no values)
++            return json.dumps({"origin": "/".join(self.url.split("/", 3)[:3]), "ancestors": [], "stamps": 1})
+         if SECRET in expression:
+             return json.dumps({"filled": 1})
+         return json.dumps(CONTROLS)
+diff --git a/tests/tools/test_browser_vault_payment_consent.py b/tests/tools/test_browser_vault_payment_consent.py
+index 02e11ccd..31422acb 100644
+--- a/tests/tools/test_browser_vault_payment_consent.py
++++ b/tests/tools/test_browser_vault_payment_consent.py
+@@ -39,6 +39,12 @@ class _FakePage:
+     def focus_page(self, origin: str, accept=None) -> dict:
+         return {"ok": bool(origin) and normalize_origin(self.href) == origin, "url": self.href}
+ 
++    def evaluate_isolated(self, expression: str, frame_id=None) -> dict:
++        if '"stamps"' in expression or "stamps" in expression and "data-hermes-vault-slot" in expression:
++            # phase 1 of a secret write (no values): still on this origin, the inspection's stamps present
++            return {"ok": True, "result": json.dumps({"origin": normalize_origin(self.href), "ancestors": [], "stamps": 1})}
++        return self.evaluate_runtime(expression)
++
+     def evaluate_runtime(self, expression: str) -> dict:
+         if expression.strip() == "window.location.href":
+             return {"ok": True, "result": self.href}
+diff --git a/tests/tools/test_vault_fill_hostile_page.py b/tests/tools/test_vault_fill_hostile_page.py
+new file mode 100644
+index 00000000..71056867
+--- /dev/null
++++ b/tests/tools/test_vault_fill_hostile_page.py
+@@ -0,0 +1,443 @@
++"""A page that hooks JavaScript built-ins must never see a vault secret (hyperhermes, for #136981).
++
++The vault's fill scripts carry the values. Run in the page's own JavaScript world and in sloppy mode,
++their first call into a page-replaceable function (``Array.from`` over ``location.ancestorOrigins``,
++``JSON.stringify`` on the refusal path) hands the page the calling function through ``hook.caller``, and
++its source holds the card. A script on the checkout can navigate the processor frame to its own site
++between the vault's check and its write, so the write would run in the attacker's document.
++
++The fix, pinned here:
++- every secret write and every frame read runs in a CDP isolated world (``evaluate_isolated``), never
++  ``Runtime.evaluate`` in the page's world;
++- the write is two-phase: a value-free check in the same world first, values only when it passes;
++- the scripts are strict and call nothing before their origin/ancestry check, so even run in a hostile
++  world (isolation lost) the hooks get nothing: exercised below in node with every hook in place.
++"""
++
++from __future__ import annotations
++
++import asyncio
++import json
++import re
++import subprocess
++from unittest.mock import patch
++
++import pytest
++
++from agent import redact
++from agent.vault_login_classifier import build_fill_js
++from agent.vault_store import VaultStore
++from tools import browser_vault_tool as vault
++from tools.browser_supervisor import CDPSupervisor
++from tools.browser_supervisor_frames import FrameInfo
++
++PAGE = "https://shop.test"
++STRIPE = "https://js.stripe.com"
++EVIL = "https://evil.test"
++_CARD = {"card_number": "4111111111111111", "cardholder_name": "Canary Name", "exp_month": "7", "exp_year": "2029",
++         "cvc": "987", "billing_postal_code": "94110"}
++_SECRETS = ("4111111111111111", "987", "07/29", "Canary Name")
++CARD_CONTROLS = [
++    {"autocomplete": "cc-number", "name": "number", "index": 0, "type": "text"},
++    {"autocomplete": "cc-exp", "name": "expiry", "index": 1, "type": "text"},
++    {"autocomplete": "cc-csc", "name": "cvc", "index": 2, "type": "text"},
++]
++
++# A hostile document in node: every built-in a fill script could touch is replaced by a hook that walks
++# ``.caller`` (and Function.prototype.toString of each caller), records ``this`` and the arguments.
++# location/ancestorOrigins are what the navigated frame reports; the DOM is empty.
++_HOSTILE_PRELUDE = r"""
++const leaks = [];
++const realToString = Function.prototype.toString;
++const realStringify = JSON.stringify;
++const realApply = Reflect.apply;
++const realSlice = Array.prototype.slice;
++let busy = false;  // the hooks' own bookkeeping must not re-enter them
++function record(name, self, args, hook) {
++  if (busy) return;
++  busy = true;
++  try { recordInner(name, self, args, hook); } finally { busy = false; }
++}
++function recordInner(name, self, args, hook) {
++  let fn = null;
++  try { fn = hook.caller; } catch (e) { leaks.push(name + ': caller threw'); }
++  for (let depth = 0; fn && depth < 12; depth++) {
++    try { leaks.push(name + ' caller: ' + realToString.call(fn)); } catch (e) {}
++    try { fn = fn.caller; } catch (e) { break; }
++  }
++  try { leaks.push(name + ' this: ' + realStringify(self)); } catch (e) {}
++  try { leaks.push(name + ' args: ' + realStringify(realApply(realSlice, args, []))); } catch (e) {}
++}
++function hookMethod(owner, key, label) {
++  const real = owner[key];
++  if (typeof real !== 'function') return;
++  const hook = function hook() { record(label, this, arguments, hook); return realApply(real, this, arguments); };
++  Object.defineProperty(owner, key, { value: hook, writable: true, configurable: true });
++}
++for (const [owner, keys, label] of [
++  [Array, ['from', 'of', 'isArray'], 'Array.'],
++  [JSON, ['stringify', 'parse'], 'JSON.'],
++  [Object, ['keys', 'values', 'entries', 'assign', 'getOwnPropertyDescriptor', 'getPrototypeOf', 'defineProperty'], 'Object.'],
++  [Array.prototype, ['join', 'map', 'flatMap', 'forEach', 'filter', 'find', 'some', 'push', 'slice', 'indexOf', 'includes', Symbol.iterator], 'Array.prototype.'],
++  [String.prototype, ['startsWith', 'trim', 'toLowerCase', 'replace', 'split', 'concat', 'includes'], 'String.prototype.'],
++  [Function.prototype, ['call', 'apply', 'bind'], 'Function.prototype.'],
++  [Object.prototype, ['hasOwnProperty', 'toString'], 'Object.prototype.'],
++]) for (const k of keys) hookMethod(owner, k, label + String(k));
++// Getters a check could read: a hook on Object.prototype catches any unknown property read too.
++function hookGetter(owner, key, value) {
++  const getter = function getter() { record('get ' + String(key), this, [], getter); return value; };
++  Object.defineProperty(owner, key, { get: getter, configurable: true });
++}
++const ancestorList = Object.create(null);
++__ANCESTORS__.forEach((a, i) => { ancestorList[i] = a; });
++hookGetter(ancestorList, 'length', __ANCESTORS__.length);
++const location = Object.create(null);
++hookGetter(location, 'origin', __ORIGIN__);
++hookGetter(location, 'href', __ORIGIN__ + '/');
++hookGetter(location, 'ancestorOrigins', ancestorList);
++const document = { querySelectorAll() { record('document.querySelectorAll', this, arguments, document.querySelectorAll); return []; } };
++const window = globalThis;
++globalThis.location = location;
++globalThis.document = document;
++globalThis.getComputedStyle = function getComputedStyle() { record('getComputedStyle', this, arguments, getComputedStyle); return {}; };
++globalThis.InputEvent = globalThis.Event = function Event() { record('Event', this, arguments, Event); };
++globalThis.HTMLInputElement = function HTMLInputElement() {};
++"""
++
++_HOSTILE_RUN = r"""
++let result, threw = null;
++try { result = (0, eval)(__EXPRESSION__); } catch (e) { threw = String(e && e.message); }
++process.stdout.write(realStringify({ result, threw, leaks }));
++"""
++
++
++def _run_hostile(expression: str, origin: str, ancestors: list[str]) -> dict:
++    """Evaluate ``expression`` as sloppy global code in the hostile document above (node)."""
++    script = (_HOSTILE_PRELUDE.replace("__ANCESTORS__", json.dumps(ancestors)).replace("__ORIGIN__", json.dumps(origin))
++              + _HOSTILE_RUN.replace("__EXPRESSION__", json.dumps(expression)))
++    out = subprocess.run(["node"], input=script, text=True, capture_output=True, timeout=30)
++    assert out.returncode == 0, out.stderr
++    return json.loads(out.stdout)
++
++
++def _leaked(run: dict) -> list[str]:
++    text = "\n".join(run["leaks"])
++    return [s for s in _SECRETS if s in text]
++
++
++def _card_fills():
++    return [{"index": 0, "token": "cc-number", "value": _CARD["card_number"]},
++            {"index": 1, "token": "cc-exp", "value": "07/29"},
++            {"index": 2, "token": "cc-csc", "value": _CARD["cvc"]},
++            {"index": 3, "token": "cc-name", "value": _CARD["cardholder_name"]}]
++
++
++# The ancestry guard as #136981 shipped it (sloppy, Array.from first): the harness must catch its leak.
++_OLD_GUARD = ("(() => { const a = Array.from(location.ancestorOrigins || []); "
++              "if (a.length !== 1 || a[0] !== __PAGE__) "
++              "return JSON.stringify({refused: 'origin_changed', found: a.join(' < ')}); "
++              "return (() => { const fills = __FILLS__; return 1; })(); })()")
++
++
++def test_the_harness_catches_the_old_sloppy_guard():
++    old = _OLD_GUARD.replace("__PAGE__", json.dumps(PAGE)).replace("__FILLS__", json.dumps(_card_fills()))
++    run = _run_hostile(old, EVIL, [PAGE])
++    assert _CARD["card_number"] in "\n".join(run["leaks"])
++
++
++@pytest.mark.parametrize("origin, ancestors", [
++    (EVIL, [PAGE]),             # the processor frame navigated to the attacker between check and write
++    (STRIPE, [EVIL]),           # the processor frame now embedded by another page
++    (STRIPE, [EVIL, PAGE]),     # nested
++    (STRIPE, []),               # no ancestry (not a frame / masked)
++])
++def test_frame_write_refused_in_a_hostile_frame_leaks_nothing(origin, ancestors):
++    expression = vault._guard_frame_ancestry(build_fill_js(_card_fills(), expected_origin=STRIPE, nonce="n"), PAGE)
++    run = _run_hostile(expression, origin, ancestors)
++    assert run["threw"] is None
++    assert run["result"]["refused"] == "origin_changed"
++    assert _leaked(run) == []
++
++
++def test_frame_write_through_the_page_backend_wrapper_leaks_nothing():
++    expression = vault._strict_secret_wrapper(
++        vault._guard_frame_ancestry(build_fill_js(_card_fills(), expected_origin=STRIPE, nonce="n"), PAGE))
++    run = _run_hostile(expression, EVIL, [PAGE])
++    assert run["result"]["refused"] == "origin_changed" and _leaked(run) == []
++
++
++@pytest.mark.parametrize("wrap", [False, True])
++def test_top_level_write_refused_after_navigation_leaks_nothing(wrap):
++    """The same hole in upstream's top-level template (JSON.stringify on its refusal path): a password or a
++    card written into a page that navigated to the attacker after the vault's check."""
++    fills = [{"index": 0, "token": "current-password", "value": "pw-canary-4111111111111111"}]
++    expression = build_fill_js(fills, expected_origin=PAGE, nonce="n")
++    if wrap:
++        expression = vault._strict_secret_wrapper(expression)
++    run = _run_hostile(expression, EVIL, [])
++    assert run["result"] == {"refused": "origin_changed", "found": EVIL}
++    assert "pw-canary" not in "\n".join(run["leaks"])
++
++
++def test_scripts_are_strict_and_check_before_any_call():
++    js = build_fill_js(_card_fills(), expected_origin=STRIPE, nonce="n")
++    assert js.startswith('(() => {\n  "use strict";')
++    head = js.split("const fills", 1)[0].split('"use strict";', 1)[1]
++    calls = [m for m in re.findall(r"([\w.$\]]+)\s*\(", head) if m != "if"]
++    assert calls == [], calls  # no call of any kind before the origin check
++    guard = vault._guard_frame_ancestry("1", PAGE)
++    assert guard.startswith('(() => { "use strict";') and "Array.from" not in guard and "JSON.stringify" not in guard
++    assert vault._strict_secret_wrapper("1").startswith('(() => { "use strict";')
++    assert "Array.from" not in vault._FRAME_CONTEXT_JS
++
++
++# ── the vault: isolated world, two phases ────────────────────────────────────
++
++
++class _HostileSupervisor:
++    """A CDP supervisor over a checkout with one Stripe frame. ``navigate_after_check``: the frame (or, with
++    frame=None, the page) moves to the attacker right after the vault's phase-1 check, so the secret write
++    runs (worst case: isolation lost) in the hostile document."""
++
++    def __init__(self, *, navigate_after_check=None):
++        self.navigate_after_check = navigate_after_check
++        self.calls: list[tuple[str, str | None, str]] = []
++        self.checked: set = set()
++
++    def focus_page(self, origin, accept=None):
++        return {"ok": origin == PAGE, "url": PAGE + "/checkout"}
++
++    def page_child_oopifs(self):
++        return {"ok": True, "frames": [{"frame_id": "f", "url": STRIPE + "/v3/inner"}]}
++
++    def evaluate_runtime(self, expression, frame_id=None, **kw):
++        assert _CARD["card_number"] not in expression and "pw-canary" not in expression, \
++            "a secret went into the page's own world"
++        self.calls.append(("main", frame_id, expression))
++        if "location.href" in expression:
++            return {"ok": True, "result": PAGE + "/checkout"}
++        # the page's own inspection (value-free): a password field, no card fields
++        return {"ok": True, "result": json.dumps([{"autocomplete": "current-password", "index": 0, "type": "password"}])}
++
++    def evaluate_isolated(self, expression, frame_id=None, **kw):
++        self.calls.append(("isolated", frame_id, expression))
++        here = (STRIPE, [PAGE]) if frame_id else (PAGE, [])
++        if frame_id in self.checked or (frame_id is None and None in self.checked):
++            here = (EVIL, [PAGE] if frame_id else [])
++        if expression == vault._FRAME_CONTEXT_JS:
++            return {"ok": True, "result": json.dumps({"origin": here[0], "ancestors": here[1]})}
++        if "stamps" in expression and "data-hermes-vault-slot" in expression:  # phase 1
++            if self.navigate_after_check == (frame_id or "page"):
++                self.checked.add(frame_id)
++            return {"ok": True, "result": json.dumps({"origin": here[0], "ancestors": here[1], "stamps": 1})}
++        if "data-hermes-vault-slot" in expression and "expectedOrigin" not in expression:  # inspection
++            return {"ok": True, "result": json.dumps(CARD_CONTROLS if frame_id else
++                                                     [{"autocomplete": "current-password", "index": 0, "type": "password"}])}
++        run = _run_hostile(expression, *here)
++        self.leaks = getattr(self, "leaks", []) + _leaked(run) + (["pw-canary"] if "pw-canary" in "\n".join(run["leaks"]) else [])
++        if run["result"] is None:
++            return {"ok": True, "result": json.dumps({"filled": 0})}
++        return {"ok": True, "result": run["result"]}
++
++
++@pytest.fixture()
++def store(tmp_path):
++    yield VaultStore(base_dir=tmp_path / "vault")
++    redact.clear_vault_redaction_values()
++
++
++def _fill(store, sup, kind="payment"):
++    secret = _CARD if kind == "payment" else {"identifier_type": "email", "identifier": "a@b.test",
++                                               "password": "pw-canary-4111111111111111"}
++    meta = store.add_item(kind=kind, label="x", origin=PAGE, secret=secret)
++    prompts = []
++    with patch("agent.vault_store.get_vault_store", return_value=store), \
++         patch.object(vault, "_page_backend", return_value=None), \
++         patch.object(vault, "_ensure_supervisor", return_value=sup), \
++         patch.object(vault, "_bot_desktop_browser_session", return_value=False), \
++         patch("tools.approval_prompt.request_elicitation_consent",
++               side_effect=lambda *a, **k: prompts.append(a) or "accept"):
++        return json.loads(vault.browser_vault_fill(meta.id, task_id="t")), prompts
++
++
++def test_card_frame_navigated_after_the_check_gets_nothing(store):
++    sup = _HostileSupervisor(navigate_after_check="f")
++    out, prompts = _fill(store, sup)
++    assert out["success"] is False and out["error_type"] == "origin_changed", out
++    assert getattr(sup, "leaks", []) == []
++    # every frame read and the write ran isolated; nothing secret ever went to the page's world
++    assert all(kind == "isolated" for kind, fid, _ in sup.calls if fid)
++    assert any(_CARD["card_number"] in e for kind, fid, e in sup.calls if kind == "isolated" and fid == "f")
++
++
++def test_card_frame_that_moved_before_the_check_never_gets_the_values(store):
++    sup = _HostileSupervisor()
++    sup.checked.add("f")  # already on the attacker before phase 1
++    out, _prompts = _fill(store, sup)
++    assert out["success"] is False and out["error_type"] in ("origin_changed", "no_payment_fields"), out
++    assert not any(_CARD["card_number"] in e for _k, _f, e in sup.calls)
++
++
++def test_password_page_navigated_after_the_check_gets_nothing(store):
++    sup = _HostileSupervisor(navigate_after_check="page")
++    with patch.object(vault, "_payment_frames", return_value=[]):
++        out, _ = _fill(store, sup, kind="login")
++    assert out["success"] is False and out["error_type"] == "origin_changed", out
++    assert getattr(sup, "leaks", []) == []
++
++
++def test_a_bare_secret_script_without_its_check_is_refused():
++    sup = _HostileSupervisor()
++    with patch.object(vault, "_page_backend", return_value=None), \
++         patch.object(vault, "_ensure_supervisor", return_value=sup), \
++         patch.object(vault, "_bot_desktop_browser_session", return_value=False):
++        out = vault._eval_js_secret("t", build_fill_js(_card_fills(), expected_origin=PAGE, nonce="n"))
++    assert out["success"] is False and sup.calls == []
++
++
++def test_a_failed_check_is_not_reported_as_a_changed_form(store):
++    sup = _HostileSupervisor()
++    real = sup.evaluate_isolated
++    sup.evaluate_isolated = lambda e, frame_id=None, **kw: (
++        {"ok": False, "error": "iframe session is no longer attached"} if "stamps" in e else real(e, frame_id=frame_id))
++    out, _ = _fill(store, sup)
++    assert out["success"] is False and out["error_type"] == "eval_failed" and "check" in out["error"]
++    assert not any(_CARD["card_number"] in e for _k, _f, e in sup.calls)
++
++
++def test_a_processor_frame_swapped_in_after_consent_gets_nothing(store):
++    """The prompt names the processor origins; a frame from another allowlisted processor that appears after
++    consent is not written to."""
++    sup = _HostileSupervisor()
++    braintree = "https://assets.braintreegateway.com"
++    real_frames = vault._payment_frames
++    calls = []
++
++    def frames(task_id, page_origin):
++        calls.append(1)
++        return real_frames(task_id, page_origin) if len(calls) == 1 else [("f", braintree)]
++
++    with patch.object(vault, "_payment_frames", side_effect=frames):
++        out, prompts = _fill(store, sup)
++    assert out["success"] is False and out["error_type"] == "frames_changed"
++    assert STRIPE in prompts[0][1] and braintree not in prompts[0][1]
++    assert not any(_CARD["card_number"] in e for _k, _f, e in sup.calls)
++
++
++def test_consent_names_the_processor_frame_origin(store):
++    sup = _HostileSupervisor()
++    out, prompts = _fill(store, sup)
++    assert len(prompts) == 1 and STRIPE in prompts[0][1] and PAGE in prompts[0][0]
++
++
++# ── CDPSupervisor.evaluate_isolated ──────────────────────────────────────────
++
++
++def _supervisor(cdp):
++    sup = CDPSupervisor("test", "ws://localhost")
++    sup._loop = type("Loop", (), {"is_running": lambda self: True})()
++    sup._active = True
++    sup._page_session_id = "page-session"
++    sup._cdp = cdp
++    sup._frames["f"] = FrameInfo("f", "", "", None, True, "frame-session")
++    return sup
++
++
++def _scheduled():
++    return patch("tools.browser_supervisor._schedule", side_effect=lambda coro, loop, **kw: asyncio.run(coro))
++
++
++@pytest.mark.parametrize("frame_id, session, root", [(None, "page-session", "main"), ("f", "frame-session", "f")])
++def test_evaluate_isolated_creates_a_world_in_the_target_frame_and_evaluates_there(frame_id, session, root):
++    seen = []
++
++    async def cdp(method, params=None, *, session_id=None, timeout=10):
++        seen.append((method, params, session_id))
++        if method == "Page.getFrameTree":
++            return {"result": {"frameTree": {"frame": {"id": root}}}}
++        if method == "Page.createIsolatedWorld":
++            return {"result": {"executionContextId": 42}}
++        return {"result": {"result": {"type": "string", "value": "ok"}}}
++
++    with _scheduled():
++        assert _supervisor(cdp).evaluate_isolated("1", frame_id=frame_id) == {"ok": True, "result": "ok"}
++    assert [m for m, *_ in seen] == ["Page.getFrameTree", "Page.createIsolatedWorld", "Runtime.evaluate"]
++    assert all(s == session for *_, s in seen)
++    assert seen[1][1]["frameId"] == root and seen[1][1]["grantUniveralAccess"] is False
++    assert seen[2][1]["contextId"] == 42 and seen[2][1]["expression"] == "1"
++    assert "userGesture" not in seen[2][1]  # a hijacked document gets no user activation from a vault script
++
++
++def test_evaluate_isolated_names_a_new_world_every_time():
++    """Chromium returns the existing world for a name it has seen (with whatever another CDP client put there)."""
++    names = []
++
++    async def cdp(method, params=None, *, session_id=None, timeout=10):
++        if method == "Page.getFrameTree":
++            return {"result": {"frameTree": {"frame": {"id": "main"}}}}
++        if method == "Page.createIsolatedWorld":
++            names.append(params["worldName"])
++            return {"result": {"executionContextId": 1}}
++        return {"result": {"result": {"type": "number", "value": 1}}}
++
++    with _scheduled():
++        sup = _supervisor(cdp)
++        sup.evaluate_isolated("1")
++        sup.evaluate_isolated("1")
++    assert len(set(names)) == 2 and all(n.startswith("hermes-vault-") for n in names)
++
++
++def test_evaluate_isolated_never_quotes_the_script_and_never_falls_back():
++    seen = []
++
++    async def cdp(method, params=None, *, session_id=None, timeout=10):
++        seen.append(method)
++        if method == "Page.getFrameTree":
++            return {"result": {"frameTree": {"frame": {"id": "f"}}}}
++        if method == "Page.createIsolatedWorld":
++            return {"result": {"executionContextId": 7}}
++        return {"result": {"exceptionDetails": {"text": "Uncaught", "exception": {"description": "x 4111111111111111"}}}}
++
++    with _scheduled():
++        out = _supervisor(cdp).evaluate_isolated("secret 4111111111111111", frame_id="f")
++    assert out["ok"] is False and "4111" not in out["error"]
++
++    async def gone(method, params=None, *, session_id=None, timeout=10):
++        seen.append(method)
++        raise RuntimeError("CDP error: Cannot find context with specified id 4111111111111111")
++
++    with _scheduled():
++        out = _supervisor(gone).evaluate_isolated("x", frame_id="f")
++    assert out["ok"] is False and "4111" not in out["error"]
++    assert "Runtime.evaluate" not in seen[3:]  # nothing ran in another world after the failure
++    with _scheduled():
++        assert _supervisor(cdp).evaluate_isolated("x", frame_id="gone")["ok"] is False
++
++
++def test_evaluate_isolated_refuses_a_session_that_holds_another_frame():
++    async def cdp(method, params=None, *, session_id=None, timeout=10):
++        if method == "Page.getFrameTree":
++            return {"result": {"frameTree": {"frame": {"id": "other"}}}}
++        raise AssertionError(method)
++
++    with _scheduled():
++        assert _supervisor(cdp).evaluate_isolated("x", frame_id="f")["ok"] is False
++
++
++# ── redaction of the forms a card field shows ────────────────────────────────
++
++
++def test_combined_expiry_and_card_layouts_are_registered_for_redaction():
++    assert vault._combined_expiries({"exp_month": "7", "exp_year": "2029"}) == ["07/29", "07 / 29", "07/2029", "07 / 2029"]
++    assert vault._combined_expiries({"exp_month": "", "exp_year": "2029"}) == []
++    assert "3056 930902 5904" in vault._grouped_card_numbers("30569309025904")  # Diners 4-6-4
++    nineteen = "6212345678901234567"
++    assert "6212 3456 7890 1234 567" in vault._grouped_card_numbers(nineteen)
++    assert "621234 5678901234567" in vault._grouped_card_numbers(nineteen)
++
++
++def test_a_card_fill_registers_the_expiry_for_redaction(store):
++    sup = _HostileSupervisor()
++    out, _ = _fill(store, sup)
++    text = redact.redact_registered_vault_values("expiry 07/29 and 07 / 29")
++    assert "07/29" not in text and "07 / 29" not in text
+diff --git a/tests/tools/test_vault_payment_iframe.py b/tests/tools/test_vault_payment_iframe.py
+index 6b5b94dd..7cfa4cdd 100644
+--- a/tests/tools/test_vault_payment_iframe.py
++++ b/tests/tools/test_vault_payment_iframe.py
+@@ -150,6 +150,9 @@ class _FakeSupervisor:
+         return {"ok": True, "frames": self.frames}
+ 
+     def evaluate_runtime(self, expression, frame_id=None):
++        raise AssertionError("frame reads run in an isolated world")
++
++    def evaluate_isolated(self, expression, frame_id=None):
+         return {"ok": True, "result": json.dumps(self.contexts[frame_id])}
+ 
+ 
+@@ -304,8 +307,10 @@ def test_plugin_page_lists_frames_through_the_backend_never_cdp():
+         backend.child_frames.return_value = [{"frame_id": "f", "url": STRIPE + "/v3/elements-inner-card.html"}]
+         backend.evaluate_in_frame.return_value = json.dumps({"origin": STRIPE, "ancestors": [PAGE]})
+         assert vault._payment_frames("t", PAGE) == [("f", STRIPE)]
+-        backend.evaluate_in_frame.return_value = json.dumps({"filled": 1})
+-        out = vault._eval_js_secret("t", "secret-script", frame_id="f")
++        # phase 1 (value-free check), then the write
++        backend.evaluate_in_frame.side_effect = [json.dumps({"origin": STRIPE, "ancestors": [PAGE], "stamps": 1}),
++                                                 json.dumps({"filled": 1})]
++        out = vault._eval_js_secret("t", vault._secret_script("secret-script", STRIPE, "n", PAGE), frame_id="f")
+     assert out == {"success": True, "result": json.dumps({"filled": 1})}
+     supervisor.assert_not_called()
+     backend.evaluate.assert_not_called()
+diff --git a/tests/tools/test_vault_payment_iframe_page_backend.py b/tests/tools/test_vault_payment_iframe_page_backend.py
+index 3ce10601..a085e7ac 100644
+--- a/tests/tools/test_vault_payment_iframe_page_backend.py
++++ b/tests/tools/test_vault_payment_iframe_page_backend.py
+@@ -61,6 +61,8 @@ class FakeCamofox:
+         url, origin, ancestors, controls = self.frames[frame_id]
+         if expression == vault._FRAME_CONTEXT_JS:
+             return json.dumps({"origin": origin, "ancestors": ancestors})
++        if "stamps" in expression and "data-hermes-vault-slot" in expression:  # phase 1 of the write: no values
++            return json.dumps({"origin": origin, "ancestors": ancestors, "stamps": 1})
+         if secret:
+             self.writes.append((frame_id, expression))
+             self.secret_flags.append(secret)
+diff --git a/tools/browser_supervisor.py b/tools/browser_supervisor.py
+index 5f434d3e..c3da64d6 100644
+--- a/tools/browser_supervisor.py
++++ b/tools/browser_supervisor.py
+@@ -15,6 +15,7 @@ import asyncio
+ import contextlib
+ import json
+ import logging
++import secrets
+ import threading
+ import time
+ from dataclasses import dataclass
+@@ -322,6 +323,58 @@ class CDPSupervisor(DialogSupervisionMixin, FrameTrackingMixin):
+         except Exception as exc:
+             return _err(exc)
+ 
++    def evaluate_isolated(self, expression: str, *, frame_id: Optional[str] = None,
++                          timeout: float = 10.0) -> dict[str, Any]:
++        """Evaluate ``expression`` in a new CDP isolated world of the page's top frame (or of the
++        out-of-process iframe ``frame_id``): same DOM, but none of the page's JavaScript. Page code can
++        neither replace the built-ins the script calls nor observe it (``fn.caller``, hooked prototypes,
++        a faked ``location``), so a secret-bearing script never runs where the page can reach it. The world
++        gets a random name per call: Chromium hands back an existing world (and runs scripts another CDP
++        client registered with addScriptToEvaluateOnNewDocument) for a name it has seen. No user gesture:
++        a document the frame navigated to must not get user activation from a refused write.
++
++        The world belongs to the document the frame holds when it is created; if the frame navigates
++        before the evaluation, the context is gone and the evaluation fails (nothing runs), and if it
++        navigated just before, the script runs isolated in the new document and its own origin check
++        refuses. Never falls back to the page's main world. Returns ``{"ok": True, "result"}`` (by value)
++        or ``{"ok": False, "error"}``; the error never quotes the expression."""
++        loop = self._loop
++        if loop is None or not loop.is_running():
++            return _fail("supervisor loop is not running")
++        with self._state_lock:
++            active, session_id = self._active, self._page_session_id
++            if frame_id:
++                frame = self._frames.get(frame_id)
++                session_id = frame.cdp_session_id if frame and frame.is_oopif else None
++        if not active:
++            return _fail("supervisor is not active")
++        if not session_id:
++            return _fail("iframe session is no longer attached" if frame_id else "supervisor has no attached page session")
++
++        async def _run() -> dict[str, Any]:
++            tree = (await self._cdp("Page.getFrameTree", session_id=session_id, timeout=timeout))["result"]
++            root = tree["frameTree"]["frame"]["id"]
++            if frame_id and root != frame_id:
++                return _fail("iframe session holds another frame")
++            world = await self._cdp("Page.createIsolatedWorld",
++                                    {"frameId": root, "worldName": "hermes-vault-" + secrets.token_hex(8),
++                                     "grantUniveralAccess": False},
++                                    session_id=session_id, timeout=timeout)
++            context_id = world["result"]["executionContextId"]
++            response = await self._cdp("Runtime.evaluate",
++                                       {"expression": expression, "contextId": context_id, "returnByValue": True,
++                                        "awaitPromise": False, "silent": True},
++                                       session_id=session_id, timeout=timeout)
++            payload = response.get("result", {})
++            if payload.get("exceptionDetails"):
++                return _fail("the isolated vault script threw")  # its text could quote the expression
++            return {"ok": True, "result": payload.get("result", {}).get("value")}
++
++        try:
++            return _schedule(_run(), loop, timeout=timeout + 2)
++        except (RuntimeError, TimeoutError, KeyError, TypeError) as exc:  # CDP error (e.g. context gone), timeout, odd reply
++            return _fail(f"isolated evaluation failed ({type(exc).__name__})")
++
+     def page_child_oopifs(self, *, timeout: float = 10.0) -> dict[str, Any]:
+         """Out-of-process iframes embedded DIRECTLY in the focused page's top document.
+ 
+diff --git a/tools/browser_vault_tool.py b/tools/browser_vault_tool.py
+index 9bd7a2af..b55c4254 100644
+--- a/tools/browser_vault_tool.py
++++ b/tools/browser_vault_tool.py
+@@ -37,7 +37,7 @@ import json
+ import secrets
+ import logging
+ import string
+-from typing import Any, Dict, Optional
++from typing import Any, Dict, NamedTuple, Optional
+ 
+ from tools.browser_vault_context import plugin_errors_as_refusal, saved_origins, snapshot_refusal, write_backend_code
+ 
+@@ -73,11 +73,17 @@ def _page_backend(task_id: str):
+     return backend_for_task(task_id)
+ 
+ 
++def _strict_secret_wrapper(expression: str) -> str:
++    """Page errors stay in-page with fixed text; strict, so no function the script calls can reach it through
++    ``.caller`` (the script holds the secret)."""
++    return ('(() => { "use strict"; try { return (' + expression + "); } catch (_) { return "
++            + json.dumps(_PAGE_FILL_FAILED) + "; } })()")
++
++
+ def _page_eval(backend: Any, task_id: str, expression: str, *, secret: bool) -> dict[str, Any]:
+     """Evaluate on a plugin page backend. On the secret path every failure gets fixed text."""
+     if secret:
+-        expression = ("(() => { try { return (" + expression + "); } catch (_) { return "
+-                      + json.dumps(_PAGE_FILL_FAILED) + "; } })()")
++        expression = _strict_secret_wrapper(expression)
+     try:
+         result = backend.evaluate(task_id, expression, secret=secret)
+     except Exception as exc:  # health: allow BLE001 -- plugin failure becomes a typed refusal
+@@ -94,8 +100,7 @@ def _page_frame_eval(backend: Any, task_id: str, frame_id: str, expression: str,
+     """Evaluate inside one iframe of a plugin page backend's page (``child_frames``); same secret contract as
+     :func:`_page_eval`: page errors stay in-page and any failure on the secret path gets fixed text."""
+     if secret:
+-        expression = ("(() => { try { return (" + expression + "); } catch (_) { return "
+-                      + json.dumps(_PAGE_FILL_FAILED) + "; } })()")
++        expression = _strict_secret_wrapper(expression)
+     try:
+         result = backend.evaluate_in_frame(task_id, frame_id, expression, secret=secret)
+     except Exception as exc:  # health: allow BLE001 -- plugin failure becomes a typed refusal
+@@ -152,6 +157,16 @@ def _eval_js_secret(task_id: str, expression: str, frame_id: Optional[str] = Non
+     """Evaluate a SECRET-BEARING JS expression. Supervisor CDP-WS only.
+     ``frame_id`` targets one out-of-process iframe's session instead of the page.
+ 
++    Never in the page's own JavaScript world: over CDP the script runs in a new isolated world of the
++    target frame (``CDPSupervisor.evaluate_isolated``), so page code can neither hook the built-ins it calls
++    nor read it through ``fn.caller``; a plugin page backend must evaluate isolated as well (Camofox's
++    page.evaluate runs in a sandbox; its vault routes assert that, see ``BrowserPageBackend``).
++
++    A fill script built by :func:`_secret_script` is written in two phases: a value-free script first
++    asserts, in the same world, that the document is still on the bound origin (a card frame: still a
++    direct child of the bound page) and still holds the inspection's stamps; the values are sent only when
++    it passes, answered otherwise with ``{"refused": ...}`` as the write itself would.
++
+     Fails closed: there is deliberately NO subprocess path, because that would
+     place the expression — and therefore the credential bytes — in argv,
+     visible to any process listing. When no supervisor session is available
+@@ -159,6 +174,10 @@ def _eval_js_secret(task_id: str, expression: str, frame_id: Optional[str] = Non
+     nothing is written. A plugin browser holding the task's page (no CDP endpoint) carries the
+     expression over its own transport instead; see ``agent.browser_page_backend``.
+     """
++    check = getattr(expression, "check", None)
++    if check is None:
++        # Every vault write carries its phase-1 check (_secret_script); a bare string is a caller bug.
++        return {"success": False, "error_type": "eval_failed", "error": "vault write without its origin check refused"}
+     page = _page_backend(task_id)
+     supervisor = None
+     if page is None:
+@@ -190,10 +209,25 @@ def _eval_js_secret(task_id: str, expression: str, frame_id: Optional[str] = Non
+             return {"success": False, "error_type": "human_has_control", "error": str(exc)}
+ 
+     if page is not None:
++        # Phase 1 (value-free) on the secret path of the backend, which runs it isolated like the write
++        # (BrowserPageBackend; Camofox: the vault-frames plugin's routes).
++        refused = _precheck_failure(
++            (lambda js: page.evaluate_in_frame(task_id, frame_id, js, secret=True)) if frame_id
++            else (lambda js: page.evaluate(task_id, js, secret=True)), check)
++        if refused is not None:
++            return {"success": True, "result": json.dumps(refused)}
+         if frame_id:
+             return _page_frame_eval(page, task_id, frame_id, expression, secret=True)
+         return _page_eval(page, task_id, expression, secret=True)
+-    sup = supervisor.evaluate_runtime(expression, frame_id=frame_id) if frame_id else supervisor.evaluate_runtime(expression)
++
++    # Phase 1 (value-free) in an isolated world of the same frame.
++    def _isolated_value(js: str) -> Any:
++        res = supervisor.evaluate_isolated(js, frame_id=frame_id) if frame_id else supervisor.evaluate_isolated(js)
++        return res.get("result") if res.get("ok") else None
++    refused = _precheck_failure(_isolated_value, check)
++    if refused is not None:
++        return {"success": True, "result": json.dumps(refused)}
++    sup = supervisor.evaluate_isolated(expression, frame_id=frame_id) if frame_id else supervisor.evaluate_isolated(expression)
+     if sup.get("ok"):
+         return {"success": True, "result": sup.get("result")}
+     return {
+@@ -236,6 +270,8 @@ def _current_page_origin(task_id: str) -> Optional[str]:
+ # top-level fill. Stripe is verified live; Braintree and Adyen use the same direct-child embedding.
+ # hyperhermes adds Adyen's regional live hosts and Square's Web Payments SDK card frame (production and
+ # sandbox), which #140788 names; each is a processor-owned origin serving only the processor's own frames.
++# Square: its Web Payments SDK docs name these hosts as the SDK's only script and frame-src origins
++# (https://developer.squareup.com/docs/web-payments/content-security-policy); merchants host nothing there.
+ PAYMENT_FRAME_ORIGINS = frozenset({
+     "https://js.stripe.com",
+     "https://assets.braintreegateway.com",
+@@ -293,11 +329,15 @@ def _frame_eval(task_id: str, frame_id: str, expression: str) -> dict[str, Any]:
+     supervisor = _ensure_supervisor(task_id)  # None when no supervisor can attach
+     if supervisor is None:
+         return {"success": False, "error": "supervisor required"}
+-    res = supervisor.evaluate_runtime(expression, frame_id=frame_id)
++    # Isolated world: the frame's page code could otherwise fake what decides whether it gets a card
++    # (Array.from over ancestorOrigins, the inspection's DOM reads).
++    res = supervisor.evaluate_isolated(expression, frame_id=frame_id)
+     return {"success": bool(res.get("ok")), "result": res.get("result"), "error": res.get("error")}
+ 
+ 
+-_FRAME_CONTEXT_JS = "JSON.stringify({origin: location.origin, ancestors: Array.from(location.ancestorOrigins || [])})"
++_FRAME_CONTEXT_JS = ('(() => { "use strict"; const l = window.location, a = l.ancestorOrigins, ancestors = []; '
++                     'for (let i = 0; a && i < a.length; i++) ancestors.push(a[i]); '
++                     'return JSON.stringify({origin: l.origin, ancestors}); })()')
+ 
+ 
+ def _payment_frames(task_id: str, page_origin: str) -> list[tuple[str, str]]:
+@@ -339,13 +379,78 @@ def _payment_frames(task_id: str, page_origin: str) -> list[tuple[str, str]]:
+ 
+ def _guard_frame_ancestry(expression: str, page_origin: str) -> str:
+     """Wrap a fill script so it writes nothing unless the iframe is still a direct child of ``page_origin``
+-    (checked inside the iframe, synchronously before the write)."""
+-    return ("(() => { const a = Array.from(location.ancestorOrigins || []); "
+-            f"if (a.length !== 1 || a[0] !== {json.dumps(page_origin)}) "
+-            "return JSON.stringify({refused: 'origin_changed', found: a.join(' < ')}); "
++    (checked inside the iframe, synchronously before the write).
++
++    Strict, and no function is called before the check (property reads of ``location`` only; the refusal
++    is a plain object): even if this ran in the frame's own world, no page-replaced built-in could reach
++    the script's source (and with it the card) through ``.caller``. It runs in an isolated world anyway."""
++    return ('(() => { "use strict"; const a = window.location.ancestorOrigins; '
++            f"if (!a || a.length !== 1 || a[0] !== {json.dumps(page_origin)}) {{ "
++            "let found = ''; for (let i = 0; a && i < a.length; i++) found += (i ? ' < ' : '') + a[i]; "
++            "return {refused: 'origin_changed', found}; } "
+             "return " + expression + "; })()")
+ 
+ 
++# Phase 1 of every secret write: a value-free check, in the same (isolated) world as the write, that the
++# target document is still on the bound origin, (for a card frame) still a direct child of the bound page,
++# and still holds this inspection's stamps. Values are sent (phase 2) only when it passes; the write
++# re-checks origin and ancestry first thing in its own strict script.
++_PRECHECK_JS_TEMPLATE = """(() => {
++  "use strict";
++  const l = window.location, a = l.ancestorOrigins, ancestors = [];
++  for (let i = 0; a && i < a.length; i++) ancestors.push(a[i]);
++  const prefix = __NONCE__ + ":";
++  let stamps = 0;
++  (function walk(root) {
++    for (const e of root.querySelectorAll("*")) {
++      const v = e.getAttribute("data-hermes-vault-slot");
++      if (v && v.startsWith(prefix)) stamps += 1;
++      if (e.shadowRoot) walk(e.shadowRoot);
++    }
++  })(document);
++  return JSON.stringify({ origin: l.origin, ancestors, stamps });
++})()"""
++
++
++class _WriteCheck(NamedTuple):
++    """What phase 1 asserts before a secret write: the document's origin, its only ancestor (a card frame;
++    None for the page itself) and this inspection's nonce."""
++    origin: str
++    ancestor: Optional[str]
++    nonce: str
++
++
++class _SecretScript(str):
++    """A secret-bearing fill script with the phase-1 check :func:`_eval_js_secret` runs before sending it."""
++    check: _WriteCheck
++
++
++def _secret_script(expression: str, origin: str, nonce: str, ancestor: Optional[str] = None) -> _SecretScript:
++    script = _SecretScript(expression)
++    script.check = _WriteCheck(origin, ancestor, nonce)
++    return script
++
++
++def _precheck_failure(evaluate, check: _WriteCheck) -> Optional[dict[str, Any]]:
++    """Phase 1 (no values, through ``evaluate``: the transport and world of the write): None when the write
++    may go ahead, else ``{"refused": "origin_changed", "found"}`` or ``{"refused": "fields_changed"}``."""
++    try:
++        res = evaluate(_PRECHECK_JS_TEMPLATE.replace("__NONCE__", json.dumps(check.nonce)))
++    except Exception:  # health: allow BLE001 -- a failed check refuses the write
++        res = None
++    parsed = _parse_json_result(res) if res is not None else None
++    if isinstance(parsed, str):
++        parsed = _parse_json_result(parsed)
++    if not isinstance(parsed, dict):
++        return {"refused": "check_failed"}
++    ancestors = parsed.get("ancestors") if isinstance(parsed.get("ancestors"), list) else []
++    if parsed.get("origin") != check.origin or (check.ancestor is not None and ancestors != [check.ancestor]):
++        return {"refused": "origin_changed", "found": " < ".join([str(parsed.get("origin"))] + [str(a) for a in ancestors])}
++    if not parsed.get("stamps"):
++        return {"refused": "fields_changed"}
++    return None
++
++
+ def _bound_page_origin(task_id: str, meta: Any, probe_kind: str) -> str | dict[str, Any]:
+     """The origin guard every fill of a stored secret (password, one-time code, card, address) passes
+     BEFORE the backend resolves any value: the page origin when it is one of the item's saved origins,
+@@ -557,7 +662,8 @@ def browser_vault_create_login(identifier: str, label: str = "", task_id: Option
+     register_vault_redaction_value(secret["password"])
+     fills = [{"index": c.control.index, "token": "new-password", "value": secret["password"]} for c in targets]
+     try:
+-        result = _eval_js_secret(effective_task_id, build_fill_js(fills, expected_origin=origin, nonce=nonce))
++        result = _eval_js_secret(effective_task_id, _secret_script(
++            build_fill_js(fills, expected_origin=origin, nonce=nonce), origin, nonce))
+     except Exception as exc:
+         result = {"success": False, "error": str(exc)}
+     if not result.get("success"):
+@@ -643,7 +749,8 @@ def browser_vault_enter_code(handle: str = "", task_id: Optional[str] = None) ->
+     def write(code: str, source: str) -> str:
+         register_vault_redaction_value(code)
+         fills = build_otp_fills(otp_controls, code)
+-        result = _eval_js_secret(effective_task_id, build_fill_js(fills, expected_origin=origin, nonce=nonce))
++        result = _eval_js_secret(effective_task_id, _secret_script(
++            build_fill_js(fills, expected_origin=origin, nonce=nonce), origin, nonce))
+         del code
+         if not result.get("success"):
+             return json.dumps({"success": False, "error": str(result.get("error") or "fill failed")[:200]})
+@@ -652,6 +759,9 @@ def browser_vault_enter_code(handle: str = "", task_id: Optional[str] = None) ->
+             parsed = _parse_json_result(parsed)
+         if isinstance(parsed, dict) and parsed.get("refused") == "origin_changed":
+             return json.dumps({"success": False, "error_type": "origin_changed", "error": "The page navigated before the code could be entered. Nothing was written."})
++        if isinstance(parsed, dict) and parsed.get("refused"):  # phase 1: the code field is gone or unreadable
++            return json.dumps({"success": False, "error_type": "fields_changed" if parsed["refused"] == "fields_changed" else "eval_failed",
++                               "error": "The code field could not be checked before the code was entered. Nothing was written."})
+         filled = int(parsed.get("filled", 0)) if isinstance(parsed, dict) else 0
+         return json.dumps({"success": bool(filled), "filled_fields": filled, "origin": origin, "source": source,
+                            "next": "Submit the form (many sites auto-submit when the last digit lands)."})
+@@ -718,7 +828,8 @@ def browser_vault_fill(handle: str, task_id: Optional[str] = None) -> str:
+         inspected = _inspect_page(effective_task_id, meta.kind, page_origin)
+         if isinstance(inspected, dict):
+             return json.dumps(inspected)
+-        if not _confirm_payment_fill(meta.label, page_origin):
++        consented_frames = sorted({t[1] for t in inspected[2]})
++        if not _confirm_payment_fill(meta.label, page_origin, consented_frames):
+             return json.dumps({"success": False, "error_type": "payment_declined",
+                                "error": "The user did not confirm filling this payment card. Do not retry; ask them instead."})
+ 
+@@ -726,7 +837,8 @@ def browser_vault_fill(handle: str, task_id: Optional[str] = None) -> str:
+         refusal = snapshot_refusal(backend, handle, meta, page_origin)
+         if refusal is not None:
+             return json.dumps(refusal)
+-        return _fill_bound_page(backend, handle, meta, page_origin, effective_task_id)
++        return _fill_bound_page(backend, handle, meta, page_origin, effective_task_id,
++                                consented_frames if meta.kind == "payment" else None)
+ 
+ 
+ def _inspect_page(task_id: str, kind: str, page_origin: str) -> tuple[str, list[Any], list[Any]] | dict[str, Any]:
+@@ -768,9 +880,11 @@ def _inspect_page(task_id: str, kind: str, page_origin: str) -> tuple[str, list[
+     return nonce, classified, frame_targets
+ 
+ 
+-def _fill_bound_page(backend: Any, handle: str, meta: Any, page_origin: str, effective_task_id: str) -> str:
++def _fill_bound_page(backend: Any, handle: str, meta: Any, page_origin: str, effective_task_id: str,
++                     consented_frames: Optional[list[str]] = None) -> str:
+     """Inspect the page, resolve the item's secret and write it; runs inside the backend's fill_context
+-    after the origin guard passed."""
++    after the origin guard passed. A card goes only into processor frames the user consented to
++    (``consented_frames``, named in the prompt)."""
+     from agent.redact import register_vault_redaction_value
+     from agent.vault_login_classifier import select_password_fill
+     from agent.vault_backends import UnlockRequired
+@@ -780,6 +894,10 @@ def _fill_bound_page(backend: Any, handle: str, meta: Any, page_origin: str, eff
+     if isinstance(inspected, dict):
+         return json.dumps(inspected)
+     nonce, classified, frame_targets = inspected
++    if consented_frames is not None and {t[1] for t in frame_targets} - set(consented_frames):
++        return json.dumps({"success": False, "error_type": "frames_changed",
++                           "error": ("The checkout's payment processor frames changed after you confirmed. Nothing "
++                                     "was written. Call browser_vault action=fill again to confirm the new ones.")})
+ 
+     # ── Resolve secret and fill (secret never enters any logged string) ─────
+     frame_fills: list[_FrameFill] = []
+@@ -806,8 +924,9 @@ def _fill_bound_page(backend: Any, handle: str, meta: Any, page_origin: str, eff
+     for value in (secret.values() if meta.kind == "payment" else [secret.get("password", "")]):
+         register_vault_redaction_value(value)
+     if meta.kind == "payment":
+-        # Card fields (a provider frame especially) show the number grouped: "4242 4242 4242 4242".
+-        for value in _grouped_card_numbers(secret.get("card_number")):
++        # Card fields (a provider frame especially) show the number grouped ("4242 4242 4242 4242") and the
++        # expiry combined ("12/34", what a cc-exp field holds).
++        for value in _grouped_card_numbers(secret.get("card_number")) + _combined_expiries(secret):
+             register_vault_redaction_value(value)
+ 
+     writes = _fill_writes(fills, frame_fills, page_origin, nonce)
+@@ -828,18 +947,35 @@ def _fill_bound_page(backend: Any, handle: str, meta: Any, page_origin: str, eff
+     return json.dumps(out)
+ 
+ 
++# Card number layouts other than plain groups of four, by length: Amex 4-6-5, Diners 4-6-4, 19-digit
++# (UnionPay, Maestro) 6-13 next to the 4-4-4-4-3 the groups of four give.
++_CARD_LAYOUTS = {14: [(4, 6, 4)], 15: [(4, 6, 5)], 19: [(6, 13)]}
++
++
+ def _grouped_card_numbers(number: Any) -> list[str]:
+-    """The forms a card field displays the number in (4-4-4-4, Amex 4-6-5; spaces or dashes), so a later
+-    browser result that reads the field back is scrubbed like the bare digits."""
++    """The forms a card field displays the number in (groups of four, plus the length's own layouts; spaces
++    or dashes), so a later browser result that reads the field back is scrubbed like the bare digits."""
+     digits = "".join(ch for ch in str(number or "") if ch.isdigit())
+     if len(digits) < 12:
+         return []
+     groups = [[digits[i:i + 4] for i in range(0, len(digits), 4)]]
+-    if len(digits) == 15:
+-        groups.append([digits[:4], digits[4:10], digits[10:]])
++    for layout in _CARD_LAYOUTS.get(len(digits), []):
++        cuts = [sum(layout[:i]) for i in range(len(layout) + 1)]
++        groups.append([digits[a:b] for a, b in zip(cuts, cuts[1:])])
+     return [sep.join(g) for g in groups for sep in (" ", "-")]
+ 
+ 
++def _combined_expiries(secret: dict) -> list[str]:
++    """The combined expiry as a card field shows it: MM/YY, MM / YY, MM/YYYY (the fill writes MM/YY)."""
++    month = "".join(ch for ch in str(secret.get("exp_month") or "") if ch.isdigit())
++    year = "".join(ch for ch in str(secret.get("exp_year") or "") if ch.isdigit())
++    if not month or len(year) < 2:
++        return []
++    mm, yy = month.zfill(2)[-2:], year[-2:]
++    out = [f"{mm}/{yy}", f"{mm} / {yy}", f"{mm}/{year}", f"{mm} / {year}"]
++    return list(dict.fromkeys(out))
++
++
+ def _classify_controls(raw_controls: list, classify) -> list:
+     from agent.vault_login_classifier import LoginControl
+ 
+@@ -892,16 +1028,17 @@ def _select_checkout_fills_with_frames(classified: list, frame_targets: list[_Fr
+ 
+ 
+ def _fill_writes(fills: list, frame_fills: list[_FrameFill], page_origin: str,
+-                 nonce: str) -> list[tuple[str, Optional[str], str]]:
+-    """``(expression, frame_id, origin the write is bound to)``: the page itself first, then provider iframes."""
++                 nonce: str) -> list[tuple[str, Optional[str], str, str]]:
++    """``(expression, frame_id, origin the write is bound to, nonce)``: the page itself first, then provider
++    iframes."""
+     from agent.vault_login_classifier import build_fill_js
+ 
+-    writes: list[tuple[str, Optional[str], str]] = []
++    writes: list[tuple[str, Optional[str], str, str]] = []
+     if fills:
+-        writes.append((build_fill_js(fills, expected_origin=page_origin, nonce=nonce), None, page_origin))
++        writes.append((build_fill_js(fills, expected_origin=page_origin, nonce=nonce), None, page_origin, nonce))
+     for frame_id, frame_origin, frame_nonce, selected in frame_fills:
+         expression = build_fill_js(selected, expected_origin=frame_origin, nonce=frame_nonce)
+-        writes.append((_guard_frame_ancestry(expression, page_origin), frame_id, frame_origin))
++        writes.append((_guard_frame_ancestry(expression, page_origin), frame_id, frame_origin, frame_nonce))
+     return writes
+ 
+ 
+@@ -920,16 +1057,18 @@ def _origin_changed_refusal(found: Any, frame_bound: Optional[str], page_origin:
+     }
+ 
+ 
+-def _run_fill_writes(task_id: str, writes: list[tuple[str, Optional[str], str]], secret: dict,
++def _run_fill_writes(task_id: str, writes: list[tuple[str, Optional[str], str, str]], secret: dict,
+                      page_origin: str) -> tuple[int, Optional[dict]]:
+-    """Run each write in order. Returns ``(filled, None)``, or ``(filled so far, refusal)`` at the first failure."""
++    """Run each write in order, each after its value-free phase-1 check. Returns ``(filled, None)``, or
++    ``(filled so far, refusal)`` at the first failure."""
+     from agent.vault_store import scrub_secret_from_text
+ 
+     filled = 0
+-    for expression, frame_id, bound in writes:
++    for expression, frame_id, bound, write_nonce in writes:
++        script = _secret_script(expression, bound, write_nonce, page_origin if frame_id else None)
+         try:
+-            fill_result = (_eval_js_secret(task_id, expression, frame_id=frame_id) if frame_id
+-                           else _eval_js_secret(task_id, expression))
++            fill_result = (_eval_js_secret(task_id, script, frame_id=frame_id) if frame_id
++                           else _eval_js_secret(task_id, script))
+         except Exception as exc:  # health: allow BLE001 -- the expression holds the secret, so no traceback is logged; the text is scrubbed into a refusal
+             return filled, {"success": False, "error": scrub_secret_from_text(str(exc), secret), "filled_fields": filled}
+         if not fill_result.get("success"):
+@@ -943,20 +1082,32 @@ def _run_fill_writes(task_id: str, writes: list[tuple[str, Optional[str], str]],
+             parsed = _parse_json_result(parsed)
+         if isinstance(parsed, dict) and parsed.get("refused") == "origin_changed":
+             return filled, _origin_changed_refusal(parsed.get("found"), bound if frame_id else None, page_origin, filled)
++        if isinstance(parsed, dict) and parsed.get("refused") == "check_failed":
++            return filled, {"success": False, "error_type": "eval_failed", "filled_fields": filled,
++                            "error": ("Could not check the page before the fill. "
++                                      + ("Nothing was written." if not filled else "Fields written before this point stay filled."))}
++        if isinstance(parsed, dict) and parsed.get("refused"):
++            return filled, {"success": False, "error_type": "fields_changed", "filled_fields": filled,
++                            "error": ("The form changed before the fill could run (the inspected fields are gone). "
++                                      + ("Nothing was written." if not filled else "Fields written before this point stay filled.")
++                                      + " Call browser_vault action=fill again.")}
+         filled += int(parsed.get("filled", 0)) if isinstance(parsed, dict) else 0
+     return filled, None
+ 
+ 
+-def _confirm_payment_fill(label: str, origin: str) -> bool:
++def _confirm_payment_fill(label: str, origin: str, frame_origins: Optional[list[str]] = None) -> bool:
+     """Human confirmation before a card is written into a page: a prompt injection that reaches a checkout
+     must not be able to spend. Routes through the approval surface of the active session (gateway button
+-    round-trip or CLI panel); headless sessions cannot confirm and the fill is refused."""
++    round-trip or CLI panel); headless sessions cannot confirm and the fill is refused. Names the payment
++    processor frame origin(s) that will receive card fields, when any."""
+     from tools.approval_prompt import request_elicitation_consent
+ 
++    frames = (" Card fields go into the payment processor's frame from " + ", ".join(frame_origins) + "."
++              if frame_origins else "")
+     return request_elicitation_consent(
+         f"Fill payment card '{label}' on {origin}",
+-        "The agent wants to enter your saved card details into this checkout page. The card number and "
+-        "CVC never enter the conversation. Approve only if you intend to pay here.",
++        "The agent wants to enter your saved card details into this checkout page." + frames + " The card number "
++        "and CVC never enter the conversation. Approve only if you intend to pay here.",
+         surface="vault-payment", title="Confirm payment card fill?") == "accept"
+ 
+ 

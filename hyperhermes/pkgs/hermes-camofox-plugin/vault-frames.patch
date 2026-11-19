@@ -12,16 +12,37 @@ POST /tabs/<id>/vault-frames lists the tab's direct child frames,
 POST /tabs/<id>/vault-frames/<frameId>/evaluate runs a script in one of
 them. The secret path keeps evaluate's rules: loopback or HTTPS only, no
 redirects, no environment proxies. Core decides which frame takes the card.
+
+Every secret-bearing script, the top-level password/card fill too, goes
+through the plugin (POST /tabs/<id>/vault-evaluate for the main frame),
+never core's /evaluate: the plugin runs it only in an isolated world (it
+refuses a browser launched with main-world evaluation and asserts Xrays
+in the same world first), and core's /evaluate would put the script on
+its tab:evaluate plugin event.
 Not upstream (hermes-official-plugins).
 
 diff --git a/camofox_vault.py b/camofox_vault.py
-index 1b917f9..69c4236 100644
+index 1b917f9..3eda83a 100644
 --- a/camofox_vault.py
 +++ b/camofox_vault.py
-@@ -59,4 +59,32 @@ def make_page_backend():
-                 raise RuntimeError(str(resp.get("error") if isinstance(resp, dict) else "") or "evaluate failed")
-             return resp["result"]
- 
+@@ -50,10 +50,42 @@ def make_page_backend():
+                 raise RuntimeError(client.NO_SESSION_ERROR)
+             if secret and not secret_transport_ok(client.get_camofox_url()):
+                 raise RuntimeError("vault fills need CAMOFOX_URL on loopback or HTTPS")
++            # A secret-bearing script goes to the vault-frames plugin's own route
++            # (pkgs/camofox-browser/vault-frames-plugin), which runs it only in an isolated world (it asserts
++            # that, and refuses otherwise) and does not put it on core's tab:evaluate plugin event. A server
++            # without the route answers 404: no fill, never the plain route.
+             # proxies=None per scheme: requests would otherwise route through HTTP(S)_PROXY from the
+             # environment, sending the fill script in clear text past the loopback/HTTPS check above.
+-            resp = client.request("post", client.tab_path(session, "evaluate"), allow_redirects=False,
++            resp = client.request("post", client.tab_path(session, "vault-evaluate" if secret else "evaluate"),
++                                  allow_redirects=False, proxies={"http": None, "https": None},
++                                  json={"expression": expression, "userId": session["user_id"]}).json()
++            if not isinstance(resp, dict) or "result" not in resp or resp.get("error"):
++                raise RuntimeError(str(resp.get("error") if isinstance(resp, dict) else "") or "evaluate failed")
++            return resp["result"]
++
 +        # The page's direct child frames (hosted card fields), through hyperhermes' camofox-browser plugin
 +        # vault-frames (pkgs/camofox-browser/vault-frames-plugin); a server without it answers 404, so no frames.
 +        def child_frames(self, task_id: str) -> list[dict[str, str]]:
@@ -29,7 +50,7 @@ index 1b917f9..69c4236 100644
 +            if not session or not session.get("tab_id"):
 +                return []
 +            resp = client.request("post", client.tab_path(session, "vault-frames"), allow_redirects=False,
-+                                  proxies={"http": None, "https": None},
+                                   proxies={"http": None, "https": None},
 +                                  json={"userId": session["user_id"]}).json()
 +            frames = resp.get("frames") if isinstance(resp, dict) else None
 +            return [{"frame_id": str(f["frameId"]), "url": str(f.get("url") or "")}
@@ -45,9 +66,6 @@ index 1b917f9..69c4236 100644
 +                raise RuntimeError("bad frame id")
 +            resp = client.request("post", client.tab_path(session, f"vault-frames/{frame_id}/evaluate"),
 +                                  allow_redirects=False, proxies={"http": None, "https": None},
-+                                  json={"expression": expression, "userId": session["user_id"]}).json()
-+            if not isinstance(resp, dict) or "result" not in resp or resp.get("error"):
-+                raise RuntimeError(str(resp.get("error") if isinstance(resp, dict) else "") or "evaluate failed")
-+            return resp["result"]
-+
-     return CamofoxPageBackend()
+                                   json={"expression": expression, "userId": session["user_id"]}).json()
+             if not isinstance(resp, dict) or "result" not in resp or resp.get("error"):
+                 raise RuntimeError(str(resp.get("error") if isinstance(resp, dict) else "") or "evaluate failed")
