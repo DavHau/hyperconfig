@@ -413,6 +413,8 @@ in
           secretEnv = {
             P0_API_KEY = credential "p0-api-key";
             ANTHROPIC_TOKEN = credential "teamclaude-api-key";
+            # OpenRouter for headless runs on other models (hermes chat --provider openrouter)
+            OPENROUTER_API_KEY = credential "openrouter-api-key";
           };
           skillDirs = map (s: "${s}/share/skills") (nixSkills ++ cfg.extraSkills);
           settings = {
