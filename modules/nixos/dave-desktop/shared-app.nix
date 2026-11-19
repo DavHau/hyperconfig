@@ -1,23 +1,16 @@
 # The shared "Hermes Desktop" app on Dave's desktops (./default.nix) for
 # som's agents (machines/som/hermes-agents.nix), through hyperhermes'
 # desktop module: `hermes-desktop` (the Electron app, also what the niri
-# keybind and the bar button spawn via spaces-hermes), plus a "Hermes
-# Desktop" entry and one "Hermes TUI (<agent>)" entry per agent. The
-# module's header has the connection mechanics; this file has som's side
-# of them. Apps marked `isolated` in ./apps.nix are in neither: they get
-# an app of their own in a container (./isolated-apps.nix).
+# keybind and the bar button spawn via spaces-hermes) and its "Hermes
+# Desktop" entry. The module's header has the connection mechanics; this
+# file has som's side of them. Apps marked `isolated` in ./apps.nix are not
+# in it: they get an app of their own in a container (./isolated-apps.nix).
 #
 # The app opens each agent's always-on dashboard on som,
 # https://<agent>.davhau.fyi (../../../machines/som/hermes-dashboards.nix),
 # and signs in through pocket-id: dave signs in once per agent inside the
 # app. Chats run in som's dashboard units, so quitting the app leaves them
 # running.
-#
-# The TUI entries dial <agent>@hermes.davhau.com (som's public name) with
-# the user's normal identities (the agent accounts take the admin keys),
-# the host verified as `som.d`: som presents its clan sshd CA certificate
-# (principal som.d) on every address, and the sshd client role trusts that
-# CA for `*.d` in ssh_known_hosts.
 {
   config,
   lib,
@@ -29,12 +22,9 @@
 
   services.hyperhermes.desktop = {
     enable = true;
-    host = "hermes.davhau.com";
     domain = (import ../../../machines/som/hermes-dashboards.nix).domain;
     hostLabel = "som";
-    hostKeyAlias = "som.d";
-    # Agent account on som -> label (also read by som's assertions, which
-    # require ssh keys for each: the TUI entries log in as the agent).
+    # Agent account on som -> label.
     agents = lib.mapAttrs (_: a: a.label) (lib.filterAttrs (_: a: !(a ? isolated)) (import ./apps.nix));
     # The first window opens on `primary`.
     primary = "dave-hermes";

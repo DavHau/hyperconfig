@@ -27,7 +27,7 @@ store path.
 | `rea` | REA reverse engineering for agents with `rea.enable`: its MCP server, the `rea` CLI with Ghidra and the other analysis tools, its skill |
 | `teamclaude` | an agent's Anthropic traffic through a TeamClaude gateway |
 | `claude-auth` | Claude Pro/Max OAuth for the agents (vendored hermes-claude-auth) |
-| `desktop` | the hermes-desktop app (each agent's hosted dashboard, OAuth) and TUI launchers on a workstation |
+| `desktop` | the hermes-desktop app (each agent's hosted dashboard, OAuth) on a workstation |
 | `clan` | fills the secret paths from [clan](https://clan.lol) vars (not in `default`) |
 | `local-container` | the whole local deployment in one NixOS container on a workstation (not in `default`) |
 

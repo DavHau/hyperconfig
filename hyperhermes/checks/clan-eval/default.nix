@@ -104,7 +104,6 @@ let
         agents.alice.teamclaude.enable = true;
         desktop = {
           enable = true;
-          host = "agents.example.org";
           hostLabel = "agents";
           domain = "example.org";
           agents.alice = "Alice";

@@ -3,15 +3,12 @@
 # https://<account>.davhau.fyi (som's agents:
 # ../../../machines/som/hermes-dashboards.nix; infra-space:
 # ../infra-space/dashboard.nix). Read by ./shared-app.nix,
-# ./isolated-apps.nix and machines/som/hermes-agents.nix (assertion: each
-# agent in the shared app needs ssh keys, its TUI entry logs in as the
-# agent).
+# ./isolated-apps.nix and ./hermes-one.nix.
 #
 #   label     shown in the app and the launcher entries.
 #   isolated  unset: the agent is a connection of the shared "Hermes
-#             Desktop" app and has a "Hermes TUI (<label>)" entry
-#             (./shared-app.nix).
-#             set: neither; it has an app of its own, "Hermes (<label>)",
+#             Desktop" app (./shared-app.nix).
+#             set: not in it; it has an app of its own, "Hermes (<label>)",
 #             run in a container of its own on every desktop
 #             (./isolated-apps.nix). Its fields:
 #               index  the container's veth subnet, 10.235.1.<4i>/30 and

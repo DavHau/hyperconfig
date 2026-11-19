@@ -11,10 +11,8 @@
   session either. A dashboard renders what its agent writes, so the app
   showing it gets nothing of Dave's: not his home, his ssh agent, his
   session bus or his other agents' app (whose cookies sign in to
-  dave-hermes and the others), and the agent's account needs no ssh keys
-  (no TUI entry; som's assertion in machines/som/hermes-agents.nix skips
-  these apps). It needs no local infra-space or space either: the app
-  only talks https, so every desktop gets the same set.
+  dave-hermes and the others). It needs no local infra-space or space
+  either: the app only talks https, so every desktop gets the same set.
 
   Per app, container `isolated.name` (default `hermes-<account>`; at most
   12 characters: the host's veth is ve-<name>), through the spaces' host

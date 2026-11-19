@@ -1,8 +1,8 @@
 # Hermes launchers on a workstation for the agents of a hyperhermes host
 # (`services.hyperhermes.desktop`): `hermes-desktop` (the Electron app,
-# packages.hermes-desktop), plus a "Hermes Desktop" entry and one
-# "Hermes TUI (<agent>)" entry per agent for app launchers. Independent of
-# core: the agents run elsewhere, this machine only dials them.
+# packages.hermes-desktop) and its "Hermes Desktop" entry for app
+# launchers. Independent of core: the agents run elsewhere, this machine
+# only dials their dashboards.
 #
 # Desktop app: every agent is a `remote` connection to its always-on
 # hosted dashboard, https://<agent>.<domain> (the dashboards module's
@@ -14,10 +14,6 @@
 # Chats run in the dashboard unit on the agents' host, not in a process
 # the app owns, so quitting the app leaves running sessions and subagents
 # alone.
-#
-# TUI: a plain `ssh -t <agent>@<host> hermes` with the user's normal
-# identities and a real pty, the host key trusted under `hostKeyAlias` if
-# set.
 #
 # `hermes-agent` is this flake's input, the source of the app.
 { hermes-agent }:
@@ -50,20 +46,6 @@ let
     '').overrideAttrs
       { passthru = { inherit spec; }; };
 
-  hostKeyArg = lib.optionalString (cfg.hostKeyAlias != null) "-o HostKeyAlias=${cfg.hostKeyAlias} ";
-
-  tui =
-    agent:
-    pkgs.writeShellScriptBin "hermes-tui-${agent}" ''
-      ${pkgs.openssh}/bin/ssh -t ${hostKeyArg}${agent}@${cfg.host} hermes "$@"
-      rc=$?
-      if [ "$rc" -ne 0 ]; then
-        printf '\nhermes exited with status %d - press Enter to close\n' "$rc"
-        read -r _
-      fi
-      exit "$rc"
-    '';
-
   desktopItem = pkgs.makeDesktopItem {
     name = "hermes-desktop";
     desktopName = "Hermes Desktop";
@@ -75,21 +57,6 @@ let
       "Chat"
     ];
   };
-
-  tuiItem =
-    agent:
-    pkgs.makeDesktopItem {
-      name = "hermes-tui-${agent}";
-      desktopName = "Hermes TUI (${cfg.agents.${agent}})";
-      comment = "Hermes Agent terminal UI on ${cfg.hostLabel}";
-      exec = "${tui agent}/bin/hermes-tui-${agent}";
-      inherit icon;
-      terminal = true;
-      categories = [
-        "Network"
-        "ConsoleOnly"
-      ];
-    };
 in
 {
   # Imported with its argument applied (../../flake.nix), so it names
@@ -97,33 +64,17 @@ in
   _file = ./default.nix;
 
   options.services.hyperhermes.desktop = with lib; {
-    enable = mkEnableOption "the hermes-desktop app and TUI launchers for a remote hyperhermes host's agents";
+    enable = mkEnableOption "the hermes-desktop app for a remote hyperhermes host's agents";
     package = mkOption {
       type = types.package;
       default = import ../../pkgs/hermes-desktop { inherit pkgs hermes-agent; };
       defaultText = literalMD "packages.hermes-desktop, built against this system's nixpkgs";
       description = "The Electron app the `hermes-desktop` launcher runs.";
     };
-    host = mkOption {
-      type = types.str;
-      example = "hermes.example.org";
-      description = "SSH host name of the machine the agents run on; the TUI entries dial it.";
-    };
     hostLabel = mkOption {
       type = types.str;
-      default = cfg.host;
-      defaultText = literalExpression "config.services.hyperhermes.desktop.host";
-      description = ''
-        Short name of the agents' host, used in the launcher entries.
-      '';
-    };
-    hostKeyAlias = mkOption {
-      type = types.nullOr types.str;
-      default = null;
-      description = ''
-        ssh HostKeyAlias under which the host key is already trusted
-        (ssh_known_hosts, a @cert-authority line, ...), for the TUI.
-      '';
+      example = "agents";
+      description = "Short name of the agents' host, shown in the launcher entry.";
     };
     domain = mkOption {
       type = types.str;
@@ -138,7 +89,7 @@ in
       example = {
         alice = "Alice's agent";
       };
-      description = "Agent account on the host -> label shown in the app and the TUI entry.";
+      description = "Agent account on the host -> label shown in the app.";
     };
     primary = mkOption {
       type = types.str;
@@ -166,7 +117,6 @@ in
     environment.systemPackages = [
       hermesDesktop
       desktopItem
-    ]
-    ++ map tuiItem (lib.attrNames cfg.agents);
+    ];
   };
 }

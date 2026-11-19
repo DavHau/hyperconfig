@@ -97,9 +97,7 @@ let
 
   desktopConfig = {
     enable = true;
-    host = "agents.example.org";
     hostLabel = "agents";
-    hostKeyAlias = "agents.internal";
     domain = "example.org";
     agents = {
       alice = "Alice";
@@ -208,9 +206,7 @@ let
     desktop-evaluates = evaluates desktop && failedAssertions desktop == [ ];
     desktop-launchers =
       hasPackageNamed desktop "hermes-desktop"
-      && hasPackageNamed desktop "hermes-desktop.desktop"
-      && hasPackageNamed desktop "hermes-tui-alice.desktop"
-      && hasPackageNamed desktop "hermes-tui-bob.desktop";
+      && hasPackageNamed desktop "hermes-desktop.desktop";
     # The app dials each agent's hosted dashboard with OAuth.
     desktop-dashboard-urls = desktopSpec == {
       primary = "alice";

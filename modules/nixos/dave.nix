@@ -20,7 +20,7 @@ in
     ./sbox-mullvad.nix
     ./nix-ssh-client.nix
     # Dave's desktop apps, the same set on every desktop: the shared
-    # Hermes Desktop app and TUI entries, the isolated voice and
+    # Hermes Desktop app, the isolated voice and
     # infra-space apps, the infra-space and spaces shells
     # (hyper.daveDesktop.user picks the session).
     ./dave-desktop

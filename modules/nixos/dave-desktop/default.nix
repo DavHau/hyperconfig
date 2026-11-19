@@ -3,8 +3,7 @@
   ../dave.nix (amy, vit, som):
 
     - ./shared-app.nix: the shared "Hermes Desktop" app (hyperhermes'
-      desktop module) for som's trusted agents, plus their "Hermes TUI"
-      entries;
+      desktop module) for som's trusted agents;
     - ./isolated-apps.nix: "Hermes (voice)" and "Hermes (infra-space)",
       each the hermes app in a confined container of its own here
       (../space-gui on the desktop user's session);

@@ -394,22 +394,8 @@ in
       );
       deniedReaders = lib.filter (name: denied ? ${name}) (lib.attrNames vaultReaders);
       slotless = lib.filter (name: !agents.${name}.slot.enable) (lib.attrNames agents);
-      # Agents in dave's shared desktop app (../../modules/nixos/dave-desktop/shared-app.nix)
-      # get a "Hermes TUI (<agent>)" entry that ssh-es in as the agent: an
-      # account without keys makes that entry fail with "Permission denied".
-      # Not the `isolated` ones: they have no TUI entry, only their own
-      # app on the dashboard (../../modules/nixos/dave-desktop/isolated-apps.nix).
-      tuiKeyless = lib.filter (name: (agents.${name}.sshKeys or [ ]) == [ ]) (
-        lib.attrNames (
-          lib.filterAttrs (_: a: !(a ? isolated)) (import ../../modules/nixos/dave-desktop/apps.nix)
-        )
-      );
     in
     [
-      {
-        assertion = tuiKeyless == [ ];
-        message = "machines/som: agents in dave's Hermes desktop/TUI launchers need sshKeys (else the TUI entry is refused): ${toString tuiKeyless}";
-      }
       {
         assertion = undenied == [ ];
         message = ''

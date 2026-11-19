@@ -181,7 +181,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/cooler-lcd/default.nix — Show the NixOS snowflake on the LCD of a Thermalright AIO pump head (USB 0416:5302 "USBDISPLAY", firmware 4.07, PM=51 F… <- som
 - modules/nixos/cooler-lcd/render.py — - <- m/cooler-lcd/default.nix
 - modules/nixos/cooler-lcd/stream.py — - <- m/cooler-lcd/default.nix
-- modules/nixos/dave-desktop/apps.nix — THE list of Hermes apps on Dave's desktops (./default.nix): <- machines/som/hermes-agents.nix, m/dave-desktop/hermes-one.nix, m/dave-desktop/isolated-apps.nix, m/dave-desktop/shared-app.nix
+- modules/nixos/dave-desktop/apps.nix — THE list of Hermes apps on Dave's desktops (./default.nix): <- m/dave-desktop/hermes-one.nix, m/dave-desktop/isolated-apps.nix, m/dave-desktop/shared-app.nix
 - modules/nixos/dave-desktop/default.nix — Dave's desktop apps, the same set on every desktop that imports ../dave.nix (amy, vit, som): <- m/dave-desktop/hermes-one.nix, m/dave.nix, m/space-gui/default.nix, m/spaces/client.nix
 - modules/nixos/dave-desktop/hermes-one-app.nix — Hermes One (../../../pkgs/hermes-one) as a launcher script: <- m/dave-desktop/hermes-one.nix, m/dave-desktop/isolated-apps.nix
 - modules/nixos/dave-desktop/hermes-one-connections.py — - <- m/dave-desktop/hermes-one-app.nix
