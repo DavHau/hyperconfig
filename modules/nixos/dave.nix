@@ -7,6 +7,13 @@ let
   l = lib // builtins;
 in
 {
+  # spaces' update-diff pre-switch check calls `dix --force-correctness`
+  # for dix >= 1.4.2; dix 3.0 dropped that flag (now `dix diff OLD NEW`),
+  # so the check failed and blocked every switch. Drop once spaces-os
+  # updates its default.
+  spaces.update-diff.command = lib.mkIf (lib.versionAtLeast (pkgs.dix.version or "0") "3")
+    "${lib.getExe pkgs.dix} diff";
+
   imports = [
     inputs.home-manager.nixosModules.default
     inputs.retiolum.nixosModules.retiolum
