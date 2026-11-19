@@ -56,10 +56,10 @@ us. Each stands alone on `main` unless "after" says otherwise.
 | PR | What | Setting / neutrality | after | Status |
 |---|---|---|---|---|
 | A1 (#462) | `nixosModules.fleet`, `agave.tunnel.*` options | neutral | – | merged |
-| A2 | Repo mode: `services.agave.repository` (url, branch, key): ~/fleet is a clone of an existing repo; the template sync never touches it | off by default | Words #702 | branch `repo-mode-clone`; reviewed twice (approve with nits); PR opens with A3/A5 |
-| A3 | Repo mode: computers come from the repo's clan inventory (offline until their tunnel connects, no install/wipe/remove); their tunnel keys come from the repo's public vars | repo mode only | A2 | branch `repo-mode-inventory`; review asked for key revocation etc., in fix-up |
+| A2 | Repo mode: `services.agave.repository` (url, branch, key): ~/fleet is a clone of an existing repo; the template sync never touches it | off by default | Words #702 | branch `repo-mode-clone`; nits applied, delta review: approve with nits (temp-dir prefix, two doc clauses); PR opens with A3/A5 |
+| A3 | Repo mode: computers come from the repo's clan inventory (offline until their tunnel connects, no install/wipe/remove); their tunnel keys come from the repo's public vars | repo mode only | A2 | branch `repo-mode-inventory`; revocation fixed, re-review: approve with nits (in fix-up with A5) |
 | A4 | Each computer reports the commit it runs (`system.configurationRevision`); Agave shows Behind | neutral (no revision = nothing shown) | Words [#682](https://git.geninf.io/generational-infrastructure/agave/pulls/682) | [#685](https://git.geninf.io/generational-infrastructure/agave/pulls/685), reviewed (approve after fix-up), waits for Dave |
-| A5 | Repo mode: fetch + rebase before a turn, push to the branch after a confirmed change, retry on reject, never force | repo mode only | A3 | branch `repo-mode-push`; review asked for a mechanical confirm gate and the push key out of the agent's sandbox, in fix-up |
+| A5 | Repo mode: fetch + rebase before a turn, push to the branch after a confirmed change, retry on reject, never force | repo mode only | A3 | branch `repo-mode-push`; mechanical confirm gate done; re-review: request changes (the agent can still reach the push key via `.git/config` and `/proc/<pid>/root`; approval must bind the shown commit), in fix-up 3 |
 | A6 | `nixosModules.fleet` without the recipe framework (`config.blocks` optional) | neutral | – | [#677](https://git.geninf.io/generational-infrastructure/agave/pulls/677), CI green, reviewed (approve), waits for Dave |
 | W1 | Words: **behind** | Words only | – | [#682](https://git.geninf.io/generational-infrastructure/agave/pulls/682), reviewed, waits for Dave |
 | W2 | Words: **the repository**, **repo mode**, **repository computer** | Words only | – | [#702](https://git.geninf.io/generational-infrastructure/agave/pulls/702), reviewed, waits for Dave |
@@ -78,15 +78,15 @@ agave `main` at a rev Dave picks.
 | Step | What | Status |
 |---|---|---|
 | H1 | This doc | done |
-| H2 | flake input `agave` pinned to the integration branch | |
-| H3 | tranquil-pds on som: pds.davhau.com, handle domain davhau.com, PDS-hosted did:web on, invite-only, no relay crawl (`modules/nixos/atproto-pds`, `machines/som/atproto-pds.nix`; DNS records and certificate on som, since `*.davhau.com` points at edi) | implemented, in review |
-| H4 | Dave's account dave.davhau.com (did:web), created by `atproto-pds-accounts.service`; password from the prompt-free clan var `atproto-pds-dave-password` (random until Dave sets his own: `clan-secret-prompt som atproto-pds-dave-password password`, then a deploy applies it) | implemented, in review |
-| H5 | space `agave-host` (registry index 3, sshPort 2226, uids 1220/1221) running `services.agave` in repo mode | |
-| H6 | SNI backend agave.davhau.com (443 and 80) -> 10.235.0.14 | |
-| H7 | Mullvad egress source `ve-agave-host` | |
-| H8 | clan vars: TeamClaude client key `teamclaude-agave-host`, `agave-geninf-ro` credential, hyperconfig push key `agave-host-github` (GitHub deploy key with write: Dave adds it once) | |
-| H9 | `nixosModules.fleet` (tunnel only: no desktop, no Wi-Fi) on every machine incl. amy and vit, dialing agave.davhau.com in TLS | |
-| H10 | Agave's tenant ssh key authorized for root on every machine (public value in the repo, revocable by removing it) | |
+| H2 | flake input `agave` pinned to the integration branch | implemented; security review: request changes (tenant key `from=` localhost only, push/tenant keys not for the login user, generator names, no fleet-wide configurationRevision), in fix-up |
+| H3 | tranquil-pds on som: pds.davhau.com, handle domain davhau.com, PDS-hosted did:web on, invite-only, no relay crawl (`modules/nixos/atproto-pds`, `machines/som/atproto-pds.nix`; DNS records and certificate on som, since `*.davhau.com` points at edi) | on main (8583ae5c), vars generated; waits for deploy of som |
+| H4 | Dave's account dave.davhau.com (did:web), created by `atproto-pds-accounts.service`; password from the prompt-free clan var `atproto-pds-dave-password` (random until Dave sets his own: `clan-secret-prompt som atproto-pds-dave-password password`, then a deploy applies it) | on main, var generated; waits for deploy of som |
+| H5 | space `agave-host` (registry index 3, sshPort 2226, uids 1220/1221) running `services.agave` in repo mode | implemented; security review: request changes (tenant key `from=` localhost only, push/tenant keys not for the login user, generator names, no fleet-wide configurationRevision), in fix-up |
+| H6 | SNI backend agave.davhau.com (443 and 80) -> 10.235.0.14 | implemented; security review: request changes (tenant key `from=` localhost only, push/tenant keys not for the login user, generator names, no fleet-wide configurationRevision), in fix-up |
+| H7 | Mullvad egress source `ve-agave-host` | implemented; security review: request changes (tenant key `from=` localhost only, push/tenant keys not for the login user, generator names, no fleet-wide configurationRevision), in fix-up |
+| H8 | clan vars: TeamClaude client key `teamclaude-agave-host`, `agave-geninf-ro` credential, hyperconfig push key `agave-host-github` (GitHub deploy key with write: Dave adds it once) | implemented; security review: request changes (tenant key `from=` localhost only, push/tenant keys not for the login user, generator names, no fleet-wide configurationRevision), in fix-up |
+| H9 | `nixosModules.fleet` (tunnel only: no desktop, no Wi-Fi) on every machine incl. amy and vit, dialing agave.davhau.com in TLS | implemented; security review: request changes (tenant key `from=` localhost only, push/tenant keys not for the login user, generator names, no fleet-wide configurationRevision), in fix-up |
+| H10 | Agave's tenant ssh key authorized for root on every machine (public value in the repo, revocable by removing it) | implemented; security review: request changes (tenant key `from=` localhost only, push/tenant keys not for the login user, generator names, no fleet-wide configurationRevision), in fix-up |
 | H11 | Rented leaf machines (agave-vm-host): off until the last step | later |
 
 ## Milestones
