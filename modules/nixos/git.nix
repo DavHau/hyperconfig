@@ -101,6 +101,11 @@ in
     config.url."ssh://gitea@git.geninf.io/generational-infrastructure/agave".insteadOf =
       "https://git.geninf.io/generational-infrastructure/agave";
   };
+  # hyperconfig's own input `agave` (../../flake.nix) is fetched over ssh
+  # by every evaluation here, with my key: git.geninf.io's host key pinned,
+  # as in infra-space (./infra-space/guest.nix), so a fresh user or root's
+  # `clan machines update` doesn't stop at the host key prompt.
+  programs.ssh.knownHosts = { inherit (import ./spaces/forge-host-keys.nix) git-geninf-io; };
 
   environment.systemPackages = [
     (lib.hiPrio git)

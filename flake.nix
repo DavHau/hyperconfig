@@ -168,6 +168,26 @@
     nix-housing.url = "git+https://codeberg.org/decentstates/nix-housing?ref=latest";
     nix-housing.inputs.nixpkgs.follows = "nixpkgs";
 
+    # Dave's self-hosted Agave (docs/agave-self-hosted.md): the server in
+    # the agave-host space on som and the tunnel on every machine. Pinned to
+    # the integration branch (agave main + the open self-hosting PRs); Dave
+    # moves it: `nix flake update agave`, reviewing the diff of agave's
+    # module.nix and template/modules each time (its fleet module runs as
+    # root on every machine). A private repository over ssh, so every
+    # evaluator of a machine needs a key with read access: Dave's own on
+    # his machines (git.geninf.io pinned in modules/nixos/git.nix), the
+    # shared read-only key agave-geninf-ro in infra-space (deploys, both
+    # bumps: modules/nixos/infra-space/guest.nix) and in the agave-host
+    # tenant, davhau-gi-bot's in geninf-space. Anyone else (joy's clone,
+    # a fresh checkout without a key) evaluates no machine. nixpkgs and
+    # clan-core stay agave's own (its template lock re-roots them, agave's
+    # flake.nix). Its marketplace and VM host inputs serve its checks only
+    # and point at this flake instead (`follows = ""`), so nothing fetches
+    # those private repositories.
+    agave.url = "git+ssh://gitea@git.geninf.io/generational-infrastructure/agave?ref=davhau/self-hosted";
+    agave.inputs.agave-marketplace.follows = "";
+    agave.inputs.agave-vm-host.follows = "";
+
 
   };
 

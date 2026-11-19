@@ -332,7 +332,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/spaces/default.nix — Named agent spaces: NixOS containers like infra-space (../infra-space), each for one job, none of them a fleet admin. h… <- amy, som, m/spaces/client.nix, m/spaces/forges.nix, m/spaces/geninf-space.nix, m/spaces/guest.nix, m/spaces/host.nix, m/spaces/instance.nix, +3
 - modules/nixos/spaces/forge-check.sh — Post-deploy check of a space's forge logins (./forges.nix), run in the space as its user: <- m/spaces/forges.nix
 - modules/nixos/spaces/forge-cli-config.sh — Writes tea's config for the space's user: <- m/spaces/forges.nix
-- modules/nixos/spaces/forge-host-keys.nix — The forges' ssh host keys, as `programs.ssh.knownHosts` entries: <- m/spaces/geninf-space.nix
+- modules/nixos/spaces/forge-host-keys.nix — The forges' ssh host keys, as `programs.ssh.knownHosts` entries: <- m/git.nix, m/infra-space/guest.nix, m/spaces/geninf-space.nix
 - modules/nixos/spaces/forges.nix — Pull requests from a space: <- m/spaces/geninf-space.nix, m/spaces/guest.nix
 - modules/nixos/spaces/geninf-space.nix — The geninf-space: an agent's place for generational-infrastructure's work: its own clan (gi-infra: the repository on gi… <- m/spaces/default.nix, m/spaces/forges.nix, m/spaces/guest.nix
 - modules/nixos/spaces/guest-base.nix — The base of every space's guest system (infra-space's ../infra-space/guest.nix and the named spaces' ./guest.nix import… <- m/spaces/default.nix, m/spaces/guest.nix, m/spaces/instance.nix, m/spaces/publish-guest.nix, m/spaces/publish.nix

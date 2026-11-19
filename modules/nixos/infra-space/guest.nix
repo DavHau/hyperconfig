@@ -394,6 +394,7 @@ in
         certAuthority = true;
         inherit (cfg.fleetCertAuthority) hostNames publicKey;
       };
+      inherit (import ../spaces/forge-host-keys.nix) git-geninf-io;
     }
     // lib.listToAttrs (
       lib.imap0 (
@@ -417,6 +418,14 @@ in
         User git
         HostKeyAlias github.com
         IdentityFile ${secretsDir}/secrets-github
+        IdentitiesOnly yes
+
+      # hyperconfig's private flake input `agave` (../../../flake.nix):
+      # every evaluation here (deploys, the nightly bump) fetches it with
+      # the shared read-only key (./default.nix, agave-geninf-ro).
+      Host git.geninf.io
+        User gitea
+        IdentityFile ${secretsDir}/agave-geninf-ro
         IdentitiesOnly yes
 
       Host ${lib.concatStringsSep " " cfg.fleetCertAuthority.hostNames}
