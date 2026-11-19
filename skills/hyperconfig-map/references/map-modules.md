@@ -224,7 +224,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/infra-space/decisions/SKILL.md — Walk Dave through the open decisions of the fleet's registry one at a time (urgent first), record his short answers and  <- m/infra-space/decisions.nix, m/infra-space/hermes.nix
 - modules/nixos/infra-space/decisions/decision.py — - <- m/infra-space/decisions.nix
 - modules/nixos/infra-space/decisions/test_decision.py — - <- m/infra-space/decisions.nix
-- modules/nixos/infra-space/decisions/curate/SKILL.md — The daily 08:00 curation of the decision registry - decide what does not need Dave, re-check every open decision, obsole <- m/infra-space/decisions.nix, m/infra-space/hermes.nix
+- modules/nixos/infra-space/decisions/curate/SKILL.md — The daily 08:00 curation of the decision registry - challenge every open item (does it really need Dave?), hand work ite <- m/infra-space/decisions.nix, m/infra-space/hermes.nix
 - modules/nixos/infra-space/fleet-bump/default.nix — fleet-bump: the deterministic nightly nixpkgs bump (the recurring-tasks redesign, step 4: branch-only mode). A guest mo… <- modules/flake-parts/fleet-jobs.nix, m/infra-space/fleet-bump/test.nix, m/infra-space/hermes.nix
 - modules/nixos/infra-space/fleet-bump/fleet-bump.sh — fleet-bump: the deterministic nightly nixpkgs bump (./default.nix says where it runs and why). No agent: fetch main, mo… <- m/infra-space/fleet-bump/default.nix
 - modules/nixos/infra-space/fleet-bump/test.nix — ./fleet-bump.sh in a VM, offline: <- flake.nix
