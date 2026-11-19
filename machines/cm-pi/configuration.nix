@@ -78,7 +78,13 @@
 
   # One systemd: link these against the module's patched systemd.package
   # instead of building the unpatched pkgs.systemd as well.
-  services.dbus.brokerPackage = pkgs.dbus-broker.override { systemd = config.systemd.package; };
+  # nixpkgs 2026-11 renamed dbus-broker's input systemd -> systemdLibs.
+  services.dbus.brokerPackage = pkgs.dbus-broker.override (
+    if lib.functionArgs pkgs.dbus-broker.override ? systemdLibs then
+      { systemdLibs = config.systemd.package; }
+    else
+      { systemd = config.systemd.package; }
+  );
   services.zram-generator.package = pkgs.zram-generator.override { systemd = config.systemd.package; };
 
   # Headless: no docs, man pages or default packages (perl, strace);
