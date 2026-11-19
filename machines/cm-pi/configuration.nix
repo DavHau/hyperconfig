@@ -65,6 +65,15 @@
       frontend = self.pkgsBuildBuild.grafana-alloy.frontend;
     });
 
+    # Cross builds run no tests, but home-assistant's `requirementsTest`
+    # (a structured attr, kept with doCheck = false) still makes the test
+    # deps inputs: hassfest among them, whose cross build fails its
+    # runtime-deps check (ruff). overrideAttrs, not overridePythonAttrs:
+    # the NixOS module calls `.override` on the result.
+    home-assistant = ifCross super.home-assistant (p: p.overrideAttrs {
+      requirementsTest = [ ];
+    });
+
     # pynacl and pycares propagate their build-platform cffi (x86_64
     # python3, ~360 MiB) into the runtime closure; only their own builds
     # need it. The riscv64 cffi stays a runtime dependency.
