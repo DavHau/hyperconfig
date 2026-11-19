@@ -230,6 +230,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/infra-space/fleet-bump/test.nix — ./fleet-bump.sh in a VM, offline: <- flake.nix
 - modules/nixos/infra-space/hermes-skill/SKILL.md — Manage Dave's NixOS fleet from infra-space - change hyperconfig, push it, deploy machines with clan, reach the other inf <- m/infra-space/agent-tools.nix, m/infra-space/guest.nix, m/infra-space/hermes.nix
 - modules/nixos/infra-space/nixpkgs-bump/SKILL.md — The nightly nixpkgs-unstable bump of hyperconfig - update nixpkgs, build every machine, fix, review, guard, merge to mai <- m/infra-space/hermes.nix, m/infra-space/nixpkgs-bump.nix
+- modules/nixos/infra-space/nixpkgs-bump/follow.sh — nixpkgs-bump-follow <session-id> <log>: <- m/infra-space/nixpkgs-bump.nix
 - modules/nixos/infra-space/nixpkgs-bump/guard-test.nix — ./guard.sh against a scratch repository, without network: <- flake.nix
 - modules/nixos/infra-space/nixpkgs-bump/guard.nix — nixpkgs-bump-guard (./guard.sh), for ../nixpkgs-bump.nix (the guest's PATH) and ./guard-test.nix (which passes stubs as… <- m/infra-space/nixpkgs-bump.nix, m/infra-space/nixpkgs-bump/guard-test.nix
 - modules/nixos/infra-space/nixpkgs-bump/guard.sh — nixpkgs-bump-guard: the nightly bump's last check before it pushes (../nixpkgs-bump/SKILL.md step 6), run in the bump w… <- m/infra-space/nixpkgs-bump/guard.nix

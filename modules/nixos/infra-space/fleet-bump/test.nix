@@ -53,8 +53,13 @@ pkgs.testers.runNixOSTest {
         waitFor = [ "blocker.service" ];
         waitMaxSec = 40;
       };
-      # stands in for the agent's bump
-      systemd.services.blocker.serviceConfig.ExecStart = "${pkgs.coreutils}/bin/sleep infinity";
+      # stands in for the agent's bump: a oneshot, `activating` while it
+      # runs, as nixpkgs-bump.service (`is-active` would say inactive)
+      systemd.services.blocker.serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${pkgs.coreutils}/bin/sleep infinity";
+        TimeoutStartSec = "infinity";
+      };
     };
 
   testScript = ''
@@ -209,7 +214,8 @@ pkgs.testers.runNixOSTest {
         machine.succeed("systemctl reset-failed fleet-bump.service")
 
     with subtest("waits while the agent's bump runs; killed while waiting still reports"):
-        machine.succeed("systemctl start blocker.service")
+        machine.succeed("systemctl start --no-block blocker.service")
+        machine.wait_until_succeeds("systemctl show -p ActiveState --value blocker.service | grep -qx activating")
         machine.succeed("systemctl start --no-block fleet-bump.service")
         machine.sleep(3)
         machine.succeed("systemctl show -p ActiveState --value fleet-bump.service | grep -qx activating")

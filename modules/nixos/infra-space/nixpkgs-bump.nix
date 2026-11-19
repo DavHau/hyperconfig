@@ -26,9 +26,14 @@
   the client only: the turn goes on in the gateway and may still push
   hours later (gateway_client.py:1 "Closing a viewer never stops its
   authority"; gateway_chat.py:394 "accepted work continues at the
-  gateway"; hermes has no CLI interrupt). Ending the turn means ending
-  it in the gateway (the dashboard, or restarting hermes-agent-infra,
-  which this unit no longer follows, see below). What keeps a stray turn
+  gateway"; hermes has no CLI interrupt). So a client that loses its
+  websocket (a keepalive timeout under load, a gateway restart) does not
+  end the run either: the unit then follows the session in the agent's
+  state.db until its turn ends, and resumes it when a restart cut it off
+  (`follow` below). Ending the run means stopping this unit first (or
+  the follower resumes the session), then ending the turn in the
+  gateway (the dashboard, or restarting hermes-agent-infra, which this
+  unit no longer follows, see below). What keeps a stray turn
   from merging over a newer run is the skill: step 1 refuses to start
   while a bump workspace is in use (its liveness stamp, refreshed at each
   step and by nixpkgs-bump-nix, younger than 2 h; a file changed in the
@@ -64,6 +69,7 @@
 */
 {
   config,
+  inputs,
   lib,
   pkgs,
   ...
@@ -142,6 +148,45 @@ let
     '';
   };
 
+  # The client is only a viewer of the turn (see the header): it ends
+  # with "Gateway disconnected; turn outcome is unknown" when the
+  # gateway drops its websocket (keepalive ping timeout under load:
+  # 2026-11-19 09:53, som at load ~100 from the agent's and fleet-bump's
+  # builds at once) or restarts, while the turn goes on, or is cut off by
+  # the restart and never re-run. Then the unit follows the session
+  # itself (./nixpkgs-bump/follow.sh): it waits for the turn in the
+  # agent's state.db, takes the report from the session, or resumes the
+  # session (`hermes chat --resume`) when the turn was cut off. The unit
+  # stays active all the while, so fleet-bump keeps waiting.
+  follow = pkgs.writeShellApplication {
+    name = "nixpkgs-bump-follow";
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.gnugrep
+      pkgs.sqlite
+      config.systemd.package
+    ];
+    # No errexit: a failed resume or discard must not end the follower
+    # (it retries). The script's SQL holds the (validated) session id in
+    # single quotes.
+    bashOptions = [
+      "nounset"
+      "pipefail"
+    ];
+    text =
+      builtins.replaceStrings
+        [ "@hermesHome@" "@gatewayUnit@" "@maxResumes@" "@pollSec@" "@maxDbErrors@" "@verdict@" ]
+        [
+          (inputs.hyperhermes.lib.lockedHermesHome user)
+          "hermes-agent-${user}.service"
+          "3"
+          "30"
+          "20"
+          (lib.getExe verdict)
+        ]
+        (builtins.readFile ./nixpkgs-bump/follow.sh);
+  };
+
   # som has 32 threads: at most two builds of eight cores each, half the
   # machine. Plain nix sends the guest's own (max-jobs auto = 32, cores 0:
   # all); the daemon's nix.conf values never apply to daemon clients.
@@ -191,6 +236,8 @@ let
     fi
     query=${logDir}/last-prompt
     { cat ${prompt}; echo "CM_PI_BUILD=$cm_pi"; } >"$query"
+    # Logs of the last 60 runs.
+    ls -1t ${logDir}/*.log | tail -n +61 | xargs -r rm -f
     # The agent's shim (core's agents.nix): HERMES_HOME and the gateway's
     # environment, as in Dave's sessions. Hours of polling a mass rebuild
     # outlast hermes' default of 500 tool calls per turn. --in is home,
@@ -198,9 +245,18 @@ let
     /run/current-system/sw/bin/hermes chat -Q -s nixpkgs-bump --max-turns 3000 \
       --in ${home} --query-file "$query" 2>&1 | tee "$log"
     rc=''${PIPESTATUS[0]}
-    # Logs of the last 60 runs.
-    ls -1t ${logDir}/*.log | tail -n +61 | xargs -r rm -f
     last=$(${lib.getExe verdict} "$log") && [ "$rc" = 0 ] && exit 0
+    # No report at all: the client lost the turn (see `follow` above), or
+    # the turn was cut off. Wait for the session, resume it if it was cut
+    # off, and judge the report it ends with. A report that says failed
+    # is the run's verdict as it stands.
+    sid=$(grep -o '^session_id: [A-Za-z0-9_-]*$' "$log" | tail -n 1 | cut -d' ' -f2 || true)
+    case "$last" in "NIXPKGS-BUMP: "*) sid= ;; esac
+    if [ -n "$sid" ]; then
+      ${lib.getExe follow} "$sid" "$log" && exit 0
+      last=$(${lib.getExe verdict} "$log")
+      rc=resumed
+    fi
     echo "nixpkgs-bump: failed (hermes exit $rc, last line: $last); see $log" >&2
     exit 1
   '';
@@ -211,6 +267,7 @@ in
     guard
     workspace
     verdict
+    follow
     bumpNix
     searxng
   ];

@@ -126,10 +126,23 @@ trap 'killed INT 130' INT
 
 # The agent's bump still running (a mass rebuild): wait, so the two never
 # build at once (2x the load). Here, not in ExecStartPre: the wait has its
-# own bound and leaves the unit's timeout to the builds.
+# own bound and leaves the unit's timeout to the builds. `is-active` is
+# not the test: a oneshot unit is `activating` for its whole run, and
+# `is-active` answers 0 for `active` only (2026-11-19: this run started
+# beside the agent's, and both built at once).
+running() {
+  local u state
+  for u in "$@"; do
+    state=$(systemctl show -p ActiveState --value "$u") || return 0
+    case "$state" in
+      active | activating | reloading | refreshing | deactivating) return 0 ;;
+    esac
+  done
+  return 1
+}
 if [ "${#wait_for[@]}" -gt 0 ]; then
   waited=0
-  while systemctl is-active -q "${wait_for[@]}"; do
+  while running "${wait_for[@]}"; do
     [ "$waited" -lt "$wait_max" ] ||
       fail "still active after ${waited}s (limit ${wait_max}s): ${wait_for[*]}; not building beside it"
     [ "$waited" -gt 0 ] || log "waiting for ${wait_for[*]}"
