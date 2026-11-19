@@ -101,7 +101,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - secretFile: hyperhermes/modules/sso.nix
 - services.container-slots: hyperhermes/modules/container-slots-storage/default.nix, hyperhermes/modules/container-slots.nix
 - services.hyperhermes: hyperhermes/modules/core/options.nix, hyperhermes/modules/local-container/guest.nix, hyperhermes/modules/mail/default.nix, hyperhermes/modules/rea/default.nix, hyperhermes/modules/slots/default.nix, hyperhermes/modules/teamclaude.nix, hyperhermes/modules/wallet/default.nix
-- services.hyperhermes.agents: hyperhermes/modules/browser/camofox.nix, hyperhermes/modules/browser/ocr.nix, hyperhermes/modules/browser/options.nix, hyperhermes/modules/browser/searxng.nix, hyperhermes/modules/browser/web-access-skill.nix, hyperhermes/modules/browser/web-extract.nix, hyperhermes/modules/clan.nix, hyperhermes/modules/dashboards/default.nix, hyperhermes/modules/publish/default.nix, machines/som/hermes-inference.nix
+- services.hyperhermes.agents: hyperhermes/modules/browser/camofox.nix, hyperhermes/modules/browser/ocr.nix, hyperhermes/modules/browser/options.nix, hyperhermes/modules/browser/searxng.nix, hyperhermes/modules/browser/web-access-skill.nix, hyperhermes/modules/browser/web-extract.nix, hyperhermes/modules/clan.nix, hyperhermes/modules/dashboards/default.nix, hyperhermes/modules/publish/default.nix, hyperhermes/modules/vault-request/default.nix, machines/som/hermes-inference.nix
 - services.hyperhermes.browser: hyperhermes/modules/browser/options.nix
 - services.hyperhermes.browser.extraServers: hyperhermes/modules/browser/camofox.nix
 - services.hyperhermes.claudeAuth: hyperhermes/modules/claude-auth/default.nix
@@ -130,6 +130,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - tempfail-on-error: hyperhermes/modules/mail/default.nix
 - testSecret: modules/nixos/clan-vars-restart-units-test.nix
 - usbPorts: modules/nixos/spaces/usb-ports.nix
+- vaultRequest.enable: hyperhermes/modules/vault-request/default.nix
 - wallet.enable: hyperhermes/modules/wallet/default.nix
 - zfsKeylocationSync: modules/nixos/zfs-keylocation-sync/default.nix
 

@@ -1,0 +1,6 @@
+name: vault-request
+version: 1.0.0
+description: "vault_request: ask the user to add a missing card, login or address to the vault on a page behind the agent's dashboard sign-in; values never pass through the chat."
+kind: standalone
+provides_tools:
+  - vault_request

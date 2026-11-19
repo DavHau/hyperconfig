@@ -24,6 +24,7 @@ store path.
 | `browser` | Camofox browser, web extract, SearXNG, captcha and OCR clients; `agents.<name>.browser.enable = false` leaves an agent out (its web settings are per agent, so override them per agent) |
 | `mail` | receive-only, sanitized mail per agent, read through a read-only IMAP CLI (public mode only) |
 | `wallet` | one shared phoenixd Lightning wallet for agents with `wallet.enable` |
+| `vault-request` | the `vault_request` tool and skill: an agent asks its owner for a missing card, login or address with a one-time link, `<dashboard>/vault/<id>` (30 min, single use), behind the dashboard's sign-in; the values go from the page straight into the agent's encrypted hermes vault, never through the chat; on for every agent with a dashboard unless `lockedConfig` (`agents.<name>.vaultRequest.enable = false` leaves one out) |
 | `rea` | REA reverse engineering for agents with `rea.enable`: its MCP server, the `rea` CLI with Ghidra and the other analysis tools, its skill |
 | `teamclaude` | an agent's Anthropic traffic through a TeamClaude gateway |
 | `claude-auth` | Claude Pro/Max OAuth for the agents (vendored hermes-claude-auth) |
@@ -37,7 +38,7 @@ names) and the Python venv helpers.
 
 Every feature applies to every agent unless it is opt-in (`mail`, `slots`,
 `wallet`, `rea`, `teamclaude` per agent) or the agent opts out (`publish`,
-`browser`). `claude-auth` is host-wide; an agent on `teamclaude` needs it.
+`browser`, `vaultRequest`). `claude-auth` is host-wide; an agent on `teamclaude` needs it.
 A feature's root-held port (`forwards.<name>`) names the agents that get it
 with `enabledFor`. `plugins.enabled` in an agent's config.yaml is the union
 of the host's and the agent's lists, like `skills.external_dirs`.
@@ -114,7 +115,7 @@ secrets; `lib.clan` has the per-agent ones):
 ## Checks
 
 `nix flake check`: VM tests `core`, `hardening`, `local-sso`, `public`, `publish`,
-`browser`, `wallet`, `mail`, `slots`, `slots-local`, `container-slots-storage`,
+`browser`, `wallet`, `mail`, `vault-request`, `slots`, `slots-local`, `container-slots-storage`,
 `local-deployment`;
 evaluation-only `client-features` and `clan-eval`; offline `vision` (image
 routing, vision backend and vision tools per main model, on the patched

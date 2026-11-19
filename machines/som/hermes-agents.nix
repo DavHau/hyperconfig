@@ -71,6 +71,9 @@ in
     inputs.hyperhermes.nixosModules.exposure
     inputs.hyperhermes.nixosModules.sso
     inputs.hyperhermes.nixosModules.dashboards
+    # vault_request: an agent asks its owner for a missing card, login or
+    # address through a one-time link behind its dashboard's sign-in.
+    inputs.hyperhermes.nixosModules.vault-request
     inputs.hyperhermes.nixosModules.clan
     ./hermes-inference.nix
     # dave-hermes's HA token for the TV rack plug.

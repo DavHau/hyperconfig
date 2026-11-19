@@ -51,6 +51,7 @@
         dashboards = ./modules/dashboards;
         publish = ./modules/publish;
         mail = ./modules/mail;
+        vault-request = ./modules/vault-request;
         # Agent slots (a NixOS container per agent) on container-slots,
         # which is generic (not hermes-specific) and also usable alone;
         # slots imports it.
@@ -74,6 +75,7 @@
             self.nixosModules.dashboards
             self.nixosModules.publish
             self.nixosModules.mail
+            self.nixosModules.vault-request
             self.nixosModules.slots
           ];
         };
@@ -164,6 +166,10 @@
         browser = import ./checks/browser { inherit pkgs self; };
         wallet = import ./checks/wallet { inherit pkgs self; };
         mail = import ./checks/mail { inherit pkgs self; };
+        # A request link, the signed-in owner saving a test card into the
+        # agent's vault, and the refusals (reuse, cross-site, another
+        # agent's owner).
+        vault-request = import ./checks/vault-request { inherit pkgs self hermesPackage; };
         slots = import ./checks/slots { inherit pkgs self; };
         slots-local = import ./checks/slots/local.nix { inherit pkgs self; };
         container-slots-storage = import ./checks/container-slots-storage { inherit pkgs self; };
