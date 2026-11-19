@@ -56,17 +56,20 @@ us. Each stands alone on `main` unless "after" says otherwise.
 | PR | What | Setting / neutrality | after | Status |
 |---|---|---|---|---|
 | A1 (#462) | `nixosModules.fleet`, `agave.tunnel.*` options | neutral | – | merged |
-| A2 | Repo mode: `services.agave.repository` (url, branch, key): ~/fleet is a clone of an existing repo; the template sync never touches it | off by default | – | see table below |
-| A3 | Repo mode: computers come from the repo's clan inventory (offline until their tunnel connects, no install/wipe/remove); their tunnel keys come from the repo's public vars | repo mode only | A2 | |
-| A4 | Each computer reports the commit it runs (`system.configurationRevision`); Agave shows Behind | neutral (no revision = nothing shown) | – | |
-| A5 | Repo mode: fetch + rebase before a turn, push to the branch after a confirmed change, retry on reject, never force | repo mode only | A2 | |
-| A6 | `nixosModules.fleet` without the recipe framework (`config.blocks` optional) | neutral | – | |
+| A2 | Repo mode: `services.agave.repository` (url, branch, key): ~/fleet is a clone of an existing repo; the template sync never touches it | off by default | Words #702 | branch `repo-mode-clone`; reviewed twice (approve with nits); PR opens with A3/A5 |
+| A3 | Repo mode: computers come from the repo's clan inventory (offline until their tunnel connects, no install/wipe/remove); their tunnel keys come from the repo's public vars | repo mode only | A2 | branch `repo-mode-inventory`; review asked for key revocation etc., in fix-up |
+| A4 | Each computer reports the commit it runs (`system.configurationRevision`); Agave shows Behind | neutral (no revision = nothing shown) | Words [#682](https://git.geninf.io/generational-infrastructure/agave/pulls/682) | [#685](https://git.geninf.io/generational-infrastructure/agave/pulls/685), reviewed (approve after fix-up), waits for Dave |
+| A5 | Repo mode: fetch + rebase before a turn, push to the branch after a confirmed change, retry on reject, never force | repo mode only | A3 | branch `repo-mode-push`; review asked for a mechanical confirm gate and the push key out of the agent's sandbox, in fix-up |
+| A6 | `nixosModules.fleet` without the recipe framework (`config.blocks` optional) | neutral | – | [#677](https://git.geninf.io/generational-infrastructure/agave/pulls/677), CI green, reviewed (approve), waits for Dave |
+| W1 | Words: **behind** | Words only | – | [#682](https://git.geninf.io/generational-infrastructure/agave/pulls/682), reviewed, waits for Dave |
+| W2 | Words: **the repository**, **repo mode**, **repository computer** | Words only | – | [#702](https://git.geninf.io/generational-infrastructure/agave/pulls/702), reviewed, waits for Dave |
 | A7 | Deploy target aliases for repo machines whose `deploy.targetHost` is not `root@<name>` | repo mode only | A2 | later |
 | A8 | The tenant's age key as one more recipient of the repo's secrets (C2), secrets store beside the fleet | repo mode only | A2 | later |
 | A9 | Commits carry the person as author, Agave as committer (Q5) | neutral | – | later |
 
 Integration branch: `davhau/self-hosted` in agave merges every open PR
-branch above on top of `main`. hyperconfig's `agave` input pins it. It
+branch above on top of `main` (rebuilt from scratch whenever a PR
+branch changes; it is never a PR itself). hyperconfig's `agave` input pins it. It
 goes away once the PRs merge upstream: then the pin moves back to
 agave `main` at a rev Dave picks.
 
@@ -97,3 +100,4 @@ agave `main` at a rev Dave picks.
 ## Status log
 
 - 2026-11-19: plan reconstructed and committed (the scratch copy was lost).
+- 2026-11-19: #677, #682, #685, #702 open for Dave's review (no merge scheduled, label needs-decision); A2/A3/A5 in review fix-ups; PDS (H3/H4) implemented and reviewed in its own change; the agave-host space (H2, H5-H10) in progress.
