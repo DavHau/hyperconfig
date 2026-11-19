@@ -79,8 +79,8 @@ agave `main` at a rev Dave picks.
 |---|---|---|
 | H1 | This doc | done |
 | H2 | flake input `agave` pinned to the integration branch | |
-| H3 | tranquil-pds on som: pds.davhau.com, handle domain davhau.com, PDS-hosted did:web on, invite-only, no relay crawl | |
-| H4 | Dave's account dave.davhau.com (did:web), password from a prompted clan var (`clan-secret-prompt`), gated until set | |
+| H3 | tranquil-pds on som: pds.davhau.com, handle domain davhau.com, PDS-hosted did:web on, invite-only, no relay crawl (`modules/nixos/atproto-pds`, `machines/som/atproto-pds.nix`; DNS records and certificate on som, since `*.davhau.com` points at edi) | implemented, in review |
+| H4 | Dave's account dave.davhau.com (did:web), created by `atproto-pds-accounts.service`; password from the prompt-free clan var `atproto-pds-dave-password` (random until Dave sets his own: `clan-secret-prompt som atproto-pds-dave-password password`, then a deploy applies it) | implemented, in review |
 | H5 | space `agave-host` (registry index 3, sshPort 2226, uids 1220/1221) running `services.agave` in repo mode | |
 | H6 | SNI backend agave.davhau.com (443 and 80) -> 10.235.0.14 | |
 | H7 | Mullvad egress source `ve-agave-host` | |

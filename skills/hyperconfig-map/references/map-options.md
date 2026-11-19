@@ -10,10 +10,12 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - ashift: machines/amy/disko.nix, machines/som/disko.nix
 - barToggle: modules/clan/remote-building/default.nix
 - browser.enable: hyperhermes/modules/browser/options.nix
+- clan.core.postgresql: modules/nixos/atproto-pds/test.nix
 - clan.core.settings: modules/nixos/spaces/test.nix
 - clan.core.settings.directory: modules/nixos/infra-space/agent-tools-test.nix, modules/nixos/ipv4-forward-slots-test/default.nix
+- clan.core.state: modules/nixos/atproto-pds/test.nix
 - clan.core.vars: modules/nixos/clan-vars-restart-units-test.nix
-- clan.core.vars.generators: modules/nixos/clan-secrets-mirror-test.nix, modules/nixos/infra-space/test-clan-stub.nix, modules/nixos/ipv4-forward-slots-test/default.nix, modules/nixos/porkbun-records/test.nix, modules/nixos/spaces/test.nix, modules/nixos/storagebox-test.nix
+- clan.core.vars.generators: modules/nixos/atproto-pds/test.nix, modules/nixos/clan-secrets-mirror-test.nix, modules/nixos/infra-space/test-clan-stub.nix, modules/nixos/ipv4-forward-slots-test/default.nix, modules/nixos/porkbun-records/test.nix, modules/nixos/spaces/test.nix, modules/nixos/storagebox-test.nix
 - clanSecretsMirror.url: modules/nixos/clan-secrets-mirror.nix, modules/nixos/infra-space/nixpkgs-bump/guard-test.nix
 - clients: modules/clan/oidc/default.nix
 - containerSlot.cacheUsers: hyperhermes/modules/slot/default.nix
@@ -21,11 +23,12 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - dashboard.url: hyperhermes/modules/dashboards/default.nix
 - domain: modules/clan/wireguard/default.nix
 - encGuard: machines/nas/automount/enc-guard.nix
-- files: modules/nixos/infra-space/test-clan-stub.nix, modules/nixos/ipv4-forward-slots-test/default.nix, modules/nixos/spaces/test.nix
+- files: modules/nixos/atproto-pds/test.nix, modules/nixos/infra-space/test-clan-stub.nix, modules/nixos/ipv4-forward-slots-test/default.nix, modules/nixos/spaces/test.nix
 - hyper.afk.defaultModel: modules/nixos/afk.nix
 - hyper.afk.extraSkills: modules/nixos/afk.nix
 - hyper.afk.pinnedSettings: modules/nixos/afk.nix
 - hyper.agentUser.enable: modules/nixos/agent-user.nix
+- hyper.atprotoPds: modules/nixos/atproto-pds/default.nix
 - hyper.coolerLcd.usbPort: modules/nixos/cooler-lcd/default.nix
 - hyper.daveDesktop.hermesOne.package: modules/nixos/dave-desktop/hermes-one.nix
 - hyper.daveDesktop.restrictForwarding: modules/nixos/dave-desktop/isolated-apps.nix
@@ -94,7 +97,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - networking.publicIPv6: modules/nixos/public-ipv6-token.nix
 - niri.outputExtras: modules/nixos/niri-output-extras.nix
 - openrouter: machines/som/hermes-inference.nix
-- path: modules/nixos/infra-space/test-clan-stub.nix, modules/nixos/ipv4-forward-slots-test/default.nix, modules/nixos/monitoring-exec-usage.nix, modules/nixos/monitoring-teamclaude.nix, modules/nixos/spaces/test.nix
+- path: modules/nixos/atproto-pds/test.nix, modules/nixos/infra-space/test-clan-stub.nix, modules/nixos/ipv4-forward-slots-test/default.nix, modules/nixos/monitoring-exec-usage.nix, modules/nixos/monitoring-teamclaude.nix, modules/nixos/spaces/test.nix
 - port: modules/clan/wireguard/default.nix
 - publish.enable: hyperhermes/modules/publish/default.nix
 - rea.enable: hyperhermes/modules/rea/default.nix

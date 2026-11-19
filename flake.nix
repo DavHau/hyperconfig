@@ -256,6 +256,11 @@
           import ./modules/nixos/porkbun-records/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
+        # Dave's PDS on som: accounts, did:web, password var, port gate.
+        atproto-pds =
+          import ./modules/nixos/atproto-pds/test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          };
         per-user-tmp =
           import ./modules/nixos/per-user-tmp/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;

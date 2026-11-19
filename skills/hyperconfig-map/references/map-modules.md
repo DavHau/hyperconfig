@@ -174,6 +174,9 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/zfs-arc-max.nix — Cap the ZFS ARC. Unbounded it grows to nearly all of RAM and gives it back only under pressure, which shows up as "used… <- som
 - modules/nixos/zfs-ephemeral-tmp.nix — /tmp on a ZFS dataset instead of tmpfs: <- som, m/per-user-tmp/test.nix
 - modules/nixos/zt-eu-sites.nix — zt-eu's controller side of the bridged home LANs (../../home-networks): <- modules/flake-parts/nixosConfigurations.nix
+- modules/nixos/atproto-pds/accounts.py — - <- m/atproto-pds/default.nix
+- modules/nixos/atproto-pds/default.nix — An atproto PDS (tranquil-pds, nixpkgs' services.tranquil-pds) for our own accounts: <- machines/som/atproto-pds.nix, m/atproto-pds/test.nix
+- modules/nixos/atproto-pds/test.nix — ./default.nix with som's names (../../../machines/som/atproto-pds.nix) in a NixOS container, nginx on plain http (no ce… <- flake.nix
 - modules/nixos/clan-unlock/clan-unlock.sh — - <- m/clan-unlock/default.nix
 - modules/nixos/clan-unlock/default.nix — clan-unlock <machine>: feed a machine waiting for its disk passphrase, over ssh into its initrd. Where it is and which… <- m/dave.nix
 - modules/nixos/cloudflare-warp/default.nix — Cloudflare WARP client + noctalia bar icon toggling the tunnel. <- amy

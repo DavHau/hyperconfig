@@ -64,6 +64,7 @@ in
     inputs.hyperhermes.nixosModules.mail
     # Pooled Claude subscription gateway, https://teamclaude.davhau.com/.
     ../../modules/nixos/teamclaude-gateway
+    ./atproto-pds.nix
     # Strict sandbox and internet-only fetchers: this daemon builds for
     # untrusted agents, slots and remote clients.
     ../../modules/nixos/nix-sandbox-strict.nix
