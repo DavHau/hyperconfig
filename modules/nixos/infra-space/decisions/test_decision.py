@@ -202,6 +202,149 @@ class Registry(unittest.TestCase):
         self.assertIn("Needs Dave (money): 20 USD a month", self.ok("show", "D1"))
         self.assertEqual(self.show("D2")["needs_dave"]["criterion"], "access")
 
+    def test_work_items_are_refused(self):
+        # D10's and D9's shapes: a review, a parked change, an unlanded
+        # branch, a vars step are the agents' work, never Dave's question
+        cases = [
+            ("cm-pi slim closure change", "never reviewed, touches the clan inventory", "a review"),
+            ("Land the nas tang unlock?", "rebased on main, not landed", "a rebase"),
+            ("cm-pi slim closure", "conflicts with the recurring-tasks module on main", "a conflict"),
+            ("Keep the proxy change parked?", "x", "a parked change"),
+            ("Generate nas' unlock var", "needs a vars step first", "a vars step"),
+            ("Land the nas change?", "not landed yet", "an unlanded change"),
+        ]
+        for title, why, what in cases:
+            rc, _, err = self.cli("add", "--title", title, "--why", why, "--needs-dave", "noticeable: he sees it")
+            self.assertEqual(rc, 1, title)
+            self.assertIn("work item", err, title)
+            self.assertIn(what, err, title)
+            self.assertIn("decision work", err, title)
+        self.assertEqual(self.ok("list", "--status", "all", "--count").strip(), "0")
+        # the filer may say why only Dave can, recorded in a note
+        self.ok("add", "--title", "Buy the reviewed proxy plan?", "--needs-dave", "money: 20 USD a month",
+                "--not-work-item", "the review is done; the purchase is his")
+        d = self.show("D1")
+        self.assertEqual(d["status"], "open")
+        self.assertIn("past the work-item check", d["notes"][-1]["text"])
+        # a job's inbox line of that shape: open unsorted for the curator, never asked
+        self.inbox({"title": "Land nas unlock", "why": "reviewed change, not landed", "recommendation": "a",
+                    "needs_dave": "noticeable: x"})
+        d = self.show("D2")
+        self.assertEqual((d["status"], d.get("needs_dave")), ("open", None))
+        self.assertIn("looks like a work item", d["notes"][-1]["text"])
+
+    def test_work_item_patterns_spare_real_questions(self):
+        for t in ("Write a review of the hotel under your name?", "Review your Google privacy settings?",
+                  "Fix the car park sensor?", "his bank password, not in clan vars",
+                  "conflicts with the maintenance window", "conflicts with the change you asked for",
+                  "SearXNG update held back from the nightly review", "the parked domain renewal costs 12 USD"):
+            self.assertIsNone(decision.work_item_match(t), t)
+        for t in ("never reviewed", "needs an independent review", "rebased on main", "conflicts in 9 files with main",
+                  "parked as a patch", "not landed", "needs a vars step", "generating the disk-unlock var",
+                  "needs to be reviewed", "has not been reviewed", "awaiting review", "the stack is behind main",
+                  "diverged from main", "unmerged", "Park the cm-pi slim closure change (not landed)"):
+            self.assertIsNotNone(decision.work_item_match(t), t)
+        self.ok("add", "--title", "Give Anna access?", "--needs-dave", "access: to the Nextcloud Dave runs")
+
+    def test_inbox_cannot_waive_the_work_item_check(self):
+        self.inbox({"title": "Land it?", "why": "never reviewed", "needs_dave": "money: x",
+                    "not_work_item": "trust me", "recommendation": "a"})
+        d = self.show("D1")
+        self.assertEqual((d["status"], d.get("needs_dave")), ("open", None))
+        self.assertNotIn("past the work-item check", json.dumps(d))
+
+    def test_work_title_collisions(self):
+        self.ok("work", "--title", "Review the cm-pi change", "--step", "review it")
+        rc, out, _ = self.cli("add", "--title", "Review the cm-pi change", "--needs-dave", "money: x",
+                              "--not-work-item", "y")
+        self.assertEqual(rc, 1)
+        self.assertIn("handed back as work", out)
+        rc, out, _ = self.cli("decided", "--title", "Review the cm-pi change", "--chose", "a", "--why", "b")
+        self.assertEqual(rc, 1)
+        self.assertIn("handed back as work", out)
+        self.assertEqual(self.show("D1")["status"], "work")
+        # handback only from open/answered; reopen takes a work item back
+        rc, _, _ = self.cli("handback", "D1", "--step", "x", "--note", "y")
+        self.assertEqual(rc, 1)
+        rc, _, err = self.cli("reopen", "D1", "--step", "x")
+        self.assertEqual(rc, 1)
+        self.assertIn("--needs-dave", err)
+        self.ok("reopen", "D1", "--needs-dave", "money: it costs", "--note", "turned out to cost money")
+        self.assertEqual(self.show("D1")["status"], "open")
+        self.ok("obsolete", "D1", "--reason", "x")
+        rc, _, _ = self.cli("handback", "D1", "--step", "x", "--note", "y")
+        self.assertEqual(rc, 1)
+
+    def test_access_claims_need_a_verified_step(self):
+        # D9's shape: "only Dave runs it" filed as access
+        rc, _, err = self.cli("add", "--title", "Unlock nas by itself?",
+                              "--needs-dave", "access: only Dave runs it from the casa LAN")
+        self.assertEqual(rc, 1)
+        self.assertIn("access-verified", err)
+        for crit in ("physical", "secret-only-dave", "access-verified", "only-dave"):
+            rc, _, err = self.cli("add", "--title", "x " + crit, "--needs-dave", crit + ": he has to")
+            self.assertEqual(rc, 1, crit)
+            self.assertIn("--step", err, crit)
+            rc, _, err = self.cli("add", "--title", "x " + crit, "--needs-dave", crit + ": he has to",
+                                  "--step", "plug it in")
+            self.assertEqual(rc, 1, crit)
+        self.ok("add", "--title", "Plug the Voice PE into amy", "--needs-dave", "physical: hardware on his desk",
+                "--step", "plug it into amy by USB", "--verified", "no remote path flashes a new device")
+        d = self.show("D1")
+        self.assertEqual(d["needs_dave"], {"criterion": "physical", "why": "hardware on his desk",
+                                           "step": "plug it into amy by USB",
+                                           "verified": "no remote path flashes a new device"})
+        self.assertIn("Step for Dave: plug it into amy by USB", self.ok("show", "D1"))
+        self.ok("add", "--title", "Pick the wake word", "--needs-dave", "preference: he hears it every day")
+        self.assertEqual(self.show("D2")["needs_dave"]["criterion"], "preference")
+        # alias
+        self.ok("add", "--title", "Bank login", "--needs-dave", "secret: his bank password", "--step", "type it",
+                "--verified", "not in clan vars, on no machine")
+        self.assertEqual(self.show("D3")["needs_dave"]["criterion"], "secret-only-dave")
+        # an inbox line with such an unverified claim: unsorted, not asked
+        self.inbox({"title": "Run the unlock step", "needs_dave": "access-verified: only him", "recommendation": "a"})
+        d4 = self.show("D4")
+        self.assertEqual((d4["status"], d4.get("needs_dave")), ("open", None))
+        # update can complete the step of an existing claim
+        self.ok("update", "D1", "--step", "plug it into amy's front USB", by="curator")
+        self.assertEqual(self.show("D1")["needs_dave"]["step"], "plug it into amy's front USB")
+
+    def test_work_and_handback(self):
+        self.assertEqual(self.ok("work", "--title", "Review the cm-pi slim closure", "--step",
+                                 "independent review, then land", "--source", "infra", by="infra").strip(), "D1")
+        d = self.show("D1")
+        self.assertEqual((d["status"], d["follow_up"]), ("work", "independent review, then land"))
+        self.assertEqual(self.ok("list").strip(), "")  # not a question
+        self.assertEqual(self.ok("brief"), "")  # never a message of its own
+        self.ask("--title", "Buy a proxy?")
+        self.assertIn("1 work item handed back to the agents (nothing for you)", self.ok("brief"))
+        self.ok("obsolete", "D2", "--reason", "test")
+        self.assertIn("agents' work", self.ok("list", "--status", "pending"))
+        self.assertIn("refiled", self.ok("work", "--title", "review the cm-pi slim closure", "--step", "again"))
+        # a work-shaped question already open (filed before the check): handed back
+        self.ask("--title", "Let nas unlock by itself?")
+        with self.assertRaises(SystemExit):  # --note required
+            self.cli("handback", "D3", "--step", "x")
+        self.ok("handback", "D3", "--step", "infra binds the passphrase offline, lands, deploys",
+                "--note", "the step is offline with the passphrase in clan vars", by="curator")
+        d = self.show("D3")
+        self.assertEqual((d["status"], d.get("needs_dave")), ("work", None))
+        self.assertIn("was filed as needing Dave (money)", d["notes"][-1]["text"])
+        self.assertNotIn("Let nas unlock", self.ok("brief"))
+        # a refile of the same title with needs_dave does not reopen it as a question
+        rc, out, _ = self.cli("add", "--needs-dave", "money: test", "--title", "Let nas unlock by itself?")
+        self.assertEqual(rc, 1)
+        self.assertIn("handed back as work", out)
+        self.assertEqual(self.show("D3")["status"], "work")
+        # done: closed like any follow-up
+        self.ok("close", "D3", "--note", "landed and deployed")
+        self.assertEqual(self.show("D3")["status"], "done")
+        # Dave's own answer is never handed back
+        self.ask("--title", "Buy it?")
+        self.ok("answer", "D4", "a")
+        rc, _, err = self.cli("handback", "D4", "--step", "x", "--note", "y")
+        self.assertEqual(rc, 1)
+
     def test_decided_subcommand(self):
         out = self.ok("decided", "--title", "Keep SearXNG engines off", "--chose", "no change",
                       "--why", "nothing asked for them", "--source", "research", by="infra")

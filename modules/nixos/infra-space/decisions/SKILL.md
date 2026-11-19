@@ -19,6 +19,8 @@ him, and no question common sense answers.
 A question reaches Dave only if answering it needs something only he
 has:
 
+- **preference**: his taste on something he lives with (not which of
+  several sane technical options);
 - **money**: spends his money or signs up in his name;
 - **identity**: exposes his identity or private data to a third party;
 - **irreversible**: irreversibly destroys data he may care about (no
@@ -26,7 +28,21 @@ has:
 - **access**: gives another person access;
 - **noticeable**: a change he will notice in daily use that he didn't
   ask for;
-- **conflict**: a real conflict with something he said.
+- **conflict**: a real conflict with something he said;
+- **physical**, **secret-only-dave**, **access-verified**: a step only
+  his hands, a secret only he knows, or access only he has can do;
+  these name the step and how it was verified that no fleet root,
+  clan vars or agent key path can do it. Check that yourself before
+  showing it (read the step: offline? value already in clan vars?);
+  if an agent path exists, it is work, not a question.
+
+**Work items are never shown to him**: not reviewed yet, conflicts,
+parked, needs a rebase, not landed, needs a vars step. `decision --by
+infra handback <id> --step "<what an agent does>" --note "<why>"`, then
+dispatch it (`fleet-change-delegation`) and `close` it when done.
+`decision list --status work` lists the ones handed back by the
+curation or by jobs (`decision work`): dispatch those at the start
+too.
 
 Everything else (which of several sane options, measure first or not,
 reversible cleanups, "keep as is", evaluations, a child's
@@ -60,7 +76,8 @@ the bar.
 
 ## For each decision (`decision show <id>`)
 
-0. **Check the bar first.** If it does not clear it (no `Needs Dave`
+0. **Check the bar first.** A work item: hand it back and dispatch it
+   (above), silently. If it does not clear it (no `Needs Dave`
    line, or the named criterion does not really apply), don't show it:
    `decision --by infra decide-default <id>` (answers it with its
    recommendation; one filed with a `needs_dave` needs `--note "<why

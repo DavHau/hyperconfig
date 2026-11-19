@@ -637,9 +637,15 @@ gate) is recorded as decided, so the morning brief lists it under
 
 Ask Dave (`decision add --needs-dave "<criterion>: <why>" --title ...
 --why ... --option "a) ..." --recommendation ... --still-relevant-if
-...`) only when it clears the bar, naming the criterion: money,
-identity, irreversible, access, noticeable (a change he will notice
-daily that he did not ask for) or conflict (with something he said);
-`decision add --help` lists them. Without one, `add` refuses. The same
-title again only refiles. A failed night by itself is not a decision;
+...`) only when it clears the bar, naming the criterion (`decision
+add --help` lists them: preference, money, identity, irreversible,
+access, noticeable, conflict; physical, secret-only-dave and
+access-verified also need `--step` and `--verified`). Without a
+criterion, `add` refuses. The same title again only refiles. A review,
+rebase, conflict or leftover change is never his question (`add`
+refuses that too): a choice you made is `decided` (above); work left
+for an interactive session (a review to run, a rebase) is `decision
+--by nixpkgs-bump work --title "<what>" --step "<what an agent must
+do>" --source "nixpkgs-bump (<workspace>)"` (off Dave's brief; a
+session dispatches it). A failed night by itself is not a decision;
 the report and the log cover it.

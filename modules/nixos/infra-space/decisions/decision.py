@@ -24,8 +24,16 @@ inbox lines to inbox.rejected.jsonl), log.jsonl rotated at LOG_MAX_BYTES
 rejected alone and never stops the rest.
 
 The bar (Dave): only a question that needs something only he has is
-asked. `add` requires `--needs-dave "<criterion>: <why>"`, criterion one
-of NEEDS_DAVE; without it the caller decides itself and records that
+asked (his preference, money, identity, irreversible loss, another
+person's access, a noticeable change, a conflict with what he said, a
+physical step, a secret or access only he has; the last three name the
+step and how it was verified that no agent path can do it). Work items
+(a review, a rebase, a conflict, a parked or unlanded change, a vars
+step) are refused by `add` (WORK_ITEM) and go to `work` / `handback`:
+status work, never asked, a session dispatches and closes them. An
+inbox line cannot waive that check (`not_work_item` is CLI only).
+`add` requires `--needs-dave "<criterion>: <why>"`, criterion one of
+NEEDS_DAVE; without it the caller decides itself and records that
 with `decided` (status answered, answer.auto: visible in the brief's
 "decided for you" line, never asked). An inbox line (untrusted: jobs
 read CVE feeds, changelogs) without needs_dave is decided only when it
@@ -57,7 +65,10 @@ from datetime import datetime, timedelta, timezone
 
 DIR = "@DIR@"
 URGENCIES = ["urgent", "normal", "low"]
-STATUSES = ["open", "answered", "obsolete", "done"]
+# work: handed back to the agents (a work item filed as a question: a
+# review, a rebase, a step a fleet root can run); never shown to Dave,
+# closed by the session that did it
+STATUSES = ["open", "answered", "work", "obsolete", "done"]
 # Dave's zone (no DST): only for what he reads.
 BKK = timezone(timedelta(hours=7))
 ID_RE = re.compile(r"D[0-9]{1,6}")  # always .fullmatch
@@ -83,15 +94,73 @@ NEEDS_DAVE = {
     "access": "gives another person access",
     "noticeable": "a change he will notice in daily use that he did not ask for",
     "conflict": "a real conflict with something he said",
+    "preference": "his personal taste on something he lives with (not which of several sane technical options)",
+    "physical": "a physical step only he can do (plug in, power, be on site)",
+    "secret-only-dave": "a secret only he knows (not one in clan vars or on a fleet machine)",
+    "access-verified": "a step only his access can do, verified that no fleet root, clan vars or agent key path can",
 }
+# other spellings of a criterion
+NEEDS_DAVE_ALIASES = {"secret": "secret-only-dave", "only-dave": "access-verified"}
+# criteria that claim Dave must DO a step: they name the step and how it
+# was verified that no agent path (root on a fleet machine, clan vars,
+# the agent's own keys) can do it, or they are refused
+NEEDS_STEP = {"physical", "secret-only-dave", "access-verified"}
+# work items filed as questions (Dave): a review, a rebase, a conflict
+# with main, a parked or unlanded change, a vars step are the agents'
+# work; dispatch them, never ask him
+WORK_ITEM = [
+    ("a review", re.compile(
+        r"\b(?:un|not\s+(?:yet\s+)?|never\s+(?:been\s+)?)reviewed\b|\b(?:to\s+be|been|being)\s+reviewed\b"
+        r"|\b(?:awaiting|pending)\s+review\b|\breview\s+pending\b"
+        r"|\breview(?:ed|s|ing)?\s+(?:of\s+)?(?:the\s+|this\s+|a\s+)?(?:diff|change|patch|commit|branch|stack|PR|code)s?\b"
+        r"|\b(?:needs?|awaits?|waiting\s+(?:for|on)|before)\s+(?:an?\s+)?(?:independent\s+|fresh\s+|security\s+)?review\b", re.I)),
+    ("a rebase", re.compile(r"\brebas(?:e|ed|es|ing)\b", re.I)),
+    ("a conflict with other code", re.compile(
+        r"\bconflicts?\s+(?:in\s+\d+\s+files\b|with\s+(?:the\s+)?(?:\S+\s+){0,3}(?:module|branch|commit|patch|stack)s?\b"
+        r"|(?:with|on)\s+main\b)|\bmerge\s+conflicts?\b", re.I)),
+    ("a parked change", re.compile(
+        r"\bparked\s+(?:as|in|on|change|branch|work|patch|stack)\b"
+        r"|\b(?:change|branch|work|patch|stack)\s+(?:is\s+|stays\s+)?parked\b"
+        r"|\bpark(?:ing)?\s+(?:the\s+|this\s+|a\s+)?(?:\S+\s+){0,3}(?:change|branch|work|patch|stack)\b", re.I)),
+    ("an unlanded change", re.compile(
+        r"\bnot\s+(?:yet\s+)?(?:landed|merged)\b|\bun(?:landed|merged)\b|\b(?:behind|diverged\s+from)\s+main\b|\bland(?:ing)?\s+(?:the\s+|this\s+)?(?:change|branch|patch|stack)\b", re.I)),
+    ("a vars step", re.compile(
+        r"\bvars?\s+(?:step|generat\w*|regenerat\w*)\b|\bclan\s+vars\s+(?:generate|set|step)\b"
+        r"|\b(?:re)?generat\w*\s+(?:the\s+|its\s+)?(?:\S+\s+){0,2}vars?\b", re.I)),
+]
+# an `access` reason that really claims "only Dave can run it" (the
+# criterion means giving another person access; that claim is
+# access-verified, with its step and verification)
+ONLY_DAVE_CLAIM = re.compile(
+    r"\bonly\s+(?:dave|he|him)\b\s+(?:can|could|runs?|has|does|knows)\b|\bonly\s+(?:dave|he)\s+from\b"
+    r"|\bdave\s+(?:must|has\s+to|needs\s+to)\s+(?:run|do)\b|\bfrom\s+the\s+\w+\s+lan\b", re.I)
 # the brief: example titles in the "decided for you" line
 BRIEF_DECIDED_EXAMPLES = 2
 CRITERIA = "; ".join(f"{k} ({v})" for k, v in NEEDS_DAVE.items())
 DECIDE_YOURSELF = (
     "this does not clear the bar for asking Dave. Decide it yourself with common sense and record it:\n"
     "  decision decided --title '<what>' --chose '<what you chose>' --why '<one line>' --source <you>\n"
-    f"Ask Dave only with --needs-dave '<criterion>: <why>', criterion one of: {CRITERIA}"
+    f"Ask Dave only with --needs-dave '<criterion>: <why>', criterion one of: {CRITERIA}. "
+    "physical, secret-only-dave and access-verified also need --step '<the concrete step>' and --verified '<how you checked that no "
+    "fleet root, clan vars or agent key path can do it>'"
 )
+WORK_ITEM_HINT = (
+    "this looks like a work item, not a decision for Dave ({what}: matched {match!r}). Reviews, rebases, "
+    "conflicts, parked or unlanded changes and vars steps are the agents' job: dispatch it "
+    "(fleet-change-delegation). An unattended job that cannot dispatch hands it back with\n"
+    "  decision work --title '<what>' --step '<what an agent must do>' --source <you>\n"
+    "If it really needs Dave anyway (the criterion holds on its own), add --not-work-item '<why only he can>'"
+)
+
+
+def work_item_match(*texts):
+    """(what, matched text) of the first work-item pattern in texts, else None."""
+    for t in texts:
+        for what, rx in WORK_ITEM:
+            m = rx.search(t or "")
+            if m:
+                return what, m.group(0)
+    return None
 
 
 class Fail(Exception):
@@ -171,12 +240,16 @@ def parse_options(raw):
     return out
 
 
-def parse_needs_dave(raw, why=None):
-    """{criterion, why} from a criterion plus `why`, "<criterion>: <why>"
-    or a dict; None when it does not name a criterion of NEEDS_DAVE with
-    a reason."""
+def parse_needs_dave(raw, why=None, step=None, verified=None):
+    """{criterion, why[, step, verified]} from a criterion plus `why`,
+    "<criterion>: <why>" or a dict; None when it does not name a
+    criterion of NEEDS_DAVE with a reason, when a step criterion
+    (NEEDS_STEP) lacks its step or verification, or when an `access`
+    reason claims only Dave can run something (that is only-dave, with
+    its step and verification)."""
     if isinstance(raw, dict):
         crit, why = raw.get("criterion"), raw.get("why")
+        step, verified = raw.get("step", step), raw.get("verified", verified)
     elif isinstance(raw, str):
         crit = raw
         if not why and ":" in raw:
@@ -184,10 +257,34 @@ def parse_needs_dave(raw, why=None):
     else:
         return None
     crit = str(crit or "").strip().lower()
+    crit = NEEDS_DAVE_ALIASES.get(crit, crit)
     why = clean(why, "short")
     if crit not in NEEDS_DAVE or not why:
         return None
-    return {"criterion": crit, "why": why}
+    if crit == "access" and ONLY_DAVE_CLAIM.search(why):
+        return None
+    out = {"criterion": crit, "why": why}
+    if crit in NEEDS_STEP:
+        step, verified = clean(step, "short"), clean(verified, "short")
+        if not step or not verified:
+            return None
+        out.update(step=step, verified=verified)
+    return out
+
+
+def needs_dave_error(raw, why=None, step=None, verified=None):
+    """Why parse_needs_dave refused (for the CLI's message)."""
+    crit = str((raw.get("criterion") if isinstance(raw, dict) else (raw or "").partition(":")[0]) or "").strip().lower()
+    crit = NEEDS_DAVE_ALIASES.get(crit, crit)
+    reason = why if why else (raw.get("why") if isinstance(raw, dict) else (raw or "").partition(":")[2])
+    if crit == "access" and ONLY_DAVE_CLAIM.search(reason or ""):
+        return ("'access' means giving another person access. A step only Dave can run is 'access-verified' "
+                "with --step '<the concrete step>' and --verified '<how you checked no fleet root, clan vars "
+                "or agent key path can do it>'; most such steps turn out to be the agents' own work")
+    if crit in NEEDS_STEP:
+        return (f"'{crit}' needs --step '<the concrete step Dave must do>' and --verified '<how you checked "
+                "that no fleet root, clan vars or agent key path can do it>'")
+    return DECIDE_YOURSELF
 
 
 def parse_links(raw):
@@ -275,7 +372,7 @@ class Store:
     def find_duplicate(self, title):
         key = norm_title(title)
         for d in self.all():
-            if d["status"] in ("open", "answered") and norm_title(d["title"]) == key:
+            if d["status"] in ("open", "answered", "work") and norm_title(d["title"]) == key:
                 return d
         return None
 
@@ -297,13 +394,28 @@ class Store:
             without needs_dave (unsorted: the curator sorts it);
           - else Fail."""
         f = {re.sub(r"[-\s]+", "_", str(k).strip().lower()): v for k, v in fields.items()}
-        needs = parse_needs_dave(f.get("needs_dave"), f.get("needs_dave_why"))
+        needs = parse_needs_dave(f.get("needs_dave"), f.get("needs_dave_why"),
+                                 f.get("needs_dave_step"), f.get("needs_dave_verified"))
         if needs is None and not (auto or inbox):
-            raise Fail(DECIDE_YOURSELF)
+            raise Fail(needs_dave_error(f.get("needs_dave"), f.get("needs_dave_why")) if f.get("needs_dave") else DECIDE_YOURSELF)
         # a needs_dave that is there but not valid ('money' without a
         # why, an unknown criterion): a classification gone wrong, so
         # it falls back to asking (open, unsorted), never to deciding
         malformed = needs is None and any(f.get(k) not in (None, "") for k in ("needs_dave", "needs_dave_why"))
+        # a question for Dave that reads like a work item (a review, a
+        # rebase, a parked change, a vars step): the CLI refuses it
+        # unless the filer says why only Dave can (not_work_item); an
+        # inbox line stays open unsorted for the curator to hand back
+        # only the CLI may waive the check: an inbox line is untrusted
+        nwi = None if inbox else clean(f.get("not_work_item"), "short")
+        work = None
+        if needs and not nwi:
+            work = work_item_match(*(clean(f.get(k), "long") for k in ("title", "question", "why", "follow_up")),
+                                   needs["why"], needs.get("step"))
+        if work and not inbox:
+            raise Fail(WORK_ITEM_HINT.format(what=work[0], match=work[1]))
+        if work:
+            needs, malformed = None, True
         title = clean(f.get("title"), "title")
         if not title:
             raise Fail("a decision needs a title")
@@ -323,7 +435,9 @@ class Store:
             # with its recommendation or not at all
             f.pop("chose", None)
             decides = needs is None and not malformed and urgency != "urgent" and bool(rec)
-            if malformed:
+            if work:
+                why_bad = f"filed for Dave but looks like a work item ({work[0]}: {work[1]!r}): left open for curation"
+            elif malformed:
                 why_bad = f"needs_dave given but not valid ({clean(f.get('needs_dave'), 'title')!r}): left open for curation"
             elif urgency == "urgent":
                 why_bad = "urgent without needs_dave: left open for curation, not decided"
@@ -337,7 +451,11 @@ class Store:
                 dup["seen"] = dup.get("seen", 1) + 1
                 dup["updated"] = now()
                 a = dup.get("answer") or {}
-                if needs and not dup.get("needs_dave"):
+                if dup["status"] == "work":
+                    # handed back to the agents: a refile only adds
+                    # sources and links, never turns it into a question
+                    pass
+                elif needs and not dup.get("needs_dave"):
                     # now filed as a real question: one decided for him
                     # (or filed before the bar) becomes his to answer
                     dup["needs_dave"] = needs
@@ -395,7 +513,7 @@ class Store:
                 self.put(dup)
                 self.log("refiled", dup["id"], by, source=source)
                 return dup, False
-        pending = sum(1 for d in self.all() if d["status"] in ("open", "answered"))
+        pending = sum(1 for d in self.all() if d["status"] in ("open", "answered", "work"))
         if pending >= MAX_PENDING:
             raise Fail(f"registry full: {pending} decisions pending (cap {MAX_PENDING}); curate first")
         created = parse_time(f.get("created") or f.get("date") or "")
@@ -424,6 +542,8 @@ class Store:
         }
         if needs:
             d["needs_dave"] = needs
+            if nwi:
+                self.note(d, by, "filed past the work-item check: " + nwi)
             self.put(d)
             self.log("add", d["id"], by, source=source, title=title, needs_dave=needs["criterion"])
             return d, True
@@ -446,6 +566,22 @@ class Store:
         self.put(d)
         self.log("decided", d["id"], by, source=source, title=title, answer=d["answer"]["text"])
         return d, True
+
+    def new_work(self, title, step, why, source, links, by):
+        pending = sum(1 for d in self.all() if d["status"] in ("open", "answered", "work"))
+        if pending >= MAX_PENDING:
+            raise Fail(f"registry full: {pending} decisions pending (cap {MAX_PENDING}); curate first")
+        source = clean(source, "title")
+        d = {
+            "id": self.next_id(), "title": title, "question": title, "why": clean(why, "long"),
+            "options": [], "recommendation": "", "urgency": "normal", "source": source, "sources": [source],
+            "created": now(), "updated": now(), "status": "work", "still_relevant_if": "", "range": "",
+            "links": links, "follow_up": clean(step, "long"), "answer": None, "snooze_until": None,
+            "notes": [], "seen": 1,
+        }
+        self.put(d)
+        self.log("work", d["id"], by, source=source, title=title)
+        return d
 
     def note(self, d, by, text, kind="short"):
         t = clean(text, kind)
@@ -605,6 +741,9 @@ def render(d):
     if d.get("needs_dave"):
         nd = d["needs_dave"]
         lines.append(f"Needs Dave ({nd['criterion']}): {nd['why']}")
+        if nd.get("step"):
+            lines.append(f"  Step for Dave: {nd['step']}")
+            lines.append(f"  Verified no agent path: {nd.get('verified', '')}")
     if d["question"] and d["question"] != d["title"]:
         lines.append(f"Question: {d['question']}")
     if d["why"]:
@@ -771,6 +910,7 @@ def brief(store, digest, at=None, digest_failed=False, bump_log_dir=None, recurr
     shown = [d for d in open_ if d["urgency"] == "urgent" or not snoozed(d, at)][:3]
     decided = decided_for_him(store, at)
     n_unsorted = sum(1 for d in store.all() if unsorted(d))
+    n_work = sum(1 for d in store.all() if d["status"] == "work")
     notices = store.notices()
     warnings = digest_lines(digest)
     parts = []
@@ -790,6 +930,10 @@ def brief(store, digest, at=None, digest_failed=False, bump_log_dir=None, recurr
     if n_unsorted:
         # nothing hides when the curation failed or has not run yet
         parts.append(f"{n_unsorted} unsorted (curation pending)")
+    if n_work and parts:
+        # handed back to the agents: nothing for him (never a message
+        # of its own), but visible so nothing rots
+        parts.append(f"{n_work} work item{'s' if n_work != 1 else ''} handed back to the agents (nothing for you)")
     if warnings:
         if parts:
             parts.append("")
@@ -873,6 +1017,12 @@ def main(argv=None, store_dir=DIR):
                    help=f"why only Dave can answer, one of: {', '.join(NEEDS_DAVE)}; "
                    "with --needs-why, or as 'criterion: why'. Without it, add refuses")
     a.add_argument("--needs-why", help="one line: how this question meets the criterion")
+    a.add_argument("--step", help="physical / secret-only-dave / access-verified: the concrete step Dave must do")
+    a.add_argument("--verified", help="physical / secret-only-dave / access-verified: how you checked that no fleet "
+                   "root, clan vars or agent key path can do that step")
+    a.add_argument("--not-work-item", metavar="WHY",
+                   help="the text reads like a work item (review, rebase, conflict, parked, not landed, vars step) "
+                   "but the criterion holds on its own: say why only Dave can")
     a.add_argument("--question")
     a.add_argument("--why", help="why it matters / what it costs to wait")
     a.add_argument("--option", action="append", dest="options", help="repeatable: 'a) text'")
@@ -884,6 +1034,21 @@ def main(argv=None, store_dir=DIR):
     a.add_argument("--follow-up", help="what to do once answered")
     a.add_argument("--json", dest="json_in", metavar="FILE", help="read the fields as a JSON object from FILE ('-' = stdin)")
     a.add_argument("--force-new", action="store_true", help="never merge into an open one of the same title")
+
+    wk = sub.add_parser("work", help="hand a work item back to the agents (a review, a rebase, a step a fleet root "
+                        "can run): never shown to Dave; a session dispatches it and closes it. Counts toward the "
+                        f"cap of {MAX_PENDING} pending items")
+    wk.add_argument("--title", required=True, help="plain words, one line, what has to be done")
+    wk.add_argument("--step", required=True, help="what an agent must do")
+    wk.add_argument("--why", help="why it matters")
+    wk.add_argument("--source", help="job, agent or session id")
+    wk.add_argument("--link", action="append", dest="links", help="repeatable: commit, report path, file")
+
+    hb = sub.add_parser("handback", help="an open or answered decision that is really a work item: status work, "
+                        "with the step an agent must do (curator, sessions)")
+    hb.add_argument("id")
+    hb.add_argument("--step", required=True, help="what an agent must do (it becomes the follow-up)")
+    hb.add_argument("--note", required=True, help="why it is not Dave's (e.g. 'a review is agents' work')")
 
     dd = sub.add_parser("decided", help="record a decision you made yourself (visible in the brief, never asked)")
     dd.add_argument("--title", required=True, help="plain words, one line, what was decided")
@@ -903,7 +1068,8 @@ def main(argv=None, store_dir=DIR):
 
     ls = sub.add_parser("list", help="list decisions, urgent first")
     ls.add_argument("--status", default="open", choices=STATUSES + ["all", "pending", "decided", "unvetted"],
-                    help="pending = open + answered, decided = decided without asking Dave, "
+                    help="pending = open + answered + work, work = handed back to the agents, "
+                    "decided = decided without asking Dave, "
                     "unvetted = answered with a job's recommendation nobody re-judged yet (default: open)")
     ls.add_argument("--json", action="store_true")
     ls.add_argument("--count", action="store_true")
@@ -933,6 +1099,8 @@ def main(argv=None, store_dir=DIR):
     ro.add_argument("--note", default="")
     ro.add_argument("--needs-dave", metavar="'CRITERION: WHY'",
                     help="make it a question for Dave (one decided without asking him that he wants to answer himself)")
+    ro.add_argument("--step", help="with a step criterion: the concrete step")
+    ro.add_argument("--verified", help="with a step criterion: how you checked no agent path can do it")
 
     up = sub.add_parser("update", help="refresh fields (curator)")
     up.add_argument("id")
@@ -943,6 +1111,8 @@ def main(argv=None, store_dir=DIR):
     up.add_argument("--add-link", action="append", default=[])
     up.add_argument("--needs-dave", metavar="'CRITERION: WHY'",
                     help="set why only Dave can answer (curator: an old question that clears the bar)")
+    up.add_argument("--step", help="with a step criterion: the concrete step")
+    up.add_argument("--verified", help="with a step criterion: how you checked no agent path can do it")
     up.add_argument("--note", help="why it changed")
 
     mg = sub.add_parser("merge", help="duplicate: mark DUP obsolete, fold its sources/links into KEEP")
@@ -977,6 +1147,15 @@ def main(argv=None, store_dir=DIR):
         return 1
 
 
+def cli_needs(args):
+    needs = parse_needs_dave(args.needs_dave, step=args.step, verified=args.verified)
+    if needs is None:
+        err = needs_dave_error(args.needs_dave)
+        raise Fail("--needs-dave: " + (err if err != DECIDE_YOURSELF else
+                   "'<criterion>: <why>', criterion one of " + ", ".join(NEEDS_DAVE)))
+    return needs
+
+
 def run(st, args, by, ingested):
     out = sys.stdout
     if args.cmd == "add":
@@ -996,10 +1175,54 @@ def run(st, args, by, ingested):
                 fields[k] = v
         if args.needs_why:
             fields["needs_dave_why"] = args.needs_why
+        for k, v in (("needs_dave_step", args.step), ("needs_dave_verified", args.verified), ("not_work_item", args.not_work_item)):
+            if v:
+                fields[k] = v
         if args.urgency != "normal" or "urgency" not in fields:
             fields["urgency"] = args.urgency
         d, created = st.create(fields, by, force_new=args.force_new)
+        if not created and d["status"] == "work":
+            print(f"{d['id']} is handed back as work (an agent does it, Dave is not asked): refiled", file=out)
+            return 1
         print(d["id"] if created else f"{d['id']} (already open: refiled)", file=out)
+        return 0
+
+    if args.cmd == "work":
+        title = clean(args.title, "title")
+        if not title:
+            raise Fail("a work item needs a title")
+        dup = st.find_duplicate(title)
+        if dup:
+            if dup["status"] != "work":
+                raise Fail(f"{dup['id']} has that title and is {dup['status']}: `decision handback {dup['id']}` it instead")
+            st.note(dup, by, "refiled as work: " + clean(args.step, "short"))
+            dup["seen"], dup["updated"] = dup.get("seen", 1) + 1, now()
+            st.put(dup)
+            st.log("refiled", dup["id"], by)
+            print(f"{dup['id']} (already handed back: refiled)", file=out)
+            return 0
+        d = st.new_work(title, args.step, args.why, args.source or by, parse_links(args.links), by)
+        print(d["id"], file=out)
+        return 0
+
+    if args.cmd == "handback":
+        d = st.get(args.id)
+        if d["status"] not in ("open", "answered"):
+            raise Fail(f"{d['id']} is {d['status']}")
+        if d["status"] == "answered" and not (d.get("answer") or {}).get("auto"):
+            raise Fail(f"{d['id']} is answered by {d['answer']['by']}: its follow-up is work already; note the dispatch with update --note")
+        st.note(d, by, "handed back to the agents: " + clean(args.note, "short"))
+        if d.get("answer"):
+            st.note(d, by, f"earlier answer ({d['answer']['by']}): {d['answer']['text']}")
+        if d.get("needs_dave"):
+            nd = d.pop("needs_dave")
+            st.note(d, by, f"was filed as needing Dave ({nd['criterion']}): {nd['why']}")
+        d["follow_up"] = clean(args.step, "long")
+        d["status"], d["answer"], d["snooze_until"] = "work", None, None
+        d["updated"] = now()
+        st.put(d)
+        st.log("handback", d["id"], by, step=d["follow_up"], note=clean(args.note, "short"))
+        print(f"{d['id']}: work", file=out)
         return 0
 
     if args.cmd == "decided":
@@ -1010,6 +1233,9 @@ def run(st, args, by, ingested):
                 fields[k] = v
         fields["recommendation"] = args.chose
         dup = st.find_duplicate(clean(args.title, "title"))
+        if dup and dup["status"] == "work":
+            print(f"{dup['id']} is handed back as work: dispatch it and `decision close {dup['id']}`; not decided", file=out)
+            return 1
         if dup and dup["status"] == "answered" and not (dup.get("answer") or {}).get("auto"):
             # Dave (or someone by hand) answered it: his answer stays
             print(f"{dup['id']} is already answered by {dup['answer']['by']}: {dup['answer']['text'][:80]}; not decided", file=out)
@@ -1050,7 +1276,7 @@ def run(st, args, by, ingested):
     if args.cmd == "list":
         ds = st.all()
         if args.status == "pending":
-            ds = [d for d in ds if d["status"] in ("open", "answered")]
+            ds = [d for d in ds if d["status"] in ("open", "answered", "work")]
         elif args.status == "decided":
             ds = [d for d in ds if (d.get("answer") or {}).get("auto")]
         elif args.status == "unvetted":
@@ -1066,7 +1292,9 @@ def run(st, args, by, ingested):
         else:
             for d in ds:
                 flag = " (deferred)" if snoozed(d) else ""
-                if d["status"] == "open" and not d.get("needs_dave"):
+                if d["status"] == "work":
+                    flag += f" (agents' work: {d['follow_up'][:60]})"
+                elif d["status"] == "open" and not d.get("needs_dave"):
                     flag += " (unsorted, no needs-dave: decide-default it or name the criterion)"
                 elif (d.get("answer") or {}).get("auto"):
                     flag += f" (decided by {d['answer']['by']}{', unvetted' if d['answer'].get('unvetted') else ''}: {d['answer']['text'][:60]})"
@@ -1111,10 +1339,9 @@ def run(st, args, by, ingested):
                 st.note(d, by, f"earlier answer ({d['answer']['by']}): {d['answer']['text']}")
             d["status"], d["answer"], d["snooze_until"] = "open", None, None
             if args.needs_dave:
-                needs = parse_needs_dave(args.needs_dave)
-                if needs is None:
-                    raise Fail("--needs-dave: '<criterion>: <why>', criterion one of " + ", ".join(NEEDS_DAVE))
-                d["needs_dave"] = needs
+                d["needs_dave"] = cli_needs(args)
+            elif args.step or args.verified:
+                raise Fail("--step/--verified go with --needs-dave")
             if args.note:
                 st.note(d, by, args.note)
             detail = {"note": args.note}
@@ -1133,9 +1360,16 @@ def run(st, args, by, ingested):
                     raise Fail(f"bad --options-json: {e}")
                 detail["options"] = d["options"]
             if args.needs_dave:
-                needs = parse_needs_dave(args.needs_dave)
+                d["needs_dave"] = detail["needs_dave"] = cli_needs(args)
+            elif args.step or args.verified:
+                # complete a step criterion's step / verification
+                nd = dict(d.get("needs_dave") or {})
+                if not nd:
+                    raise Fail("--step/--verified go with a needs_dave (give --needs-dave too)")
+                nd.update({k: v for k, v in (("step", args.step), ("verified", args.verified)) if v})
+                needs = parse_needs_dave(nd)
                 if needs is None:
-                    raise Fail("--needs-dave: '<criterion>: <why>', criterion one of " + ", ".join(NEEDS_DAVE))
+                    raise Fail(needs_dave_error(nd))
                 d["needs_dave"] = detail["needs_dave"] = needs
             for link in parse_links(args.add_link):
                 if link not in d["links"] and len(d["links"]) < MAX_LINKS:

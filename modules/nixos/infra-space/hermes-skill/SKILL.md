@@ -228,14 +228,30 @@ every machine, reviews, merge to main, no deploy. Its reports are in
 
 ## Decisions: decide yourself, ask Dave only past the bar
 
-Ask Dave only when the answer needs something only he has: **money**
+Ask Dave only when the answer needs something only he has: his
+**preference** (taste on something he lives with), **money**
 (spending his money, signing up in his name), **identity** (exposing his
 identity or private data to a third party), **irreversible**
 (destroying data he may care about, no backup or undo), **access**
 (giving another person access), **noticeable** (a change he will notice
 in daily use that he didn't ask for), **conflict** (a real conflict with
-something he said). Everything else, including "which of these sane
-options", measure-first, keep-as-is, reversible cleanups and a child's
+something he said), **physical** (a step only his hands can do),
+**secret-only-dave** (a secret only he knows, in no clan var),
+**access-verified** (a step only his access can do). The last three
+need `--step "<the concrete step>"` and `--verified "<how you checked
+that no fleet root, clan vars or agent key path can do it>"`: check
+before claiming; most such steps turn out to be yours.
+
+**Work items are never decisions.** "Not reviewed yet", "conflicts
+with main", "parked", "needs a rebase", "not landed", "needs a vars
+step": dispatch them (review, rebase, land, generate the var yourself).
+`decision add` refuses that shape; an unattended job that cannot
+dispatch hands it back with `decision work --title ... --step "<what an
+agent must do>" --source <job>` (status work, off Dave's brief; the
+next session dispatches it and `close`s it).
+
+Everything below the bar, including "which of these
+sane options", measure-first, keep-as-is, reversible cleanups and a child's
 recommendation, you decide with common sense, record and dispatch:
 `decision decided --title ... --chose ... --why ... --source <job or
 session>` (the brief lists it under "decided for you"; never asked). If

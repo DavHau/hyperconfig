@@ -3,8 +3,13 @@
   every job and agent into one place, curated every morning, summed up
   in one short Telegram message, answered one at a time through
   /decisions. Only a question that clears the bar reaches him: `add`
-  needs `--needs-dave <criterion>` (money, identity, irreversible,
-  access, noticeable, conflict); everything else is recorded as decided
+  needs `--needs-dave <criterion>` (preference, money, identity,
+  irreversible, access, noticeable, conflict, and physical /
+  secret-only-dave / access-verified, which also name the step and how
+  it was verified that no agent path can do it) and refuses text shaped
+  like a work item (review, rebase, conflict, parked, not landed, vars
+  step): those go to `work`/`handback` (status work, never asked, off
+  the brief but for a count); everything else is recorded as decided
   by the agent (`decided`, a calm inbox line without needs_dave that
   carries a recommendation, recorded unvetted until a session re-judges
   it, the curator's `decide-default`) and shown as one "decided for
@@ -30,8 +35,9 @@
       notices.jsonl holds one-off lines for the next brief (a service
       the CVE watch took down).
     - decisions-curate.timer, 08:00 Asia/Bangkok: the agent with
-      ./decisions/curate/SKILL.md, unattended (re-checks every open
-      decision, obsoletes, merges, refreshes, re-ranks). A done run's
+      ./decisions/curate/SKILL.md, unattended (challenges every open
+      decision daily: hands work items back, verifies "only Dave can"
+      claims, obsoletes, merges, refreshes, re-ranks). A done run's
       session is archived: Dave sees nothing of it. Its bound is the
       prompt plus its toolsets: `-t terminal,file` (no skills, no
       delegation, no memory); terminal is still the agent's full shell
