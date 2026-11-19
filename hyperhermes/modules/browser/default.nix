@@ -2,8 +2,9 @@
 # (services.hyperhermes.browser): a loopback SearXNG as web_search, a
 # local web_extract plugin, a per-agent Camofox browser server behind
 # hermes' browser_* tools (captcha solving through a CaptchaKraken model),
-# OCR on our own GPU, and the web-access skill that tells the agent which
-# to use when.
+# OCR on our own GPU, an opt-in residential proxy for blocked sites
+# (./residential-proxy.nix), and the web-access skill that tells the agent
+# which to use when.
 #
 # Per agent, the Camofox server runs as the agent's uid behind a root-held
 # port of core's forwards (services.hyperhermes.forwards.camofox), owner-only
@@ -17,5 +18,6 @@
     ./camofox.nix
     ./web-access-skill.nix
     ./ocr.nix
+    ./residential-proxy.nix
   ];
 }

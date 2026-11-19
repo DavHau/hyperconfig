@@ -40,6 +40,12 @@
 # sandbox, asserted by the vault-frames plugin); a card frame the checkout
 # navigates to a hostile page right after the vault's value-free check gets
 # nothing.
+#
+# Residential proxy (modules/browser/residential-proxy.nix): with
+# browser.residentialProxy.url set, browser_residential is offered; the
+# browser goes direct by default and through the proxy (a stand-in that
+# marks the page with the proxy username) only after browser_residential,
+# with the chosen country, and direct again after `off`.
 { pkgs, self }:
 let
   inherit (pkgs) lib;
@@ -86,6 +92,7 @@ pkgs.testers.runNixOSTest {
       browser = {
         enable = true;
         captchaSolver.baseUrl = "http://127.0.0.1:8766/v1";
+        residentialProxy.url = "http://127.0.0.1:8768";
       };
     };
 
@@ -122,6 +129,13 @@ pkgs.testers.runNixOSTest {
             ExecStart = "${pkgs.python3}/bin/python3 ${site} 8767";
           };
         };
+        residential-stub = {
+          wantedBy = [ "multi-user.target" ];
+          serviceConfig = {
+            DynamicUser = true;
+            ExecStart = "${pkgs.python3}/bin/python3 ${./residential-stub.py} 8768";
+          };
+        };
         captcha-site = {
           wantedBy = [ "multi-user.target" ];
           serviceConfig = {
@@ -135,6 +149,8 @@ pkgs.testers.runNixOSTest {
       pkgs.curl
       pkgs.python3
     ];
+    # Not a loopback name: Firefox sends those past any proxy.
+    networking.hosts."127.0.0.1" = [ "residential-site.test" ];
   };
 
   testScript =
@@ -145,6 +161,7 @@ pkgs.testers.runNixOSTest {
       driver = driverOf ./downloads.py;
       captchaDriver = driverOf ./captcha.py;
       vaultDriver = driverOf ./vault.py;
+      residentialDriver = driverOf ./residential.py;
     in
     ''
     import json
@@ -240,6 +257,13 @@ pkgs.testers.runNixOSTest {
         print(out)
         assert "ALL PASSED" in out
         assert "4242424242424242" not in machine.succeed("journalctl -u hermes-camofox-alice --no-pager")
+
+    with subtest("browser_residential: direct by default, through the proxy only on request"):
+        machine.wait_for_unit("residential-stub.service")
+        assert "RESIDENTIAL_PROXY_URL=http://127.0.0.1:8768\n" in machine.succeed("cat ${hlib.stateDir "alice"}/.hermes/.env")
+        out = machine.succeed("${residentialDriver "alice" "residential http://residential-site.test:8768"}")
+        print(out)
+        assert "ALL PASSED" in out
 
     with subtest("bob reaches neither alice's port nor her backend"):
         machine.fail("runuser -u bob -- curl -s --max-time 10 http://127.0.0.1:${port}/health")

@@ -18,7 +18,8 @@ import os
 import shutil
 import signal
 import tempfile
-from typing import Any, Dict, List
+import re
+from typing import Any, Dict, List, Optional
 
 from agent.web_search_provider import WebSearchProvider
 
@@ -43,12 +44,18 @@ async def _stop(proc: asyncio.subprocess.Process) -> None:
     await proc.wait()
 
 
-async def _extract_one(url: str, fmt: str) -> Dict[str, Any]:
+async def _extract_one(url: str, fmt: str, country: Optional[str] = None) -> Dict[str, Any]:
     tmp = tempfile.mkdtemp(prefix="local-extract-")
     try:
         env = {"HOME": tmp, "LANG": "C.UTF-8", "PATH": "/nonexistent", "TMPDIR": tmp}
+        args = [url, fmt]
+        if country:
+            # Only the proxy's address: it holds no secret (the proxy keeps
+            # the provider's credentials and gates who connects).
+            env["RESIDENTIAL_PROXY_URL"] = os.environ.get("RESIDENTIAL_PROXY_URL", "")
+            args.append(country)
         proc = await asyncio.create_subprocess_exec(
-            PYTHON, SCRIPT, url, fmt,
+            PYTHON, SCRIPT, *args,
             stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             env=env, start_new_session=True,
         )
@@ -103,5 +110,52 @@ class LocalExtractProvider(WebSearchProvider):
         return list(await asyncio.gather(*(_extract_one(u, fmt) for u in urls)))
 
 
+# ---- web_extract_residential: the same extraction through the host's residential proxy ----
+# Offered only when the host has one (RESIDENTIAL_PROXY_URL in the agent's .env, set by
+# hyperhermes' browser.residentialProxy). Opt-in per call: web_extract itself never uses it.
+
+RESIDENTIAL_SCHEMA = {
+    "name": "web_extract_residential",
+    "description": (
+        "Like web_extract, but the request leaves through a residential (home) IP address via this "
+        "host's paid residential proxy, in the chosen country. Use ONLY after web_extract or the "
+        "browser was blocked by the site (403, bot wall, 'access denied', region block); it costs "
+        "paid traffic. Never for logging in to the owner's accounts unless asked. If it answers that "
+        "the proxy's traffic is used up, do not retry: go on without it and tell the user."),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "urls": {"type": "array", "items": {"type": "string"}, "maxItems": 5,
+                     "description": "Up to 5 http(s) URLs."},
+            "country": {"type": "string", "pattern": "^[A-Za-z]{2}$",
+                        "description": "Exit country, ISO 3166 two-letter code (default: the proxy's, SG)."},
+            "format": {"type": "string", "enum": ["markdown", "text"], "default": "markdown"},
+        },
+        "required": ["urls"],
+    },
+}
+
+
+def _residential_available() -> bool:
+    return bool(re.fullmatch(r"http://127\.0\.0\.1:[0-9]+", os.environ.get("RESIDENTIAL_PROXY_URL", "")))
+
+
+async def _handle_residential(args: Dict[str, Any], **_: Any) -> str:
+    urls = [str(u) for u in (args.get("urls") or [])][:5]
+    if not urls:
+        return json.dumps({"success": False, "error": "urls is required"})
+    country = str(args.get("country") or os.environ.get("RESIDENTIAL_PROXY_COUNTRY", "SG"))
+    if not re.fullmatch(r"[A-Za-z]{2}", country):
+        return json.dumps({"success": False, "error": "country must be a two-letter ISO code, e.g. SG, US, DE"})
+    fmt = "text" if args.get("format") == "text" else "markdown"
+    results = await asyncio.gather(*(_extract_one(u, fmt, country.upper()) for u in urls))
+    return json.dumps({"via": f"residential proxy ({country.upper()})", "results": list(results)},
+                      ensure_ascii=False)
+
+
 def register(ctx) -> None:
     ctx.register_web_search_provider(LocalExtractProvider())
+    if _residential_available():
+        ctx.register_tool(name="web_extract_residential", toolset="web", schema=RESIDENTIAL_SCHEMA,
+                          handler=_handle_residential, check_fn=_residential_available, is_async=True,
+                          emoji="🏠")

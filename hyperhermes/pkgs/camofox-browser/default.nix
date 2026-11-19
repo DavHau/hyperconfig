@@ -10,6 +10,9 @@
 # /tabs/:tabId/vault-evaluate): the tab's direct child iframes for
 # browser_vault's hosted card-field fill, and every vault script, run only in
 # Camoufox's isolated world (pkgs/hermes-camofox-plugin/vault-frames.patch).
+# ./residential-plugin: a userId ending in `-residential-<cc>` browses through
+# the host's residential proxy (RESIDENTIAL_PROXY_URL), for hermes'
+# browser_residential.
 {
   lib,
   buildNpmPackage,
@@ -54,10 +57,11 @@ buildNpmPackage (finalAttrs: {
     substituteInPlace camofox.config.json --replace-fail \
       '"youtube": { "enabled": true }' '"youtube": { "enabled": false }' \
       --replace-fail '"persistence": { "enabled": true },' \
-      '"persistence": { "enabled": true }, "captcha": { "enabled": true }, "vault-frames": { "enabled": true },'
-    mkdir plugins/captcha plugins/vault-frames
+      '"persistence": { "enabled": true }, "captcha": { "enabled": true }, "vault-frames": { "enabled": true }, "residential": { "enabled": true },'
+    mkdir plugins/captcha plugins/vault-frames plugins/residential
     cp ${./captcha-plugin/index.js} plugins/captcha/index.js
     cp ${./vault-frames-plugin/index.js} plugins/vault-frames/index.js
+    cp ${./residential-plugin/index.js} plugins/residential/index.js
     substituteInPlace server.js --replace-fail \
       "const args = super.xvfb_args;" \
       "const args = [...super.xvfb_args, '-nolisten', 'local'];"
@@ -68,7 +72,7 @@ buildNpmPackage (finalAttrs: {
       const p = JSON.parse(fs.readFileSync("package.json"));
       delete p.overrides;
       delete p.devDependencies;
-      p.files.push("plugins/captcha/index.js", "plugins/vault-frames/index.js");
+      p.files.push("plugins/captcha/index.js", "plugins/vault-frames/index.js", "plugins/residential/index.js");
       fs.writeFileSync("package.json", JSON.stringify(p, null, 2));
       const l = JSON.parse(fs.readFileSync("package-lock.json"));
       delete l.packages[""].devDependencies;

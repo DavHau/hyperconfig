@@ -258,8 +258,8 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/monitoring-alert-digest/test_digest.py — - <- m/monitoring-alert-digest/default.nix
 - modules/nixos/monitoring-alert-digest/test_provision_token.py — - <- m/monitoring-alert-digest/default.nix
 - modules/nixos/mullvad-egress/default.nix — Mullvad egress for hyper.mullvadEgress.users (mechanism in ./egress.nix, their DNS in ./dns.nix), exiting in Singapore. <- som
-- modules/nixos/mullvad-egress/dns.nix — DNS of the tunneled users (./egress.nix) through the tunnel too, so the names they look up do not reach the host's reso… <- m/infra-space/agent-tools-test.nix, m/mullvad-egress/default.nix, m/mullvad-egress/egress.nix, m/mullvad-egress/test.nix
-- modules/nixos/mullvad-egress/egress.nix — Selected users reach the internet only through a Mullvad WireGuard tunnel; <- m/infra-space/agent-tools-test.nix, m/mullvad-egress/default.nix, m/mullvad-egress/test.nix
+- modules/nixos/mullvad-egress/dns.nix — DNS of the tunneled users (./egress.nix) through the tunnel too, so the names they look up do not reach the host's reso… <- m/infra-space/agent-tools-test.nix, m/mullvad-egress/default.nix, m/mullvad-egress/egress.nix, m/mullvad-egress/test.nix, m/residential-proxy/test.nix
+- modules/nixos/mullvad-egress/egress.nix — Selected users reach the internet only through a Mullvad WireGuard tunnel; <- m/infra-space/agent-tools-test.nix, m/mullvad-egress/default.nix, m/mullvad-egress/test.nix, m/residential-proxy/test.nix
 - modules/nixos/mullvad-egress/failover.sh — Usage: mullvad-egress-failover IFACE PUBKEY ENDPOINT [PUBKEY ENDPOINT]... Moves the tunnel to the next relay of the lis… <- m/mullvad-egress/egress.nix
 - modules/nixos/mullvad-egress/register.sh — !/usr/bin/env bash Usage (repo root, logged-in Mullvad app on this machine):
 - modules/nixos/mullvad-egress/test.nix — ./egress.nix and ./dns.nix against a fake Mullvad relay. <- flake.nix
@@ -297,6 +297,11 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/recurring-tasks/registry.nix — The fleet's recurring tasks, as data: <- m/monitoring-alerts.nix, m/recurring-tasks/default.nix
 - modules/nixos/recurring-tasks/test.nix — ./default.nix on one machine with an nspawn guest: <- flake.nix, m/recurring-tasks/default.nix
 - modules/nixos/recurring-tasks/test_recurring_tasks.py — - <- m/recurring-tasks/default.nix
+- modules/nixos/residential-proxy/default.nix — Residential proxy for som's hermes agents: <- machines/som/hermes-agents.nix
+- modules/nixos/residential-proxy/gateway.py — - <- m/residential-proxy/service.nix
+- modules/nixos/residential-proxy/service.nix — The residential proxy gateway's mechanism (./gateway.py as a unit), without clan: <- m/residential-proxy/default.nix, m/residential-proxy/test.nix
+- modules/nixos/residential-proxy/test-provider.py — - <- m/residential-proxy/test.nix
+- modules/nixos/residential-proxy/test.nix — ./service.nix with ../mullvad-egress (as ./default.nix wires it on som) against a fake Mullvad relay that also plays th… <- flake.nix
 - modules/nixos/role-iodine/default.nix — - <- nas
 - modules/nixos/role-sshuttle-server/default.nix — - <- nas
 - modules/nixos/scan-trigger/default.nix — scan-trigger: a LAN web page that pulls flatbed scans from an eSCL (AirScan) scanner, builds one searchable PDF per doc… <- m/home-printer-host.nix
@@ -432,14 +437,16 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyperhermes/modules/browser/ocr-cli.py — - <- hyperhermes/modules/browser/ocr.nix
 - hyperhermes/modules/browser/ocr.nix — OCR for the agents on the deployment's own hardware (browser.ocr.baseUrl, a Firecrawl-Parse-compatible server the site… <- hyperhermes/modules/browser/default.nix
 - hyperhermes/modules/browser/options.nix — Options of the agents' web tools (./default.nix). <- hyperhermes/modules/browser/default.nix
+- hyperhermes/modules/browser/residential-proxy.nix — The agents' opt-in residential proxy (browser.residentialProxy.url): <- hyperhermes/modules/browser/default.nix
 - hyperhermes/modules/browser/searxng-package.nix — The SearXNG package of ./searxng.nix: <- hyperhermes/modules/browser/options.nix, hyperhermes/modules/browser/searxng.nix
 - hyperhermes/modules/browser/searxng.nix — A private SearXNG metasearch instance on loopback, the web_search backend of the agents. <- hyperhermes/modules/browser/default.nix
 - hyperhermes/modules/browser/web-access-skill.nix — The agents' `web-access` skill (./web-access-skill): <- hyperhermes/modules/browser/default.nix
 - hyperhermes/modules/browser/web-extract.nix — The web_extract backend of the agents: <- hyperhermes/modules/browser/default.nix
 - hyperhermes/modules/browser/ocr-skill/SKILL.md — Read text from scanned PDFs, photos and screenshots of documents (English and Thai) with the `ocr` CLI, which runs on th <- hyperhermes/modules/browser/ocr.nix
+- hyperhermes/modules/browser/residential-proxy-skill/SKILL.md — The host's paid residential proxy (home IP, pick the country). Use only when a site blocked web_extract or the browser ( <- hyperhermes/modules/browser/residential-proxy.nix
 - hyperhermes/modules/browser/web-access-skill/SKILL.md — Find, read and download things on the web from this host. Use whenever a task fetches or reads a web page or file, or a  <- hyperhermes/modules/browser/web-access-skill.nix
 - hyperhermes/modules/browser/web-extract/__init__.py — - <- hyperhermes/modules/browser/web-extract.nix
-- hyperhermes/modules/browser/web-extract/fetch.py — - <- hyperhermes/modules/browser/web-extract.nix
+- hyperhermes/modules/browser/web-extract/fetch.py — - <- hyperhermes/modules/browser/web-extract.nix, m/residential-proxy/test.nix
 - hyperhermes/modules/claude-auth/_hermes_claude_auth_bootstrap.py — Vendored from https://github.com/kristianvast/hermes-claude-auth commit 6525928e13a2771ca0fcf0539ea286150e83c421 (2026-… <- hyperhermes/modules/claude-auth/default.nix
 - hyperhermes/modules/claude-auth/anthropic_billing_bypass.py — Vendored from https://github.com/kristianvast/hermes-claude-auth commit 6525928e13a2771ca0fcf0539ea286150e83c421 (2026-… <- hyperhermes/modules/claude-auth/default.nix
 - hyperhermes/modules/claude-auth/default.nix — hermes-claude-auth (github.com/kristianvast/hermes-claude-auth) for every hermes agent on this host (`services.hyperher…

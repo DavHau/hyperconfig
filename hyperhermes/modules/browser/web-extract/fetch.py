@@ -1,6 +1,12 @@
 """Fetch one URL and print its readable content as one JSON object.
 
-Usage: fetch.py URL [markdown|text]
+Usage: fetch.py URL [markdown|text] [COUNTRY]
+
+With COUNTRY (two letters) and RESIDENTIAL_PROXY_URL in the environment,
+every connection, the browser retry's included, goes through the host's
+residential proxy, its exit in that country (the proxy username; the
+proxy holds the provider's credentials). The plugin sets both only for
+web_extract_residential.
 
 Output: {"url", "title", "content"} or {"url", "error", "kind", "status"}.
 The fetch impersonates Chrome's TLS/HTTP2 fingerprint (curl_cffi);
@@ -13,8 +19,11 @@ the agent can pick the next step instead of retrying.
 """
 
 import asyncio
+import base64
 import ipaddress
 import json
+import os
+import re
 import random
 import socket
 import sys
@@ -34,6 +43,28 @@ MAX_BYTES = 25 * 1024 * 1024
 THIN_TEXT = 300
 
 CAMOUFOX = "@camoufox@"
+
+# The residential exit of this run (main), or None for the direct one.
+RESIDENTIAL = None  # (proxy host, port, country)
+
+
+def residential_from(country):
+    url = os.environ.get("RESIDENTIAL_PROXY_URL", "")
+    m = re.fullmatch(r"http://(127\.0\.0\.1):([0-9]+)", url)
+    if not m or not re.fullmatch(r"[A-Za-z]{2}", country or ""):
+        raise Failure("invalid_request", "No residential proxy on this host, or not a two-letter country code.")
+    return m.group(1), int(m.group(2)), country.lower()
+
+
+def residential_auth():
+    return "Basic " + base64.b64encode(f"{RESIDENTIAL[2]}:x".encode()).decode()
+
+
+def proxy_failure(status, reason):
+    """The residential proxy's own refusal (its 402/502/4xx) as a Failure."""
+    if status == 402:
+        return Failure("proxy_exhausted", "The residential proxy refused: its paid traffic is used up (or the account was suspended). Do not retry through it; go on without it and tell the user.", status)
+    return Failure("proxy_error", f"The residential proxy could not reach the site ({status} {reason}). Try another country, later, or without it.", status)
 # Plain-fetch failures that a real browser may get past.
 RENDER_ON = ("blocked", "js_required")
 # Seconds. The whole URL stays inside BUDGET (the plugin kills the
@@ -151,16 +182,29 @@ def network_failure(url, exc):
 def fetch(url):
     """GET with Chrome impersonation, redirects checked hop by hop. Returns
     (final_url, status, headers, body)."""
+    proxy = {}
+    if RESIDENTIAL:
+        # The proxy dials the site; the private-address check still runs on
+        # the name here, so a URL naming an internal host is refused first.
+        proxy = {"proxy": f"http://{RESIDENTIAL[0]}:{RESIDENTIAL[1]}",
+                 "proxy_auth": (RESIDENTIAL[2], "x")}
     with requests.Session(impersonate=IMPERSONATE) as session:
         for _ in range(MAX_REDIRECTS + 1):
             check_public(url)
             try:
-                response = session.get(url, allow_redirects=False, timeout=TIMEOUT, stream=True)
+                response = session.get(url, allow_redirects=False, timeout=TIMEOUT, stream=True, **proxy)
             except RequestException as exc:
+                if RESIDENTIAL:
+                    m = re.search(r"CONNECT tunnel failed, response (\d+)", str(exc))
+                    if m:
+                        raise proxy_failure(int(m.group(1)), "")
                 raise network_failure(url, exc)
             try:
                 headers = {k.lower(): v for k, v in response.headers.items()}
                 status = response.status_code
+                if RESIDENTIAL and "x-residential-proxy-error" in headers:
+                    # the proxy's own refusal of a plain-http request
+                    raise proxy_failure(status, headers["x-residential-proxy-error"])
                 location = headers.get("location")
                 if status in (301, 302, 303, 307, 308) and location:
                     url = urljoin(url, location)
@@ -323,7 +367,10 @@ class GuardProxy:
             return
         try:
             addr = await self.loop.run_in_executor(None, public_addr, host, port)
-            upstream_reader, upstream = await asyncio.open_connection(addr, port)
+            if RESIDENTIAL:
+                upstream_reader, upstream = await self.residential_connect(host, port)
+            else:
+                upstream_reader, upstream = await asyncio.open_connection(addr, port)
         except (Failure, OSError) as exc:
             if isinstance(exc, Failure):
                 self.refused.setdefault(host, exc)
@@ -342,6 +389,26 @@ class GuardProxy:
             upstream.write(b"\r\n".join([f"{method} {path} {version}".encode("latin-1"), *kept,
                                          b"Connection: close", b"", b""]))
         await asyncio.gather(pipe(reader, upstream), pipe(upstream_reader, writer))
+
+
+    async def residential_connect(self, host, port):
+        """A CONNECT tunnel to host:port through the residential proxy. The
+        host was checked public above; the proxy resolves it again on its
+        side, outside this host, so a second answer reaches nothing here."""
+        reader, writer = await asyncio.open_connection(RESIDENTIAL[0], RESIDENTIAL[1])
+        writer.write((f"CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\n"
+                      f"Proxy-Authorization: {residential_auth()}\r\n\r\n").encode("latin-1"))
+        await writer.drain()
+        head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 60)
+        parts = head.split(b"\r\n", 1)[0].decode("latin-1").split(" ", 2)
+        status = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+        if status != 200:
+            writer.close()
+            failure = proxy_failure(status, parts[2] if len(parts) > 2 else "")
+            self.refused.setdefault(host, failure)
+            raise failure
+        return reader, writer
+
 
 
 async def pipe(source, sink):
@@ -503,9 +570,12 @@ def run(url, fmt):
 
 
 def main():
+    global RESIDENTIAL
     url = sys.argv[1]
     fmt = sys.argv[2] if len(sys.argv) > 2 else "markdown"
     try:
+        if len(sys.argv) > 3:
+            RESIDENTIAL = residential_from(sys.argv[3])
         result = run(url, fmt)
     except Failure as exc:
         result = {"url": url, "error": str(exc), "kind": exc.kind, "status": exc.status}

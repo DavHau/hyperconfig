@@ -305,3 +305,75 @@ def handle_downloads(args: dict, **kw: Any) -> str:
 
 def handle_solve_captcha(args: dict, **kw: Any) -> str:
     return browser_solve_captcha(task_id=kw.get("task_id"))
+
+
+# ---- Residential proxy ----
+# The camofox-browser's residential plugin (../camofox-browser/residential-plugin) gives a userId
+# ending in `-residential-<cc>` a browser context through the host's residential proxy. This tool
+# moves the task's session onto such a userId (its own context and storage per country: no cookie
+# of the direct session goes along) and back. Offered only when the host has the proxy (RESIDENTIAL_PROXY_URL).
+
+def residential_available() -> bool:
+    import re
+    return bool(re.fullmatch(r"http://127\.0\.0\.1:[0-9]+", os.environ.get("RESIDENTIAL_PROXY_URL", "")))
+
+
+def browser_residential(country: Optional[str], task_id: Optional[str] = None) -> str:
+    import re
+    try:
+        session = client.get_session(task_id)
+        direct = session.get("direct_user_id") or session["user_id"]
+        want = (country or "").strip().lower()
+        if want in ("", "off", "direct", "none"):
+            if session["user_id"] != direct:
+                try:
+                    client.delete(f"/sessions/{session['user_id']}")
+                except Exception:
+                    pass
+            session.update(user_id=direct, tab_id=None)
+            session.pop("direct_user_id", None)
+            return json.dumps({"success": True, "residential": False,
+                               "note": "Back on this host's own egress. Call browser_navigate again."})
+        if not re.fullmatch(r"[a-z]{2}", want):
+            return _fail("country must be a two-letter ISO code (e.g. sg, us, de) or 'off'")
+        if session["user_id"] != direct:
+            try:
+                client.delete(f"/sessions/{session['user_id']}")
+            except Exception:
+                pass
+        session.update(user_id=f"{direct}-residential-{want}", tab_id=None, direct_user_id=direct)
+        return json.dumps({"success": True, "residential": True, "country": want.upper(),
+                           "note": ("This task's browser now leaves through a residential IP in "
+                                    f"{want.upper()} (paid traffic), in a separate browser profile without "
+                                    "the usual cookies. Call browser_navigate to load the page. "
+                                    "browser_residential with country 'off' switches back.")})
+    except requests.ConnectionError:
+        return _fail(client.connection_error_message())
+    except Exception as e:
+        return _fail(str(e))
+
+
+BROWSER_RESIDENTIAL = {
+    "name": "browser_residential",
+    "description": (
+        "Switch this task's browser onto this host's paid residential proxy (a home IP address in the "
+        "given country) or back ('off'). Use ONLY after a site blocked the normal browser (403, bot "
+        "wall, 'access denied', region block). It opens a separate browser profile: none of the usual "
+        "cookies or logins go along. Never use it to log in to the owner's accounts unless asked. If a "
+        "page then fails with the proxy's 'traffic is used up' error, switch it off, do not retry, "
+        "and tell the user."),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "country": {
+                "type": "string",
+                "description": "Two-letter exit country (sg, us, de, ...), or 'off' for the normal egress."
+            }
+        },
+        "required": ["country"]
+    }
+}
+
+
+def handle_residential(args: dict, **kw: Any) -> str:
+    return browser_residential(args.get("country"), task_id=kw.get("task_id"))

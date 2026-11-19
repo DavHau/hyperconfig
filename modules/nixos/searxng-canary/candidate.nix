@@ -61,6 +61,10 @@ let
   address = "127.88.99.1";
   port = 8899;
   canary = import ./package.nix { inherit pkgs; };
+  # The candidate's uid may not use the residential proxy: its paid
+  # engines are left out of the queries (./default.nix too).
+  paid = config.services.hyperhermes.browser.residentialProxy.searxngEngines or [ ];
+  exclude = lib.optionalString (paid != [ ]) "--exclude ${lib.concatStringsSep "," paid}";
   settingsJson = pkgs.writeText "searxng-candidate-settings.json" (
     builtins.toJSON (
       lib.recursiveUpdate (builtins.removeAttrs config.services.searx.settings [ "redis" ]) {
@@ -145,7 +149,7 @@ let
       searxng-canary --url "http://${address}:${toString port}" --source ${address} \
         --expect-instance "$name" --expect-version "$version" \
         --queries ${toString cfg.queries} --min-relevant ${toString cfg.minRelevant} \
-        --min-engines ${toString cfg.minEngines} --pause 2 2>&1 || rc=$?
+        --min-engines ${toString cfg.minEngines} --pause 2 ${exclude} 2>&1 || rc=$?
     fi
     if ! kill -0 "$pid" 2>/dev/null; then
       tail -n 30 "$run/log"

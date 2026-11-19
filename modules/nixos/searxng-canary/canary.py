@@ -7,7 +7,7 @@ domains is in the top 5 result URLs (hermes keeps the top 5 by score).
 
   searxng-canary --url URL [--queries N] [--min-relevant N] [--min-engines K]
                  [--engines a,b] [--per-engine a,b,...] [--language L]
-                 [--prom FILE] [--json]
+                 [--exclude a,b] [--prom FILE] [--json]
                  [--expect-instance NAME] [--expect-version V]
 
 Verdict (exit 0 = pass): at least --min-relevant queries relevant, and
@@ -18,6 +18,11 @@ alone (`engines=<name>`) and prints a table; it is a probe, no verdict.
 refuse (exit 2, no queries) unless its instance_name / version are exactly
 these: a gate that started a scratch instance proves it talks to that one,
 not to a stale process left on the port.
+--exclude leaves the named engines out of every query (SearXNG's
+`disabled_engines=<name>__general`): engines whose traffic is paid (the
+residential proxy's) stay out of the canary's fixed queries. It does not
+apply to an explicit --engines/--per-engine list (SearXNG ignores
+disabled_engines for named engines).
 --prom writes Prometheus text-format metrics (renamed into place) for a
 textfile collector; the verdict still sets the exit code.
 
@@ -69,8 +74,13 @@ def urlopen(req, timeout):
     return urllib.request.urlopen(req, timeout=timeout)
 
 
+EXCLUDE = []
+
+
 def search(url, query, engines=None, language=None, timeout=20):
     args = {"q": query, "format": "json", "pageno": "1"}
+    if EXCLUDE:
+        args["disabled_engines"] = ",".join(f"{e}__general" for e in EXCLUDE)
     if engines:
         args["engines"] = engines
     if language:
@@ -215,9 +225,11 @@ def main():
     ap.add_argument("--expect-instance", help="refuse unless /config's instance_name is exactly this")
     ap.add_argument("--expect-version", help="refuse unless /config's version is exactly this")
     ap.add_argument("--source", help="local address to connect from")
+    ap.add_argument("--exclude", help="comma list of engines left out of every query")
     args = ap.parse_args()
-    global SOURCE
+    global SOURCE, EXCLUDE
     SOURCE = args.source
+    EXCLUDE = [e for e in (args.exclude or "").split(",") if e]
 
     if args.expect_instance is not None or args.expect_version is not None:
         try:

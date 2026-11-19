@@ -4,3 +4,5 @@ description: "web_extract on this host: Chrome-impersonating fetch (curl_cffi), 
 kind: backend
 provides_web_providers:
   - local-extract
+provides_tools:
+  - web_extract_residential

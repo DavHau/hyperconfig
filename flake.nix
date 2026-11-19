@@ -247,6 +247,11 @@
           import ./modules/nixos/mullvad-egress/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
+        # som's residential proxy gateway (Evomi) behind Mullvad.
+        residential-proxy =
+          import ./modules/nixos/residential-proxy/test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          };
         # som's agents kept off Roman's site LANs.
         zt-eu-lan-guard =
           import ./modules/nixos/zt-eu-lan-guard/test.nix {

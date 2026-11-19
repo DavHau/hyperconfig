@@ -1,6 +1,6 @@
 --- a/__init__.py
 +++ b/__init__.py
-@@ -64,6 +64,12 @@
+@@ -64,6 +64,17 @@
      for schema, handler, emoji in tools:
          ctx.register_tool(name=schema["name"], toolset=TOOLSET, schema=schema, handler=handler,
                            check_fn=t.check_camofox_configured, emoji=emoji)
@@ -10,17 +10,23 @@
 +                                   (x.BROWSER_SOLVE_CAPTCHA, x.handle_solve_captcha, "🧩")):
 +        ctx.register_tool(name=schema["name"], toolset=TOOLSET, schema=schema, handler=handler,
 +                          check_fn=t.check_camofox_configured, emoji=emoji)
++    # The host's residential proxy, opt-in per task; only where the host has one.
++    if x.residential_available():
++        ctx.register_tool(name=x.BROWSER_RESIDENTIAL["name"], toolset=TOOLSET, schema=x.BROWSER_RESIDENTIAL,
++                          handler=x.handle_residential,
++                          check_fn=lambda: t.check_camofox_configured() and x.residential_available(), emoji="🏠")
      # Offered only with CAMOFOX_API_KEY set: the server's cookie route checks that bearer token.
      ctx.register_tool(name=s.BROWSER_IMPORT_COOKIES["name"], toolset=TOOLSET, schema=s.BROWSER_IMPORT_COOKIES,
                        handler=t.handle_import_cookies, check_fn=t.check_cookie_import_available, emoji="🍪")
 --- a/plugin.yaml
 +++ b/plugin.yaml
-@@ -25,6 +25,8 @@
+@@ -25,6 +25,9 @@
    - browser_vision
    - browser_console
    - browser_import_cookies
 +  - browser_downloads
 +  - browser_solve_captcha
++  - browser_residential
  provides_hooks:
    - on_session_end
    - on_session_finalize

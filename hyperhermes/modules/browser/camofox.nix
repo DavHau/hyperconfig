@@ -151,6 +151,11 @@ let
       // lib.optionalAttrs (cfg.browser.captchaSolver.baseUrl != null) {
         VLLM_BASE_URL = cfg.browser.captchaSolver.baseUrl;
         CAPTCHA_LORA_NAME = cfg.browser.captchaSolver.model;
+      }
+      # Only for userIds ending in -residential-<cc> (the residential
+      # plugin, ./residential-proxy.nix); every other context stays direct.
+      // lib.optionalAttrs (cfg.browser.residentialProxy.url != null && browserAgents ? ${user}) {
+        RESIDENTIAL_PROXY_URL = cfg.browser.residentialProxy.url;
       };
       # Xvfb for the headful browser; camoufox-js finds it with `which`.
       path = [

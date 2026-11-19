@@ -83,7 +83,9 @@ form fields including `g-recaptcha-response` and `document.cookie` with
   loop, web.archive.org (Wayback, CDX) included.
 - The site's own 403 page in the real browser ("flagged as suspicious",
   "access denied") after the challenge wait: an IP or reputation block of
-  this host. Report it as that; more tries will not pass it.
+  this host. More tries will not pass it. If this host has the
+  `residential-proxy` skill, follow it (one try from a home IP);
+  otherwise report it as that.
 
 ## Archives come last
 

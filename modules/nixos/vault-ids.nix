@@ -88,7 +88,10 @@
 # 1218 searxng-candidate (uid and gid; som's sandboxed scratch SearXNG of
 # the nightly bump, searxng-canary/candidate.nix, Mullvad-tunneled); none
 # are vault principals. 1219 slot-stefan-pq (som; vault-ro only, see the
-# tiers above). gid 1100 stays unallocated.
+# tiers above). 1220/1221 are claimed by the agave-host space (its user
+# and sshd forwarder). 1222 residential-proxy (uid and gid; som's
+# Mullvad-tunneled gateway to Evomi, residential-proxy/; not a vault
+# principal). gid 1100 stays unallocated.
 # These container uids are their on-disk owners only: inside, each space
 # container runs in its own user namespace (spaces/host.nix,
 # privateUsers), container uid n being host uid 0x50000000 +

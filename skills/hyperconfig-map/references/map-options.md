@@ -61,6 +61,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.providerKeyPaths: modules/nixos/provider-keys.nix
 - hyper.providerKeys: modules/nixos/provider-keys.nix
 - hyper.recurringTasks: modules/nixos/recurring-tasks/default.nix
+- hyper.residentialProxy: modules/nixos/residential-proxy/service.nix
 - hyper.rgbOff.colorfulArgb: modules/nixos/rgb-off.nix
 - hyper.rgbOff.dramMode: modules/nixos/rgb-off.nix
 - hyper.scanTrigger: modules/nixos/scan-trigger/default.nix
@@ -104,9 +105,10 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - secretFile: hyperhermes/modules/sso.nix
 - services.container-slots: hyperhermes/modules/container-slots-storage/default.nix, hyperhermes/modules/container-slots.nix
 - services.hyperhermes: hyperhermes/modules/core/options.nix, hyperhermes/modules/local-container/guest.nix, hyperhermes/modules/mail/default.nix, hyperhermes/modules/rea/default.nix, hyperhermes/modules/slots/default.nix, hyperhermes/modules/teamclaude.nix, hyperhermes/modules/wallet/default.nix
-- services.hyperhermes.agents: hyperhermes/modules/browser/camofox.nix, hyperhermes/modules/browser/ocr.nix, hyperhermes/modules/browser/options.nix, hyperhermes/modules/browser/searxng.nix, hyperhermes/modules/browser/web-access-skill.nix, hyperhermes/modules/browser/web-extract.nix, hyperhermes/modules/clan.nix, hyperhermes/modules/dashboards/default.nix, hyperhermes/modules/publish/default.nix, hyperhermes/modules/vault-request/default.nix, machines/som/hermes-inference.nix
+- services.hyperhermes.agents: hyperhermes/modules/browser/camofox.nix, hyperhermes/modules/browser/ocr.nix, hyperhermes/modules/browser/options.nix, hyperhermes/modules/browser/residential-proxy.nix, hyperhermes/modules/browser/searxng.nix, hyperhermes/modules/browser/web-access-skill.nix, hyperhermes/modules/browser/web-extract.nix, hyperhermes/modules/clan.nix, hyperhermes/modules/dashboards/default.nix, hyperhermes/modules/publish/default.nix, hyperhermes/modules/vault-request/default.nix, machines/som/hermes-inference.nix
 - services.hyperhermes.browser: hyperhermes/modules/browser/options.nix
 - services.hyperhermes.browser.extraServers: hyperhermes/modules/browser/camofox.nix
+- services.hyperhermes.browser.residentialProxy: hyperhermes/modules/browser/residential-proxy.nix
 - services.hyperhermes.claudeAuth: hyperhermes/modules/claude-auth/default.nix
 - services.hyperhermes.dashboards: hyperhermes/modules/dashboards/default.nix
 - services.hyperhermes.desktop: hyperhermes/modules/desktop/default.nix
@@ -142,6 +144,8 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - agent-ssh: modules/nixos/agent-user.nix
 - cctl-${instanceName}: modules/clan/cctl/default.nix
 - clan-secrets-pull: modules/nixos/clan-secrets-mirror.nix
+- evomi-account: modules/nixos/residential-proxy/default.nix
+- evomi-proxy: modules/nixos/residential-proxy/default.nix
 - grafana-telegram: modules/nixos/monitoring-alerts.nix
 - ha-rack-plug-token: machines/som/dave-hermes-ha.nix
 - inference-api-key: modules/nixos/provider-keys.nix

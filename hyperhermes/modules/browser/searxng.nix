@@ -8,6 +8,7 @@
 }:
 let
   cfg = config.services.hyperhermes;
+  rp = cfg.browser.residentialProxy;
   port = 8890;
   envFile = "/var/lib/hermes-searxng/env";
 in
@@ -28,6 +29,12 @@ in
   };
 
   config = lib.mkIf cfg.browser.enable {
+    assertions = [
+      {
+        assertion = rp.searxngEngines == [ ] || rp.url != null;
+        message = "services.hyperhermes.browser.residentialProxy.searxngEngines needs residentialProxy.url.";
+      }
+    ];
     services.searx = {
       enable = true;
       # nixpkgs' searxng (or browser.searxng.source) with our patches.
@@ -100,19 +107,39 @@ in
               inactive = false;
             }
           ]
-          # Dead from the egress with every curl_cffi target (2026-11);
-          # off so they don't sit suspended. Google: /wml/search 403
-          # (searxng#6835, open); Qwant: API 403 AccessDenied.
-          ++
-            map
-              (name: {
+          # Dead from the egress with every curl_cffi target (2026-11):
+          # Google: /wml/search 403 (searxng#6835, open); Qwant: API 403
+          # AccessDenied. Off so they don't sit suspended, unless the host
+          # routes them through its residential proxy
+          # (browser.residentialProxy.searxngEngines, ./residential-proxy.nix):
+          # then on, their own network with that proxy and the default exit
+          # country (the proxy username).
+          ++ map (
+            name:
+            if lib.elem name rp.searxngEngines then
+              {
+                inherit name;
+                disabled = false;
+                network = {
+                  proxies."all://" = "http://${rp.defaultCountry}:x@${lib.removePrefix "http://" rp.url}";
+                  # The proxy, not this host, resolves and dials the site.
+                  retries = 1;
+                };
+              }
+            else
+              {
                 inherit name;
                 disabled = true;
-              })
-              [
-                "google"
-                "qwant"
-              ]
+              }
+          ) [
+            "google"
+            "qwant"
+          ]
+          ++ map (name: {
+            inherit name;
+            disabled = false;
+            network.proxies."all://" = "http://${rp.defaultCountry}:x@${lib.removePrefix "http://" rp.url}";
+          }) (lib.subtractLists [ "google" "qwant" ] rp.searxngEngines)
           # Startpage: an Anubis challenge for every target (2026-11). Back
           # to stock-inactive on purpose (not even loaded) rather than
           # merely disabled; turn it on again by hand after a manual

@@ -18,6 +18,7 @@
 #
 # The unit queries loopback only; the engines' traffic is searx's own
 # (Mullvad egress). 4 queries per 10 min are ~1 % of the instance's load.
+# Engines on the residential proxy (paid traffic) are left out of them.
 {
   config,
   lib,
@@ -27,6 +28,9 @@
 let
   dir = "/run/searxng-canary";
   canary = import ./package.nix { inherit pkgs; };
+  # Engines on the paid residential proxy stay out of the fixed queries.
+  paid = config.services.hyperhermes.browser.residentialProxy.searxngEngines or [ ];
+  exclude = lib.optionalString (paid != [ ]) "--exclude ${lib.concatStringsSep "," paid}";
 in
 {
   imports = [ ./candidate.nix ];
@@ -61,7 +65,7 @@ in
         # whose timestamp the staleness alert catches.
         script = ''
           ${lib.getExe canary} --url http://127.0.0.1:${toString config.services.searx.settings.server.port} \
-            --queries 4 --pause 2 --prom ${dir}/searxng.prom || true
+            --queries 4 --pause 2 ${exclude} --prom ${dir}/searxng.prom || true
         '';
       };
 
