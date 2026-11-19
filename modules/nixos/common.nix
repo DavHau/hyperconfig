@@ -16,6 +16,15 @@
   ];
   users.mutableUsers = false;
 
+  # A live switch never restarts wpa_supplicant: on a Wi-Fi uplink (nas via
+  # role-parasit, vit, amy, joy) a restart mid-switch dropped the link and
+  # the switch never finished its restart step, leaving the machine without
+  # sshd until a power-cycle (nixpkgs bump to 26.11.20261116, whose only
+  # change to the unit was tzdata's path). The new unit takes over at the
+  # next boot or a manual restart. Cause not yet proven: see
+  # fleet-change-delegation's recurring-unit-failures.md.
+  systemd.services.wpa_supplicant.restartIfChanged = lib.mkDefault false;
+
   # Only decides the id for a dave that doesn't exist yet: update-users-groups.pl
   # refuses to renumber a live account. amy pins 1001 (grmpf owns 1000 there).
   users.users.dave.uid = lib.mkDefault 1000;
