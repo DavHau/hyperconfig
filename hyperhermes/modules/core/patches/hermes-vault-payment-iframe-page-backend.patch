@@ -1,0 +1,386 @@
+hermes v0.23.0 (+ hermes-vault-payment-iframe-fill.patch): hosted card
+fields on a plugin page backend (Camofox), Square, grouped-number redaction.
+
+Symptom: #136981 reaches card frames only over a CDP supervisor; on a
+plugin page backend (Camofox, which hyperhermes agents browse with: no CDP)
+_payment_frames returns [] and frame writes are refused, so the agent
+still cannot pay. Square's Web Payments SDK frame (web.squarecdn.com) and
+Adyen's regional live hosts are not in the processor list. A card field
+shows the number grouped ("4242 4242 4242 4242"), which the exact-value
+redaction of a later browser result read does not catch.
+
+Fix:
+- BrowserPageBackend gets two optional methods: child_frames(task_id)
+  (direct children of the page only; default none) and
+  evaluate_in_frame(task_id, frame_id, expression, secret=...), with the
+  same transport rules as evaluate. The vault lists a plugin page's frames
+  through them and runs the frame inspection and the fill there; the
+  secret path gets the same in-page try/catch and fixed failure text as
+  _page_eval. Frame selection is unchanged: the origin and
+  ancestorOrigins read inside the frame decide, and the write re-checks.
+  The Camofox side is pkgs/hermes-camofox-plugin/vault-frames.patch plus
+  pkgs/camofox-browser/vault-frames-plugin.
+- PAYMENT_FRAME_ORIGINS adds https://web.squarecdn.com,
+  https://sandbox.web.squarecdn.com and checkoutshopper-live-{us,au,apse,in}.adyen.com.
+- A card fill also registers the number's grouped forms (4-4-4-4 and Amex
+  4-6-5, spaces or dashes) with the redaction boundary.
+
+Not upstream yet (to propose on #136981 / #140788).
+
+diff --git a/agent/browser_page_backend.py b/agent/browser_page_backend.py
+index bf1579413a..253b8c2611 100644
+--- a/agent/browser_page_backend.py
++++ b/agent/browser_page_backend.py
+@@ -35,3 +35,18 @@ class BrowserPageBackend(ProviderBase):
+         Never open a tab. With ``secret=True`` the expression embeds a credential: send it only over a
+         transport that keeps it out of argv and off the network in clear text (loopback or HTTPS), never
+         follow a redirect with it, and never log it. Exception text on that path is discarded by core."""
++
++    def child_frames(self, task_id: str) -> list[dict[str, str]]:
++        """The iframes embedded DIRECTLY in the task's current page: ``[{"frame_id", "url"}]``.
++
++        Optional (the default lists none): it lets ``browser_vault`` fill hosted card fields (Stripe
++        Elements & co.) that live in a processor's cross-origin iframe. Only direct children of the page's
++        main frame, never a nested frame and never another page's frame; ``frame_id`` is opaque to core.
++        Core decides which frame may take a card by reading its origin and ancestry from inside it."""
++        return []
++
++    def evaluate_in_frame(self, task_id: str, frame_id: str, expression: str, *, secret: bool) -> Any:
++        """Evaluate ``expression`` inside one frame listed by :meth:`child_frames`; raise on failure,
++        including when the frame is gone or no longer a direct child of the page. Same transport rules
++        as :meth:`evaluate` for ``secret=True``."""
++        raise NotImplementedError("this browser does not reach iframes")
+diff --git a/tests/tools/test_vault_payment_iframe.py b/tests/tools/test_vault_payment_iframe.py
+index d2cce16890..6b5b94ddc0 100644
+--- a/tests/tools/test_vault_payment_iframe.py
++++ b/tests/tools/test_vault_payment_iframe.py
+@@ -294,12 +294,21 @@ def test_payment_frame_fill_obeys_backend_context_and_snapshot(store, page_origi
+         assert events == (["pre-inspect", "enter", "exit"] if page_origin == PAGE else [])
+ 
+ 
+-def test_plugin_page_does_not_use_cdp_frames_or_redirect_frame_writes():
++def test_plugin_page_lists_frames_through_the_backend_never_cdp():
++    """hyperhermes: a plugin browser (Camofox, no CDP) lists the page's direct child frames itself and runs
++    frame scripts through its own transport; the CDP supervisor is never asked."""
+     with patch.object(vault, "_page_backend") as page_backend, \
+          patch.object(vault, "_ensure_supervisor") as supervisor, \
+          patch.object(vault, "_bot_desktop_browser_session", return_value=False):
+-        assert vault._payment_frames("t", PAGE) == []
++        backend = page_backend.return_value
++        backend.child_frames.return_value = [{"frame_id": "f", "url": STRIPE + "/v3/elements-inner-card.html"}]
++        backend.evaluate_in_frame.return_value = json.dumps({"origin": STRIPE, "ancestors": [PAGE]})
++        assert vault._payment_frames("t", PAGE) == [("f", STRIPE)]
++        backend.evaluate_in_frame.return_value = json.dumps({"filled": 1})
+         out = vault._eval_js_secret("t", "secret-script", frame_id="f")
+-    assert out["success"] is False
++    assert out == {"success": True, "result": json.dumps({"filled": 1})}
+     supervisor.assert_not_called()
+-    page_backend.return_value.evaluate.assert_not_called()
++    backend.evaluate.assert_not_called()
++    task, frame, expression = backend.evaluate_in_frame.call_args.args
++    assert (task, frame) == ("t", "f") and "secret-script" in expression and "catch" in expression
++    assert backend.evaluate_in_frame.call_args.kwargs == {"secret": True}
+diff --git a/tests/tools/test_vault_payment_iframe_page_backend.py b/tests/tools/test_vault_payment_iframe_page_backend.py
+new file mode 100644
+index 0000000000..3ce10601f9
+--- /dev/null
++++ b/tests/tools/test_vault_payment_iframe_page_backend.py
+@@ -0,0 +1,170 @@
++"""hyperhermes: hosted card-field frames on a plugin page backend (Camofox has no CDP).
++
++The frame list comes from the backend's ``child_frames`` (direct children of the page only); which frame may
++take the card is still decided inside the frame: a known processor origin whose only ancestor is the bound
++merchant origin, re-checked in the same script as the write.
++"""
++
++from __future__ import annotations
++
++import json
++from unittest.mock import patch
++
++import pytest
++
++from agent import redact
++from agent.vault_store import VaultStore
++from tools import browser_vault_tool as vault
++
++_CARD = {"card_number": "4242424242424242", "cardholder_name": "A User", "exp_month": "12", "exp_year": "2034",
++         "cvc": "123", "billing_postal_code": "10115"}
++PAGE = "https://shop.test"
++STRIPE = "https://js.stripe.com"
++CARD_CONTROLS = [
++    {"autocomplete": "cc-number", "name": "number", "index": 0, "type": "text"},
++    {"autocomplete": "cc-exp", "name": "expiry", "index": 1, "type": "text"},
++    {"autocomplete": "cc-csc", "name": "cvc", "index": 2, "type": "text"},
++]
++
++
++class FakeCamofox:
++    """A plugin page backend: the merchant page plus child frames, each with its own origin and ancestry.
++    ``frames``: frame_id -> (url, origin, ancestors, controls)."""
++
++    name = "camofox"
++    display_name = "Camofox"
++
++    def __init__(self, frames, *, page_controls=(), page_origin=PAGE, list_error=None):
++        self.frames, self.page_controls, self.page_origin = frames, list(page_controls), page_origin
++        self.list_error = list_error
++        self.writes: list[tuple[str | None, str]] = []
++        self.secret_flags: list[bool] = []
++
++    def has_page(self, task_id):
++        return True
++
++    def evaluate(self, task_id, expression, *, secret):
++        if "location.href" in expression:
++            return self.page_origin + "/checkout"
++        if secret:
++            self.writes.append((None, expression))
++            self.secret_flags.append(secret)
++            return json.dumps({"filled": expression.count('"index"')})
++        return json.dumps(self.page_controls)
++
++    def child_frames(self, task_id):
++        if self.list_error:
++            raise self.list_error
++        return [{"frame_id": fid, "url": url} for fid, (url, *_rest) in self.frames.items()]
++
++    def evaluate_in_frame(self, task_id, frame_id, expression, *, secret):
++        url, origin, ancestors, controls = self.frames[frame_id]
++        if expression == vault._FRAME_CONTEXT_JS:
++            return json.dumps({"origin": origin, "ancestors": ancestors})
++        if secret:
++            self.writes.append((frame_id, expression))
++            self.secret_flags.append(secret)
++            return json.dumps({"filled": expression.count('"index"')})
++        return json.dumps(controls)
++
++
++@pytest.fixture()
++def store(tmp_path):
++    yield VaultStore(base_dir=tmp_path / "vault")
++    redact.clear_vault_redaction_values()
++
++
++def _fill(store, page, consent="accept"):
++    meta = store.add_item(kind="payment", label="Test card", origin=PAGE, secret=_CARD)
++    prompts = []
++
++    def ask(*args, **kwargs):
++        prompts.append(args)
++        return consent
++
++    with patch("agent.vault_store.get_vault_store", return_value=store), \
++         patch.object(vault, "_page_backend", return_value=page), \
++         patch.object(vault, "_ensure_supervisor", side_effect=AssertionError("no CDP on a plugin page")), \
++         patch.object(vault, "_bot_desktop_browser_session", return_value=False), \
++         patch("tools.approval_prompt.request_elicitation_consent", side_effect=ask):
++        raw = vault.browser_vault_fill(meta.id, task_id="t")
++    return raw, json.loads(raw), prompts
++
++
++def test_card_is_filled_into_a_processor_frame_embedded_directly_in_the_merchant_page(store):
++    page = FakeCamofox({"f": (STRIPE + "/v3/inner.html", STRIPE, [PAGE], CARD_CONTROLS)})
++    raw, out, prompts = _fill(store, page)
++    assert out["success"] is True and out["frames"] == [STRIPE], out
++    assert out["fields"] == ["cc-csc", "cc-exp", "cc-number"]
++    assert len(prompts) == 1
++    assert [w[0] for w in page.writes] == ["f"] and page.secret_flags == [True]
++    write = page.writes[0][1]
++    assert _CARD["card_number"] in write and json.dumps(STRIPE) in write and "ancestorOrigins" in write
++    for value in (_CARD["card_number"], _CARD["cvc"], "4242 4242 4242 4242"):
++        assert value not in raw
++
++
++@pytest.mark.parametrize("frame", [
++    # an origin the merchant page (or an attacker) controls, labelled like a card frame
++    ("https://shop.test/card-frame", "https://shop.test", [PAGE], CARD_CONTROLS),
++    ("https://evil.test/v3/inner.html", "https://evil.test", [PAGE], CARD_CONTROLS),
++    # a processor URL whose document is not the processor's (navigated away / spoofed listing)
++    (STRIPE + "/v3/inner.html", "https://evil.test", [PAGE], CARD_CONTROLS),
++    # srcdoc / about:blank / data: frames: the merchant's own or an opaque origin
++    ("about:srcdoc", "null", [PAGE], CARD_CONTROLS),
++    ("about:blank", PAGE, [PAGE], CARD_CONTROLS),
++    ("data:text/html,<input>", "null", [PAGE], CARD_CONTROLS),
++    # a processor frame nested under another origin, or embedded by a page on another origin
++    (STRIPE + "/v3/inner.html", STRIPE, ["https://evil.test", PAGE], CARD_CONTROLS),
++    (STRIPE + "/v3/inner.html", STRIPE, ["https://evil.test"], CARD_CONTROLS),
++])
++def test_no_card_reaches_a_frame_that_is_not_a_direct_processor_child(store, frame):
++    page = FakeCamofox({"f": frame})
++    raw, out, prompts = _fill(store, page)
++    assert out["success"] is False and out["error_type"] == "no_payment_fields", out
++    assert prompts == [] and page.writes == []
++
++
++def test_only_the_processor_frame_gets_the_card_next_to_a_lookalike(store):
++    page = FakeCamofox({
++        "evil": ("https://evil.test/card", "https://evil.test", [PAGE], CARD_CONTROLS),
++        "stripe": (STRIPE + "/v3/inner.html", STRIPE, [PAGE], CARD_CONTROLS),
++    })
++    _raw, out, _prompts = _fill(store, page)
++    assert out["success"] is True
++    assert [w[0] for w in page.writes] == ["stripe"]
++
++
++def test_a_backend_that_cannot_list_frames_fills_nothing(store):
++    page = FakeCamofox({}, list_error=RuntimeError("404 vault-frames"))
++    _raw, out, prompts = _fill(store, page)
++    assert out["error_type"] == "no_payment_fields" and prompts == [] and page.writes == []
++
++
++def test_declined_consent_writes_nothing_into_the_frame(store):
++    page = FakeCamofox({"f": (STRIPE + "/v3/inner.html", STRIPE, [PAGE], CARD_CONTROLS)})
++    _raw, out, prompts = _fill(store, page, consent="decline")
++    assert out["error_type"] == "payment_declined" and len(prompts) == 1 and page.writes == []
++
++
++def test_a_frame_failure_on_the_secret_path_has_fixed_text(store):
++    class Failing(FakeCamofox):
++        def evaluate_in_frame(self, task_id, frame_id, expression, *, secret):
++            if secret:
++                raise RuntimeError("boom " + expression)  # an error that quotes the script (and the card)
++            return super().evaluate_in_frame(task_id, frame_id, expression, secret=secret)
++
++    page = Failing({"f": (STRIPE + "/v3/inner.html", STRIPE, [PAGE], CARD_CONTROLS)})
++    raw, out, _prompts = _fill(store, page)
++    assert out["success"] is False and out["error_type"] == "eval_failed"
++    assert _CARD["card_number"] not in raw and "boom" not in raw
++
++
++def test_grouped_card_numbers_are_redacted(store):
++    page = FakeCamofox({"f": (STRIPE + "/v3/inner.html", STRIPE, [PAGE], CARD_CONTROLS)})
++    _fill(store, page)
++    text = redact.redact_registered_vault_values("field shows 4242 4242 4242 4242 / 4242-4242-4242-4242")
++    assert "4242" not in text
++    assert vault._grouped_card_numbers("378282246310005") == [
++        "3782 8224 6310 005", "3782-8224-6310-005", "3782 822463 10005", "3782-822463-10005"]
++    assert vault._grouped_card_numbers("123") == []
+diff --git a/tools/browser_vault_tool.py b/tools/browser_vault_tool.py
+index ff2fc86358..9bd7a2af4e 100644
+--- a/tools/browser_vault_tool.py
++++ b/tools/browser_vault_tool.py
+@@ -90,6 +90,24 @@ def _page_eval(backend: Any, task_id: str, expression: str, *, secret: bool) ->
+     return {"success": True, "result": result}
+ 
+ 
++def _page_frame_eval(backend: Any, task_id: str, frame_id: str, expression: str, *, secret: bool) -> dict[str, Any]:
++    """Evaluate inside one iframe of a plugin page backend's page (``child_frames``); same secret contract as
++    :func:`_page_eval`: page errors stay in-page and any failure on the secret path gets fixed text."""
++    if secret:
++        expression = ("(() => { try { return (" + expression + "); } catch (_) { return "
++                      + json.dumps(_PAGE_FILL_FAILED) + "; } })()")
++    try:
++        result = backend.evaluate_in_frame(task_id, frame_id, expression, secret=secret)
++    except Exception as exc:  # health: allow BLE001 -- plugin failure becomes a typed refusal
++        detail = "" if secret else f": {str(exc)[:200]}"
++        return {"success": False, "error_type": "eval_failed",
++                "error": f"The {backend.name} browser could not run the vault script in the card frame{detail}"}
++    if secret and _parse_json_result(result) == _PAGE_FILL_FAILED:
++        return {"success": False, "error_type": "eval_failed",
++                "error": f"The {backend.name} browser could not run the vault script in the card frame"}
++    return {"success": True, "result": result}
++
++
+ def _eval_js(task_id: str, expression: str) -> dict[str, Any]:
+     """Evaluate NON-SECRET JS on the current page (inspection, origin reads): on the plugin browser
+     holding the task's page, else over the task's CDP supervisor. Without either the call reports it."""
+@@ -173,8 +191,7 @@ def _eval_js_secret(task_id: str, expression: str, frame_id: Optional[str] = Non
+ 
+     if page is not None:
+         if frame_id:
+-            return {"success": False, "error_type": "eval_failed",
+-                    "error": "The plugin browser does not support vault iframe fills"}
++            return _page_frame_eval(page, task_id, frame_id, expression, secret=True)
+         return _page_eval(page, task_id, expression, secret=True)
+     sup = supervisor.evaluate_runtime(expression, frame_id=frame_id) if frame_id else supervisor.evaluate_runtime(expression)
+     if sup.get("ok"):
+@@ -217,11 +234,19 @@ def _current_page_origin(task_id: str) -> Optional[str]:
+ # ancestor origin is the item's bound origin), re-checked inside the iframe in the same script as the write.
+ # Card numbers/CVCs on most checkouts live in such iframes (PCI scope reduction), out of reach of the
+ # top-level fill. Stripe is verified live; Braintree and Adyen use the same direct-child embedding.
++# hyperhermes adds Adyen's regional live hosts and Square's Web Payments SDK card frame (production and
++# sandbox), which #140788 names; each is a processor-owned origin serving only the processor's own frames.
+ PAYMENT_FRAME_ORIGINS = frozenset({
+     "https://js.stripe.com",
+     "https://assets.braintreegateway.com",
+     "https://checkoutshopper-live.adyen.com",
++    "https://checkoutshopper-live-us.adyen.com",
++    "https://checkoutshopper-live-au.adyen.com",
++    "https://checkoutshopper-live-apse.adyen.com",
++    "https://checkoutshopper-live-in.adyen.com",
+     "https://checkoutshopper-test.adyen.com",
++    "https://web.squarecdn.com",
++    "https://sandbox.web.squarecdn.com",
+ })
+ 
+ _PAYMENT_FRAME_SELECTOR = ", ".join(f'iframe[src^="{o}/"]' for o in sorted(PAYMENT_FRAME_ORIGINS))
+@@ -260,7 +285,11 @@ def _focus_bound_origin(task_id: str, origin: str, kind: str) -> Optional[str]:
+ 
+ 
+ def _frame_eval(task_id: str, frame_id: str, expression: str) -> dict[str, Any]:
+-    """Evaluate NON-SECRET JS inside one out-of-process iframe (supervisor only)."""
++    """Evaluate NON-SECRET JS inside one iframe: a plugin page backend's frame, else an out-of-process
++    iframe over the supervisor."""
++    page = _page_backend(task_id)
++    if page is not None:
++        return _page_frame_eval(page, task_id, frame_id, expression, secret=False)
+     supervisor = _ensure_supervisor(task_id)  # None when no supervisor can attach
+     if supervisor is None:
+         return {"success": False, "error": "supervisor required"}
+@@ -277,12 +306,19 @@ def _payment_frames(task_id: str, page_origin: str) -> list[tuple[str, str]]:
+     ancestry are read from inside the iframe. Empty when there is no supervisor or no such iframe."""
+     from agent.vault_store import VaultError, normalize_origin
+ 
+-    if _page_backend(task_id) is not None:
+-        return []
+-    supervisor = _ensure_supervisor(task_id)  # None when no supervisor can attach
+-    if supervisor is None:
+-        return []
+-    listed = supervisor.page_child_oopifs()
++    page = _page_backend(task_id)
++    if page is not None:
++        # A plugin browser (Camofox: no CDP) lists the page's direct child frames itself.
++        try:
++            listed = {"ok": True, "frames": list(page.child_frames(task_id) or [])}
++        except Exception as exc:  # health: allow BLE001 -- no frames when the plugin cannot list them
++            logger.debug("vault: %s could not list frames (%s)", page.name, exc)
++            return []
++    else:
++        supervisor = _ensure_supervisor(task_id)  # None when no supervisor can attach
++        if supervisor is None:
++            return []
++        listed = supervisor.page_child_oopifs()
+     if not listed.get("ok"):
+         return []
+     out = []
+@@ -769,6 +805,10 @@ def _fill_bound_page(backend: Any, handle: str, meta: Any, page_origin: str, eff
+     # Address values are not secrets but the card fields are: register every payment value.
+     for value in (secret.values() if meta.kind == "payment" else [secret.get("password", "")]):
+         register_vault_redaction_value(value)
++    if meta.kind == "payment":
++        # Card fields (a provider frame especially) show the number grouped: "4242 4242 4242 4242".
++        for value in _grouped_card_numbers(secret.get("card_number")):
++            register_vault_redaction_value(value)
+ 
+     writes = _fill_writes(fills, frame_fills, page_origin, nonce)
+     filled, refusal = _run_fill_writes(effective_task_id, writes, secret, page_origin)
+@@ -788,6 +828,18 @@ def _fill_bound_page(backend: Any, handle: str, meta: Any, page_origin: str, eff
+     return json.dumps(out)
+ 
+ 
++def _grouped_card_numbers(number: Any) -> list[str]:
++    """The forms a card field displays the number in (4-4-4-4, Amex 4-6-5; spaces or dashes), so a later
++    browser result that reads the field back is scrubbed like the bare digits."""
++    digits = "".join(ch for ch in str(number or "") if ch.isdigit())
++    if len(digits) < 12:
++        return []
++    groups = [[digits[i:i + 4] for i in range(0, len(digits), 4)]]
++    if len(digits) == 15:
++        groups.append([digits[:4], digits[4:10], digits[10:]])
++    return [sep.join(g) for g in groups for sep in (" ", "-")]
++
++
+ def _classify_controls(raw_controls: list, classify) -> list:
+     from agent.vault_login_classifier import LoginControl
+ 

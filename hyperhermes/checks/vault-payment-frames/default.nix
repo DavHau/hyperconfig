@@ -1,0 +1,29 @@
+# Offline check of the vault's hosted card-field fill on the patched hermes
+# package (the three hermes-vault-payment patches in modules/core/patches): the
+# patches' own pytest files (the wheel drops tests/, so they are taken from
+# the patches) against the installed modules: consent only for a checkout
+# that can take a card (#126889), card tokens written only into a known
+# processor's frame embedded directly in the bound page (#136981), the same
+# over a plugin page backend (Camofox), refused for a frame from another
+# origin, a nested one, srcdoc/about:blank/data: frames and a processor URL
+# whose document is not the processor's; no card value in a result. The
+# browser check (../browser) runs it against a real Camofox. No network.
+{ pkgs, hermesPackage }:
+let
+  py = "${hermesPackage.hermesVenv}/bin/python3";
+  pytestPath = pkgs.python314Packages.makePythonPath [ pkgs.python314Packages.pytest ];
+  patches = ../../modules/core/patches;
+in
+pkgs.runCommand "hyperhermes-vault-payment-frames-check" { nativeBuildInputs = [ pkgs.patchutils pkgs.nodejs ]; } ''
+  export HOME=$TMPDIR/home
+  mkdir -p $HOME $TMPDIR/hermes src && cd src
+  export HERMES_HOME=$TMPDIR/hermes
+  for p in hermes-vault-payment-consent-needs-card hermes-vault-payment-iframe-fill hermes-vault-payment-iframe-page-backend; do
+    filterdiff -p1 -i 'tests/*' -x 'tests/tools/test_browser_vault.py' ${patches}/$p.patch | patch -p1 -F0
+  done
+  PYTHONPATH=${pytestPath} ${py} -m pytest -q -p no:cacheprovider \
+    tests/tools/test_browser_vault_payment_consent.py \
+    tests/tools/test_vault_payment_iframe.py \
+    tests/tools/test_vault_payment_iframe_page_backend.py 2>&1 | tee $out
+  [ "''${PIPESTATUS[0]}" = 0 ]
+''

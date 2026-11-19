@@ -183,6 +183,10 @@
         # Offline: memory.background_consolidation "auto" applies the
         # background review's patch/remove with a snapshot; "stage" stages.
         memory-consolidation = import ./checks/memory-consolidation { inherit pkgs hermesPackage; };
+        # Offline: browser_vault fills a card only into a known processor's
+        # card frame embedded directly in the bound checkout (CDP and the
+        # Camofox page backend), after consent.
+        vault-payment-frames = import ./checks/vault-payment-frames { inherit pkgs hermesPackage; };
         # Evaluation only: teamclaude, claude-auth, desktop and rea on a
         # system without clan, secrets as runtime paths.
         client-features = import ./checks/client-features { inherit pkgs self; };

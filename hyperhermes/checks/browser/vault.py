@@ -8,6 +8,15 @@ registry like the agent loop, against her real camofox-browser and the login and
                  and its confirmation, never returning it; on a page without a password field it
                  saves nothing.
 
+  card <site> <processor>
+                 hosted card-field fill (hermes-vault-payment-iframe-*.patch, the plugin's
+                 vault-frames.patch, camofox-browser's vault-frames plugin): a TEST card saved for the
+                 shop's origin is filled into the card frame the checkout embeds directly from the
+                 processor origin (made a known processor here; the real list holds Stripe, Adyen,
+                 Braintree, Square), never into the same frame served from an origin the shop controls,
+                 nor into the processor frame nested inside such a frame. Consent is answered yes by a
+                 stand-in (headless has no prompt) and counted: a refused checkout never asks.
+
 Exits 1 on the first failed check; every check prints a PASS/FAIL line.
 """
 import json
@@ -43,6 +52,9 @@ from agent.vault_store import get_vault_store  # noqa: E402
 from tools.registry import registry  # noqa: E402
 
 PASSWORD = "vault-test-Pw-0123456789"
+# A test card number (Stripe's), never a real one.
+CARD = {"card_number": "4242424242424242", "cardholder_name": "Test User", "exp_month": "12", "exp_year": "2034",
+        "cvc": "123", "billing_postal_code": "10115"}
 T = "vault-a"
 
 
@@ -57,6 +69,7 @@ def call(name, **args):
     last = out = registry.dispatch(name, args, task_id=T)
     print(f"--- {name}({json.dumps(args)}) -> {out[:800]}", flush=True)
     check(PASSWORD not in out, f"{name} does not echo the password")
+    check(CARD["card_number"] not in out, f"{name} does not echo the card number")
     return json.loads(out)
 
 
@@ -112,6 +125,76 @@ def vault(site):
                        headers=bc._auth_headers(), timeout=30)
 
 
+def card(site, processor):
+    import time
+    from unittest.mock import patch
+
+    from agent.browser_page_registry import backend_for_task
+    from tools import browser_vault_tool as vault_tool
+
+    def card_value(field, frame_url=processor + "/card", expression=None):
+        """A field of the page's direct child frame at ``frame_url``, read in the frame through the plugin
+        (never through a browser tool); None without such a frame."""
+        page = backend_for_task(T)
+        deadline = time.monotonic() + 20
+        while True:
+            frames = [f for f in page.child_frames(T) if f["url"] == frame_url]
+            if frames or time.monotonic() > deadline:
+                break
+            time.sleep(0.5)
+        if not frames:
+            return None
+        return page.evaluate_in_frame(T, frames[0]["frame_id"],
+                                      expression or f"document.getElementById('{field}').value", secret=False)
+
+    meta = get_vault_store().add_item("payment", "test card", CARD, origin=site)
+    asked = []
+
+    def consent(*args, **kwargs):
+        asked.append(args[0])
+        return "accept"
+
+    with patch.object(vault_tool, "PAYMENT_FRAME_ORIGINS", vault_tool.PAYMENT_FRAME_ORIGINS | {processor}), \
+            patch("tools.approval_prompt.request_elicitation_consent", side_effect=consent):
+        shop = site.replace("127.0.0.1", "localhost")
+        check(call("browser_navigate", url=site + "/checkout-evil").get("success") is True, "/checkout-evil loads")
+        check(card_value("number", shop + "/card") == "", "its card frame from the shop-controlled origin is there")
+        out = call("browser_vault", action="fill", handle=meta.id)
+        check(out.get("error_type") == "no_payment_fields" and not asked,
+              "the fill refuses the card frame from an origin the shop controls, without asking")
+        check(card_value("number", shop + "/card") == "", "and writes nothing into it")
+
+        # The processor frame is a grandchild here: core never reaches it (no frame is listed for it, and its
+        # ancestors are two); refused before consent, so no card is resolved at all.
+        check(call("browser_navigate", url=site + "/checkout-nested").get("success") is True, "/checkout-nested loads")
+        check(card_value("title", shop + "/wrap", "document.title") == "", "its wrapper frame loads")
+        out = call("browser_vault", action="fill", handle=meta.id)
+        check(out.get("error_type") == "no_payment_fields" and not asked,
+              "the fill refuses a processor frame nested in a shop-controlled frame, without asking")
+
+        check(call("browser_navigate", url=site + "/checkout").get("success") is True, "the checkout loads")
+        check(card_value("number") == "", "its card frame from the processor origin is there and empty")
+        out = call("browser_vault", action="fill", handle=meta.id)
+        check(out.get("success") is True and out.get("frames") == [processor]
+              and out.get("fields") == ["cc-csc", "cc-exp", "cc-number"] and out.get("origin") == site
+              and len(asked) == 1, "the fill asks once and fills number, expiry and CVC in the processor frame")
+        check(card_value("number") == CARD["card_number"] and card_value("cvc") == CARD["cvc"]
+              and card_value("expiry") == "12/34", "the processor frame holds the card")
+        check(CARD["cvc"] not in last and "4242" not in last, "the result carries no card value")
+
+        other = site.replace("127.0.0.1", "localhost")
+        check(call("browser_navigate", url=other + "/checkout").get("success") is True,
+              "the same checkout on another origin loads")
+        out = call("browser_vault", action="fill", handle=meta.id)
+        check(out.get("error_type") == "origin_mismatch" and len(asked) == 1, "the fill refuses another origin")
+
+    requests.delete(f"{bc.get_camofox_url()}/sessions/{bc.get_session(T)['user_id']}",
+                    headers=bc._auth_headers(), timeout=30)
+
+
 if __name__ == "__main__":
-    vault(sys.argv[2])
+    if sys.argv[1] == "card":
+        card(sys.argv[2], sys.argv[3])
+    else:
+        vault(sys.argv[2])
     print("ALL PASSED", flush=True)

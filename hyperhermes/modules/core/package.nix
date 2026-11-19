@@ -53,6 +53,12 @@ let
     ./patches/hermes-subagents-resume-every-turn.patch
     # After the exclude-native patch: extends its catalog filter lines.
     ./patches/hermes-openrouter-no-batch.patch
+    # After the generate-password patch (its login classify sits in the
+    # code these move), in this order: upstream #126889, #136981, then
+    # hyperhermes' frames on the Camofox page backend.
+    ./patches/hermes-vault-payment-consent-needs-card.patch
+    ./patches/hermes-vault-payment-iframe-fill.patch
+    ./patches/hermes-vault-payment-iframe-page-backend.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {

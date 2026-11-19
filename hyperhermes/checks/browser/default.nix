@@ -30,6 +30,11 @@
 # site's signup form, saves it in her vault bound to that origin with the
 # given identifier and fills the password and its confirmation with it,
 # never returning it; on a page without a password field it saves nothing.
+# Card frames (hermes-vault-payment-iframe-*.patch, the plugin's
+# vault-frames.patch): a test card is filled into the card iframe a checkout
+# embeds directly from the processor's origin (a second local site), and
+# refused for the same frame from an origin the shop controls and for the
+# processor frame nested in such a frame.
 { pkgs, self }:
 let
   inherit (pkgs) lib;
@@ -102,6 +107,14 @@ pkgs.testers.runNixOSTest {
           serviceConfig = {
             DynamicUser = true;
             ExecStart = "${pkgs.python3}/bin/python3 ${site} 8765";
+          };
+        };
+        # The card processor's origin for the vault's card-frame fill.
+        card-site = {
+          wantedBy = [ "multi-user.target" ];
+          serviceConfig = {
+            DynamicUser = true;
+            ExecStart = "${pkgs.python3}/bin/python3 ${site} 8767";
           };
         };
         captcha-site = {
@@ -208,6 +221,14 @@ pkgs.testers.runNixOSTest {
         out = machine.succeed("${vaultDriver "alice" "vault http://127.0.0.1:8765"}")
         print(out)
         assert "ALL PASSED" in out
+
+    with subtest("the vault fills a test card only into the processor's card frame the checkout embeds directly"):
+        machine.wait_for_unit("card-site.service")
+        out = machine.succeed("${vaultDriver "alice" "card http://127.0.0.1:8765 http://localhost:8767"}")
+        print(out)
+        assert "ALL PASSED" in out
+        # camofox-browser logs neither the fill script nor the card.
+        assert "4242424242424242" not in machine.succeed("journalctl -u hermes-camofox-alice --no-pager")
 
     with subtest("bob reaches neither alice's port nor her backend"):
         machine.fail("runuser -u bob -- curl -s --max-time 10 http://127.0.0.1:${port}/health")

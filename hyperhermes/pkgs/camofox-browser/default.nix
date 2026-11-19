@@ -3,9 +3,12 @@
 # Nix Camoufox (CAMOUFOX_EXECUTABLE), the default uBlock addon is excluded
 # by the caller, and no install script runs.
 #
-# One plugin is added: ./captcha-plugin (POST /tabs/:tabId/solve-captcha),
+# Two plugins are added: ./captcha-plugin (POST /tabs/:tabId/solve-captcha),
 # CaptchaKraken's driver on a tab's live page, with its engine from
-# pkgs/captchakraken. It answers only when the unit sets VLLM_BASE_URL.
+# pkgs/captchakraken; it answers only when the unit sets VLLM_BASE_URL.
+# ./vault-frames-plugin (POST /tabs/:tabId/vault-frames[/:frameId/evaluate]):
+# the tab's direct child iframes for browser_vault's hosted card-field fill
+# (pkgs/hermes-camofox-plugin/vault-frames.patch).
 {
   lib,
   buildNpmPackage,
@@ -50,9 +53,10 @@ buildNpmPackage (finalAttrs: {
     substituteInPlace camofox.config.json --replace-fail \
       '"youtube": { "enabled": true }' '"youtube": { "enabled": false }' \
       --replace-fail '"persistence": { "enabled": true },' \
-      '"persistence": { "enabled": true }, "captcha": { "enabled": true },'
-    mkdir plugins/captcha
+      '"persistence": { "enabled": true }, "captcha": { "enabled": true }, "vault-frames": { "enabled": true },'
+    mkdir plugins/captcha plugins/vault-frames
     cp ${./captcha-plugin/index.js} plugins/captcha/index.js
+    cp ${./vault-frames-plugin/index.js} plugins/vault-frames/index.js
     substituteInPlace server.js --replace-fail \
       "const args = super.xvfb_args;" \
       "const args = [...super.xvfb_args, '-nolisten', 'local'];"
@@ -63,7 +67,7 @@ buildNpmPackage (finalAttrs: {
       const p = JSON.parse(fs.readFileSync("package.json"));
       delete p.overrides;
       delete p.devDependencies;
-      p.files.push("plugins/captcha/index.js");
+      p.files.push("plugins/captcha/index.js", "plugins/vault-frames/index.js");
       fs.writeFileSync("package.json", JSON.stringify(p, null, 2));
       const l = JSON.parse(fs.readFileSync("package-lock.json"));
       delete l.packages[""].devDependencies;

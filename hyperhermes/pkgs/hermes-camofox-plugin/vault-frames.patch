@@ -1,0 +1,53 @@
+browser_vault reaches the card frames of a Camofox tab (hosted card fields).
+
+Symptom: on a checkout whose card number and CVC sit in a payment
+processor's cross-origin iframe (Stripe Elements & co.), browser_vault
+fill on the Camofox tab found no card field: Camofox has no CDP, so
+hermes' frame path (#136981) cannot list or enter the tab's iframes.
+
+Fix: the page backend implements core's optional child_frames and
+evaluate_in_frame (hermes-vault-payment-iframe-page-backend.patch) over
+the camofox-browser plugin vault-frames (../camofox-browser/vault-frames-plugin):
+POST /tabs/<id>/vault-frames lists the tab's direct child frames,
+POST /tabs/<id>/vault-frames/<frameId>/evaluate runs a script in one of
+them. The secret path keeps evaluate's rules: loopback or HTTPS only, no
+redirects, no environment proxies. Core decides which frame takes the card.
+Not upstream (hermes-official-plugins).
+
+diff --git a/camofox_vault.py b/camofox_vault.py
+index 1b917f9..69c4236 100644
+--- a/camofox_vault.py
++++ b/camofox_vault.py
+@@ -59,4 +59,32 @@ def make_page_backend():
+                 raise RuntimeError(str(resp.get("error") if isinstance(resp, dict) else "") or "evaluate failed")
+             return resp["result"]
+ 
++        # The page's direct child frames (hosted card fields), through hyperhermes' camofox-browser plugin
++        # vault-frames (pkgs/camofox-browser/vault-frames-plugin); a server without it answers 404, so no frames.
++        def child_frames(self, task_id: str) -> list[dict[str, str]]:
++            session = _tracked_session(task_id)
++            if not session or not session.get("tab_id"):
++                return []
++            resp = client.request("post", client.tab_path(session, "vault-frames"), allow_redirects=False,
++                                  proxies={"http": None, "https": None},
++                                  json={"userId": session["user_id"]}).json()
++            frames = resp.get("frames") if isinstance(resp, dict) else None
++            return [{"frame_id": str(f["frameId"]), "url": str(f.get("url") or "")}
++                    for f in (frames or []) if isinstance(f, dict) and f.get("frameId")]
++
++        def evaluate_in_frame(self, task_id: str, frame_id: str, expression: str, *, secret: bool) -> Any:
++            session = _tracked_session(task_id)
++            if not session or not session.get("tab_id"):
++                raise RuntimeError(client.NO_SESSION_ERROR)
++            if secret and not secret_transport_ok(client.get_camofox_url()):
++                raise RuntimeError("vault fills need CAMOFOX_URL on loopback or HTTPS")
++            if not frame_id.replace("-", "").isalnum():
++                raise RuntimeError("bad frame id")
++            resp = client.request("post", client.tab_path(session, f"vault-frames/{frame_id}/evaluate"),
++                                  allow_redirects=False, proxies={"http": None, "https": None},
++                                  json={"expression": expression, "userId": session["user_id"]}).json()
++            if not isinstance(resp, dict) or "result" not in resp or resp.get("error"):
++                raise RuntimeError(str(resp.get("error") if isinstance(resp, dict) else "") or "evaluate failed")
++            return resp["result"]
++
+     return CamofoxPageBackend()

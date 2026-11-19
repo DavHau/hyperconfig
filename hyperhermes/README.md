@@ -118,7 +118,8 @@ secrets; `lib.clan` has the per-agent ones):
 `local-deployment`;
 evaluation-only `client-features` and `clan-eval`; offline `vision` (image
 routing, vision backend and vision tools per main model, on the patched
-package; a consumer passes its own `settings` and package to it).
+package; a consumer passes its own `settings` and package to it) and
+`vault-payment-frames` (the vault's card-frame fill, on the patched package).
 
 ## hermes patches
 
@@ -148,6 +149,24 @@ package; a consumer passes its own `settings` and package to it).
   takes native images away from every model); the tool-availability
   caches are per main model, so one session's text-only model no longer
   drops `vision_analyze`/`browser_vision` from another session's tool list.
+- `hermes-vault-payment-consent-needs-card`: a vault card fill asks for
+  consent only once the checkout shows a card number field (on the page or,
+  with the next patch, in a processor's card frame); before, a frame-only
+  checkout prompted and then failed, on every retry. Upstream:
+  NousResearch/hermes-agent#126889 (open), as is.
+- `hermes-vault-payment-iframe-fill`: `browser_vault` fills card number,
+  expiry and CVC into hosted card fields (Stripe Elements, Braintree Hosted
+  Fields, Adyen Secured Fields): only into a frame whose own document is on a
+  known processor origin and whose only ancestor is the card's bound
+  checkout origin, re-checked in the write's own script. Upstream:
+  NousResearch/hermes-agent#136981 (open), as is (CDP browsers only).
+- `hermes-vault-payment-iframe-page-backend`: the same over a plugin page
+  backend (Camofox has no CDP: `child_frames`/`evaluate_in_frame`, served by
+  `pkgs/hermes-camofox-plugin/vault-frames.patch` and camofox-browser's
+  `vault-frames` plugin), Square's and Adyen's regional card-frame origins,
+  and redaction of the grouped card number. Not upstream yet (proposed on
+  #136981 / #140788). Checks: `vault-payment-frames` (offline), `browser`
+  (a real Camofox, a two-origin test checkout, a test card).
 - `hermes-busy-message-yields-command`: a message sent while a foreground
   terminal command runs (with an image too, over the messaging gateway or
   the classic CLI) moves the command to the background, still running,

@@ -3,6 +3,12 @@ POST answered with an attachment, a form POST answered with a 302 to a file on
 another origin (APKSum's shape), and a script-built blob; plus a fetch() re-POST
 of the redirecting form and a file over browser_downloads' 50 MiB limit. /login is
 a login form for the vault test, /signup a signup form (password and confirmation).
+Card checkouts for the vault's hosted card-field fill: /card is a processor's card
+frame (number, expiry, CVC); /checkout embeds it from http://localhost:<card port>
+(the stand-in processor origin), /checkout-evil embeds the same frame from
+http://localhost:<this port> (an origin the shop controls, not a processor),
+/checkout-nested embeds the processor frame inside /wrap from that origin.
+The card port is the second argument (default 8767).
 
 Files are deterministic bytes; `site.py --sha <name>` prints a file's sha256.
 """
@@ -84,6 +90,23 @@ SIGNUP = b"""<!doctype html><html><head><title>sign up</title></head><body>
 </form>
 </body></html>"""
 
+CARD = b"""<!doctype html><html><head><title>card</title></head><body>
+<input id="number" name="cardnumber" autocomplete="cc-number" inputmode="numeric">
+<input id="expiry" name="exp-date" autocomplete="cc-exp">
+<input id="cvc" name="cvc" autocomplete="cc-csc">
+</body></html>"""
+
+
+def checkout(frame_url: str) -> bytes:
+    return ('<!doctype html><html><head><title>checkout</title></head><body>\n'
+            '<label>Email <input id="email" type="email" autocomplete="email"></label>\n'
+            f'<iframe id="card" src="{frame_url}" width="400" height="200"></iframe>\n'
+            '</body></html>').encode()
+
+
+def wrap(frame_url: str) -> bytes:
+    return b'<!doctype html><html><body><iframe src="' + frame_url.encode() + b'" width="380" height="180"></iframe></body></html>'
+
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
@@ -107,6 +130,18 @@ class H(BaseHTTPRequestHandler):
             self.wfile.write(INDEX)
         elif self.path in ("/login", "/signup"):
             page = LOGIN if self.path == "/login" else SIGNUP
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(page)))
+            self.end_headers()
+            self.wfile.write(page)
+        elif self.path in ("/card", "/checkout", "/checkout-evil", "/checkout-nested", "/wrap"):
+            port = self.server.server_address[1]
+            processor = f"http://localhost:{CARD_PORT}/card"
+            page = {"/card": CARD, "/checkout": checkout(processor),
+                    "/checkout-evil": checkout(f"http://localhost:{port}/card"),
+                    "/checkout-nested": checkout(f"http://localhost:{port}/wrap"),
+                    "/wrap": wrap(processor)}[self.path]
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.send_header("Content-Length", str(len(page)))
@@ -153,4 +188,5 @@ if __name__ == "__main__":
         n = sys.argv[2]
         print(hashlib.sha256(payload(n, BIG if n == "big.bin" else FILES[n])).hexdigest())
         sys.exit(0)
+    CARD_PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8767
     DualStack(("::", int(sys.argv[1]) if len(sys.argv) > 1 else 8765), H).serve_forever()

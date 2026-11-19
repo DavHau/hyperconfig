@@ -13,7 +13,10 @@
 # v0.22.5. ./native-vision.patch: browser_vision attaches the screenshot
 # for a main model with native vision (was a hunk of the core patch
 # hermes-vision-every-model). The vault (browser_vault on the Camofox tab) is upstream's now:
-# core's browser page backend seam plus the plugin's camofox_vault.py.
+# core's browser page backend seam plus the plugin's camofox_vault.py;
+# ./vault-frames.patch lets it reach the tab's hosted card-field iframes
+# (core: hermes-vault-payment-iframe-page-backend.patch; server:
+# ../camofox-browser/vault-frames-plugin).
 #
 # The plugin needs `requests` only, which the hermes venv has. hermes
 # imports it as a package from $HERMES_HOME/plugins/camofox (the browser
@@ -73,4 +76,5 @@ runCommand "hermes-camofox-plugin-1.1.0"
     cd $out
     patch -p1 < ${./register-extras.patch}
     patch -p1 < ${./native-vision.patch}
+    patch -p1 < ${./vault-frames.patch}
   ''
