@@ -3,7 +3,7 @@
 `hyper.spaces.<name>`: a NixOS container per job, built like infra-space
 (`../infra-space`) but with none of its fleet rights, except one:
 agave-host's Agave tenant is root on every fleet machine
-(the fleet's tunnel module), its login user is not. Two:
+(`../agave-tunnel.nix`), its login user is not. Two:
 `geninf-space` on som and amy (a container on each, separate homes, the
 same shared keys), and `agave-host` on som, Dave's self-hosted Agave
 (`./agave-host.nix`, docs/agave-self-hosted.md). Design and isolation: `./default.nix` (host side
@@ -140,7 +140,7 @@ on the old machine.
 - `space-agave-host-github`: DavHau/hyperconfig on GitHub, Settings > Deploy
   keys, with write access (Agave pushes confirmed changes to main).
 - `space-agave-host-tenant-ssh`: nothing to add; root on every fleet machine
-  trusts it from the repo (the fleet's tunnel module).
+  trusts it from the repo (`../agave-tunnel.nix`).
 - `space-agave-host-hostkey` (`ssh_host_ed25519_key.pub`): nothing to add;
   every machine's tunnel pins it from the repo.
 

@@ -12,6 +12,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 ### modules/nixos
 - modules/nixos/acme-local-resolver.nix — lego's DNS-01 orders on a machine behind the home router (cm-beryl). <- som
 - modules/nixos/afk.nix — afk: the omp-based harness (profile + patchset) from the local ../afk flake checkout. Default package is the non-sandbo… <- m/dave.nix, m/spaces/afk.nix
+- modules/nixos/agave-tunnel.nix — Agave's tunnel on every fleet machine but the installer (the `agave-tunnel` importer instance in modules/flake-parts/ni… <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/fleet-access.nix, m/ipv4-forward.nix, m/spaces/agave-host.nix, m/spaces/default.nix
 - modules/nixos/agent-user.nix — Fleet-wide `agent` user. <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/fleet-access.nix
 - modules/nixos/alacritty.nix — - <- m/dave.nix
 - modules/nixos/all-hardware.nix — - <- m/common.nix
@@ -36,7 +37,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/deluge.nix — - <- m/dave.nix
 - modules/nixos/desktop.nix — X11/libinput basics and session variables (terminal = ghostty) on Dave's desktops; <- m/dave.nix
 - modules/nixos/dyndns-porkbun.nix — Dynamic DNS through the Porkbun API: <- edi, machines/nas/porkbun.nix
-- modules/nixos/encrypted-dns.nix — System DNS only ever leaves this machine encrypted: <- m/dave.nix
+- modules/nixos/encrypted-dns.nix — System DNS only ever leaves this machine encrypted: <- m/agave-tunnel.nix, m/dave.nix
 - modules/nixos/esphome-secrets.nix — Secrets of the ESPHome devices (locations/*/esphome, machines/cm-pi/esphome), one shared generator per ESPHome director… <- amy
 - modules/nixos/etc-hosts.nix — - <- m/dave.nix
 - modules/nixos/fast-nix-gc.nix — Fleet-wide store GC (imported by ./common.nix, so every machine gets it): <- m/common.nix, m/disk-hygiene/default.nix, m/infra-space/gcroots.nix
@@ -65,7 +66,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/initrd-ssh.nix — sshd in the initrd on port 2222: <- vit
 - modules/nixos/initrd-wifi.nix — Wifi in the initrd, so a machine without a cable can reach its Tang servers (./tang-client.nix). <- vit
 - modules/nixos/iodine-password.nix — Password of the iodine IP-over-DNS tunnel (ns.bruch-bu.de). <- m/role-iodine/default.nix
-- modules/nixos/ipv4-forward.nix — Lend sgp's public IPv4 to som. <- sgp, som, m/ipv4-forward-slots-test/default.nix
+- modules/nixos/ipv4-forward.nix — Lend sgp's public IPv4 to som. <- sgp, som, m/agave-tunnel.nix, m/ipv4-forward-slots-test/default.nix
 - modules/nixos/jujutsu.nix — jj (jujutsu) on Dave's desktops, with its config. <- m/dave.nix
 - modules/nixos/kernel-latest-zfs.nix — Use the newest kernel series that the configured ZFS package supports. <- amy
 - modules/nixos/lan-printer.nix — lan-printer: one driverless (IPP Everywhere / AirPrint) CUPS queue, created by our own oneshot instead of hardware.prin… <- m/home-printer-host.nix, m/home-printer.nix
@@ -101,7 +102,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/nix-lazy.nix — - <- m/dave.nix
 - modules/nixos/nix-parallel-downloads.nix — - <- m/dave.nix
 - modules/nixos/nix-registry.nix — - <- m/dave.nix
-- modules/nixos/nix-sandbox-strict.nix — som's nix-daemon builds for users it does not trust: <- som
+- modules/nixos/nix-sandbox-strict.nix — som's nix-daemon builds for users it does not trust: <- som, m/agave-tunnel.nix
 - modules/nixos/nix-ssh-client.nix — Unified ssh client key for the nix daemon. <- m/dave.nix
 - modules/nixos/nix.nix — The nix package on Dave's desktops: <- m/dave.nix
 - modules/nixos/nixpkgs-config.nix — nixpkgs `config` for the whole fleet (imported, not a module): <- modules/flake-parts/nixosConfigurations.nix, m/dave.nix
@@ -212,7 +213,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/infra-space/dashboard.nix — The infra-space agent's hermes dashboard, published by this host's nginx (som only: <- m/infra-space/default.nix, m/infra-space/hermes.nix, m/infra-space/secret-prompt/default.nix
 - modules/nixos/infra-space/decisions.nix — The fleet's decision registry: <- m/infra-space/hermes.nix, m/telegram-send/default.nix
 - modules/nixos/infra-space/default.nix — infra-space: a NixOS container on every member machine (./members.nix), identical on each, from which the fleet is mana… <- amy, som, m/infra-space/agent-tools-test.nix, m/infra-space/dashboard.nix, m/infra-space/fleet-access.nix, m/infra-space/gcroots.nix, m/infra-space/guest.nix, m/infra-space/hermes.nix, +10
-- modules/nixos/infra-space/fleet-access.nix — infra-space's root access on every clan machine (wired via the `sshd` instance's server extraModules in modules/flake-p… <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/default.nix, m/infra-space/test.nix, m/spaces/agave-host.nix, m/telegram-send/default.nix
+- modules/nixos/infra-space/fleet-access.nix — infra-space's root access on every clan machine (wired via the `sshd` instance's server extraModules in modules/flake-p… <- modules/flake-parts/nixosConfigurations.nix, m/agave-tunnel.nix, m/infra-space/default.nix, m/infra-space/test.nix, m/spaces/agave-host.nix, m/telegram-send/default.nix
 - modules/nixos/infra-space/gcroots.nix — GC roots on this host for systems built from the infra-space guest (a host module, imported by ./default.nix; <- m/infra-space/default.nix, m/infra-space/fleet-bump/default.nix
 - modules/nixos/infra-space/guest.nix — The system inside the infra-space container (./default.nix sets the options below from the host side). <- m/infra-space/default.nix, m/infra-space/fleet-bump/default.nix, m/infra-space/gcroots.nix, m/infra-space/hermes.nix, m/infra-space/secret-prompt/default.nix, m/spaces/client.nix, m/spaces/guest-base.nix
 - modules/nixos/infra-space/hermes.nix — The infra-space's hermes agent, inside the container (./default.nix appends this to the guest's modules on every member… <- m/infra-space/agent-tools-guest.nix, m/infra-space/dashboard.nix, m/infra-space/decisions.nix, m/infra-space/default.nix, m/infra-space/fleet-bump/default.nix, m/infra-space/nixpkgs-bump.nix, m/infra-space/voice-api.nix
@@ -327,7 +328,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/space-gui/hermes-app.nix — The hermes desktop app as a space-gui command (./default.nix): <- m/dave-desktop/isolated-apps.nix
 - modules/nixos/space-gui/test.nix — space-gui (./default.nix) on one machine: <- flake.nix, m/space-gui/default.nix
 - modules/nixos/spaces/afk.nix — afk in a space's guest, for Dave's interactive sessions: <- m/spaces/instance.nix
-- modules/nixos/spaces/agave-host.nix — The agave-host space: Dave's self-hosted Agave (docs/agave-self-hosted.md, H5-H8), agave's server (`services.agave`, th… <- m/spaces/default.nix
+- modules/nixos/spaces/agave-host.nix — The agave-host space: Dave's self-hosted Agave (docs/agave-self-hosted.md, H5-H8), agave's server (`services.agave`, th… <- m/agave-tunnel.nix, m/infra-space/default.nix, m/spaces/default.nix
 - modules/nixos/spaces/blocked-destinations.nix — What a confined space's guest may not reach (./host.nix `confine`): <- m/dave-desktop/isolated-apps.nix, m/spaces/default.nix
 - modules/nixos/spaces/client.nix — Dave's way into every space-like container, on his desktops (../dave-desktop): <- m/dave-desktop/default.nix, m/spaces/default.nix, m/spaces/instance.nix, m/spaces/test.nix
 - modules/nixos/spaces/default.nix — Named agent spaces: NixOS containers like infra-space (../infra-space), each for one job, none of them a fleet admin bu… <- amy, som, m/spaces/agave-host.nix, m/spaces/client.nix, m/spaces/forges.nix, m/spaces/geninf-space.nix, m/spaces/guest.nix, m/spaces/host.nix, +4
@@ -342,7 +343,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/spaces/host.nix — The host side of one space container: <- m/dave-desktop/isolated-apps.nix, m/infra-space/default.nix, m/space-gui/default.nix, m/space-gui/test.nix, m/spaces/agave-host.nix, m/spaces/default.nix, m/spaces/guest-base.nix, m/spaces/guest.nix, +3
 - modules/nixos/spaces/immutable-helper.py — One request of a space guest's root (./host.nix, immutableHelper): <- m/spaces/host.nix
 - modules/nixos/spaces/instance.nix — One space-like container on this host, everything infra-space (../infra-space) and the named spaces (./default.nix) sha… <- m/infra-space/default.nix, m/spaces/afk.nix, m/spaces/agave-host.nix, m/spaces/default.nix, m/spaces/guest.nix
-- modules/nixos/spaces/public.nix — Every space-like container Dave reaches from his desktops, one entry per copy: <- m/spaces/client.nix, m/spaces/default.nix
+- modules/nixos/spaces/public.nix — Every space-like container Dave reaches from his desktops, one entry per copy: <- m/agave-tunnel.nix, m/spaces/client.nix, m/spaces/default.nix
 - modules/nixos/spaces/publish-guest.nix — A space's published web apps, the guest's side (./publish.nix has the host's, ./default.nix wires both from hyper.space… <- m/spaces/default.nix, m/spaces/guest.nix, m/spaces/publish.nix
 - modules/nixos/spaces/publish.nix — The spaces' published web apps, the host's front (som: <- som, m/spaces/default.nix, m/spaces/publish-guest.nix
 - modules/nixos/spaces/registry.nix — The named agent spaces (./default.nix): <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/default.nix, m/spaces/agave-host.nix, m/spaces/client.nix, m/spaces/default.nix, m/spaces/geninf-space.nix, m/spaces/public.nix, m/spaces/publish.nix, +2

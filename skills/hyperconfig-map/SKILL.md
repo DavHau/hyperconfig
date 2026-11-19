@@ -135,7 +135,9 @@ the named owner and leave the copies to their unification.
 
 - A new generator (prompted or not) blocks every deploy until generated.
 - som's toplevel drvPath changes on any repo edit (nginx references the
-  source): don't treat that as a behaviour change.
+  source): don't treat that as a behaviour change. Only som: no machine
+  carries the commit (`hyper.agaveTunnel.reportRevision` would, on every
+  commit; it is off).
 - New *mechanism* = new file in `modules/nixos/` imported where needed;
   a new *instance* of an existing mechanism (Mechanisms table) is data in
   its module, not a copy (`CONVENTIONS.md`).

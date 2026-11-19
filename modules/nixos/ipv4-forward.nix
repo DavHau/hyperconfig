@@ -83,6 +83,12 @@ in
       default = returnMarkInt;
       description = "fwmark bit the backend gives forwarded connections' return traffic (other mark users check against it).";
     };
+    backendAddress = lib.mkOption {
+      type = lib.types.str;
+      readOnly = true;
+      default = backendAddress;
+      description = "The backend's (${backendName}'s) end of the tunnel: where the gateway reaches what the backend serves on the public IPv4, since the gateway's own connections to that address stay local (./agave-tunnel.nix).";
+    };
   };
 
   config = lib.mkMerge [

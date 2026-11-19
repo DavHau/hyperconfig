@@ -1,15 +1,16 @@
 /*
   infra-space's root access on every clan machine (wired via the `sshd`
   instance's server extraModules in modules/flake-parts/nixosConfigurations.nix,
-  like ../agent-user.nix).
+  like ../agent-user.nix), and the same kind of access for other fleet
+  admins' keys (`extraKeyFiles`: Agave's tenant, ../agave-tunnel.nix).
 
-  The key goes into root's authorizedKeys.keyFiles, not into the clan
+  The keys go into root's authorizedKeys.keyFiles, not into the clan
   instance's authorizedKeys: several modules copy root's `keys` list to
   other accounts (som's hermes agents as their adminKeys, bam's
-  dave, nas' users) or into the initrd, and the infra-space identity must
+  dave, nas' users) or into the initrd, and these identities must
   reach none of them. Nothing reads `keyFiles` but sshd's own
   /etc/ssh/authorized_keys.d/root (which carries both, so hosts whose sshd
-  reads only that file, like vit, admit it too) and the initrd sshd's
+  reads only that file, like vit, admit them too) and the initrd sshd's
   authorizedKeyFiles default, which is narrowed back below.
 */
 {
@@ -18,7 +19,8 @@
   ...
 }:
 let
-  inherit (config.hyper.infraSpace.fleetAccess) keyFile;
+  inherit (config.hyper.infraSpace.fleetAccess) keyFile extraKeyFiles;
+  keyFiles = [ keyFile ] ++ extraKeyFiles;
 in
 {
   # A file, not a string: sshd reads keyFiles at eval time, and a file
@@ -31,12 +33,17 @@ in
     defaultText = lib.literalMD "the shared clan var `infra-space-ssh` (./default.nix)";
     description = "The infra-space ssh public key authorized for root here.";
   };
+  options.hyper.infraSpace.fleetAccess.extraKeyFiles = lib.mkOption {
+    type = lib.types.listOf lib.types.path;
+    default = [ ];
+    description = "More public key files (public clan vars) authorized for root here the same way, never in the initrd.";
+  };
 
   config = {
-    users.users.root.openssh.authorizedKeys.keyFiles = [ keyFile ];
+    users.users.root.openssh.authorizedKeys.keyFiles = keyFiles;
     # Its default is root's keyFiles: the unlocking initrd stays Dave's.
     boot.initrd.network.ssh.authorizedKeyFiles = lib.mkDefault (
-      lib.remove keyFile config.users.users.root.openssh.authorizedKeys.keyFiles
+      lib.subtractLists keyFiles config.users.users.root.openssh.authorizedKeys.keyFiles
     );
   };
 }

@@ -169,7 +169,8 @@
     nix-housing.inputs.nixpkgs.follows = "nixpkgs";
 
     # Dave's self-hosted Agave (docs/agave-self-hosted.md): the server in
-    # the agave-host space on som and the tunnel on every machine. Pinned to
+    # the agave-host space on som (modules/nixos/spaces/agave-host.nix) and
+    # the tunnel on every machine (modules/nixos/agave-tunnel.nix). Pinned to
     # the integration branch (agave main + the open self-hosting PRs); Dave
     # moves it: `nix flake update agave`, reviewing the diff of agave's
     # module.nix and template/modules each time (its fleet module runs as

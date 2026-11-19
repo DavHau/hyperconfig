@@ -2,7 +2,7 @@
   The agave-host space: Dave's self-hosted Agave (docs/agave-self-hosted.md,
   H5-H8), agave's server (`services.agave`, the flake input `agave`'s
   nixosModules.default) in a named space on som, at https://agave.davhau.com.
-  Every fleet machine's tunnel dials it.
+  Every fleet machine's tunnel dials it (../agave-tunnel.nix).
 
   Reached through som's SNI passthrough (hyperhermes' slots.sniBackends):
   the public IPv4's 443 for agave.davhau.com and *.agave.davhau.com (the
@@ -25,8 +25,8 @@
   refuses this host's services but DNS.
 
   The one space whose tenant is a fleet admin: Agave's tenant (t-infra)
-  logs in as root on every fleet machine, som included (the fleet's tunnel
-  module, H10). Dave's decision; it deploys with `clan machines update`. The login
+  logs in as root on every fleet machine, som included (../agave-tunnel.nix,
+  H10). Dave's decision; it deploys with `clan machines update`. The login
   user `agave-host` (Dave's keys, afk) never holds that key.
 
   Its own keys, each revocable alone, clan vars without prompts (`clan vars
@@ -47,8 +47,8 @@
                            Manual: Dave adds its public value on GitHub as
                            a deploy key.
     space-agave-host-tenant-ssh  the tenant's ssh identity, which root on
-                           every fleet machine trusts (the fleet's tunnel
-                           module, through ../infra-space/fleet-access.nix); system
+                           every fleet machine trusts (../agave-tunnel.nix,
+                           through ../infra-space/fleet-access.nix); system
                            credential `tenant-ssh`.
   The first two are the login user's too, at
   /run/agave-host/secrets/<credential> (0400 agave-host). github and

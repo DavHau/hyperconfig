@@ -27,6 +27,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.afk.defaultModel: modules/nixos/afk.nix
 - hyper.afk.extraSkills: modules/nixos/afk.nix
 - hyper.afk.pinnedSettings: modules/nixos/afk.nix
+- hyper.agaveTunnel.reportRevision: modules/nixos/agave-tunnel.nix
 - hyper.agentUser.enable: modules/nixos/agent-user.nix
 - hyper.atprotoPds: modules/nixos/atproto-pds/default.nix
 - hyper.coolerLcd.usbPort: modules/nixos/cooler-lcd/default.nix
@@ -42,6 +43,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.infraSpace: modules/nixos/infra-space/default.nix
 - hyper.infraSpace.agentTools.browser: modules/nixos/infra-space/agent-tools.nix
 - hyper.infraSpace.dashboard: modules/nixos/infra-space/dashboard.nix
+- hyper.infraSpace.fleetAccess.extraKeyFiles: modules/nixos/infra-space/fleet-access.nix
 - hyper.infraSpace.fleetAccess.keyFile: modules/nixos/infra-space/fleet-access.nix
 - hyper.infraSpace.gcRoots: modules/nixos/infra-space/gcroots.nix
 - hyper.initrdSsh.enable: modules/nixos/initrd-ssh.nix

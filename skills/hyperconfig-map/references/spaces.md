@@ -17,8 +17,9 @@
 | `test.nix` | `checks.x86_64-linux.spaces` (VM test; names machines: grep it on moves) |
 
 No space is a fleet admin except agave-host: its Agave tenant (not its
-login user) is root on every fleet machine (the fleet's tunnel module, key
-`space-agave-host-tenant-ssh`).
+login user) is root on every fleet machine (`agave-tunnel.nix`, key
+`space-agave-host-tenant-ssh`, `from="127.0.0.1,::1"`: through the
+tunnels only).
 
 Token path, e.g. geninf-space: prompted generator `space-geninf-space-token-geninf`
 (geninf-space.nix) -> `hyper.spaces.geninf-space.credentials.token-geninf` -> nspawn

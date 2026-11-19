@@ -118,7 +118,8 @@
                          gi-infra, never write); credential
                          `agave-geninf-ro`, ssh's key for git.geninf.io
                          (./guest.nix: hyperconfig's flake input `agave`).
-                         The agave-host space has it too.
+                         The agave-host space has it too
+                         (../spaces/agave-host.nix).
     infra-space-brief    shared, made and used on the hermes member only:
                          the morning brief's key to edi, a forced command
                          for an unprivileged user (../telegram-send);

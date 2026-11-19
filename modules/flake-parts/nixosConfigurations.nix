@@ -160,6 +160,15 @@ in {
               roles.default.machines = lib.genAttrs (lib.remove "installer" fleetMachines) (_: { });
               roles.default.extraModules = [ ../nixos/clan-secrets-mirror.nix ];
             };
+            # Dave's Agave reaches every machine but the installer (RAM
+            # only, never deployed) through its tunnel
+            # (../nixos/agave-tunnel.nix); laptops included.
+            agave-tunnel = {
+              module.name = "importer";
+              module.input = "clan-core";
+              roles.default.machines = lib.genAttrs (lib.remove "installer" fleetMachines) (_: { });
+              roles.default.extraModules = [ ../nixos/agave-tunnel.nix ];
+            };
             dave-user = { #
               module.name = "users";
               roles.default.tags.all = { }; #

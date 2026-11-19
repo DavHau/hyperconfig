@@ -1,8 +1,8 @@
 /*
   Named agent spaces: NixOS containers like infra-space (../infra-space),
   each for one job, none of them a fleet admin but one: agave-host, whose
-  Agave tenant is root on every fleet machine (./agave-host.nix, the
-  fleet's tunnel module; never its login user). hyper.spaces.<name> on the
+  Agave tenant is root on every fleet machine (./agave-host.nix,
+  ../agave-tunnel.nix; never its login user). hyper.spaces.<name> on the
   machines ./registry.nix assigns it to produces container <name>, its
   user <name>, its home /var/lib/spaces/<name>/home here.
 

@@ -78,15 +78,15 @@ agave `main` at a rev Dave picks.
 | Step | What | Status |
 |---|---|---|
 | H1 | This doc | done |
-| H2 | flake input `agave` pinned to the integration branch | implemented; security review: request changes (tenant key `from=` localhost only, push/tenant keys not for the login user, generator names, no fleet-wide configurationRevision), in fix-up |
+| H2 | flake input `agave` pinned to the integration branch | on main, vars generated, reviewed twice (approve with nits); waits for deploy |
 | H3 | tranquil-pds on som: pds.davhau.com, handle domain davhau.com, PDS-hosted did:web on, invite-only, no relay crawl (`modules/nixos/atproto-pds`, `machines/som/atproto-pds.nix`; DNS records and certificate on som, since `*.davhau.com` points at edi) | on main (8583ae5c), vars generated; waits for deploy of som |
 | H4 | Dave's account dave.davhau.com (did:web), created by `atproto-pds-accounts.service`; password from the prompt-free clan var `atproto-pds-dave-password` (random until Dave sets his own: `clan-secret-prompt som atproto-pds-dave-password password`, then a deploy applies it) | on main, var generated; waits for deploy of som |
-| H5 | space `agave-host` (registry index 3, sshPort 2226, uids 1220/1221) running `services.agave` in repo mode | implemented; security review: request changes (tenant key `from=` localhost only, push/tenant keys not for the login user, generator names, no fleet-wide configurationRevision), in fix-up |
-| H6 | SNI backend agave.davhau.com (443 and 80) -> 10.235.0.14 | implemented; security review: request changes (tenant key `from=` localhost only, push/tenant keys not for the login user, generator names, no fleet-wide configurationRevision), in fix-up |
-| H7 | Mullvad egress source `ve-agave-host` | implemented; security review: request changes (tenant key `from=` localhost only, push/tenant keys not for the login user, generator names, no fleet-wide configurationRevision), in fix-up |
-| H8 | clan vars: TeamClaude client key `teamclaude-agave-host`, `agave-geninf-ro` credential, hyperconfig push key `agave-host-github` (GitHub deploy key with write: Dave adds it once) | implemented; security review: request changes (tenant key `from=` localhost only, push/tenant keys not for the login user, generator names, no fleet-wide configurationRevision), in fix-up |
-| H9 | `nixosModules.fleet` (tunnel only: no desktop, no Wi-Fi) on every machine incl. amy and vit, dialing agave.davhau.com in TLS | implemented; security review: request changes (tenant key `from=` localhost only, push/tenant keys not for the login user, generator names, no fleet-wide configurationRevision), in fix-up |
-| H10 | Agave's tenant ssh key authorized for root on every machine (public value in the repo, revocable by removing it) | implemented; security review: request changes (tenant key `from=` localhost only, push/tenant keys not for the login user, generator names, no fleet-wide configurationRevision), in fix-up |
+| H5 | space `agave-host` (registry index 3, sshPort 2226, uids 1220/1221) running `services.agave`; repo mode is a commented block until agave is re-locked to the integration branch with A2-A5 | on main, vars generated, reviewed twice (approve with nits); waits for deploy |
+| H6 | SNI backend agave.davhau.com (443 and 80) -> 10.235.0.14 | on main, vars generated, reviewed twice (approve with nits); waits for deploy |
+| H7 | Mullvad egress source `ve-agave-host` | on main, vars generated, reviewed twice (approve with nits); waits for deploy |
+| H8 | clan vars: TeamClaude client key `space-agave-host-teamclaude`, `agave-geninf-ro` credential, hyperconfig push key `space-agave-host-github` (GitHub deploy key with write: Dave adds it once, after protecting main against force-push and deletion), tenant key `space-agave-host-tenant-ssh` (root's key on every machine, `from="127.0.0.1,::1"`: usable only through a tunnel) | on main, vars generated, reviewed twice (approve with nits); waits for deploy |
+| H9 | `nixosModules.fleet` (tunnel only: no desktop, no Wi-Fi) on every machine incl. amy and vit, dialing agave.davhau.com in TLS | on main, vars generated, reviewed twice (approve with nits); waits for deploy |
+| H10 | Agave's tenant ssh key authorized for root on every machine (public value in the repo, revocable by removing it) | on main, vars generated, reviewed twice (approve with nits); waits for deploy |
 | H11 | Rented leaf machines (agave-vm-host): off until the last step | later |
 
 ## Milestones
@@ -96,6 +96,24 @@ agave `main` at a rev Dave picks.
 - M3 All machines online through their tunnels, Behind shown (A4, H9, H10).
 - M4 Agave writes a change Dave confirmed to `main` (A5, push key).
 - M5 Secrets (A8) and rented leaf machines (H11).
+
+## Where it lives
+
+- input `agave`: `flake.nix`; infra-space fetches it with `agave-geninf-ro`
+  (`modules/nixos/infra-space/guest.nix`).
+- the space: `modules/nixos/spaces/agave-host.nix` (server, SNI backend,
+  Mullvad, TeamClaude client, DNS A records, keys), registry entry in
+  `modules/nixos/spaces/registry.nix`.
+- the tunnel and the tenant's root key: `modules/nixos/agave-tunnel.nix`
+  (importer instance `agave-tunnel` in
+  `modules/flake-parts/nixosConfigurations.nix`, key file through
+  `modules/nixos/infra-space/fleet-access.nix`, usable only through the
+  tunnels: `from="127.0.0.1,::1"`). The revision for A4's Behind is an
+  opt-in there, `hyper.agaveTunnel.reportRevision`, off everywhere: it
+  changes a machine's toplevel on every commit.
+- DNS: `*.davhau.com` points at edi, so agave.davhau.com and
+  *.agave.davhau.com get their own A record (som's public IPv4, sgp's),
+  no AAAA (som's IPv6 443 is its own nginx).
 
 ## Status log
 
