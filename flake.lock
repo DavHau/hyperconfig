@@ -2145,11 +2145,11 @@
     "searxng": {
       "flake": false,
       "locked": {
-        "lastModified": 1794647848,
-        "narHash": "sha256-ipGSanQ/zqlpK5pRgOH6aaH6/cOwatU3LjnuG9kjbnI=",
+        "lastModified": 1794731974,
+        "narHash": "sha256-TWAP7nhnHhRyf3HIxIZX+OEUnldIrutSPOMt1Mzhicc=",
         "owner": "searxng",
         "repo": "searxng",
-        "rev": "a7128d5d1d5af2837a68fbeaaee9c3e8391aa9cf",
+        "rev": "2d500cb6b8e98b5f57fb446786e91f8de03be89f",
         "type": "github"
       },
       "original": {
