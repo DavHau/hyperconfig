@@ -114,10 +114,31 @@
           {
             # libsqlite3-sys (sqlx) links the system sqlite, which nixpkgs'
             # stdenv no longer brings into the link: add it to the build.
+            # Cross (cm-pi): the sqlx-macros proc-macro links sqlite for the
+            # build platform too. The pkg-config crate reads, per cargo TARGET,
+            # PKG_CONFIG{,_PATH}_<triple with underscores>
+            # (lowercase: nixpkgs' cargoEnvVarTarget is uppercase, which
+            # it doesn't read), so point the build platform at its own
+            # pkg-config and sqlite; riscv64 build scripts keep nixpkgs' cross
+            # setup (only set when build != host).
             services.ncro.package =
-              (pkgs.callPackage "${inputs.ncro}/nix/package.nix" { }).overrideAttrs (old: {
-                buildInputs = (old.buildInputs or [ ]) ++ [ pkgs.sqlite ];
-              });
+              (pkgs.callPackage "${inputs.ncro}/nix/package.nix" { }).overrideAttrs (
+                old:
+                {
+                  buildInputs = (old.buildInputs or [ ]) ++ [ pkgs.sqlite ];
+                }
+                // lib.optionalAttrs (!lib.systems.equals pkgs.stdenv.buildPlatform pkgs.stdenv.hostPlatform) (
+                  let
+                    build = lib.replaceStrings [ "-" ] [ "_" ] pkgs.stdenv.buildPlatform.rust.cargoShortTarget;
+                  in
+                  {
+                    env = (old.env or { }) // {
+                      "PKG_CONFIG_${build}" = "${pkgs.pkgsBuildBuild.pkg-config}/bin/pkg-config";
+                      "PKG_CONFIG_PATH_${build}" = "${pkgs.pkgsBuildBuild.sqlite.dev}/lib/pkgconfig";
+                    };
+                  }
+                )
+              );
 
             imports = [ inputs.ncro.nixosModules.ncro ];
 
