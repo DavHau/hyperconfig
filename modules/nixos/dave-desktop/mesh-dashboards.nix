@@ -6,11 +6,14 @@
     - https://<agent>.davhau.fyi for each of som's agents
       (machines/som/hermes-dashboards.nix) and infra-space
       (../infra-space/dashboard-account.nix), and the front door
-      hermes.davhau.com: som;
-    - the sign-in, id.davhau.com (pocket-id, modules/clan/oidc): edi.
-  Same URLs, same certificates (nginx on both answers on [::]:443 for
+      hermes.davhau.com: som.
+  The sign-in, id.davhau.com (pocket-id on edi), stays on public DNS:
+  every other login from this machine (Grafana, the browser) shares it,
+  and an authoritative mesh entry would break all of them whenever
+  yggdrasil is down or has no path.
+  Same URLs, same certificates (som's nginx answers on [::]:443 for
   those names, and the clan's yggdrasil filter there admits this
-  machine's address); the sign-in and the dashboards' rate limits see this
+  machine's address); the dashboards' rate limits see this
   machine's yggdrasil address, one /128 shared by this host and all its
   containers (as its public v4 was). Serve ports (<port>.<agent>.davhau.fyi)
   and everything else stay on public DNS.
@@ -25,8 +28,7 @@
   Without yggdrasil (its interface down) a connect fails at once (no
   route); with the interface up but no path to the peer it waits for the
   app's timeout: yggdrasil gives no ICMP answer for a lost path. The
-  entries are authoritative (no fallback to the public addresses), so
-  then every login through id.davhau.com from this machine fails too.
+  entries are authoritative (no fallback to the public addresses).
 */
 {
   config,
@@ -54,16 +56,15 @@ let
         lib.attrNames dashboards.accounts ++ [ infraSpaceAccount.name ]
       )
       ++ [ dashboards.frontDoor ];
-    edi = [ "id.davhau.com" ];
   };
 in
 {
   options.hyper.meshDashboards = {
     enable = lib.mkOption {
       type = lib.types.bool;
-      default = !(lib.hasAttr machine names);
-      defaultText = lib.literalMD "true but on the serving machines (som, edi)";
-      description = "Resolve the hermes dashboards' and their sign-in's names to the serving machines' yggdrasil addresses.";
+      default = !(lib.elem machine [ "som" "edi" ]);
+      defaultText = lib.literalMD "true but on som (serves them) and edi";
+      description = "Resolve the hermes dashboards' names to som's yggdrasil address.";
     };
     endpoints = lib.mkOption {
       type = lib.types.listOf lib.types.str;
