@@ -101,6 +101,12 @@ let
         host = "127.0.0.1";
         port = 3456;
         trustLoopback = false;
+        # TeamClaude's SQLite usage history (teamclaude.usage.db beside the
+        # config, 0600): one row per request with caller, account, model and
+        # the tokens by kind incl. cache reads/writes, rolled up per hour
+        # (kept 400 days). ./metrics.nix exports it per client and account,
+        # which the usage pages need to split each account's quota.
+        usageHistory = true;
       };
       upstream = "https://api.anthropic.com";
       switchThreshold = usageCap;

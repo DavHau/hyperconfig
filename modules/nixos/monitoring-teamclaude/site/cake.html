@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Claude usage – B: the cake</title>
+<link rel="stylesheet" href="style.css">
+<style>
+.cake { display: grid; grid-template-columns: minmax(260px, 420px) 1fr; gap: 1.2rem; align-items: start; }
+@media (max-width: 760px) { .cake { grid-template-columns: 1fr; } }
+.periods { display: flex; gap: .3rem; flex-wrap: wrap; margin: .6rem 0; }
+.periods button { background: none; border: 1px solid var(--line); color: var(--fg); border-radius: 6px; padding: .2rem .55rem; cursor: pointer; font: inherit; font-size: .85rem; }
+.periods button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+td .meter { height: .55em; border-radius: 3px; display: inline-block; vertical-align: middle; }
+</style>
+</head>
+<body>
+<main>
+<nav class="top"><a href="./">Overview</a><a href="timeline.html">A · Over time</a><a href="cake.html" aria-current="page">B · Cake</a><a href="people.html">C · Per person</a></nav>
+<h1>B · Who has which piece of the cake</h1>
+<p class="lead">The whole circle is the pool's capacity in the chosen period (every account's quota). Each slice is what one client used of it; the green slice is what was left unused. The table says the same in "% of one Claude Max 20x account".</p>
+<div class="bar"><div class="switch" id="sw"></div></div>
+<div class="periods" id="periods"></div>
+<div class="cake">
+  <div class="card"><div id="pie"></div></div>
+  <div class="card"><table id="tbl"></table></div>
+</div>
+<div id="foot"></div>
+<div class="tip" id="tip"></div>
+</main>
+<script src="common.js"></script>
+<script>
+"use strict";
+(async () => {
+  let d;
+  try { d = await loadData(); } catch (e) { document.getElementById("pie").append(el("p", { class: "err" }, e.message)); return; }
+  const colors = colorMap(d);
+  const order = clientOrder(d);
+  const tip = document.getElementById("tip");
+  document.getElementById("foot").append(footer(d, true));
+  let bs = [], sel = 0;
+
+  function arc(cx, cy, r0, r1, a0, a1) {
+    const p = (r, a) => [cx + r * Math.sin(a), cy - r * Math.cos(a)];
+    const large = a1 - a0 > Math.PI ? 1 : 0;
+    const [x0, y0] = p(r1, a0), [x1, y1] = p(r1, a1), [x2, y2] = p(r0, a1), [x3, y3] = p(r0, a0);
+    return `M${x0},${y0}A${r1},${r1} 0 ${large} 1 ${x1},${y1}L${x2},${y2}A${r0},${r0} 0 ${large} 0 ${x3},${y3}Z`;
+  }
+
+  function show() {
+    const b = bs[sel];
+    for (const [i, btn] of [...document.getElementById("periods").children].entries()) btn.setAttribute("aria-pressed", i === sel);
+    const slices = order.filter((c) => b.acc[c] > 0).map((c) => [c, b.acc[c], colors[c]]);
+    slices.push(["free (unused)", b.free, "var(--free-line)"]);
+    const whole = Math.max(d.capacity, b.total);
+    const svg = el("svg", { viewBox: "0 0 300 300" });
+    let a = 0;
+    for (const [c, v, col] of slices) {
+      if (v <= 0) continue;
+      const a1 = a + 2 * Math.PI * v / whole;
+      const path = el("path", { d: arc(150, 150, 70, 140, a, Math.min(a1, a + 2 * Math.PI - 1e-4)), fill: col, stroke: "var(--card)", "stroke-width": 1 });
+      path.addEventListener("mousemove", (ev) => {
+        tip.innerHTML = `<b>${esc(c)}</b><br>${pct(v, 1)} of one account · ${pct(v / d.capacity, 1)} of the pool`;
+        tip.style.display = "block"; tip.style.left = ev.clientX + 14 + "px"; tip.style.top = ev.clientY + 14 + "px";
+      });
+      path.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+      svg.append(path);
+      a = a1;
+    }
+    svg.append(el("text", { x: 150, y: 142, "text-anchor": "middle", style: "font-size:22px;fill:var(--fg);font-weight:600" }, pct(b.total / d.capacity)));
+    svg.append(el("text", { x: 150, y: 162, "text-anchor": "middle" }, b.total > d.capacity ? "over capacity (resets overlap)" : "of the pool used"));
+    svg.append(el("text", { x: 150, y: 178, "text-anchor": "middle" }, `${b.label}${b.full ? "" : " (so far)"}`));
+    document.getElementById("pie").replaceChildren(svg);
+
+    const max = Math.max(...slices.map((s) => s[1]));
+    const tbl = document.getElementById("tbl");
+    tbl.replaceChildren(el("tr", {}, el("th", {}, "Client"), el("th", { class: "num" }, "% of one account"), el("th", { class: "num" }, "% of pool"), el("th", {}, "")));
+    for (const [c, v, col] of slices) {
+      tbl.append(el("tr", {}, el("td", {}, el("span", { class: "sw", style: `display:inline-block;width:.7em;height:.7em;border-radius:2px;margin-right:.4em;background:${col}` }), c),
+        el("td", { class: "num" }, pct(v, 1)), el("td", { class: "num" }, pct(v / d.capacity, 1)),
+        el("td", { style: "width:35%" }, el("span", { class: "meter", style: `width:${100 * v / max}%;background:${col}` }))));
+    }
+    if (b.expired) tbl.append(el("tr", {}, el("td", { colspan: 4, class: "muted" }, `Measured: ${pct(b.expired)} of an account expired unused at weekly resets in this period.`)));
+    if (b.estimated) tbl.append(el("tr", {}, el("td", { colspan: 4, class: "muted" }, `${Math.round(100 * b.estimated / b.hours)}% of this period's hours are estimated (before the per-account usage history).`)));
+    if (Object.keys(b.fallback).length) {
+      const fb = Object.values(b.fallback).reduce((x, y) => x + y, 0) / b.weeks;
+      tbl.append(el("tr", {}, el("td", { colspan: 4, class: "muted" }, `Plus ${pct(fb, 1)} of an account served outside this pool (the fallback gateway, or an account its owner capped for the gateway).`)));
+    }
+  }
+
+  periodSwitch(document.getElementById("sw"), (period) => {
+    bs = buckets(d, period);
+    sel = bs.length - 1;
+    // Default to the last complete period when the current one has barely begun.
+    if (!bs[sel].full && bs.length > 1 && bs[sel].hours < (period === "day" ? 12 : period === "week" ? 72 : 10 * 24)) sel--;
+    const box = document.getElementById("periods");
+    box.replaceChildren(...bs.map((b, i) => el("button", { type: "button", onclick: () => { sel = i; show(); } }, b.label)));
+    show();
+  });
+})();
+</script>
+</body>
+</html>

@@ -84,7 +84,6 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/monitoring-exec-usage.nix — "Unused packages" dashboard on the monitoring server's Grafana (stats.davhau.com/d/exec-usage), fed by ./exec-usage on… <- modules/flake-parts/nixosConfigurations.nix
 - modules/nixos/monitoring-grafana-sso.nix — Grafana of the clan-core monitoring server, published at stats.davhau.com behind the clan's pocket-id (modules/clan/oid… <- edi
 - modules/nixos/monitoring-server.nix — Local overrides for the clan-core monitoring server (Mimir + Loki). <- modules/flake-parts/nixosConfigurations.nix
-- modules/nixos/monitoring-teamclaude.nix — "TeamClaude usage" dashboard on the monitoring server's Grafana (stats.davhau.com/d/teamclaude-usage), fed by som's exp… <- modules/flake-parts/nixosConfigurations.nix
 - modules/nixos/monitoring-zfs-pools.nix — Pushes ZFS pool health and capacity to Mimir for ./monitoring-alerts.nix. <- modules/flake-parts/nixosConfigurations.nix, m/recurring-tasks/default.nix
 - modules/nixos/nautilus.nix — Nautilus right-click "Open in Ghostty" (folder background and folder items), via the nautilus-open-any-terminal extensi… <- m/dave.nix
 - modules/nixos/networking-desktop.nix — Desktop networking: NetworkManager, tailscale, and the wired link-local address (./wired-link-local.nix). <- m/dave.nix
@@ -274,6 +273,10 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/monitoring-alert-digest/provision_token.py — - <- m/monitoring-alert-digest/default.nix
 - modules/nixos/monitoring-alert-digest/test_digest.py — - <- m/monitoring-alert-digest/default.nix
 - modules/nixos/monitoring-alert-digest/test_provision_token.py — - <- m/monitoring-alert-digest/default.nix
+- modules/nixos/monitoring-teamclaude/default.nix — "TeamClaude usage" dashboard on the monitoring server's Grafana (stats.davhau.com/d/teamclaude-usage) and the usage pag… <- modules/flake-parts/nixosConfigurations.nix
+- modules/nixos/monitoring-teamclaude/ledger.py — - <- m/monitoring-teamclaude/default.nix, m/monitoring-teamclaude/test.nix
+- modules/nixos/monitoring-teamclaude/test.nix — The TeamClaude usage pipeline's logic, without a VM: <- flake.nix
+- modules/nixos/monitoring-teamclaude/test_ledger.py — - <- m/monitoring-teamclaude/test.nix
 - modules/nixos/mullvad-egress/default.nix — Mullvad egress for hyper.mullvadEgress.users (mechanism in ./egress.nix, their DNS in ./dns.nix), exiting in Singapore. <- som, m/spaces/agave-host.nix
 - modules/nixos/mullvad-egress/dns.nix — DNS of the tunneled users (./egress.nix) through the tunnel too, so the names they look up do not reach the host's reso… <- m/infra-space/agent-tools-test.nix, m/mullvad-egress/default.nix, m/mullvad-egress/egress.nix, m/mullvad-egress/test.nix, m/residential-proxy/test.nix
 - modules/nixos/mullvad-egress/egress.nix — Selected users reach the internet only through a Mullvad WireGuard tunnel; <- m/infra-space/agent-tools-test.nix, m/mullvad-egress/default.nix, m/mullvad-egress/test.nix, m/residential-proxy/test.nix
@@ -384,7 +387,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/spaces/forge-prs-skill/SKILL.md — > <- m/spaces/forges.nix
 - modules/nixos/spaces/publish-skill/SKILL.md — >
 - modules/nixos/teamclaude-gateway/default.nix — TeamClaude: pooled Claude subscription gateway at https://teamclaude.davhau.com/, after project-zero's pubproxy01 setup… <- som
-- modules/nixos/teamclaude-gateway/metrics.nix — Pushes TeamClaude usage to Mimir for the "TeamClaude usage" dashboard (../monitoring-teamclaude.nix on the monitoring s… <- m/teamclaude-gateway/default.nix
+- modules/nixos/teamclaude-gateway/metrics.nix — Pushes TeamClaude usage to Mimir for the "TeamClaude usage" dashboard (../monitoring-teamclaude on the monitoring serve… <- m/teamclaude-gateway/default.nix
 - modules/nixos/telegram-send/default.nix — edi's side of infra-space's morning brief (../infra-space/decisions.nix): <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/decisions.nix, m/infra-space/default.nix
 - modules/nixos/telegram-send/dispatch.sh — !/usr/bin/env bash fleet-brief-dispatch: <- m/infra-space/test.nix, m/telegram-send/default.nix
 - modules/nixos/telegram-send/send.py — - <- m/telegram-send/default.nix

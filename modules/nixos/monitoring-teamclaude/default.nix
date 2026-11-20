@@ -1,6 +1,23 @@
 # "TeamClaude usage" dashboard on the monitoring server's Grafana
-# (stats.davhau.com/d/teamclaude-usage), fed by som's exporter
-# (./teamclaude-gateway/metrics.nix): per client key output tokens and
+# (stats.davhau.com/d/teamclaude-usage) and the usage pages at
+# stats.davhau.com/usage/, both fed by som's exporter
+# (../teamclaude-gateway/metrics.nix).
+#
+# The usage pages (./site, three views to pick from) show who used how
+# much of the pooled Claude Max 20x accounts, in % of one account's weekly
+# quota, per day / week / month, with the pool's capacity and what is left.
+# ./ledger.py (a timer here) derives that from Mimir: each account's weekly
+# utilization as Anthropic reports it, split among the clients by what they
+# spent on that account (its header says how, and how exact it is). It
+# writes data.json; the pages are static and read it. They are behind
+# Grafana's own sign-in (pocket-id, group `stats`: Dave): nginx asks
+# Grafana's /api/user with the visitor's session cookie (auth_request) and
+# sends anyone without one to Grafana's login, which returns here.
+# The pages are the privacy boundary, not the data: the per-client numbers
+# behind them are Mimir series like every other metric (readable by whoever
+# can query Mimir: edi's loopback, the fleet's metrics push credential).
+#
+# The dashboard: per client key output tokens and
 # requests per day over the last two weeks, a this-week vs last-week table
 # (rolling 7 days, from the lifetime counters via increase(), which absorbs
 # a counter reset), and each account's weekly quota with its resets marked.
@@ -15,6 +32,17 @@
 #            http://127.0.0.1:3001/mimir/otlp/v1/metrics
 { config, lib, pkgs, ... }:
 let
+  grafanaPort = config.services.grafana.settings.server.http_port;
+  # The ledger's own copy (history beyond Mimir's 30 days is merged from it).
+  ledgerState = "/var/lib/monitoring-teamclaude/data.json";
+  # What nginx serves; group nginx, nothing else can read it.
+  publicDir = "/run/monitoring-teamclaude";
+  site = pkgs.runCommand "monitoring-teamclaude-site" { } ''
+    mkdir -p $out
+    cp ${./site}/*.html ${./site}/*.js ${./site}/*.css $out/
+  '';
+  mimir = "http://127.0.0.1:3001/mimir/prometheus/api/v1";
+
   ds = {
     type = "prometheus";
     uid =
@@ -69,6 +97,14 @@ let
     timezone = "browser";
     schemaVersion = 39;
     refresh = "15m";
+    links = [
+      {
+        title = "Usage in % of an account";
+        type = "link";
+        url = "/usage/";
+        targetBlank = false;
+      }
+    ];
     time = { from = "now-14d"; to = "now"; };
     annotations.list = [
       {
@@ -195,6 +231,83 @@ let
 in
 {
   services.mimir.configuration.limits.out_of_order_time_window = "8d";
+
+  systemd.services.monitoring-teamclaude = {
+    description = "TeamClaude usage ledger for the usage pages";
+    after = [ "mimir.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      DynamicUser = true;
+      Group = "nginx";
+      StateDirectory = "monitoring-teamclaude";
+      RuntimeDirectory = "monitoring-teamclaude";
+      RuntimeDirectoryMode = "0750";
+      RuntimeDirectoryPreserve = true;
+      UMask = "0027";
+      # Group nginx is only for handing nginx data.json; keep the unit away
+      # from what else that group can read (TLS keys, nginx credentials).
+      InaccessiblePaths = [ "-/var/lib/acme" "-/run/nginx" "-/etc/nginx" ];
+      IPAddressAllow = "localhost";
+      IPAddressDeny = "any";
+      ProtectSystem = "strict";
+      ProtectHome = true;
+      PrivateTmp = true;
+      NoNewPrivileges = true;
+      CapabilityBoundingSet = "";
+      RestrictAddressFamilies = [ "AF_INET" "AF_INET6" ];
+      SystemCallArchitectures = "native";
+    };
+    script = ''
+      ${lib.getExe pkgs.python3} ${./ledger.py} --mimir ${mimir} --out ${ledgerState}
+      cp ${ledgerState} ${publicDir}/data.json.tmp
+      mv ${publicDir}/data.json.tmp ${publicDir}/data.json
+    '';
+  };
+
+  systemd.timers.monitoring-teamclaude = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "3min";
+      OnUnitActiveSec = "15min";
+    };
+  };
+
+  services.nginx.virtualHosts.${config.services.grafana.settings.server.domain}.locations = {
+    # Signed in = Grafana knows the session cookie. Any other credential
+    # (an API token, basic auth of the local admin) is dropped, so only a
+    # browser session of a `stats` member opens the pages.
+    "= /_teamclaude_usage_auth" = {
+      proxyPass = "http://127.0.0.1:${toString grafanaPort}/api/user";
+      extraConfig = ''
+        internal;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Authorization "";
+        proxy_set_header X-Grafana-Org-Id "";
+      '';
+    };
+    "@teamclaude_usage_login".return = "302 /login?redirectTo=%2Fusage%2F";
+    "= /usage".return = "301 /usage/";
+    "^~ /usage/" = {
+      alias = "${site}/";
+      extraConfig = ''
+        auth_request /_teamclaude_usage_auth;
+        error_page 401 = @teamclaude_usage_login;
+        add_header Cache-Control "private, no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+        add_header Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'" always;
+      '';
+    };
+    "= /usage/data.json" = {
+      alias = "${publicDir}/data.json";
+      extraConfig = ''
+        auth_request /_teamclaude_usage_auth;
+        error_page 401 = @teamclaude_usage_login;
+        add_header Cache-Control "private, no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+      '';
+    };
+  };
 
   services.grafana.provision.dashboards.settings.providers = [
     {

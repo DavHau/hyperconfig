@@ -278,6 +278,12 @@
           import ./modules/nixos/zt-eu-lan-guard/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
+        # TeamClaude usage pages: som's exporter and edi's ledger.
+        monitoring-teamclaude =
+          import ./modules/nixos/monitoring-teamclaude/test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+            inherit (self.nixosConfigurations.som.config.services.teamclaude) package;
+          };
         porkbun-records =
           import ./modules/nixos/porkbun-records/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;

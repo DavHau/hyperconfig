@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Claude usage – C: per person</title>
+<link rel="stylesheet" href="style.css">
+<style>
+.person h3 { margin: 0; font-size: 1rem; display: flex; justify-content: space-between; align-items: baseline; }
+.person .big { font-size: 1.4rem; }
+.pool { margin-bottom: 1rem; }
+.pool .stack { display: flex; height: 26px; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); }
+.pool .stack div { height: 100%; }
+</style>
+</head>
+<body>
+<main>
+<nav class="top"><a href="./">Overview</a><a href="timeline.html">A · Over time</a><a href="cake.html">B · Cake</a><a href="people.html" aria-current="page">C · Per person</a></nav>
+<h1>C · One small chart per person</h1>
+<p class="lead">A card per client, biggest first, each with its own history on the same scale (the dashed line is 100% = one whole Claude Max 20x account). The big number is the last complete period. The bar on top splits the whole pool for that period, free capacity included.</p>
+<div class="bar"><div class="switch" id="sw"></div><span class="muted" id="which"></span></div>
+<div class="card pool"><div class="stack" id="stack"></div><div id="poollegend"></div></div>
+<div class="grid3" id="grid"></div>
+<div id="foot"></div>
+<div class="tip" id="tip"></div>
+</main>
+<script src="common.js"></script>
+<script>
+"use strict";
+(async () => {
+  let d;
+  try { d = await loadData(); } catch (e) { document.getElementById("grid").append(el("p", { class: "err" }, e.message)); return; }
+  const colors = colorMap(d);
+  const order = clientOrder(d);
+  const tip = document.getElementById("tip");
+  document.getElementById("foot").append(footer(d));
+
+  function draw(period) {
+    const bs = buckets(d, period);
+    const lastFull = [...bs].reverse().find((b) => b.full) || bs.at(-1);
+    document.getElementById("which").textContent = `Big numbers: ${lastFull.label}${lastFull.full ? "" : " (so far)"}`;
+    // pool bar
+    const stack = document.getElementById("stack");
+    stack.replaceChildren();
+    const whole = Math.max(d.capacity, lastFull.total);
+    const parts = order.filter((c) => lastFull.acc[c] > 0).map((c) => [c, lastFull.acc[c], colors[c]]);
+    parts.push(["free", lastFull.free, "var(--free)"]);
+    for (const [c, v, col] of parts) {
+      const div = el("div", { style: `width:${100 * v / whole}%;background:${col}` });
+      div.addEventListener("mousemove", (ev) => { tip.innerHTML = `<b>${esc(c)}</b> ${pct(v, 1)} of one account`; tip.style.display = "block"; tip.style.left = ev.clientX + 14 + "px"; tip.style.top = ev.clientY + 14 + "px"; });
+      div.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+      stack.append(div);
+    }
+    document.getElementById("poollegend").replaceChildren(el("p", { class: "muted", style: "margin:.4rem 0 0" }, `Pool, ${lastFull.label}: ${pct(lastFull.total)} used of ${d.capacity * 100}% (${d.capacity} accounts), ${pct(lastFull.free)} free.`));
+
+    const grid = document.getElementById("grid");
+    grid.replaceChildren();
+    const ymax = Math.max(1, ...bs.flatMap((b) => Object.values(b.acc))) * 1.05;
+    for (const c of order) {
+      const series = bs.map((b) => b.acc[c] || 0);
+      if (!series.some((v) => v > 0.0005)) continue;
+      const W = 260, H = 90, L = 2, B = 14;
+      const x = (i) => L + (W - 2 * L) * (bs.length === 1 ? 0.5 : i / (bs.length - 1));
+      const y = (v) => 4 + (H - B - 4) * (1 - v / ymax);
+      const svg = el("svg", { viewBox: `0 0 ${W} ${H}` });
+      svg.append(el("line", { class: "cap", x1: 0, x2: W, y1: y(1), y2: y(1), "stroke-width": 1 }));
+      const pts = series.map((v, i) => `${x(i)},${y(v)}`).join(" ");
+      svg.append(el("path", { d: `M${x(0)},${y(0)}L${pts.replace(/ /g, "L")}L${x(series.length - 1)},${y(0)}Z`, fill: colors[c], opacity: 0.25 }));
+      svg.append(el("polyline", { points: pts, fill: "none", stroke: colors[c], "stroke-width": 2 }));
+      bs.forEach((b, i) => {
+        const dot = el("circle", { cx: x(i), cy: y(series[i]), r: 6, fill: "transparent" });
+        dot.addEventListener("mousemove", (ev) => { tip.innerHTML = `<b>${esc(c)}</b> · ${esc(b.label)}<br>${pct(series[i], 1)} of one account${b.estimated ? " <span class=muted>(estimated)</span>" : ""}`; tip.style.display = "block"; tip.style.left = ev.clientX + 14 + "px"; tip.style.top = ev.clientY + 14 + "px"; });
+        dot.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+        svg.append(dot);
+      });
+      svg.append(el("text", { x: 0, y: H - 2 }, bs[0].label));
+      svg.append(el("text", { x: W, y: H - 2, "text-anchor": "end" }, bs.at(-1).label));
+      const now = lastFull.acc[c] || 0;
+      const share = lastFull.total ? now / d.capacity : 0;
+      grid.append(el("div", { class: "card person" },
+        el("h3", {}, el("span", {}, el("span", { class: "sw", style: `display:inline-block;width:.7em;height:.7em;border-radius:2px;margin-right:.4em;background:${colors[c]}` }), c), el("span", { class: "big" }, pct(now, now < 0.1 ? 1 : 0))),
+        el("div", { class: "muted", style: "font-size:.8rem" }, `of one account · ${pct(share, 1)} of the pool`),
+        svg));
+    }
+  }
+  periodSwitch(document.getElementById("sw"), draw);
+})();
+</script>
+</body>
+</html>

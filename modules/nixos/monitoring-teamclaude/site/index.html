@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Claude usage – pick a view</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+<nav class="top"><a href="./" aria-current="page">Overview</a><a href="timeline.html">A · Over time</a><a href="cake.html">B · Cake</a><a href="people.html">C · Per person</a></nav>
+<h1>Claude usage of the TeamClaude pool</h1>
+<p class="lead">Three ways to show the same numbers. Pick the one you like; the others go.</p>
+<div class="card" id="now" style="margin-bottom:1rem"></div>
+<div class="variants">
+  <a class="card" href="timeline.html"><h2>A · Over time</h2><p>Stacked columns per day / week / month, capacity line on top and the free headroom in green. Best for trends: is the pool filling up, who grew.</p></a>
+  <a class="card" href="cake.html"><h2>B · Cake</h2><p>One donut per period: every slice a client, the green slice unused capacity, plus a table in % of one account. Best for "who has the biggest piece" right now.</p></a>
+  <a class="card" href="people.html"><h2>C · Per person</h2><p>A small chart per client on one shared scale, with last period's % of an account as the big number, and the whole pool as one bar on top. Best for following individuals.</p></a>
+</div>
+
+<h2 id="method">How "% of one account" is computed</h2>
+<div class="card">
+<p><b>Unit.</b> The pooled accounts are Claude <b>Max 20x</b> subscriptions (Anthropic's top personal plan; there is no plan called "Ultra"). 100% = one such account's whole <b>weekly</b> quota. A period's figure is prorated: a client at 50% for a day used half of one account's per-day share of its week (1/7 of the weekly quota per day). The pool's capacity is one 100% per account the gateway may use (an account its owner capped low for the gateway, e.g. to 1%, stays the owner's and is not counted) in every period; "free" is capacity minus what everyone used, outside use included. Where an account's week reset with quota left, that leftover is also shown as measured "expired unused" (in whole account-weeks, not prorated).</p>
+<p><b>Above 100%?</b> A weekly quota can be spent in two days. Over such a day a client shows e.g. 300% (three days' share of one account in one day), and the pool's columns can top the capacity line for a while when accounts reset at different times. Over whole weeks the pool cannot go much past its capacity.</p>
+<p><b>What is measured.</b> For every account Anthropic reports its weekly utilization in each reply's rate-limit headers (<code>anthropic-ratelimit-unified-7d-utilization</code>), in whole percent; the gateway also probes it every 5 minutes. Every rise of that number within one weekly window is quota really used. These totals per account are exact to that 1% step. No 5-hour utilization is reported for these accounts, so only the weekly quota is used.</p>
+<p><b>Who used it.</b> Each rise is split among the clients that the gateway served <i>on that account</i> since the previous rise, by the API list price of their requests (input, cache writes, cache reads and output, priced per model, from TeamClaude's own usage history). This assumes the subscription quota is metered roughly like API cost, which is the best public proxy; the per-client split is therefore an estimate, the per-account totals are not. A rise while the gateway sent the account nothing is the owner's own use outside the gateway ("(outside gateway)").</p>
+<p><b>Older data (hatched, "estimated").</b> Before the gateway kept per-account history, only per-client output tokens exist: the pool's rises are shared by output tokens over the same interval, and before even those existed the rises show as "(before per-client data)". Output tokens ignore cache reads and the model, so these weeks are rougher.</p>
+<p><b>The fallback gateway</b> (another pool, used only when ours is full) and the little the gateway may use of an owner-capped account are not counted against our capacity; that use is listed separately ("served outside this pool") at the %-per-dollar rate measured on our pool accounts.</p>
+<p><b>The old Grafana numbers.</b> The "TeamClaude usage" dashboard counts output tokens and requests per client. The counts themselves match the gateway's own books, but they are not usage of the quota: input there is only the uncached part (cache reads and writes, most of an agent's prompt, are missing), the model is ignored (Opus and Haiku count the same), and the "last week" column covered only the days since the exporter started.</p>
+</div>
+<div id="foot"></div>
+</main>
+<script src="common.js"></script>
+<script>
+"use strict";
+(async () => {
+  let d;
+  try { d = await loadData(); } catch (e) { document.getElementById("now").append(el("p", { class: "err" }, e.message)); return; }
+  document.getElementById("foot").append(footer(d));
+  const now = Date.now() / 1000;
+  const rows = d.accounts.map((a) => el("tr", {},
+    el("td", {}, a.name), el("td", {}, a.pool ? "Max 20x, in the pool" : a.own ? "Max 20x, owner's (capped)" : "other gateway"),
+    el("td", { class: "num" }, pct(a.util)), el("td", { class: "num" }, a.cap != null ? pct(a.cap) : "–"),
+    el("td", { class: "num" }, a.resetAt ? `${Math.max(0, (a.resetAt - now) / 86400).toFixed(1)} d` : "–")));
+  document.getElementById("now").append(el("h2", { style: "margin-top:0" }, "Accounts right now"),
+    el("table", {}, el("tr", {}, el("th", {}, "Account"), el("th", {}, "Plan"), el("th", { class: "num" }, "Weekly used"), el("th", { class: "num" }, "Gateway cap"), el("th", { class: "num" }, "Resets in")), ...rows));
+})();
+</script>
+</body>
+</html>
