@@ -588,6 +588,38 @@ class Bodies(unittest.TestCase):
         r = sanitize.reading(mime("text/plain; charset=utf-8", f"Confirm your address: {self.LINK}.\n"))
         self.assertEqual(r["links"], [self.LINK])
 
+    def test_owner_reading_lists_headers_and_attachments(self):
+        m = sanitize.parse(
+            b"From: Nomad <hello@nomad.test>\r\nTo: alice+esim@agents.test\r\nSubject: Your eSIM\r\n"
+            b"MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=b\r\n\r\n"
+            b"--b\r\nContent-Type: text/html\r\n\r\n<p>Scan the QR code</p><img src=https://t.test/p.gif>"
+            b"<script>alert(1)</script>\r\n"
+            b"--b\r\nContent-Type: image/png\r\nContent-Disposition: attachment; filename=\"../qr\\r\\n.png\"\r\n"
+            b"Content-Transfer-Encoding: base64\r\n\r\niVBORw0KGgo=\r\n--b--\r\n"
+        )
+        r = sanitize.owner_reading(m)
+        self.assertEqual(r["subject"], "Your eSIM")
+        self.assertIn("hello@nomad.test", r["from"])
+        self.assertIn("Scan the QR code", r["text"])
+        self.assertNotIn("alert", r["text"])
+        self.assertEqual(r["images"], 1)
+        self.assertEqual([(a["index"], a["type"]) for a in r["attachments"]], [(1, "image/png")])
+        self.assertNotIn("_part", r["attachments"][0])
+        json.dumps(r)
+
+    def test_owner_reading_drops_spoofable_links(self):
+        html = ('<a href="https://login.bank.test\u202egpj.evil.test/">a</a>'
+                '<a href="https://evil.test\\@bank.test/">c</a>'
+                '<a href="https://user@evil.test/">d</a>'
+                '<a href="https://shop.test/x?y=1">b</a>')
+        r = sanitize.owner_reading(msg("From: <boss@lax.test>\nSubject: s\n", html=html))
+        # The raw href is dropped; the rendered text's copy (invisible
+        # characters removed) shows the host it really goes to.
+        self.assertEqual(r["odd_links"], 3)
+        self.assertNotIn("\u202e", json.dumps(r["links"], ensure_ascii=False))
+        self.assertFalse(any("@" in x["url"] for x in r["links"]), r["links"])
+        self.assertEqual({x["host"] for x in r["links"]}, {"shop.test", "login.bank.testgpj.evil.test"})
+
 
 class Linear(unittest.TestCase):
     """F3: no input makes rendering slow."""

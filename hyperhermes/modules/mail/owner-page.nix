@@ -1,5 +1,6 @@
 # The owner page, https://<ownerPage.host>/: where an agent's owner confirms
-# allowlist requests. It has its own login, separate from the front door's.
+# allowlist requests, opens quarantined mail and releases one to the agent.
+# It has its own login, separate from the front door's.
 #
 # It lives next to the front door, on the deployment's own site, apart
 # from the agent-controlled exposure.domain, and nginx forwards no login

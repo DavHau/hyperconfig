@@ -1374,3 +1374,43 @@ def reading(msg) -> dict:
         "images": r["images"],
         "too_large": r["too_large"],
     }
+
+
+def owner_reading(msg) -> dict:
+    """A message as its owner's page shows it (mailgate's /m/<id>): the
+    reading an agent gets, plus the headers a mail client shows and the
+    attachment list. Every value is still the sender's text; the page
+    escapes all of it."""
+    r = render(msg)
+    links, odd = [], 0
+    for link in all_links(r["hrefs"], r["text"]):
+        # Bidi overrides, invisible or non-ASCII characters can make a
+        # link's host read as another; the owner gets plain ones only.
+        # Browsers read "\\" as "/" and skip userinfo, where urlsplit does
+        # not: either would make the host shown differ from the one opened.
+        if link.isascii() and link.isprintable() and len(link) <= 2000 and "\\" not in link:
+            try:
+                u = urllib.parse.urlsplit(link)
+                host = (u.hostname or "") if "@" not in u.netloc else ""
+            except ValueError:
+                host = ""
+            if re.fullmatch(r"[a-z0-9.-]{1,253}|[0-9a-f:.]{2,45}", host):
+                links.append({"url": link, "host": host})
+                continue
+        odd += 1
+    return {
+        "from": clean_line(_header(msg, "From"), 300),
+        "to": clean_line(_header(msg, "To"), 300),
+        "cc": clean_line(_header(msg, "Cc"), 300),
+        "subject": clean_line(_header(msg, "Subject"), 200),
+        "date": _date(msg),
+        "text": r["text"],
+        "links": links,
+        "odd_links": odd,
+        "html": r["html"],
+        "hidden": r["hidden"],
+        "lenient": r["lenient"],
+        "images": r["images"],
+        "too_large": r["too_large"],
+        "attachments": public_attachments(r["attachments"]),
+    }

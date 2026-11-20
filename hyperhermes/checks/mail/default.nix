@@ -778,14 +778,17 @@ pkgs.testers.runNixOSTest {
             time.sleep(2)
         raise AssertionError(f"nothing matching in {user}'s quarantine: {quarantine(user)}")
 
-    def owner(account, method="GET", data={}, origin="https://${ownerHost}"):
-        cmd = f"curl -s -o /tmp/owner.out -w '%{{http_code}}' --unix-socket /run/mailgate/owner.sock -H 'X-Mailgate-Account: {account}'"
+    def owner(account, method="GET", data={}, origin="https://${ownerHost}", path=""):
+        cmd = f"curl -s -D /tmp/owner.hdr -o /tmp/owner.out -w '%{{http_code}}' --unix-socket /run/mailgate/owner.sock -H 'X-Mailgate-Account: {account}'"
         if method == "POST":
             if origin:
                 cmd += f" -H 'Origin: {origin}'"
             cmd += " --data '" + "&".join(f"{k}={v}" for k, v in data.items()) + "'"
-        code = server.succeed(cmd + " http://mailgate/" + ("action" if method == "POST" else "")).strip()
+        code = server.succeed(cmd + " http://mailgate/" + ("action" if method == "POST" else path)).strip()
         return code, server.succeed("cat /tmp/owner.out")
+
+    def owner_headers():
+        return server.succeed("cat /tmp/owner.hdr").lower()
 
     def https(url, *opts):
         """(status, effective URL, body) of a curl through the real nginx."""
@@ -979,6 +982,106 @@ pkgs.testers.runNixOSTest {
         assert v["links"] == [], v
         assert "lax.test" not in json.dumps(v), v
         assert "spoof" not in json.dumps(inbox("alice"))
+
+    with subtest("the owner opens a DMARC-failing quarantined mail, downloads it, releases exactly that one"):
+        # Like an eSIM mail from a provider whose mail service does not
+        # align: From a domain that did not sign it (DMARC fails), to an
+        # alias bound to another domain.
+        before = entry_ids("alice")
+        send("--mail-from esim@signup.test --header-from esim@lax.test --to alice+shop@${domain} --kind html "
+             "--subject \"'eSIM<script>alert(1)</script>'\"")
+        v = new_entries("alice", before)[0]
+        mid = v["id"]
+        assert {"dmarc-not-pass", "alias-domain-mismatch"} <= set(v["reasons"]), v
+        # The overview: the claimed sender (marked), the subject escaped,
+        # Open and Release on the row.
+        code, page = owner("alice-owner")
+        assert code == "200", page
+        assert "esim@lax.test (unverified)" in page and f'href="/m/{mid}"' in page, page
+        assert "<script>" not in page and "&lt;script&gt;" in page, page
+        assert f'name="op" value="release-one"><input type="hidden" name="id" value="{mid}"' in page, page
+        found = re.search(r'name="csrf" value="([0-9a-f]+)"', page)
+        assert found, page
+        token = found.group(1)
+        # Open: text only, hidden text and images dropped, strict CSP, no caching.
+        code, view = owner("alice-owner", path=f"m/{mid}")
+        hdrs = owner_headers()
+        assert code == "200" and "Quarterly numbers are fine." in view, view
+        assert "<script>" not in view and "&lt;script&gt;" in view, view
+        for bad in ("HIDDEN_", "track.example", "<img", "<iframe"):
+            assert bad not in view, bad
+        assert "<b>trusted.test</b>: <a href=\"https://trusted.test/report\" rel=\"noopener noreferrer\"" in view, view
+        assert "may be forged" in view, view
+        assert "default-src 'none'" in hdrs and "cache-control: no-store" in hdrs and "x-frame-options: deny" in hdrs, hdrs
+        assert "script-src" not in hdrs, hdrs
+        assert f'href="/m/{mid}/att/1"' in view and f'href="/m/{mid}/eml"' in view, view
+        # The attachment and the original: downloads, never rendered.
+        code, body = owner("alice-owner", path=f"m/{mid}/att/1")
+        hdrs = owner_headers()
+        assert code == "200" and body == "%PDF-1.4 mailgate test\n", (code, body)
+        assert 'content-disposition: attachment; filename="report.pdf"' in hdrs, hdrs
+        for want in ("content-type: application/pdf", "x-content-type-options: nosniff", "cache-control: no-store", "sandbox"):
+            assert want in hdrs, (want, hdrs)
+        # Another site cannot make the owner's browser download it.
+        server.succeed(f"curl -sf -o /dev/null --unix-socket /run/mailgate/owner.sock -H 'X-Mailgate-Account: alice-owner' "
+                       f"-H 'Sec-Fetch-Site: none' http://mailgate/m/{mid}/eml")
+        for site in ("cross-site", "same-site"):
+            for path in (f"m/{mid}", f"m/{mid}/att/1", f"m/{mid}/eml"):
+                code = server.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' --unix-socket /run/mailgate/owner.sock "
+                                      f"-H 'X-Mailgate-Account: alice-owner' -H 'Sec-Fetch-Site: {site}' http://mailgate/{path}")
+                assert code == "403", (site, path, code)
+        code, body = owner("alice-owner", path=f"m/{mid}/eml")
+        hdrs = owner_headers()
+        assert code == "200" and "eSIM<script>" in body and "PLAINSECRET" in body, code
+        assert f'filename="mail-{mid}.eml"' in hdrs and "message/rfc822" in hdrs and "no-store" in hdrs, hdrs
+        # Another owner, no account, an unknown account, a bogus id or
+        # index: 404 alike.
+        for account in ("bob-owner", "", "nobody-owner"):
+            for path in (f"m/{mid}", f"m/{mid}/att/1", f"m/{mid}/eml"):
+                assert owner(account, path=path)[0] == "404", (account, path)
+        for path in ("m/0000", f"m/{mid}/att/9", f"m/{mid}/att/x", f"m/{mid}x"):
+            assert owner("alice-owner", path=path)[0] == "404", path
+        # The agent still gets the restricted view only, and no attachment.
+        flat = json.dumps(quarantine("alice"))
+        assert "Quarterly" not in flat and "eSIM" not in flat, flat
+        rc, out = mailgate("alice", f"attachment {mid} 1 --out /tmp/alice-esim.pdf")
+        assert rc != 0, out
+        # Release: a same-origin POST with the token, for one's own agent only.
+        form = {"csrf": token, "agent": "alice", "op": "release-one", "id": mid}
+        assert owner("alice-owner", "POST", form, origin=None)[0] == "403"
+        assert owner("alice-owner", "POST", form, origin="https://${aliceDashHost}")[0] == "403"
+        assert owner("alice-owner", "POST", dict(form, csrf="0" * 64))[0] == "403"
+        found = re.search(r'name="csrf" value="([0-9a-f]+)"', owner("bob-owner")[1])
+        assert found
+        bob_token = found.group(1)
+        assert owner("bob-owner", "POST", dict(form, csrf=bob_token))[0] == "403"
+        assert owner("bob-owner", "POST", dict(form, csrf=bob_token, agent="bob"))[0] == "400"
+        assert mid in entry_ids("alice")
+        assert owner("alice-owner", "POST", form)[0] == "303"
+        # The agent reads it: IMAP, mailgate read (marked released), the attachment.
+        wait_inbox("alice", "eSIM", timeout=60)
+        m = [x for x in inbox("alice") if "eSIM" in x["raw"]][0]
+        assert "Released to the INBOX by your owner" in m["body"] and "owner; despite=dmarc-not-pass" in m["raw"] and "(unverified sender)" in m["raw"], m["raw"]
+        assert mid not in entry_ids("alice")
+        rc, r = mailgate("alice", f"read {mid}")
+        assert rc == 0 and "Quarterly numbers are fine." in r["text"], r
+        assert {"dmarc-not-pass", "alias-domain-mismatch"} <= set(r["released_despite"]), r
+        assert r["from"] == "unaligned:esim@lax.test", r
+        server.succeed(f"runuser -u alice -- mailgate attachment {mid} 1 --out /tmp/alice-esim.pdf")
+        assert server.succeed("cat /tmp/alice-esim.pdf") == "%PDF-1.4 mailgate test\n"
+        rc, out = mailgate("bob", f"read {mid}")
+        assert rc != 0, out
+        # A second release of it is refused; the release is in the log.
+        assert owner("alice-owner", "POST", form)[0] == "400"
+        server.succeed(f"journalctl -u mailgate --no-pager | grep -q '{mid} released to INBOX by owner:alice-owner'")
+        # No allowlisting: the same forged sender is quarantined next time.
+        rc, r = mailgate("alice", "allowlist")
+        assert not any(x["entry"] in ("esim@lax.test", "@lax.test") for x in r["allowlist"]), r
+        before = entry_ids("alice")
+        send("--mail-from esim@signup.test --header-from esim@lax.test --to alice+shop@${domain} --subject esim-again")
+        v2 = new_entries("alice", before)[0]
+        assert "dmarc-not-pass" in v2["reasons"], v2
+        assert "esim-again" not in json.dumps(inbox("alice"))
 
     with subtest("F8: DMARC pass on SPF alone does not reach the INBOX"):
         send("--mail-from boss@lax.test --to alice@${domain} --subject spf-only-pass")

@@ -8,6 +8,7 @@ on stdin, then the raw message until EOF; one JSON answer on stdout.
   {"op": "analyze", "authserv_id": ..., "psl": path} -> sanitize.analyze()
   {"op": "attachment", "index": n}                   -> {name, type, data(b64)}
   {"op": "read"}                                     -> sanitize.reading()
+  {"op": "owner-read"}                               -> sanitize.owner_reading()
 """
 
 from __future__ import annotations
@@ -38,6 +39,8 @@ def main() -> None:
             out = {"name": name, "type": ctype, "size": len(data), "data": base64.b64encode(data).decode()}
     elif req["op"] == "read":
         out = sanitize.reading(msg)
+    elif req["op"] == "owner-read":
+        out = sanitize.owner_reading(msg)
     else:
         raise SystemExit(f"unknown op {req['op']!r}")
     sys.stdout.write(json.dumps(out, ensure_ascii=False))
