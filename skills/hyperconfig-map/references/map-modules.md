@@ -337,7 +337,9 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/security-fixes/overlays.nix — Package overlays of the unattended security jobs (../security-fixes.nix applies them on every machine): <- m/security-fixes.nix
 - modules/nixos/security-takedown/default.nix — Security takedowns: services the unattended security jobs (or anyone) stopped because of a critical, exploitable vulner… <- m/common.nix
 - modules/nixos/security-takedown/eligible.nix — Units a security takedown (./takedowns.json) may stop, per machine: <- m/security-takedown/default.nix
-- modules/nixos/self-heal/default.nix — Self-heal: machines that drop off the network get themselves back, without a person at the console. One module family,… <- m/common.nix, m/self-heal/hardware-watchdog-test.nix, m/self-heal/test.nix
+- modules/nixos/self-heal/boot-counting-test.nix — VM test of ./boot-counting.nix (check self-heal-boot-counting), modelled on nixpkgs' nixos/tests/systemd-boot.nix bootC… <- flake.nix
+- modules/nixos/self-heal/boot-counting.nix — Self-heal part 3: boot counting on the systemd-boot machines (amy joy nas som vit; docs/self-heal.md has the full walk-… <- m/self-heal/default.nix
+- modules/nixos/self-heal/default.nix — Self-heal: machines that drop off the network get themselves back, without a person at the console. One module family,… <- m/common.nix, m/self-heal/boot-counting-test.nix, m/self-heal/hardware-watchdog-test.nix, m/self-heal/test.nix
 - modules/nixos/self-heal/deploy-guard.nix — Deploy guard: every live switch must prove the machine is still reachable, or it is rolled back and the machine reboots… <- m/self-heal/default.nix
 - modules/nixos/self-heal/hardware-watchdog-test.nix — VM test of ./hardware-watchdog.nix (check self-heal-hardware-watchdog): <- flake.nix
 - modules/nixos/self-heal/hardware-watchdog.nix — Self-heal part 2: the hardware watchdog (docs/self-heal.md). systemd (PID 1) pings /dev/watchdog from its main loop eve… <- m/self-heal/default.nix

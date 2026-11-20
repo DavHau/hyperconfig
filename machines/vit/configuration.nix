@@ -21,8 +21,8 @@
     ../../modules/nixos/initrd-ssh.nix
   ];
 
-  # vit and som unlock each other at boot (../../modules/nixos/tang-client.nix).
-  # vit's own root is LUKS, so its Tang keys are at rest encrypted.
+  # vit and som unlock each other at boot (../../modules/nixos/tang-client.nix);
+  # vit's root is LUKS, so its Tang keys are at rest encrypted.
   hyper.tangServer = {
     enable = true;
     interface = "wlo1";
@@ -33,6 +33,8 @@
     interface = "wlo1";
   };
   hyper.luksUnlock.name = "cryptusb";
+  # Boot gate (docs/self-heal.md): restart only while som's Tang answers; no gateway until vit's NM Wi-Fi is proven login-free.
+  hyper.selfHeal.bootHealth = { tangPeers = [ { address = "fe80::7a6e:1"; dev = "wlo1"; } ]; requireGateway = false; };
 
   # Local STT/TTS for Home Assistant on cm-pi (iGPU + CPU, never the NVIDIA card).
   hyper.wyomingLocalSpeech.enable = true;

@@ -303,6 +303,18 @@ in
                 severity = "critical";
                 summary = "{{ .Labels.instance }} rolled back a deploy ({{ .Labels.reason }} unhealthy after the switch) and rebooted into the previous generation; deploys to it are blocked until `selfheal clear` on {{ .Labels.instance }} (docs/self-heal.md)";
               })
+              # Boot counting (self-heal part 3) gave up on the newest
+              # generation and booted an older entry, or someone picked one
+              # in the menu: the machine is up, the deploy is not. Stays
+              # until the next deploy or reboot into the profile; digest.
+              (rule {
+                uid = "selfheal-boot-fallback";
+                title = "Booted an older generation";
+                expr = "max by (instance) (selfheal_boot_fallback) > 0";
+                for = "30m";
+                severity = "warning";
+                summary = "{{ .Labels.instance }} runs an older generation than its system profile: the new one never booted healthy (boot counting fell back) or was not picked; see `selfheal status` and docs/self-heal.md";
+              })
               (rule {
                 uid = "fleet-unit-failed";
                 title = "Systemd unit failed";

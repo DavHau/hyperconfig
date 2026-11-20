@@ -312,6 +312,13 @@
           import ./modules/nixos/self-heal/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
+        # systemd-boot boot counting with the local health gate: a generation
+        # that never boots healthy reboots itself twice, then the last good
+        # entry boots and stays.
+        self-heal-boot-counting =
+          import ./modules/nixos/self-heal/boot-counting-test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          };
         # A hung PID 1 gets the VM reset by its (virtual) hardware watchdog.
         self-heal-hardware-watchdog =
           import ./modules/nixos/self-heal/hardware-watchdog-test.nix {

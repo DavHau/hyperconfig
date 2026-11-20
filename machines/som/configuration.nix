@@ -219,12 +219,9 @@ in
     servers = [ "vit" ];
     interface = "enp6s0";
   };
-  hyper.tangServer = {
-    enable = true;
-    interface = "br0";
-    address = "fe80::7a6e:1";
-    networkdUnit = "40-br0";
-  };
+  hyper.tangServer = { enable = true; interface = "br0"; address = "fe80::7a6e:1"; networkdUnit = "40-br0"; };
+  # The boot gate restarts som only while vit's Tang answers (docs/self-heal.md).
+  hyper.selfHeal.bootHealth.tangPeers = [ { address = "fe80::7a6e:2"; dev = "br0"; } ];
 
   # `clan-unlock som`: the initrd at a fixed link-local address, through vit.
   hyper.unlockTarget = {

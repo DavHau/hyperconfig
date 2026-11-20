@@ -3,7 +3,9 @@
 One CLI for every self-heal part. Part 1, the deploy guard
 (./deploy-guard.nix): the pre-switch check arms a transient timer; when it
 fires, `deploy-guard assess` confirms a healthy machine, or restores stopped
-units, then rolls back to the previous generation and reboots.
+units, then rolls back to the previous generation and reboots. Part 3, boot
+counting (./boot-counting.nix): `boot-health` gates boot-complete.target on
+local health and reboots a try-counted entry that stays unhealthy.
 
 Called as `selfheal.py --config <json> <command> ...`; the json (built by
 ./default.nix) holds every path and setting, so the CLI of the NEW system
@@ -15,6 +17,7 @@ import datetime
 import fcntl
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -263,31 +266,50 @@ def check_link(items):
     items.append({"name": "link", "ok": bool(up), "detail": ",".join(up) or "no interface up"})
 
 
-def check_gateway(items):
+def default_gateways():
+    """(gateway, dev) of every default route, v4 and v6, multipath
+    included (`nexthop via ... dev ...` lines)."""
     gws = []
     for fam in ("-4", "-6"):
         for line in run(["ip", fam, "route", "show", "default"], timeout=5).stdout.splitlines():
             cols = line.split()
             if "via" in cols:
                 gw = cols[cols.index("via") + 1]
-                if "dev" in cols and gw.startswith("fe80"):
-                    gw += "%" + cols[cols.index("dev") + 1]
-                gws.append(gw)
-    ok_gw = [g for g in gws if run(["ping", "-n", "-c", "1", "-W", "2", g], timeout=5).returncode == 0]
-    detail = (f"{ok_gw[0]} answers" if ok_gw else ("no default gateway" if not gws else f"{','.join(gws)} silent"))
+                dev = cols[cols.index("dev") + 1] if "dev" in cols and cols.index("dev") + 1 < len(cols) else None
+                gws.append((gw, dev))
+    return gws
+
+
+def gateway_answers(gw, dev):
+    """ICMP, or ARP for IPv4 (a router may drop pings but must answer ARP)."""
+    target = f"{gw}%{dev}" if dev and gw.startswith("fe80") else gw
+    if run(["ping", "-n", "-c", "1", "-W", "2", target], timeout=5).returncode == 0:
+        return True
+    if dev and ":" not in gw:
+        return run(["arping", "-q", "-c", "1", "-w", "2", "-I", dev, gw], timeout=5).returncode == 0
+    return False
+
+
+def check_gateway(items):
+    """Any default route's gateway answering is enough (several uplinks)."""
+    gws = default_gateways()
+    ok_gw = [g for g, d in gws if gateway_answers(g, d)]
+    detail = (f"{ok_gw[0]} answers" if ok_gw else ("no default route" if not gws else f"{','.join(g for g, _ in gws)} silent"))
     items.append({"name": "gateway", "ok": bool(ok_gw), "detail": detail})
 
 
 def health(level):
     """deploy: what we need to get in (sshd, mesh daemons, a mesh anchor).
-    local: this machine's own side only (sshd, link, gateway); for the
-    later parts, so an upstream outage never looks like a local fault."""
+    local: this machine's own side only (sshd, link, gateway), so an
+    upstream outage never looks like a local fault.
+    boot: the boot counting gate (./boot-counting.nix): local, minus link
+    and gateway where `bootRequireGateway` is off (laptops boot offline)."""
     items = []
     check_sshd(items)
     if level == "deploy":
         check_mesh(items)
         check_anchors(items)
-    else:
+    elif level == "local" or CFG.get("bootRequireGateway", True):
         check_link(items)
         check_gateway(items)
     return {"level": level, "healthy": all(i["ok"] for i in items), "items": items}
@@ -531,6 +553,12 @@ def cmd_pre_switch(args):
         return BLOCKED_EXIT
     if action != "switch":
         return 0
+    if CFG.get("bootCounting") and realpath(args.toplevel) == realpath("/nix/var/nix/profiles/system"):
+        try:
+            retry_profile_entry()
+        except Exception as e:  # noqa: BLE001 -- never block a deploy on our bug
+            event("boot-entry-retry-failed", error=str(e))
+    boot_fallback(at_boot=False)
     try:
         arm(realpath(args.toplevel))
     except Exception as e:  # noqa: BLE001 -- never block a deploy on our bug
@@ -792,7 +820,313 @@ def cmd_boot(args):
                     event("dropped", why=f"booted {short(cur)}, not the pending {short(p.get('new'))}")
     finally:
         write_metrics()
+        boot_fallback()
     return 0
+
+
+# ---------------------------------------------------------------- boot counting
+
+LOADER_GUID = "4a67b082-0a4c-41cf-b6c7-440b29bb8c4f"
+
+
+def boot_count_path():
+    """LoaderBootCountPath: set by systemd-boot only when it booted an entry
+    with a counter (after decrementing it), e.g. \\loader\\entries\\x+1-1.conf.
+    None = a blessed or uncounted entry."""
+    try:
+        with open(f"/sys/firmware/efi/efivars/LoaderBootCountPath-{LOADER_GUID}", "rb") as f:
+            raw = f.read()[4:]  # 4 bytes of attributes, then UTF-16LE
+    except OSError:
+        return None
+    return raw.decode("utf-16-le", errors="replace").rstrip("\0") or None
+
+
+def parse_counter(cpath):
+    """(entry id without counter, tries left, tries done) of a counted path."""
+    name = cpath.replace("\\", "/").rsplit("/", 1)[-1]
+    stem, dot, ext = name.rpartition(".")
+    base, plus, counter = stem.rpartition("+")
+    if not plus:
+        return None
+    left, _, done = counter.partition("-")
+    if not left.isdigit() or (done and not done.isdigit()):
+        return None
+    return base + dot + ext, int(left), int(done or 0)
+
+
+def bless_status():
+    """systemd-bless-boot status: clean (no counter), indeterminate (counted,
+    not decided yet), dirty (counted, no tries left), good, bad."""
+    r = run([CFG["blessBoot"], "status"], timeout=15)
+    return r.stdout.strip() or f"unknown ({r.stderr.strip()[:80]})"
+
+
+def boot_metrics(**values):
+    """/run/selfheal/boot.prom, next to the deploy guard's file."""
+    try:
+        lines = []
+        for k, v in values.items():
+            lines += [f"# TYPE selfheal_boot_{k} gauge", f"selfheal_boot_{k} {int(v)}"]
+        mdir = CFG["metricsDir"]
+        os.makedirs(mdir, exist_ok=True)
+        write_atomic(os.path.join(mdir, "boot.prom"), "\n".join(lines) + "\n")
+    except Exception as e:  # noqa: BLE001
+        log(f"cannot write boot metrics: {e}")
+
+
+def boot_reboot_blocker(counter, status):
+    """Why a failed boot must NOT reboot, or None. Never on a blessed or
+    uncounted entry (that is what makes a loop impossible), and never on an
+    entry booted again after its tries ran out (every entry bad: it would
+    just be picked again). So at most `tries` reboots per entry."""
+    if counter is None:
+        return "not a counted boot entry"
+    if status not in ("indeterminate", "dirty"):
+        return f"boot entry is {status}"
+    entry, left, done = counter
+    if done > CFG["bootTries"]:
+        return f"entry {entry} has no tries left (try {done} of {CFG['bootTries']}): nothing better to boot"
+    hd = hold()
+    if hd:
+        return f"held until {iso(hd['until'])}"
+    sw = switch_running()
+    if sw:
+        return f"a switch is running ({sw})"
+    peers = CFG.get("bootTangPeers") or []
+    if peers and not any(tcp_answers(p["address"], p.get("dev"), TANG_PORT) for p in peers):
+        names = ",".join(f"{p['address']}%{p.get('dev')}" for p in peers)
+        return f"{NO_TANG_PEER} ({names}): after a reboot nobody could unlock this machine"
+    return None
+
+
+TANG_PORT = 7654
+NO_TANG_PEER = "no tang peer answers"
+RECOVERED = "recovered"
+
+
+def tcp_answers(addr, dev, port, timeout=3):
+    """A TCP connect to addr (link-local: scoped to dev) on port."""
+    target = f"{addr}%{dev}" if dev and addr.lower().startswith("fe80") else addr
+    try:
+        socket.create_connection((target, port), timeout=timeout).close()
+        return True
+    except OSError:
+        return False
+
+
+def healthy_now():
+    """Boot health, healthy twice in a row 1 s apart (a flapping sshd is
+    not blessed). Returns (healthy, last result)."""
+    h = health("boot")
+    if h["healthy"]:
+        time.sleep(1)
+        h = health("boot")
+    return h["healthy"], h
+
+
+def bless(counter, **extra):
+    event("boot-healthy", entry=counter[0] if counter else "?",
+          tries_done=counter[2] if counter else "?", **extra)
+    boot_metrics(health_ok=1)
+    return 0
+
+
+def cmd_boot_health(args):
+    """selfheal-boot-healthy.service (./boot-counting.nix): gate
+    boot-complete.target on local health; on a counted entry that never
+    gets healthy, reboot so systemd-boot spends the next try."""
+    cpath = boot_count_path()
+    counter = parse_counter(cpath) if cpath else None
+    status = bless_status()
+    log(f"boot entry: {cpath or 'uncounted'}, bless status {status}")
+    if status in ("clean", "good", "bad"):
+        # nothing to decide (a switch may start this unit on a running,
+        # already assessed boot)
+        return 0
+    # monotonic: the gate starts right when timesyncd may step the clock
+    end = time.monotonic() + CFG["bootHealthTimeout"]
+    while True:
+        ok, h = healthy_now()
+        if ok:
+            return bless(counter)
+        if time.monotonic() >= end:
+            break
+        nxt = min(end, time.monotonic() + CFG["bootHealthInterval"])
+        while time.monotonic() < nxt:
+            time.sleep(1)
+    boot_metrics(health_ok=0)
+    # Blocked only because no Tang peer answers (vit/som after a power cut:
+    # the peer's Wi-Fi or unlock may come late): poll the peer for a while
+    # before giving up, and re-check health each time (a boot that recovers
+    # meanwhile, e.g. the gateway back after the power cut, is blessed,
+    # never restarted). Hold, a running switch and the tries cap still win.
+    poll_end = time.monotonic() + CFG.get("bootTangPollTimeout", 3600)
+    logged = False
+    while True:
+        why = "; ".join(f"{i['name']}: {i['detail']}" for i in failing(h))
+        with Lock():
+            blocker = boot_reboot_blocker(counter, status)
+            withdrawn = False
+            if not blocker and CFG.get("bootTangPeers"):
+                blocker = withdraw_and_recheck(counter, status)
+                withdrawn = not blocker
+            if blocker == RECOVERED:
+                return bless(counter, after="tang withdraw")
+            if not blocker:
+                assert counter is not None  # boot_reboot_blocker refuses uncounted boots
+                try:
+                    event("boot-unhealthy", failing=why, reboot="yes", entry=counter[0],
+                          tries_left=counter[1], tries_done=counter[2])
+                    os.sync()
+                    # Under the lock, right after the switch check: narrows the
+                    # window for a deploy starting now (clan-boot-* does not take
+                    # this lock; the builder writes tmp + rename anyway).
+                    r = run(["systemctl", "reboot"], timeout=60)
+                except BaseException:
+                    if withdrawn:
+                        run(["systemctl", "start", "tangd.socket"], timeout=30)
+                    raise
+                if r.returncode != 0:
+                    # never leave our Tang withdrawn on a boot that stays up:
+                    # the peer could not be unlocked at its next boot
+                    if CFG.get("bootTangPeers"):
+                        run(["systemctl", "start", "tangd.socket"], timeout=30)
+                    event("boot-reboot-failed", error=(r.stderr or "").strip()[:200])
+                return 1
+            tang_only = blocker.startswith(NO_TANG_PEER)
+            if not tang_only or time.monotonic() >= poll_end:
+                event("boot-unhealthy", failing=why, reboot="no", why=blocker)
+                return 1
+            if not logged:
+                event("boot-unhealthy-waiting", failing=why, why=blocker,
+                      poll=f"every {CFG.get('bootTangPollInterval', 30)} s for up to {CFG.get('bootTangPollTimeout', 3600)} s")
+                logged = True
+        nxt = time.monotonic() + CFG.get("bootTangPollInterval", 30)
+        while time.monotonic() < nxt:
+            time.sleep(1)
+        ok, h = healthy_now()
+        if ok:
+            return bless(counter, after="tang wait")
+
+
+def withdraw_and_recheck(counter, status):
+    """Two-phase Tang check before a restart: stop answering as a Tang peer
+    ourselves, wait longer than a peer's check-to-restart latency, then look
+    at the peers again. A peer whose gate expires at the same moment then
+    sees us gone, so of two simultaneous gates neither restarts (both stay
+    up, safe). Our Tang comes back whenever we stay up, also on an error.
+    Returns a blocker (NO_TANG_PEER-prefixed ones are retried by the poll)
+    or None."""
+    load = run(["systemctl", "show", "-P", "LoadState", "tangd.socket"], timeout=15).stdout.strip()
+    if load in ("not-found", "masked"):
+        # nothing to withdraw (no Tang server here)
+        return boot_reboot_blocker(counter, status)
+    if load != "loaded":
+        # fail closed: a failed read must not fall back to check-then-act
+        return f"{NO_TANG_PEER} check impossible: tangd.socket load state {load or 'unknown'}"
+    # n2: a `systemctl stop` of the gate during the withdraw becomes an
+    # exception, so the finally below brings our Tang back
+    old = signal.signal(signal.SIGTERM, _term)
+    blocker = None
+    try:
+        r = run(["systemctl", "stop", "tangd.socket"], timeout=30)
+        if r.returncode != 0 or unit_active("tangd.socket"):
+            blocker = (f"{NO_TANG_PEER} check impossible: cannot withdraw our own tang "
+                       f"({(r.stderr or '').strip()[:80]})")
+            return blocker
+        t = time.monotonic() + CFG.get("bootTangWithdraw", 15)
+        while time.monotonic() < t:
+            time.sleep(1)
+        blocker = boot_reboot_blocker(counter, status)
+        # the boot may have recovered while we waited: bless, don't restart
+        if not blocker and healthy_now()[0]:
+            blocker = RECOVERED
+        # Something (a switch through sockets.target) may have started our
+        # Tang again meanwhile: then a peer re-checking now sees us.
+        if not blocker and unit_active("tangd.socket"):
+            blocker = f"{NO_TANG_PEER} check impossible: our own tang came back during the withdraw"
+        return blocker
+    except BaseException:
+        blocker = blocker or "error"
+        raise
+    finally:
+        signal.signal(signal.SIGTERM, old)
+        if blocker:
+            # refused by systemd while a shutdown is queued (Conflicts=shutdown.target)
+            run(["systemctl", "start", "tangd.socket"], timeout=30)
+
+
+def _term(signum, frame):
+    raise SystemExit(143)
+
+
+def profile_entry():
+    """(path, counter) of the system profile's boot entry, or None: the
+    entry of the profile's generation number whose kernel line boots the
+    profile's toplevel (never a specialisation)."""
+    link = os.readlink("/nix/var/nix/profiles/system")  # system-<N>-link
+    gen = link.split("-")[1] if link.startswith("system-") else None
+    top = realpath("/nix/var/nix/profiles/system")
+    edir = os.path.join(CFG["bootMountPoint"], "loader", "entries")
+    for name in sorted(os.listdir(edir)):
+        if not (name.startswith("nixos-") and name.endswith(".conf")):
+            continue
+        try:
+            with open(os.path.join(edir, name)) as f:
+                lines = f.read().splitlines()
+        except OSError:
+            continue
+        version = any(x.startswith(f"version Generation {gen} ") for x in lines)
+        boots = any(x.startswith("options ") and f"init={top}/init" in x.split() for x in lines)
+        if version and boots:
+            return os.path.join(edir, name), parse_counter(name)
+    return None
+
+
+def retry_profile_entry():
+    """Before a live switch to the system profile: if its entry was marked
+    bad (+0-N, by a failed boot or an outage), the operator just chose it
+    again, so give it fresh tries (+<tries>). Without this the builder keeps
+    the bad name (same contents) and the next boot silently takes an older
+    entry. The new name comes only from the entry's own file name."""
+    pe = profile_entry()
+    if not pe or not pe[1] or pe[1][1] != 0:
+        return
+    path_, (entry, _left, done) = pe
+    stem = os.path.basename(path_).rsplit("+", 1)[0]
+    new = os.path.join(os.path.dirname(path_), f"{stem}+{CFG['bootTries']}.conf")
+    os.rename(path_, new)
+    fd = os.open(os.path.dirname(path_), os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    event("boot-entry-retry", entry=entry, was=f"+0-{done}", now=f"+{CFG['bootTries']}")
+
+
+def boot_fallback(at_boot=True):
+    """selfheal_boot_fallback: 1 while the next boot would not boot the
+    system profile (its entry is bad: boot counting gave up on it) or, at
+    boot, while an older entry is running (fallback, or picked in the
+    menu). Written at boot (selfheal-boot.service) and by the pre-switch
+    check of every live switch (after retry_profile_entry)."""
+    if not CFG.get("bootCounting"):
+        return
+    try:
+        pe = profile_entry()
+        entry_bad = bool(pe and pe[1] and pe[1][1] == 0)
+        profile = realpath("/nix/var/nix/profiles/system")
+        booted = realpath("/run/booted-system")
+        fell_back = entry_bad or (at_boot and booted != profile)
+        if fell_back and at_boot:
+            event("boot-fallback", booted=short(booted), profile=short(profile), profile_entry_bad=entry_bad)
+        mdir = CFG["metricsDir"]
+        os.makedirs(mdir, exist_ok=True)
+        write_atomic(os.path.join(mdir, "boot-fallback.prom"),
+                     "# TYPE selfheal_boot_fallback gauge\n"
+                     f"selfheal_boot_fallback {1 if fell_back else 0}\n")
+    except Exception as e:  # noqa: BLE001 -- metrics never break an action
+        log(f"cannot write the fallback metric: {e}")
 
 
 # ---------------------------------------------------------------- user commands
@@ -904,11 +1238,11 @@ def cmd_status(args):
 
 
 def main():
-    ap = argparse.ArgumentParser(prog="selfheal", description="self-heal: deploy guard (docs/self-heal.md)")
+    ap = argparse.ArgumentParser(prog="selfheal", description="self-heal: deploy guard, boot counting (docs/self-heal.md)")
     ap.add_argument("--config", required=True, help=argparse.SUPPRESS)
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("health", help="check health")
-    s.add_argument("--level", choices=["deploy", "local"], default="deploy")
+    s.add_argument("--level", choices=["deploy", "local", "boot"], default="deploy")
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_health)
     s = sub.add_parser("status", help="pending deploy, hold, rollback flag, last actions")
@@ -927,6 +1261,8 @@ def main():
     s.set_defaults(fn=cmd_clear)
     s = sub.add_parser("boot", help=argparse.SUPPRESS)
     s.set_defaults(fn=cmd_boot)
+    s = sub.add_parser("boot-health", help="gate boot-complete.target; reboot a counted entry that stays unhealthy")
+    s.set_defaults(fn=cmd_boot_health)
     dg = sub.add_parser("deploy-guard", help="deploy guard internals")
     dgs = dg.add_subparsers(dest="dgcmd", required=True)
     s = dgs.add_parser("assess")

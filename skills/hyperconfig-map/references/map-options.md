@@ -68,7 +68,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.rgbOff.dramMode: modules/nixos/rgb-off.nix
 - hyper.scanTrigger: modules/nixos/scan-trigger/default.nix
 - hyper.searxngCanary.candidate: modules/nixos/searxng-canary/candidate.nix
-- hyper.selfHeal: modules/nixos/self-heal/default.nix
+- hyper.selfHeal: modules/nixos/self-heal/boot-counting.nix, modules/nixos/self-heal/default.nix
 - hyper.selfHeal.deployGuard: modules/nixos/self-heal/deploy-guard.nix
 - hyper.selfHeal.hardwareWatchdog: modules/nixos/self-heal/hardware-watchdog.nix
 - hyper.spaceGui: modules/nixos/space-gui/default.nix

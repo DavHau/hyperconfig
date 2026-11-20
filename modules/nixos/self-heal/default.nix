@@ -6,15 +6,20 @@
 # modules/nixos/common.nix.
 #
 # Parts here: ./deploy-guard.nix (confirm a live switch or roll it back),
-# ./hardware-watchdog.nix (systemd drives /dev/watchdog). Boot counting and
-# the runtime watchdog will join this directory and reuse `selfheal health`.
+# ./hardware-watchdog.nix (systemd drives /dev/watchdog),
+# ./boot-counting.nix (systemd-boot falls back from a generation that never
+# boots healthy). The runtime watchdog will join this directory and reuse
+# `selfheal health`.
 #
-# Health (`selfheal health [--level deploy|local] [--json]`):
+# Health (`selfheal health [--level deploy|local|boot] [--json]`):
 #   deploy: sshd active and listening on services.openssh.ports, every mesh
 #           daemon this machine runs active (derived from its config), and
 #           at least one anchor answering (ICMP or TCP 22, 2 s timeout).
-#   local:  sshd, a link up, the default gateway answering (for later
-#           parts: an upstream outage must never look like a local fault).
+#   local:  sshd, a link up, any default route's gateway answering (ICMP,
+#           or ARP for IPv4): an upstream outage never looks like a local
+#           fault.
+#   boot:   local, minus link and gateway where
+#           hyper.selfHeal.bootHealth.requireGateway is off (roaming laptops).
 # Anchors default to edi, sgp and bam (minus this machine) over every
 # overlay the repo knows an address for: the /etc/hosts lines the clan
 # yggdrasil and wireguard services write (`<m>.d`, `<m>.wg-edi`, ...) and
@@ -115,12 +120,28 @@ let
         stableChecks
         ;
       holdMax = cfg.holdMaxMinutes * 60;
+      bootCounting = cfg.bootCounting.enable;
+      bootTries = cfg.bootCounting.tries;
+      bootRequireGateway = cfg.bootHealth.requireGateway;
+      bootHealthTimeout = cfg.bootHealth.timeout;
+      bootHealthInterval = cfg.bootHealth.interval;
+      bootTangPeers = cfg.bootHealth.tangPeers;
+      bootTangPollInterval = cfg.bootHealth.tangPollInterval;
+      bootTangPollTimeout = cfg.bootHealth.tangPollTimeout;
+      bootTangWithdraw = cfg.bootHealth.tangWithdraw;
+      # where the builder writes loader/entries
+      bootMountPoint =
+        let
+          x = config.boot.loader.systemd-boot.xbootldrMountPoint or null;
+        in
+        if x != null then x else config.boot.loader.efi.efiSysMountPoint;
+      blessBoot = "${config.systemd.package}/lib/systemd/systemd-bless-boot";
       path = lib.makeBinPath [
         config.systemd.package
         config.nix.package
         pkgs.coreutils
         pkgs.iproute2
-        pkgs.iputils
+        pkgs.iputils # ping, arping
         pkgs.util-linux
       ];
     }
@@ -136,6 +157,7 @@ let
 in
 {
   imports = [
+    ./boot-counting.nix
     ./deploy-guard.nix
     ./hardware-watchdog.nix
   ];
@@ -193,7 +215,8 @@ in
         A machine that roams and goes offline on purpose (laptops: amy,
         joy). The deploy guard then treats a missing link, gateway, internet
         or anchors as upstream (never rolls back for it) as long as sshd and
-        the mesh daemons are fine; later parts only report for it.
+        the mesh daemons are fine; the boot gate needs sshd only; later
+        parts only report for it.
       '';
     };
 
@@ -235,8 +258,9 @@ in
     systemd.tmpfiles.rules = [ "d /var/lib/selfheal 0700 root root -" ];
 
     # Rewrites the metrics at boot (the flag persists in /var/lib, the
-    # textfile lives in /run) and re-arms a deploy that was pending when the
-    # machine went down (./deploy-guard.nix).
+    # textfile lives in /run), re-arms a deploy that was pending when the
+    # machine went down (./deploy-guard.nix) and, with boot counting, notes
+    # a boot of something other than the system profile (a fallback).
     systemd.services.selfheal-boot = {
       description = "selfheal: metrics and pending deploy after boot";
       wantedBy = [ "multi-user.target" ];
