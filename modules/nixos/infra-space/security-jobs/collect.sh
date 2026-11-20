@@ -1,16 +1,15 @@
-# sec-collect: the security jobs' read-only collectors
-# (../security-jobs/*/SKILL.md). Every subcommand writes files into OUT
-# (created 0700) and prints one summary line per machine; nothing on a
-# machine is changed (ssh commands are read-only listings).
+# sec-collect: the security jobs' read-only collectors, run as infra through
+# sudo. RUN is validated and output goes under the fixed group-readable root
+# @runRoot@/RUN (0750/0640); the caller chooses no path. Nothing on a machine
+# is changed (ssh commands are read-only listings).
 #
-#   sec-collect inventory OUT [MACHINE...]   packages + vulnix per machine
-#   sec-collect exposure OUT [MACHINE...]    listeners, nft, declared firewall
-#   sec-collect snapshot OUT [MACHINE...]    tripwire state (current system,
+#   sec-collect inventory RUN [MACHINE...]   packages + vulnix per machine
+#   sec-collect exposure RUN [MACHINE...]    listeners, nft, declared firewall
+#   sec-collect snapshot RUN [MACHINE...]    tripwire state (current system,
 #                                            authorized keys, nft hashes)
 #
-# MACHINE defaults to @machines@ (the deployable fleet; the installer is
-# no running machine). The repository is the job's workspace: run it at
-# its root, it evaluates `.#nixosConfigurations`.
+# MACHINE defaults to @machines@ and is restricted to that list. Evaluation
+# uses infra's checkout at @repo@.
 #
 # inventory: the system a machine RUNS (/run/current-system over ssh),
 # else main's toplevel (eval) for a machine that is offline, marked as
@@ -29,23 +28,31 @@
 set +e -uo pipefail
 
 machines=(@machines@)
+all_machines=" @machines@ "
+run_root=@runRoot@
+repo=@repo@
 ssh_opts=(-o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
 
 die() {
   echo "sec-collect: $*" >&2
   exit 2
 }
-[ $# -ge 2 ] || die "usage: sec-collect inventory|exposure|snapshot OUT [MACHINE...]"
+[ $# -ge 2 ] || die "usage: sec-collect inventory|exposure|snapshot RUN [MACHINE...]"
 cmd=$1
-out=$2
+run=$2
 shift 2
+case "$run" in *[!A-Za-z0-9._-]* | "" | . | ..) die "RUN must be a plain [A-Za-z0-9._-] name" ;; esac
+out=$run_root/$run
 [ $# -gt 0 ] && machines=("$@")
 for m in "${machines[@]}"; do
-  [[ "$m" =~ ^[a-z0-9-]+$ ]] || die "not a machine name: $m"
+  case "$all_machines" in *" $m "*) ;; *) die "not a deployable machine: $m" ;; esac
 done
-umask 077
+umask 027
+[ ! -L "$out" ] || die "$out is a symlink"
 mkdir -p -- "$out" || die "mkdir $out failed"
-[ -f flake.nix ] || die "run at the root of a hyperconfig checkout (no flake.nix here)"
+chmod 2750 "$out" || die "chmod $out failed"
+cd "$repo" || die "no infra checkout at $repo"
+[ -f flake.nix ] || die "no flake.nix in $repo"
 
 on() { timeout 120 ssh "${ssh_opts[@]}" "$1.d" "$2"; }
 reachable() { timeout 20 ssh "${ssh_opts[@]}" "$1.d" true 2>/dev/null; }

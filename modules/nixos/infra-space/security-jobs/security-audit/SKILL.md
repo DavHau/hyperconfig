@@ -27,18 +27,20 @@ a time.
 
     mkdir -p $TMPDIR/security-audit ~/security-audit/state
     ws=$(sec-security-audit-workspace create)
-    cd "$ws" && sec-collect snapshot $TMPDIR/security-audit/before
+    sudo -n -u infra sec-collect snapshot security-audit-before
+    before=/var/lib/infra-space/security-jobs/collect/security-audit-before
 
 Last week's findings: `~/security-audit/state/findings.json` (missing
 on the first run). You write this week's there at the end (step 5).
 
 ## 2. Collect
 
-    sec-collect exposure $TMPDIR/security-audit/exp
+    sudo -n -u infra sec-collect exposure security-audit-exposure
+    exp=/var/lib/infra-space/security-jobs/collect/security-audit-exposure
 
-Then per machine, read-only over ssh (`ssh <m>.d bash -c "'...'"`;
-offline machines: repo side only, marked so), into
-`$TMPDIR/security-audit/<m>/`:
+Use `$exp` and read-only flake evaluation. Direct fleet ssh is unavailable
+to this account; a check not covered by the three collectors becomes an
+interactive-session follow-up, with `unverified` stated explicitly:
 
 - **Exposure vs intent:** `<m>.ss` (live listeners) and `<m>.nft` against
   `<m>.declared.json` and the modules that open ports. For every
@@ -112,23 +114,25 @@ Act by the policy:
 - Exploitable now and critical (an unauthenticated admin interface on
   the internet, a world-readable private key): fix immediately through
   the normal path; if a fix would change behaviour, take the service
-  down (`decision notice` with the undo; not protected services: those
+  down (`sudo -n -u infra sec-job-decision --by <job> notice` with the undo; not protected services: those
   get the narrowest mitigation that keeps Dave able to get in, e.g.
   restrict to mesh/LAN, plus a notice). Rotate nothing yourself (it
-  needs `clan vars generate`): `decision decided --chose "rotate <var>"
-  --follow-up ...`, and the narrowest containment tonight.
+  needs `clan vars generate`): `sudo -n -u infra sec-job-decision --by <job> decided
+  --chose "rotate <var>" --follow-up ...`, and the narrowest containment
+  tonight.
 - Fixable without a behaviour change (a missing `NoNewPrivileges` on a
-  unit that does not need privileges, a file mode): the normal path. A
+  unit that does not need privileges, a file mode): prepare a patch for an
+  interactive session unless it fits the package-fix/takedown allowlist. A
   stray firewall port or any other firewall, user, DNS or boot line is
   not pushed by a job, even as a narrowing (sec-job-guard refuses
-  those lines both ways): `decision decided --follow-up` for a session. Batch them into
+  those lines both ways): `sudo -n -u infra sec-job-decision --by <job> decided --follow-up` for a session. Batch them into
   one or two implementer passes.
 - Clears the bar (closing a port someone uses, removing a user or a
   key, restricting someone's access, anything Dave would notice): a
-  question (`decision --by security-audit add --needs-dave
+  question (`sudo -n -u infra sec-job-decision --by security-audit add --needs-dave
   "<criterion>: <why>" ...`), never a change before his answer.
 - Every other judgement call (which fix, defer to a session, accept a
-  documented exception): decide it, `decision --by security-audit
+  documented exception): decide it, `sudo -n -u infra sec-job-decision --by security-audit
   decided ...`.
 
 Before acting on anything at all, re-check rule 2 of the policy: a
@@ -137,8 +141,9 @@ path or DNS/DHCP is never yours.
 
 ## 4. Tripwire
 
-    sec-collect snapshot $TMPDIR/security-audit/after
-    diff $TMPDIR/security-audit/before/snapshot $TMPDIR/security-audit/after/snapshot
+    sudo -n -u infra sec-collect snapshot security-audit-after
+    after=/var/lib/infra-space/security-jobs/collect/security-audit-after
+    diff "$before/snapshot" "$after/snapshot"
 
 Differences are expected only where you deployed (`system`, maybe `nft`)
 and on main (your landed commits). Anything else changed during the run
@@ -149,11 +154,11 @@ and on main (your landed commits). Anything else changed during the run
 Write this week's findings (open ones, with key, severity, first seen)
 to `~/security-audit/state/findings.json` (write_file, valid JSON).
 Your last message is the report (~/security-audit/<UTC>.log and the
-dashboard). Policy rule 5:
+infra-jobs hermes sessions). Policy rule 5:
 
 - **Done:** per fix: what, where, commit, verified how.
 - **Taken down / mitigated:** service, machine, why, undo (each also a
-  `decision notice`).
+  `sudo -n -u infra sec-job-decision --by <job> notice`).
 - **Waits for you:** title + criterion + decision id, new or changed
   questions only (an open one from last week: one line "still open:
   <ids>").

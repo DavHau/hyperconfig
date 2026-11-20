@@ -2,7 +2,8 @@
   Security takedowns: services the unattended security jobs (or anyone)
   stopped because of a critical, exploitable vulnerability that could not
   be fixed in time (modules/nixos/infra-space/security-jobs/policy.md,
-  rule 1). The list is data, ./takedowns.nix, keyed by machine and unit;
+  rule 1). The list is data, ./takedowns.json (JSON, so no computed
+  entries: the guard counts what it adds), keyed by machine and unit;
   this module (imported by ../common.nix, so on every machine) disables
   the listed units of its own machine: no start at boot or by
   dependency (`enable = false` drops the unit file), so the switch stops
@@ -17,7 +18,7 @@
   file and of any line naming `takedown.eligible`.
 
   Also refused at evaluation:
-    - a takedowns.nix or eligible.nix entry for a machine that does not
+    - a takedowns.json or eligible.nix entry for a machine that does not
       exist (machines/<m>/), instead of being ignored;
     - an eligible unit matching the never-lock-out patterns below
       (policy rule 2: sshd, the mesh, the login path, infra-space, the
@@ -34,7 +35,7 @@
 }:
 let
   host = config.networking.hostName;
-  all = import ./takedowns.nix;
+  all = builtins.fromJSON (builtins.readFile ./takedowns.json);
   eligibleData = import ./eligible.nix;
   mine = all.${host} or { };
   eligible = config.security.takedown.eligible;
@@ -106,7 +107,7 @@ in
     default = [ ];
     description = ''
       Units of this machine a security takedown
-      (modules/nixos/security-takedown/takedowns.nix) may stop: its
+      (modules/nixos/security-takedown/takedowns.json) may stop: its
       internet-exposed app services, nothing else. Set in
       modules/nixos/security-takedown/eligible.nix or by the service's
       module; never by the unattended jobs (sec-job-guard refuses it).
@@ -119,7 +120,7 @@ in
     assertions = [
       {
         assertion = unknown all == [ ];
-        message = "security-takedown: takedowns.nix names unknown machine(s): ${toString (unknown all)} (machines/: ${toString machines})";
+        message = "security-takedown: takedowns.json names unknown machine(s): ${toString (unknown all)} (machines/: ${toString machines})";
       }
       {
         assertion = unknown eligibleData == [ ];

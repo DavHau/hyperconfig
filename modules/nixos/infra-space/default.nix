@@ -91,7 +91,7 @@
   container's root fails until root here clears the flag first (the
   guest's root cannot, in its user namespace: it asks this host's helper,
   ../spaces/host.nix immutableHelper):
-    chattr -i /var/lib/nixos-containers/infra-space/var/lib/hermes/infra/home/{.env,.op.env,config.yaml,active_profile,gateway.json,plugins,hooks,profiles,lib,patches}
+    chattr -i /var/lib/nixos-containers/infra-space/var/lib/hermes/{infra,infra-jobs}/home/{.env,.op.env,config.yaml,active_profile,gateway.json,plugins,hooks,profiles,lib,patches}
   (/var/lib/containers/infra-space/... where the containers' directory has
   no `nixos-` prefix, amy: by stateVersion, ../spaces/host.nix).
   /var/lib/infra-space (the guest's /home/infra) is separate and stays.
@@ -386,9 +386,16 @@ in
         user = "infra";
       }) cfg.members;
       siblingIdentity = "ssh";
-      # hermes' lockedConfig pins (./hermes.nix): the entries of its
-      # locked home only
-      immutableHelper = if cfg.hermes then inputs.hyperhermes.lib.lockedHermesHome "infra" else null;
+      # hermes' lockedConfig pins (./hermes.nix): the entries of its two
+      # agents' locked homes only (infra, and the security jobs' infra-jobs)
+      immutableHelper =
+        if cfg.hermes then
+          map inputs.hyperhermes.lib.lockedHermesHome [
+            "infra"
+            "infra-jobs"
+          ]
+        else
+          null;
       guest = ./guest.nix;
       inherit (cfg) guestModules;
       guestSpace = {

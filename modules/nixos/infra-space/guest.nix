@@ -162,7 +162,12 @@ let
   # wrapper adds `--build-host localhost` unless the caller names one.
   clanWrapper = pkgs.writeShellApplication {
     name = "clan";
+    runtimeInputs = [ pkgs.coreutils ];
     text = ''
+      if [ "$(id -un)" = infra-jobs ]; then
+        echo "clan: infra-jobs has no clan or secrets-store access" >&2
+        exit 1
+      fi
       ${lib.optionalString cfg.buildOnHost ''
         # clan's top-level parser takes no options: the subcommand is
         # always $1 $2 (with their aliases m, u).

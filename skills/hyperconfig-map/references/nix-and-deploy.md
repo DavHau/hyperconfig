@@ -41,10 +41,13 @@ Timer + skill `nixpkgs-bump/SKILL.md`; pre-push guard
 
 
 ## Security jobs: `modules/nixos/infra-space/security-jobs.nix`
-Three agent jobs on the bump's runner (`agent-job.nix`): `cve-watch`
+Three agent jobs on the bump's runner (`agent-job.nix`), as the
+unprivileged guest account `infra-jobs` (uid 1223, own locked hermes
+agent, no push/fleet/age keys): `cve-watch`
 (daily 02:30 +07), `hygiene-report` (Sat 03:30 +07),
 `security-audit` (Sun 03:30 +07); each waits for the
-bump (After= + lock) and they share `~/.sec-jobs.lock`. Runs (bump
+bump and fleet-bump (After=, the bump's lock) and they share
+`/run/agent-jobs/security.lock`. Runs (bump
 too) get `-t terminal,file,todo,delegation,no_mcp` (allowlist: no
 skill/memory tools, no MCP; terminal can still write files);
 failures: OnFailure= notice, the brief (`infraSpace.agentJobs`),
@@ -54,8 +57,13 @@ followed and resumed (`agent-job-follow.sh`). Skills
 Helpers: `sec-job-guard` (`security-jobs/guard.sh`, check
 `sec-job-guard`; both-side lock-out lines, movable inputs list, one
 takedown a night), `sec-job-deploy` (pushed rev, one build, rollback
-watchdog `/run/sec-deploy-ok`), `sec-collect`, `sec-cve-feeds`
+watchdog `/run/sec-deploy-ok`), `sec-collect`, `sec-job-push`
+(the four privileged ones only via `sudo -n -u infra`), `sec-cve-feeds`
 (NVD + GHSA, `watchlist.json`), `sec-job-nix`; hygiene = `nix run
-.#hygiene -- --report`; decisions via `decision` (`decided` / `add
---needs-dave` / `notice`, see `infra-space/decisions.nix`). Takedowns: `modules/nixos/security-takedown/` (in
-common.nix; only `security.takedown.eligible` units, from `eligible.nix`).
+.#hygiene -- --report`; decisions via the proxy `sec-job-decision --by
+<job>` (`decided` / `add --needs-dave` / `notice`, see
+`infra-space/decisions.nix`). Takedowns: `modules/nixos/security-takedown/`
+(in common.nix; data in `takedowns.json`, only
+`security.takedown.eligible` units, from `eligible.nix`). Package fixes:
+`modules/nixos/security-fixes/overlays.nix` (+ `.patch` files), applied
+fleet-wide by the fixed wrapper `security-fixes.nix`.

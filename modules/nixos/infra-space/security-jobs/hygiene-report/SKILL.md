@@ -58,7 +58,11 @@ week's counts there at the end.
 ## 3. Fix what is mechanical
 
 Mechanical = no judgement about behaviour, drvPath identical on every
-machine but som (reason-only):
+machine but som (reason-only). The security-job path allowlist still
+applies: nearly all of these cleanups are outside it. Prepare those as
+`$TMPDIR/hygiene-report/session-changes.patch`, record an interactive-session
+follow-up, and do not land them. Only a change that genuinely belongs in the
+dedicated package-fixes file or takedowns data may use the landing path:
 
 - delete an unimported module, after `rg` and an eval check prove no
   machine reaches it (grep the generator names it declares in
@@ -76,14 +80,12 @@ machine but som (reason-only):
 - regenerate the repo map when modules moved or headers changed
   (`sec-job-nix run .#repo-map`), in the same commit.
 
-One implementer subagent for the batch (normal path, rule 1 of the
-common section), with the before/after drvPath comparison of every
-machine in its report; then the security review (it also checks that
-nothing deleted was live), guard, land. Deploy: hygiene changes are
-behaviour-neutral, so deploy only if a machine's drvPath (besides som's
-source reference) changed and the reviewer accepted the reason; usually
-nothing to deploy. Cap: about 40 files per week, so the change stays
-reviewable; the rest is next week's.
+For an allowlisted batch, use one implementer subagent and the normal
+review/push path, with before/after drvPaths. For every other batch, the
+implementer produces only the session patch; there is no guard exception
+for hygiene. Deploy only if an allowlisted change alters a drvPath and the
+reviewer accepted why. Cap: about 40 files per week, landed or patched, so
+the result stays reviewable; the rest is next week's.
 
 Not mechanical, never in this job's commit: renaming options or
 generators (vars move with them), merging duplicated mechanisms,
@@ -97,23 +99,23 @@ A structural cleanup is a refactor: it is yours to decide (policy rule
 behaviour). For each new or grown one, decide what should happen and
 record it for an interactive session to dispatch:
 
-    decision --by hygiene-report decided --source hygiene-report \
+    sudo -n -u infra sec-job-decision --by hygiene-report decided --source hygiene-report \
       --title "<plain words: merge X and Y into one module>" \
       --chose "<what, in one line>" --why "<one line>" \
       --follow-up "<the change a session should dispatch>" --link <report>
 
 Only when it really clears the bar (it would change something Dave
 notices daily, e.g. a desktop app or a login path, or it moves who gets
-in, e.g. ssh keys into the registry) is it a question: `decision --by
+in, e.g. ssh keys into the registry) is it a question: `sudo -n -u infra sec-job-decision --by
 hygiene-report add --needs-dave "<criterion>: <why>" ...` with options,
 a recommendation and a `--still-relevant-if` a later run can check.
-The same title again only refiles; look at `decision list --status all`
+The same title again only refiles; look at `sudo -n -u infra sec-job-decision --by <job> list --status all`
 first and repeat one only when it got worse.
 
 ## 5. Report
 
 Your last message is the report (~/hygiene-report/<UTC>.log and the
-dashboard). Short:
+infra-jobs hermes sessions). Short:
 
 - **Done:** what the commit cleaned (counts per category), commit id,
   "verified: drvPaths identical on <machines>, som reason-only".

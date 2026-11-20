@@ -5,9 +5,9 @@
 # machines with `clan machines update <m> --build-host localhost
 # --target-host root@<m>.d`, the fleet's deploy path.
 #
-#   sec-job-deploy start LOGDIR REV MACHINE...    detached; prints the unit
-#   sec-job-deploy status LOGDIR                  the status file
-#   sec-job-deploy confirm LOGDIR [MACHINE...]    the checks (below); no
+#   sec-job-deploy start RUN REV MACHINE...    detached; prints the unit
+#   sec-job-deploy status RUN                  the status file
+#   sec-job-deploy confirm RUN [MACHINE...]    the checks (below); no
 #                                                 MACHINE: every machine
 #                                                 of the run that started
 #                                                 a switch and has no `ok`
@@ -15,7 +15,7 @@
 #
 # Detached: a transient user unit (systemd-run --user), so a dying
 # client (a som switch restarts infra-space's gateway) leaves the deploy
-# running; LOGDIR/status gets `rev <sha>`, `build exit=<rc>`, `<m>
+# running; RUN/status gets `rev <sha>`, `build exit=<rc>`, `<m>
 # built=<toplevel>`, `<m> offline|running|exit=<rc> current=<system>`,
 # `<m> ok|rolled-back|check-failed`, `som held`, and a final `done`.
 #
@@ -24,7 +24,7 @@
 # switch in parallel; som (whose switch reloads this container and kills
 # this unit) switches LAST and only when every other machine of the run
 # shows `ok` (else `som held`, som untouched). After som's switch the
-# resumed job runs `sec-job-deploy confirm LOGDIR`.
+# resumed job runs `sec-job-deploy confirm RUN`.
 #
 # Rollback watchdog, per machine: the closure is copied to the target
 # first (`nix copy`), then a transient timer is armed there
@@ -50,6 +50,7 @@ machines_ok=" @machines@ "
 repo=@repo@
 clan=/run/current-system/sw/bin/clan
 jobnix=@jobNix@
+run_root=@runRoot@
 oidc=https://id.davhau.com/.well-known/openid-configuration
 ssh_opts=(-o BatchMode=yes -o ConnectTimeout=10)
 
@@ -58,12 +59,18 @@ die() {
   exit 2
 }
 cmd=${1:-}
-dir=${2:-}
-[ -n "$cmd" ] && [ -n "$dir" ] || die "usage: sec-job-deploy start LOGDIR REV MACHINE... | status LOGDIR | confirm LOGDIR [MACHINE...]"
-case "$dir" in
-  /*) ;;
-  *) die "LOGDIR must be absolute" ;;
-esac
+name=${2:-}
+[ -n "$cmd" ] && [ -n "$name" ] || die "usage: sec-job-deploy start RUN REV MACHINE... | status RUN | confirm RUN [MACHINE...]"
+if [ "$cmd" = run ]; then
+  [ "${SEC_JOB_DEPLOY_INTERNAL:-}" = 1 ] || die "run is internal to sec-job-deploy start"
+  dir=$name
+  case "$dir" in "$run_root"/*) ;; *) die "internal log directory outside $run_root" ;; esac
+else
+  case "$name" in
+    *[!A-Za-z0-9._-]* | "" | . | ..) die "RUN must be a plain [A-Za-z0-9._-] name" ;;
+  esac
+  dir=$run_root/$name
+fi
 shift 2
 
 check_machine() {
@@ -212,7 +219,7 @@ case "$cmd" in
     exit "$rc"
     ;;
   start)
-    [ $# -ge 2 ] || die "usage: sec-job-deploy start LOGDIR REV MACHINE..."
+    [ $# -ge 2 ] || die "usage: sec-job-deploy start RUN REV MACHINE..."
     rev=$1
     shift
     case "$rev" in
@@ -220,11 +227,13 @@ case "$cmd" in
     esac
     [ ${#rev} = 40 ] || die "REV must be a full 40-character commit id"
     for m in "$@"; do check_machine "$m"; done
-    umask 077
+    umask 027
+    [ ! -L "$dir" ] || die "$dir is a symlink"
     mkdir -p -- "$dir" || die "mkdir $dir"
+    chmod 2750 "$dir" || die "chmod $dir"
     unit="sec-job-deploy-$(date -u +%Y%m%dT%H%M%S)"
     systemd-run --user --collect --unit="$unit" \
-      --setenv=PATH="$PATH" --setenv=HOME=/home/infra \
+      --setenv=PATH="$PATH" --setenv=HOME=/home/infra --setenv=SEC_JOB_DEPLOY_INTERNAL=1 \
       "$0" run "$dir" "$rev" "$@" >&2 || die "systemd-run failed"
     echo "$unit"
     exit
@@ -334,7 +343,7 @@ if [ -n "$self" ]; then
     st "som held $(date -u +%T): not every other machine is ok (${notok[*]}); som not deployed"
   else
     # its switch reloads this container: this unit may die here, and
-    # the resumed job runs `sec-job-deploy confirm LOGDIR`
+    # the resumed job runs `sec-job-deploy confirm RUN`
     one som
   fi
 fi

@@ -125,7 +125,7 @@ the named owner and leave the copies to their unification.
   `infra-space/security-jobs{.nix,/}` (Dave's policy + asking bar
   `policy.md`, shared rules `common.md`, guard + check `sec-job-guard`,
   decisions through the registry's `decision` CLI); takedowns as data
-  in `modules/nixos/security-takedown/takedowns.nix`.
+  in `modules/nixos/security-takedown/takedowns.json`.
 - skills shipped to agents: infra-space `infra-space/hermes.nix`
   (`nixSkills`), som agents `machines/som/hermes-agents.nix` (`skillDirs`),
   afk `hyper.afk.extraSkills`, personal `modules/nixos/skills/`.

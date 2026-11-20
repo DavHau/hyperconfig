@@ -94,7 +94,9 @@
 # principals; inside its guest Agave's t-infra/t-infra-tun are 59000/59001,
 # guest ids only, ./spaces/agave-host.nix). 1222 residential-proxy (uid and
 # gid; som's Mullvad-tunneled gateway to Evomi, residential-proxy/; not a
-# vault principal). gid 1100 stays unallocated.
+# vault principal). 1223 infra-jobs (uid and gid; the infra-space guest's
+# unprivileged security-job account, with no host account or vault access;
+# infra-space/security-jobs.nix). gid 1100 stays unallocated.
 # These container uids are their on-disk owners only: inside, each space
 # container runs in its own user namespace (spaces/host.nix,
 # privateUsers), container uid n being host uid 0x50000000 +

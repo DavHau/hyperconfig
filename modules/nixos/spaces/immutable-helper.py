@@ -6,9 +6,10 @@
 #
 # Done only if the peer is the guest's root (SO_PEERCRED: SPACE_UID_BASE)
 # and the descriptor's file is a regular file or directory of its root,
-# on the file system of the guest's root tree (SPACE_ROOT), below the one
-# directory of the guest the flags are for (SPACE_IMMUTABLE_DIR, hermes'
-# locked home): nothing of this host the guest could have been handed,
+# on the file system of the guest's root tree (SPACE_ROOT), directly in
+# one of the guest's directories the flags are for (SPACE_IMMUTABLE_DIR,
+# colon-separated: hermes' locked homes): nothing of this host the guest
+# could have been handed,
 # and nothing elsewhere in its tree. Where the file is: that directory
 # opened here, from SPACE_ROOT one component at a time without following
 # a link (the guest's links and mounts steer nothing), and the
@@ -31,6 +32,7 @@ FS_IMMUTABLE_FL = 0x10
 base = int(os.environ["SPACE_UID_BASE"])
 root_dev = os.stat(os.environ["SPACE_ROOT"]).st_dev
 name = os.environ["SPACE_NAME"]
+dirs = [d for d in os.environ["SPACE_IMMUTABLE_DIR"].split(":") if d]
 conn = socket.socket(fileno=0)
 
 
@@ -42,11 +44,11 @@ def reply(msg):
     print(f"space-immutable {name}: {msg}", file=sys.stderr)
 
 
-def in_dir(st):
-    """Whether (dev, ino) of `st` is an entry directly in SPACE_IMMUTABLE_DIR."""
+def in_one_dir(st, path):
+    """Whether (dev, ino) of `st` is an entry directly in the guest's `path`."""
     fd = os.open(os.environ["SPACE_ROOT"], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
     try:
-        for part in os.environ["SPACE_IMMUTABLE_DIR"].strip("/").split("/"):
+        for part in path.strip("/").split("/"):
             nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
             os.close(fd)
             fd = nxt
@@ -59,6 +61,20 @@ def in_dir(st):
         return False
     finally:
         os.close(fd)
+
+
+def in_dir(st):
+    """Whether `st` is an entry directly in one of SPACE_IMMUTABLE_DIR's
+    (colon-separated) directories. A missing one is skipped; any other error
+    (a swapped path component) raises for the caller."""
+    for d in dirs:
+        try:
+            if in_one_dir(st, d):
+                return True
+        except FileNotFoundError:
+            # that account's home not made yet: nothing of it to flag
+            continue
+    return False
 
 
 def main():
@@ -82,7 +98,7 @@ def main():
         if stat.S_ISREG(st.st_mode) and st.st_nlink != 1:
             return reply("error: a file with other hard links")
         if not in_dir(st):
-            return reply(f"error: not an entry of {os.environ['SPACE_IMMUTABLE_DIR']}")
+            return reply(f"error: not an entry of {':'.join(dirs)}")
         flags = struct.unpack("i", fcntl.ioctl(fd, FS_IOC_GETFLAGS, struct.pack("i", 0)))[0]
         new = flags | FS_IMMUTABLE_FL if msg == b"1" else flags & ~FS_IMMUTABLE_FL
         fcntl.ioctl(fd, FS_IOC_SETFLAGS, struct.pack("i", new))

@@ -194,6 +194,7 @@ let
     # Hours of polling a mass rebuild outlast hermes' default of 500 tool
     # calls per turn.
     maxTurns = 3000;
+    sharedLock = "/run/agent-jobs/nixpkgs-bump.lock";
     # the follower's continue message (./agent-job-follow.sh)
     resumeNote = " Never deploy.";
   };
@@ -201,8 +202,8 @@ in
 lib.mkMerge [
   {
     # On the system PATH, which the gateway's commands (and subagents) end in.
-    # The security jobs (./security-jobs.nix) wait for the bump's
-    # ~/nixpkgs-bump/.lock before they start, so their builds never overlap.
+    # The security jobs (./security-jobs.nix) wait for this run's shared
+    # /run/agent-jobs/nixpkgs-bump.lock before they start, so builds never overlap.
     environment.systemPackages = [
       guard
       workspace

@@ -14,6 +14,7 @@
     ./ghostty-terminfo.nix
     ./no-ca-derivations.nix
     ./security-takedown
+    ./security-fixes.nix
   ];
   users.mutableUsers = false;
 

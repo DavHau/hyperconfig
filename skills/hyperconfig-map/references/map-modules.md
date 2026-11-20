@@ -31,7 +31,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/clan-vars-restart-units-test.nix — restartUnits of clan vars with the age backend (./clan-vars-restart-units.nix) in real switches. <- flake.nix
 - modules/nixos/clan-vars-restart-units.nix — `restartUnits` of clan vars, for clan's age backend. <- modules/flake-parts/nixosConfigurations.nix, m/clan-vars-restart-units-test.nix
 - modules/nixos/common-tools.nix — Small CLI toolset (bat, git, htop, tmux, vim, ...) on every server and desktop, plus ./prune-gcroots.nix. <- bam, cm-pi, edi, joy, nas, sgp, m/shell-profile.nix
-- modules/nixos/common.nix — Fleet-wide defaults for every machine but the installer (imported by each machine's configuration.nix): <- bam, cm-pi, edi, joy, nas, sgp, modules/flake-parts/nixosConfigurations.nix, m/dave.nix, +3
+- modules/nixos/common.nix — Fleet-wide defaults for every machine but the installer (imported by each machine's configuration.nix): <- bam, cm-pi, edi, joy, nas, sgp, modules/flake-parts/nixosConfigurations.nix, m/dave.nix, +4
 - modules/nixos/cpu-powersave-cap.nix — Apply an extra CPU frequency ceiling on top of power-profiles-daemon's `power-saver` profile, going below what PPD does… <- m/laptop.nix
 - modules/nixos/dave.nix — Dave's desktops and workstations (amy, som, vit): <- amy, som, vit, m/dave-desktop/default.nix
 - modules/nixos/deluge.nix — - <- m/dave.nix
@@ -80,7 +80,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/llama-swap.nix — Extra llama-swap config for hyperconfig machines. <- amy
 - modules/nixos/locale.nix — Time zone, locale and console keymap for Dave's desktops. <- m/dave.nix
 - modules/nixos/low-battery-power-off.nix — - <- m/laptop.nix
-- modules/nixos/monitoring-alerts.nix — Fleet alerts: Grafana unified alerting on the monitoring server (edi), evaluated against the Mimir datasource the clan-… <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/nixpkgs-bump.nix, m/recurring-tasks/default.nix, m/telegram-send/default.nix
+- modules/nixos/monitoring-alerts.nix — Fleet alerts: Grafana unified alerting on the monitoring server (edi), evaluated against the Mimir datasource the clan-… <- modules/flake-parts/nixosConfigurations.nix, m/recurring-tasks/default.nix, m/telegram-send/default.nix
 - modules/nixos/monitoring-exec-usage.nix — "Unused packages" dashboard on the monitoring server's Grafana (stats.davhau.com/d/exec-usage), fed by ./exec-usage on… <- modules/flake-parts/nixosConfigurations.nix
 - modules/nixos/monitoring-grafana-sso.nix — Grafana of the clan-core monitoring server, published at stats.davhau.com behind the clan's pocket-id (modules/clan/oid… <- edi
 - modules/nixos/monitoring-server.nix — Local overrides for the clan-core monitoring server (Mimir + Loki). <- modules/flake-parts/nixosConfigurations.nix
@@ -140,6 +140,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/sbox-mullvad.nix — - <- m/dave.nix
 - modules/nixos/sbox-omp-worktrees.nix — omp task-isolation worktrees inside sbox live on the projects' filesystem. <- m/sbox.nix
 - modules/nixos/sbox.nix — sbox: the bubblewrap sandbox for agent harnesses (afk/omp, claude) and direnv on Dave's machines. Persisted dirs, key-f… <- bam, cm-pi, edi, joy, nas, m/dave.nix
+- modules/nixos/security-fixes.nix — Fleet-wide package security overrides made by the unattended security jobs. <- m/common.nix
 - modules/nixos/shell-aliases.nix — - <- m/shell-profile.nix
 - modules/nixos/shell-profile.nix — Dave's default shell profile, for every place he gets a shell: <- m/dave.nix, m/spaces/guest-base.nix
 - modules/nixos/ssh-tpm-agent-confirm-test.nix — End-to-end regression test for the ssh-tpm-agent confirm-grant cache. <- flake.nix
@@ -205,21 +206,24 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/hermes-agents-backup/default.nix — Nightly off-host backup of som's hermes agents to nas, through the clan `dave-backup` borgbackup instance (som is a cli… <- machines/som/hermes-agents.nix
 - modules/nixos/hermes-agents-backup/state-dump.py — - <- m/hermes-agents-backup/default.nix
 - modules/nixos/infra-space/age-recipients.nix — The clan vars' age recipients (vars.settings.recipients.default in ../../flake-parts/nixosConfigurations.nix): <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/default.nix, m/infra-space/guest.nix, m/spaces/default.nix
+- modules/nixos/infra-space/agent-job-follow.sh — <job>-follow <session-id> <log>: <- m/infra-space/agent-job.nix, m/infra-space/nixpkgs-bump.nix
+- modules/nixos/infra-space/agent-job.nix — One unattended agent job of the infra-space agent: <- m/infra-space/decisions.nix, m/infra-space/hermes.nix, m/infra-space/nixpkgs-bump.nix, m/infra-space/security-jobs.nix
 - modules/nixos/infra-space/agent-tools-guest.nix — The infra agent's side of ./agent-tools.nix (the host serves; <- m/infra-space/agent-tools.nix, m/infra-space/hermes.nix
 - modules/nixos/infra-space/agent-tools-test.nix — ./agent-tools.nix and ./agent-tools-guest.nix on one host (som): <- flake.nix
 - modules/nixos/infra-space/agent-tools-toolsets.py — - <- m/infra-space/agent-tools-test.nix
 - modules/nixos/infra-space/agent-tools.nix — The infra agent's tools for web signups (som only, ./agent-tools-guest.nix in the guest): <- machines/som/hermes-agents.nix, m/infra-space/agent-tools-guest.nix, m/infra-space/agent-tools-test.nix, m/infra-space/default.nix, m/infra-space/hermes.nix
 - modules/nixos/infra-space/dashboard-account.nix — Who signs in to the infra-space dashboard (./dashboard.nix, on som), as plain data for the two evaluations that need it: <- som, modules/flake-parts/nixosConfigurations.nix, m/infra-space/dashboard.nix
 - modules/nixos/infra-space/dashboard.nix — The infra-space agent's hermes dashboard, published by this host's nginx (som only: <- m/infra-space/default.nix, m/infra-space/hermes.nix, m/infra-space/secret-prompt/default.nix
-- modules/nixos/infra-space/decisions.nix — The fleet's decision registry: <- m/infra-space/hermes.nix, m/telegram-send/default.nix
+- modules/nixos/infra-space/decisions.nix — The fleet's decision registry: <- m/infra-space/agent-job.nix, m/infra-space/hermes.nix, m/infra-space/security-jobs.nix, m/telegram-send/default.nix
 - modules/nixos/infra-space/default.nix — infra-space: a NixOS container on every member machine (./members.nix), identical on each, from which the fleet is mana… <- amy, som, m/infra-space/agent-tools-test.nix, m/infra-space/dashboard.nix, m/infra-space/fleet-access.nix, m/infra-space/gcroots.nix, m/infra-space/guest.nix, m/infra-space/hermes.nix, +10
 - modules/nixos/infra-space/fleet-access.nix — infra-space's root access on every clan machine (wired via the `sshd` instance's server extraModules in modules/flake-p… <- modules/flake-parts/nixosConfigurations.nix, m/agave-tunnel.nix, m/infra-space/default.nix, m/infra-space/test.nix, m/spaces/agave-host.nix, m/telegram-send/default.nix
 - modules/nixos/infra-space/gcroots.nix — GC roots on this host for systems built from the infra-space guest (a host module, imported by ./default.nix; <- m/infra-space/default.nix, m/infra-space/fleet-bump/default.nix
-- modules/nixos/infra-space/guest.nix — The system inside the infra-space container (./default.nix sets the options below from the host side). <- m/infra-space/default.nix, m/infra-space/fleet-bump/default.nix, m/infra-space/gcroots.nix, m/infra-space/hermes.nix, m/infra-space/secret-prompt/default.nix, m/spaces/client.nix, m/spaces/guest-base.nix
-- modules/nixos/infra-space/hermes.nix — The infra-space's hermes agent, inside the container (./default.nix appends this to the guest's modules on every member… <- m/infra-space/agent-tools-guest.nix, m/infra-space/dashboard.nix, m/infra-space/decisions.nix, m/infra-space/default.nix, m/infra-space/fleet-bump/default.nix, m/infra-space/nixpkgs-bump.nix, m/infra-space/voice-api.nix
+- modules/nixos/infra-space/guest.nix — The system inside the infra-space container (./default.nix sets the options below from the host side). <- m/infra-space/default.nix, m/infra-space/fleet-bump/default.nix, m/infra-space/gcroots.nix, m/infra-space/hermes.nix, m/infra-space/secret-prompt/default.nix, m/infra-space/security-jobs.nix, m/spaces/client.nix, m/spaces/guest-base.nix
+- modules/nixos/infra-space/hermes.nix — The infra-space's hermes agent, inside the container (./default.nix appends this to the guest's modules on every member… <- m/infra-space/agent-tools-guest.nix, m/infra-space/dashboard.nix, m/infra-space/decisions.nix, m/infra-space/default.nix, m/infra-space/fleet-bump/default.nix, m/infra-space/nixpkgs-bump.nix, m/infra-space/security-jobs.nix, m/infra-space/voice-api.nix
 - modules/nixos/infra-space/members.nix — The machines that run an infra-space container (./default.nix), and the port on the machine's yggdrasil address that re… <- m/infra-space/default.nix, m/infra-space/public-members.nix
-- modules/nixos/infra-space/nixpkgs-bump.nix — The nightly nixpkgs-unstable bump, run by the infra-space agent itself (./nixpkgs-bump/SKILL.md says what it does: <- m/infra-space/decisions.nix, m/infra-space/fleet-bump/default.nix, m/infra-space/hermes.nix
+- modules/nixos/infra-space/nixpkgs-bump.nix — The nightly nixpkgs-unstable bump, run by the infra-space agent itself (./nixpkgs-bump/SKILL.md says what it does: <- m/infra-space/agent-job.nix, m/infra-space/decisions.nix, m/infra-space/fleet-bump/default.nix, m/infra-space/hermes.nix
 - modules/nixos/infra-space/public-members.nix — Every member of ./members.nix with its mesh address and its container's pinned host key, from the members' public clan… <- m/infra-space/default.nix, m/spaces/public.nix
+- modules/nixos/infra-space/security-jobs.nix — The infra-space security jobs run as the unprivileged guest `infra-jobs`, never as the fleet-admin `infra`. <- m/infra-space/agent-job.nix, m/infra-space/hermes.nix
 - modules/nixos/infra-space/test-clan-stub.nix — What clan provides to ./default.nix in the VM tests (./test.nix, ./agent-tools-test.nix): <- m/infra-space/agent-tools-test.nix, m/infra-space/test.nix
 - modules/nixos/infra-space/test-oidc.py — - <- m/infra-space/test.nix
 - modules/nixos/infra-space/test-toolsets.py — - <- m/infra-space/test.nix
@@ -234,7 +238,6 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/infra-space/fleet-bump/test.nix — ./fleet-bump.sh in a VM, offline: <- flake.nix
 - modules/nixos/infra-space/hermes-skill/SKILL.md — Manage Dave's NixOS fleet from infra-space - change hyperconfig, push it, deploy machines with clan, reach the other inf <- m/infra-space/agent-tools.nix, m/infra-space/guest.nix, m/infra-space/hermes.nix
 - modules/nixos/infra-space/nixpkgs-bump/SKILL.md — The nightly nixpkgs-unstable bump of hyperconfig - update nixpkgs, build every machine, fix, review, guard, merge to mai <- m/infra-space/hermes.nix, m/infra-space/nixpkgs-bump.nix
-- modules/nixos/infra-space/nixpkgs-bump/follow.sh — nixpkgs-bump-follow <session-id> <log>: <- m/infra-space/nixpkgs-bump.nix
 - modules/nixos/infra-space/nixpkgs-bump/guard-test.nix — ./guard.sh against a scratch repository, without network: <- flake.nix
 - modules/nixos/infra-space/nixpkgs-bump/guard.nix — nixpkgs-bump-guard (./guard.sh), for ../nixpkgs-bump.nix (the guest's PATH) and ./guard-test.nix (which passes stubs as… <- m/infra-space/nixpkgs-bump.nix, m/infra-space/nixpkgs-bump/guard-test.nix
 - modules/nixos/infra-space/nixpkgs-bump/guard.sh — nixpkgs-bump-guard: the nightly bump's last check before it pushes (../nixpkgs-bump/SKILL.md step 6), run in the bump w… <- m/infra-space/nixpkgs-bump/guard.nix
@@ -245,10 +248,22 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/infra-space/nixpkgs-bump/searxng.nix — nixpkgs-bump-searxng (./searxng.sh), for ../nixpkgs-bump.nix (the guest's PATH). <- m/infra-space/nixpkgs-bump.nix, m/infra-space/nixpkgs-bump/guard-test.nix
 - modules/nixos/infra-space/nixpkgs-bump/searxng.sh — nixpkgs-bump-searxng: the nightly bump's steps for web_search's SearXNG (the root flake input `searxng`, upstream maste… <- m/infra-space/nixpkgs-bump/searxng.nix
 - modules/nixos/infra-space/nixpkgs-bump/workspace-test.nix — ./workspace.sh against a scratch colocated repository with a local origin (no network): <- flake.nix
-- modules/nixos/infra-space/nixpkgs-bump/workspace.nix — nixpkgs-bump-workspace (./workspace.sh), for ../nixpkgs-bump.nix (the guest's PATH) and ./workspace-test.nix. <- m/infra-space/nixpkgs-bump.nix, m/infra-space/nixpkgs-bump/workspace-test.nix
+- modules/nixos/infra-space/nixpkgs-bump/workspace.nix — nixpkgs-bump-workspace (./workspace.sh), for ../nixpkgs-bump.nix (the guest's PATH) and ./workspace-test.nix. <- m/infra-space/nixpkgs-bump.nix, m/infra-space/nixpkgs-bump/workspace-test.nix, m/infra-space/security-jobs.nix
 - modules/nixos/infra-space/nixpkgs-bump/workspace.sh — nixpkgs-bump-workspace: creates and removes the nightly bump's jj workspace (../nixpkgs-bump/SKILL.md steps 1 and 6), s… <- m/infra-space/nixpkgs-bump.nix, m/infra-space/nixpkgs-bump/workspace.nix
 - modules/nixos/infra-space/secret-prompt/clan-secret-prompt.py — - <- m/infra-space/secret-prompt/default.nix
 - modules/nixos/infra-space/secret-prompt/default.nix — clan-secret-prompt (./clan-secret-prompt.py): <- m/infra-space/dashboard.nix, m/infra-space/guest.nix
+- modules/nixos/infra-space/security-jobs/collect.sh — sec-collect: the security jobs' read-only collectors, run as infra through sudo. RUN is validated and output goes under… <- m/infra-space/security-jobs.nix
+- modules/nixos/infra-space/security-jobs/cve_feeds.py — !/usr/bin/env python3 <- m/infra-space/security-jobs.nix
+- modules/nixos/infra-space/security-jobs/deploy.sh — sec-job-deploy: the security jobs' deploy (policy rule 1: fix -> review -> land -> DEPLOY -> verify). Deploys exactly t… <- m/infra-space/security-jobs.nix
+- modules/nixos/infra-space/security-jobs/guard-test.nix — Offline scratch-repo tests of the security-job allowlist, movable-input ancestry and the exact-commit privileged push. <- flake.nix
+- modules/nixos/infra-space/security-jobs/guard.sh — sec-job-guard: the security jobs' last check before a push (../security-jobs/*/SKILL.md), run at the root of the job's… <- m/infra-space/security-jobs.nix, m/infra-space/security-jobs/guard-test.nix
+- modules/nixos/infra-space/security-jobs/input-ancestry.sh — sec-job-input-ancestry NODE OLD-LOCK NEW-LOCK: <- m/infra-space/security-jobs.nix, m/infra-space/security-jobs/guard-test.nix
+- modules/nixos/infra-space/security-jobs/protected-check.sh — sec-job-protected-check: the evaluation half of sec-job-guard (./guard.sh runs it after its path and line checks). Eval… <- m/infra-space/security-jobs.nix
+- modules/nixos/infra-space/security-jobs/protected.nix — sec-job-guard's evaluation check (./guard.sh): <- m/infra-space/security-jobs.nix
+- modules/nixos/infra-space/security-jobs/push.sh — sec-job-push JOB COMMIT: privileged side of a security job's landing. Runs as infra through its exact sudo rule. COMMIT… <- m/infra-space/security-jobs.nix, m/infra-space/security-jobs/guard-test.nix
+- modules/nixos/infra-space/security-jobs/cve-watch/SKILL.md — The nightly CVE watch of Dave's fleet - new/updated CVEs and advisories of the last 48 h matched against what every mach
+- modules/nixos/infra-space/security-jobs/hygiene-report/SKILL.md — The weekly hygiene run of hyperconfig - survey (unimported modules, dangling refs, naming off-scheme, duplicated mechani
+- modules/nixos/infra-space/security-jobs/security-audit/SKILL.md — The weekly security audit of Dave's fleet (not CVEs) - exposure vs intent, auth on exposed services, secrets handling, c
 - modules/nixos/ipv4-forward-slots-test/default.nix — ../ipv4-forward.nix with a container slot behind it (hyperhermes' nixosModules.container-slots), set up as on som: <- flake.nix
 - modules/nixos/luks-unlock/agent.sh — Answer systemd-cryptsetup's passphrase request with the key from Tang. <- m/luks-unlock/default.nix
 - modules/nixos/luks-unlock/default.nix — Encrypted LUKS root, key held by clan, unlockable three ways: <- vit
@@ -292,10 +307,10 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/porkbun-records/stub.py — A stand-in for porkbun's JSON API v3, for the VM tests: <- m/porkbun-records/test.nix
 - modules/nixos/porkbun-records/sync.sh — porkbun-records-sync [--dry-run] <config.json> <- m/porkbun-records/default.nix
 - modules/nixos/porkbun-records/test.nix — ./default.nix against ./stub.py (porkbun's API on 127.0.0.1:8053): <- flake.nix
-- modules/nixos/recurring-tasks/default.nix — Freshness of the fleet's recurring tasks: <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/decisions.nix, m/recurring-tasks/test.nix, m/telegram-send/default.nix
+- modules/nixos/recurring-tasks/default.nix — Freshness of the fleet's recurring tasks: <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/decisions.nix, m/infra-space/nixpkgs-bump.nix, m/recurring-tasks/test.nix, m/telegram-send/default.nix
 - modules/nixos/recurring-tasks/promql.nix — The recurring-task SLO checks as PromQL, shared by the Grafana rules (../monitoring-alerts.nix) and the VM test (./test… <- m/monitoring-alerts.nix, m/recurring-tasks/default.nix, m/recurring-tasks/test.nix
 - modules/nixos/recurring-tasks/recurring_tasks.py — - <- m/recurring-tasks/default.nix
-- modules/nixos/recurring-tasks/registry.nix — The fleet's recurring tasks, as data: <- m/monitoring-alerts.nix, m/recurring-tasks/default.nix
+- modules/nixos/recurring-tasks/registry.nix — The fleet's recurring tasks, as data: <- m/infra-space/agent-job.nix, m/monitoring-alerts.nix, m/recurring-tasks/default.nix
 - modules/nixos/recurring-tasks/test.nix — ./default.nix on one machine with an nspawn guest: <- flake.nix, m/recurring-tasks/default.nix
 - modules/nixos/recurring-tasks/test_recurring_tasks.py — - <- m/recurring-tasks/default.nix
 - modules/nixos/residential-proxy/default.nix — Residential proxy for som's hermes agents: <- machines/som/hermes-agents.nix
@@ -318,6 +333,9 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/searxng-canary/candidate.nix — searxng-candidate: the nightly bump's scratch SearXNG, run on this host in a sandbox instead of in the infra-space gues… <- m/searxng-canary/default.nix
 - modules/nixos/searxng-canary/default.nix — searxng-canary: is web_search's SearXNG (../../../hyperhermes/modules/ browser/searxng.nix, 127.0.0.1:8890) still answe… <- machines/som/hermes-agents.nix
 - modules/nixos/searxng-canary/package.nix — The canary script (./canary.py) as a command, for ./default.nix (som's 10-min timer) and ./candidate.nix (the nightly b… <- m/searxng-canary/candidate.nix, m/searxng-canary/default.nix
+- modules/nixos/security-fixes/overlays.nix — Package overlays of the unattended security jobs (../security-fixes.nix applies them on every machine): <- m/security-fixes.nix
+- modules/nixos/security-takedown/default.nix — Security takedowns: services the unattended security jobs (or anyone) stopped because of a critical, exploitable vulner… <- m/common.nix
+- modules/nixos/security-takedown/eligible.nix — Units a security takedown (./takedowns.json) may stop, per machine: <- m/security-takedown/default.nix
 - modules/nixos/short-videos/default.nix — - <- m/dave.nix
 - modules/nixos/short-videos/short-videos.sh — !/usr/bin/env bash List video files in DIR (default: <- m/short-videos/default.nix
 - modules/nixos/skills/external-scripts/SKILL.md — >

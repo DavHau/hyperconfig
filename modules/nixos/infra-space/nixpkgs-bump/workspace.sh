@@ -60,14 +60,11 @@
 # work of its own yet; carried commits are copies of the archive) and
 # exits 1, so one odd night cannot block the next ones.
 #
-# Why `add` and then `jj new` in the workspace: `workspace add` run in
-# the repository snapshots and updates the repository's own working copy
-# (stray files there would be committed); with --ignore-working-copy jj
-# >= 0.46 registers the workspace and its git worktree but refuses to
-# check it out ("This command must be able to update the working copy",
-# exit 1). That exit is not trusted either way; `jj new main@origin`,
-# run in the new workspace (which has nothing to snapshot), checks the
-# tree out, and the facts above decide.
+# Why `add` from the new destination and then `jj new` there: `workspace
+# add` run in the repository snapshots and updates its own working copy
+# (stray files there would be committed), and current jj refuses add with
+# --ignore-working-copy. The empty destination has nothing to snapshot.
+# `jj new main@origin` checks the tree out; the facts above decide.
 #
 # alive NAME touches @logDir@/NAME.alive (NAME's directory must exist):
 # the run's liveness stamp, see create.
@@ -462,8 +459,11 @@ case "$cmd" in
     }
 
     base=$(jjr log --no-graph -r main@origin -T commit_id) || die "no main@origin"
-    # Expected to exit 1 on jj >= 0.46 (see above); the facts below decide.
-    jjr workspace add --colocate -r main@origin "$ws" >&2 || true
+    # Run from the new, empty destination: current jj refuses `workspace
+    # add --ignore-working-copy`, while a repository working directory can
+    # snapshot stray files from the main checkout.
+    (cd "$ws" && jj --config 'snapshot.auto-track="none()"' -R "$repo" \
+      workspace add --colocate -r main@origin "$ws") >&2 || die "jj workspace add $name failed"
     ws_names | grep -xF >/dev/null "$name" || die "jj does not list workspace $name"
     jj -R "$ws" new main@origin >&2 || die "jj new main@origin in $ws failed"
 

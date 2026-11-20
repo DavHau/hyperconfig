@@ -1,4 +1,4 @@
-# Units a security takedown (./takedowns.nix) may stop, per machine: the
+# Units a security takedown (./takedowns.json) may stop, per machine: the
 # internet-exposed app services and nothing else (./default.nix refuses
 # every other unit, and an unknown machine, at evaluation). A service's
 # own module may add to `security.takedown.eligible` too. Only a session

@@ -74,11 +74,11 @@
       assertion below), and on-disk owners were never changed (map
       refuses rather than chowns, above), so
       `stat -c %u /var/lib/{nixos-,}containers/<name>` is still 0.
-    - `immutableHelper` (null, or a directory of the guest: hermes'
-      locked home): /run/space-immutable/<name>/socket in the guest at
+    - `immutableHelper` (null, or a directory of the guest or a list of
+      them: hermes' locked homes): /run/space-immutable/<name>/socket in the guest at
       /run/space-immutable/socket (./immutable-helper.py): the guest's
-      root sends a descriptor of a file or directory directly in that
-      directory, one of its own root's, and gets the immutable flag set
+      root sends a descriptor of a file or directory directly in one of
+      those directories, one of its own root's, and gets the immutable flag set
       or cleared on it (hermes' lockedConfig pins, hyperhermes'
       locked-pins.py).
 
@@ -452,8 +452,8 @@ lib.mkMerge [
       SPACE_NAME = name;
       SPACE_UID_BASE = toString uidBase;
       SPACE_ROOT = containerRoot;
-      # the guest's path of the only directory whose entries it may flag
-      SPACE_IMMUTABLE_DIR = immutableHelper;
+      # the guest's paths of the only directories whose entries it may flag
+      SPACE_IMMUTABLE_DIR = lib.concatStringsSep ":" (lib.toList immutableHelper);
     };
     serviceConfig = {
       ExecStart = immutableHelperScript;

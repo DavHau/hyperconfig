@@ -190,6 +190,14 @@ let
         ]
       );
       systemd-network = sub o [ "systemd" "network" ];
+      systemd-defaultUnit = n c.systemd.defaultUnit;
+      systemd-packages = n c.systemd.packages;
+      systemd-tmpfiles-packages = n c.systemd.tmpfiles.packages;
+      udev = {
+        packages = sub o [ "services" "udev" "packages" ];
+        extraRules = sub o [ "services" "udev" "extraRules" ];
+      };
+      logind = sub o [ "services" "logind" ];
       openssh = sub o [ "services" "openssh" ];
       resolved = sub o [ "services" "resolved" ];
       users = builtins.mapAttrs (_: u: n (builtins.removeAttrs u [ "packages" ])) c.users.users;
@@ -223,6 +231,14 @@ let
       fileSystems = sub o [ "fileSystems" ];
       nix-settings = sub o [ "nix" "settings" ];
       nix-extraOptions = sub o [ "nix" "extraOptions" ];
+      environment-extraInit = sub o [ "environment" "extraInit" ];
+      powerManagement = builtins.listToAttrs (
+        map (k: { name = k; value = sub o [ "powerManagement" k ]; }) [
+          "powerUpCommands"
+          "powerDownCommands"
+          "resumeCommands"
+        ]
+      );
       units = builtins.listToAttrs (
         map (u: {
           name = u;

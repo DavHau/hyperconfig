@@ -33,7 +33,7 @@ and repair his machines.
    narrowest mitigation that keeps it reachable for Dave (restrict it to
    the mesh/LAN, turn off the vulnerable feature, a config-level
    workaround), never take it down, and tell him at once: a
-   `decision notice` (below) and the top of the report.
+   `sudo -n -u infra sec-job-decision --by <job> notice` (below) and the top of the report.
    `security-takedown` accepts only takedown-eligible units at
    evaluation time and `sec-job-guard` refuses any change, either
    direction, that touches sshd, the mesh, pocket-id, the firewall,
@@ -49,7 +49,7 @@ and repair his machines.
    restricted access), **conflict** (a real conflict with something he
    said). Such a change does not land before his answer. The one
    exception is a critical exploitable CVE where taking the service
-   down is the safe action: do it, then tell him (`decision notice` with
+   down is the safe action: do it, then tell him (`sudo -n -u infra sec-job-decision --by <job> notice` with
    the undo). Everything else, including "which of these sane fixes",
    reversible cleanups and refactors, is yours: decide it with common
    sense, record it (below) and do it. If unsure whether it clears the
@@ -65,15 +65,15 @@ and repair his machines.
 
 ### Decisions: the registry (`decision`)
 
-Every decision goes to the fleet's decision registry through its CLI,
-`decision` (`decision --help`; always `--by <job>`), never into the
-report alone and never by writing its files. The 08:00 curation run
-re-checks it, the 09:00 Telegram brief tells Dave.
+Every decision goes to the fleet's decision registry through the fixed
+proxy, `sudo -n -u infra sec-job-decision` (`--help`; always `--by <job>`),
+never into the report alone and never by writing its files. The 08:00
+curation run re-checks it, the 09:00 Telegram brief tells Dave.
 
 - **One you made yourself** (a fix chosen, a refactor deferred, a
   follow-up for an interactive session):
 
-      decision --by <job> decided --source <job> \
+      sudo -n -u infra sec-job-decision --by <job> decided --source <job> \
         --title "<plain words, what was decided>" --chose "<your choice>" \
         --why "<one line>" [--follow-up "<what a session still has to do>"] \
         [--done] [--link <report or commit>]
@@ -82,7 +82,7 @@ re-checks it, the 09:00 Telegram brief tells Dave.
   interactive session dispatches it. The brief only counts these.
 - **A question that clears the bar** (rule 3), naming the criterion:
 
-      decision --by <job> add --source <job> \
+      sudo -n -u infra sec-job-decision --by <job> add --source <job> \
         --needs-dave "<money|identity|irreversible|access|noticeable|conflict>: <why>" \
         --title "<plain words, what Dave decides>" --why "<what it is, why it matters>" \
         --option "a) ..." --option "b) ..." --recommendation "<yours, one line>" \
@@ -93,15 +93,14 @@ re-checks it, the 09:00 Telegram brief tells Dave.
   the printed id next to the item in the report.
 - **A service taken down, or a protected one mitigated** (rule 1/2):
 
-      decision --by <job> notice --source <job> "<what, on which machine, why, how to undo>"
+      sudo -n -u infra sec-job-decision --by <job> notice --source <job> "<what, on which machine, why, how to undo>"
 
   The next morning brief carries it once.
 
-If `decision decided --help` fails (a registry from before the bar):
-record your own decision as `decision --by <job> add ...` (without
-`--needs-dave`) followed by `decision --by <job> answer <id> "<your
-choice>"`, and a question as a plain `decision --by <job> add ...` with
-the criterion as the first words of `--why`.
+The proxy takes only `--by <job>` first, then one of `add`, `decided`,
+`work`, `notice` (a new one; `--list` to read them), `list` and `show`,
+and no file arguments: answering, closing or editing entries is for Dave
+and sessions.
 
 ### Taking a service down
 
@@ -115,14 +114,18 @@ affected range, yes or no with the evidence. No yes, no takedown. The
 eligible units of a machine: `sec-job-nix eval --json
 .#nixosConfigurations.<m>.config.security.takedown.eligible`. A
 takedown is data in
-`modules/nixos/security-takedown/takedowns.nix`, one entry per machine
-and unit:
+`modules/nixos/security-takedown/takedowns.json` (plain JSON, machine ->
+unit -> entry), one entry per machine and unit:
 
-    som."searx.service" = {
-      reason = "CVE-2026-12345, unauthenticated RCE, no fixed release yet";
-      since = "2026-11-15";
-      undo = "remove this entry, push, deploy som";
-    };
+    {
+      "som": {
+        "searx.service": {
+          "reason": "CVE-2026-12345, unauthenticated RCE, no fixed release yet",
+          "since": "2026-11-15",
+          "undo": "remove this entry, push, deploy som"
+        }
+      }
+    }
 
 The module disables that unit on that machine and fails evaluation for
 any unit not eligible there and for an unknown machine. It lands,
@@ -130,9 +133,9 @@ deploys and is verified like any fix (`systemctl is-active <unit>` on
 the target: `inactive`); the deploy's lock-out check (ssh over the
 mesh, the built system running, pocket-id answering 200 on its host)
 keeps the switch only if it passes, and otherwise the target rolls itself back (then remove the entry, land,
-and say so at the top of the report). Then `decision notice` it (what,
+and say so at the top of the report). Then `sudo -n -u infra sec-job-decision --by <job> notice` it (what,
 where, why, undo) and list it in the report under "taken down" with its
 undo line. A firewall-only mitigation (a port restricted to the
 mesh/LAN) is never pushed by a job (sec-job-guard refuses firewall
-lines either way): prepare it, `decision notice` it for a session,
+lines either way): prepare it, `sudo -n -u infra sec-job-decision --by <job> notice` it for a session,
 report it.

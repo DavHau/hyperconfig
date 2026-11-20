@@ -44,7 +44,7 @@
                  composite one that includes them (hermes-cli and the
                  other bundles), so a run steered by what it reads has no
                  skill or memory tool and no MCP server. Its terminal and
-                 file tools can still write files as the infra user (the
+                 file tools can still write files as the job's user (the
                  tools run in the gateway's process, outside this unit):
                  no skill/memory tools, not "cannot persist"; the repo's
                  skills/ is refused by the security jobs' guard.
@@ -59,7 +59,7 @@
   `infraSpace.agentJobs` (log dir, verdict tag, ok verdicts), from which
   the brief also reports a failed or crashed last run (./decisions.nix).
 
-  The log is <logDir>/<UTC date>T<HHMM>Z.log (umask 077); the verdict
+  The log is <logDir>/<UTC date>T<HHMM>Z.log (fileUmask); the verdict
   helper `<name>-verdict <log>` prints the last non-empty line (hermes'
   trailing `session_id:` aside) and exits 0 for an ok verdict.
 */
@@ -89,6 +89,9 @@
   # appended to the follower's continue message (./agent-job-follow.sh)
   resumeNote ? "",
   user ? "infra",
+  group ? user,
+  fileUmask ? "077",
+  decisionCommand ? "/run/current-system/sw/bin/decision",
   toolsets ? [
     "terminal"
     "file"
@@ -118,7 +121,7 @@ let
   # OnFailure=: one line for the next morning brief, with the newest log
   failedNotice = pkgs.writeShellScript "${name}-failed-notice" ''
     log=$(ls -1t ${logDir}/*.log 2>/dev/null | head -n 1)
-    /run/current-system/sw/bin/decision --by ${name} notice --source ${name} \
+    ${decisionCommand} --by ${name} notice --source ${name} \
       "${name} failed on $(${tz} date '+%F %H:%M'), see ''${log:-${logDir}} in infra-space"
   '';
 
@@ -204,7 +207,7 @@ let
 
   run = pkgs.writeShellScript name ''
     set -uo pipefail
-    umask 077
+    umask ${fileUmask}
     mkdir -p ${logDir}
     # One client at a time, also when started by hand during a run.
     exec 9>${logDir}/.lock
@@ -305,7 +308,7 @@ in
     serviceConfig = {
       Type = "oneshot";
       User = user;
-      Group = user;
+      Group = group;
       ExecStart = failedNotice;
     };
     path = [
@@ -333,7 +336,7 @@ in
     serviceConfig = {
       Type = "oneshot";
       User = user;
-      Group = user;
+      Group = group;
       WorkingDirectory = home;
       ExecStart = run;
       TimeoutStartSec = timeout;

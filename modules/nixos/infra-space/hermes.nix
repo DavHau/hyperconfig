@@ -1,9 +1,8 @@
 /*
   The infra-space's hermes agent, inside the container (./default.nix
   appends this to the guest's modules on every member): hyperhermes core
-  with one agent, `infra`, the guest's one user (./guest.nix; core's
-  accounts.nix merges into that account: same uid, bash, lingering), which
-  manages the fleet from /home/infra/hyperconfig.
+  with `infra`, the fleet administrator from /home/infra/hyperconfig, and
+  the separate unprivileged `infra-jobs` agent for the untrusted-feed jobs.
 
   Minimal on purpose, its input (journals, process lists, git logs, HTTP
   answers) being partly tenant-controlled on som:
@@ -102,6 +101,7 @@
 let
   cfg = config.infraSpace.hermes;
   user = "infra";
+  jobsUser = "infra-jobs";
   hlib = inputs.hyperhermes.lib;
   # System credentials the host passes in (nspawn --load-credential), read
   # by hermes-locked-infra (root) through LoadCredential.
@@ -395,9 +395,21 @@ in
       # flag from the host's helper (immutableHelper, ./default.nix).
       systemd.services."hermes-locked-${user}".environment.HERMES_LOCKED_IMMUTABLE_HELPER =
         "/run/space-immutable/socket";
+      systemd.services."hermes-locked-${jobsUser}".environment.HERMES_LOCKED_IMMUTABLE_HELPER =
+        "/run/space-immutable/socket";
+      # No dashboard for the unattended account: no forward, no listener.
+      systemd.services."hermes-dashboard-${jobsUser}".wantedBy = lib.mkForce [ ];
+      # Its four fixed sudo-to-infra entry points are the intended privilege
+      # boundary. The gateway-wide hardening otherwise rejects every setuid
+      # executable; keep the rest, but let sudo perform those transitions.
+      systemd.services."hermes-agent-${jobsUser}".serviceConfig = {
+        NoNewPrivileges = lib.mkForce false;
+        RestrictSUIDSGID = lib.mkForce false;
+      };
 
       services.hyperhermes = {
         hardening.enable = true;
+        forwards.dashboard.enabledFor = name: name != jobsUser;
 
         # p0, as on som (machines/som/hermes-inference.nix): the provider
         # entry, Qwen with thinking as the model, titles from it too.
@@ -456,6 +468,23 @@ in
             # Background subagents of all sessions share this cap (default 10,
             # which the infra session's fan-outs hit); as on som's agents.
             delegation.max_concurrent_children = 20;
+          };
+        };
+
+        # Untrusted-feed work is a separate account and agent. TeamClaude is
+        # inference only; no P0/OpenRouter key, fleet credential or dashboard.
+        agents.${jobsUser} = {
+          uid = 1223;
+          lockedConfig = true;
+          environment.ANTHROPIC_BASE_URL = "https://teamclaude.davhau.com";
+          secretEnv.ANTHROPIC_TOKEN = credential "teamclaude-api-key";
+          skillDirs = map (s: "${s}/share/skills") (secSkills ++ [ mapSkill ]);
+          settings = {
+            terminal.timeout = 3600;
+            platform_toolsets = lib.genAttrs platforms (_: [ "terminal" "file" "todo" "delegation" ]);
+            agent.disabled_toolsets = disabledToolsets ++ [ "skills" ];
+            checkpoints.enabled = false;
+            delegation.max_concurrent_children = 4;
           };
         };
       };

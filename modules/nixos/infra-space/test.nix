@@ -415,6 +415,10 @@ pkgs.testers.runNixOSTest {
       def guest_root(m, cmd):
           return m.succeed("nixos-container run infra-space -- " + cmd)
 
+      def guest_jobs(m, cmd, check=True):
+          full = "nixos-container run infra-space -- runuser -u infra-jobs -- bash -lc " + shlex.quote(cmd)
+          return m.succeed(full) if check else m.execute(full)
+
       members = {"memberA": memberA, "memberB": memberB}
 
       ${daemonTest.pythonHelpers}
@@ -506,6 +510,10 @@ pkgs.testers.runNixOSTest {
           m = memberA
           guest_root(m, "systemctl is-active hermes-locked-infra.service")
           out = m.succeed("${pkgs.e2fsprogs}/bin/lsattr -d /var/lib/nixos-containers/infra-space${lockedHome}/config.yaml")
+          assert out.split()[0].count("i") == 1, out
+          # and the security jobs' own agent's (infra-jobs) locked home
+          guest_root(m, "systemctl is-active hermes-locked-infra-jobs.service")
+          out = m.succeed("${pkgs.e2fsprogs}/bin/lsattr -d /var/lib/nixos-containers/infra-space/var/lib/hermes/infra-jobs/home/config.yaml")
           assert out.split()[0].count("i") == 1, out
           rc, out = m.execute("nixos-container run infra-space -- ${pkgs.e2fsprogs}/bin/chattr -i ${lockedHome}/config.yaml 2>&1")
           assert rc != 0, out
@@ -996,11 +1004,11 @@ pkgs.testers.runNixOSTest {
           assert out is not None and "Recurring tasks: status could not be read" in out, out
           managed.succeed("rm ${briefState}/recurring.json ${briefState}/recurring-rc")
           # any other agent job's failed last run: a line too
-          guest(memberA, "mkdir -p /home/infra/security-audit && printf 'SECURITY-AUDIT: failed\\nsession_id: x\\n' > /home/infra/security-audit/$(date -u +%FT%H%MZ).log")
+          guest_jobs(memberA, "mkdir -p /home/infra-jobs/security-audit && printf 'SECURITY-AUDIT: failed\\nsession_id: x\\n' > /home/infra-jobs/security-audit/$(date -u +%FT%H%MZ).log")
           brief_run()
           out = sent()
           assert out is not None and "security-audit failed in its last run" in out, out
-          guest(memberA, "rm -r /home/infra/security-audit")
+          guest_jobs(memberA, "rm -r /home/infra-jobs/security-audit")
           # a job's inbox line, a takedown notice, a warning
           guest(memberA, """printf '%s\\n' '{"title": "Take down foo?", "severity": "critical", "options": ["a) yes", "b) no"], "source": "cve-watch", "needs_dave": "noticeable: foo stops"}' '{"title": "Keep engines off", "recommendation": "no change", "source": "research"}' '{"title": "Urgent without a reason", "severity": "critical", "recommendation": "stop it", "source": "cve-watch"}' '{"kind": "notice", "text": "stopped foo.service on bam", "source": "cve-watch"}' >> /var/lib/infra-space/decisions/inbox.jsonl""")
           guest(memberA, "decision add --title 'Buy a proxy?' --urgency low --source test --needs-dave 'money: 20 USD'")
@@ -1058,13 +1066,15 @@ pkgs.testers.runNixOSTest {
               memberB.fail(f"nixos-container run infra-space -- systemctl cat {job}.timer")
               guest_root(memberA, f"systemctl is-active {job}.timer")
               deps = guest_root(memberA, f"systemctl show -p Wants -p Requires -p After -p OnFailure {job}.service")
-              assert "Wants=hermes-agent-infra.service" in deps, deps
-              assert "Requires=hermes-agent-infra.service" not in deps, deps
+              assert "Wants=hermes-agent-infra-jobs.service" in deps, deps
+              assert "Requires=hermes-agent-infra-jobs.service" not in deps, deps
               # missed nights: after the bump, not racing it for its lock
               assert "nixpkgs-bump.service" in deps.split("After=")[1].split("\n")[0], deps
               assert f"OnFailure={job}-failed-notice.service" in deps, deps
               assert "X-RestartIfChanged=false" in guest_root(memberA, f"systemctl cat {job}.service")
-              assert guest(memberA, f"command -v sec-{job}-workspace").strip() == f"/run/current-system/sw/bin/sec-{job}-workspace"
+              unit = guest_root(memberA, f"systemctl show -p User -p Group --value {job}.service")
+              assert "infra-jobs" in unit and "infra\n" not in unit, unit
+              assert guest_jobs(memberA, f"command -v sec-{job}-workspace").strip() == f"/run/current-system/sw/bin/sec-{job}-workspace"
           # Dave's schedule at +07: CVE watch daily 02:30, hygiene Saturday
           # 03:30, audit Sunday 03:30 (19:30 / 20:30 UTC the day before)
           for job, cal, utc in [("cve-watch", "*-*-* 02:30:00 Asia/Bangkok", "19:30:00 UTC"),
@@ -1074,23 +1084,64 @@ pkgs.testers.runNixOSTest {
               assert cal in timer, (job, timer)
               norm = guest_root(memberA, f"systemd-analyze calendar '{cal}'")
               assert utc.split()[0] in norm and utc.split()[-2] in norm, (job, norm)
-          for tool in ["sec-job-guard", "sec-job-protected-check", "sec-job-deploy", "sec-collect", "sec-cve-feeds",
-                       "decision", "sec-job-nix", "vulnix"]:
-              guest(memberA, f"command -v {tool}")
-          # a takedown notice through the registry reaches the next brief
-          guest(memberA, "decision --by cve-watch notice --source cve-watch 'vm-test: foo.service on bam taken down; undo: drop the entry'")
+          for tool in ["sec-job-push", "sec-job-deploy", "sec-collect", "sec-cve-feeds",
+                       "sec-job-decision", "sec-job-nix", "vulnix"]:
+              guest_jobs(memberA, f"command -v {tool}")
+          # The guest-only id and agent; no fleet or GitHub credential.
+          assert guest_jobs(memberA, "id -u").strip() == "1223"
+          guest_root(memberA, "systemctl is-active hermes-agent-infra-jobs.service")
+          guest_jobs(memberA, "test ! -r /run/infra-space/secrets/github && test ! -r /run/infra-space/secrets/ssh")
+          guest_jobs(memberA, "test ! -r /home/infra && test ! -e /home/infra-jobs/.config/age/identities")
+          code, out = guest_jobs(memberA, "git push git@github.com:DavHau/hyperconfig.git main 2>&1", check=False)
+          assert code != 0, (code, out)
+          code, out = guest_jobs(memberA, "ssh -o BatchMode=yes -o ConnectTimeout=3 root@managed.d true 2>&1", check=False)
+          assert code != 0, (code, out)
+          code, out = guest_jobs(memberA, "clan --help 2>&1", check=False)
+          assert code != 0 and "no clan or secrets-store access" in out, (code, out)
+          # Valid registry and collector arguments cross sudo; traversal,
+          # unknown machines, short ids and unknown jobs never reach a helper.
+          guest_jobs(memberA, "sudo -n -u infra sec-job-decision --by cve-watch notice --list")
+          # the registry proxy: --by a job first, the skills' verbs only, no
+          # file-reading or notice-dropping option in any spelling
+          for args in ["notice --list", "--by dave notice --list", "--by cve-watch answer D1 x",
+                       "--by cve-watch close D1", "--by cve-watch notice --sent N1", "--by cve-watch notice --se N1",
+                       "--by cve-watch add --json /home/infra/.bashrc", "--by cve-watch add --js=/etc/shadow",
+                       "--by cve-watch ingest --file /etc/passwd", "--by cve-watch brief --jobs-json /x",
+                       "--by cve-watch notice --by dave x"]:
+              code, out = guest_jobs(memberA, "sudo -n -u infra sec-job-decision " + args + " 2>&1", check=False)
+              assert code == 2 and "sec-job-decision:" in out, (args, code, out)
+          guest(memberA, "mkdir -p /home/infra/hyperconfig && git -C /home/infra/hyperconfig init -q && echo '{}' > /home/infra/hyperconfig/flake.nix && git -C /home/infra/hyperconfig remote add origin /home/infra/hyperconfig")
+          guest_jobs(memberA, "sudo -n -u infra sec-collect snapshot vm-valid-run som")
+          guest_jobs(memberA, "test -r /var/lib/infra-space/security-jobs/collect/vm-valid-run/snapshot")
+          guest(memberA, "mkdir -p /var/lib/infra-space/security-jobs/deploy/vm-status && echo 'done vm-test' > /var/lib/infra-space/security-jobs/deploy/vm-status/status")
+          assert "done vm-test" in guest_jobs(memberA, "sudo -n -u infra sec-job-deploy status vm-status")
+          code, out = guest_jobs(memberA, "sudo -n -u infra sec-job-push cve-watch 0000000000000000000000000000000000000000 2>&1", check=False)
+          assert code != 0 and "no regular bundle" in out and "a password is required" not in out, (code, out)
+          for cmd in [
+              "sudo -n -u infra sec-collect snapshot " + ".." + chr(47) + "escape som",
+              "sudo -n -u infra sec-collect snapshot vm-invalid-run not-a-machine",
+              "sudo -n -u infra sec-job-deploy start " + ".." + chr(47) + "escape 0000000000000000000000000000000000000000 som",
+              "sudo -n -u infra sec-job-deploy start vm-run short som",
+              "sudo -n -u infra sec-job-deploy start vm-run 0000000000000000000000000000000000000000 not-a-machine",
+              "sudo -n -u infra sec-job-push not-a-job 0000000000000000000000000000000000000000",
+              "sudo -n -u infra sec-job-push cve-watch short",
+          ]:
+              code, out = guest_jobs(memberA, cmd + " 2>&1", check=False)
+              assert code != 0 and "a password is required" not in out, (cmd, code, out)
+          # A takedown notice through the fixed registry proxy reaches the brief.
+          guest_jobs(memberA, "sudo -n -u infra sec-job-decision --by cve-watch notice --source cve-watch 'vm-test: foo.service on bam taken down; undo: drop the entry'")
           assert "vm-test: foo.service on bam" in guest(memberA, "decision notice --list")
           guest(memberA, "decision notice --sent $(decision notice --list | grep -o 'N[0-9]*' | head -n 1)")
           # a job waits for the bump's lock, and while another security job
           # runs (the shared lock): it starts only once both are free
-          guest(memberA, "mkdir /home/infra/hyperconfig && mkdir -p /home/infra/nixpkgs-bump && touch /home/infra/nixpkgs-bump/.lock")
-          guest_root(memberA, "systemd-run --unit=hold-bump --uid=infra flock /home/infra/nixpkgs-bump/.lock ${pkgs.coreutils}/bin/sleep 20")
+          guest_jobs(memberA, "mkdir /home/infra-jobs/hyperconfig")
+          guest_root(memberA, "systemd-run --unit=hold-bump --uid=infra --gid=agent-jobs flock /run/agent-jobs/nixpkgs-bump.lock ${pkgs.coreutils}/bin/sleep 20")
           guest_root(memberA, "systemctl start --no-block cve-watch.service")
           memberA.sleep(5)
           assert "active" == guest_root(memberA, "systemctl show -p ActiveState --value hold-bump.service").strip()
           assert "activating" in guest_root(memberA, "systemctl show -p ActiveState --value cve-watch.service")
           before = int(guest_root(memberA, "cat ${llmRecord} | wc -l").strip())
-          assert not guest(memberA, "ls /home/infra/cve-watch/*.log 2>/dev/null || true").strip()
+          assert not guest_jobs(memberA, "ls /home/infra-jobs/cve-watch/*.log 2>/dev/null || true").strip()
           memberA.wait_until_succeeds(
               "nixos-container run infra-space -- systemctl show -p ActiveState --value cve-watch.service | grep -qE 'failed|inactive'",
               timeout=180,
@@ -1099,16 +1150,17 @@ pkgs.testers.runNixOSTest {
           assert int(guest_root(memberA, "cat ${llmRecord} | wc -l").strip()) > before
           journal = guest_root(memberA, "journalctl -u cve-watch.service")
           assert "last line: " in journal, journal
-          prompt = guest(memberA, "cat /home/infra/cve-watch/last-prompt")
+          prompt = guest_jobs(memberA, "cat /home/infra-jobs/cve-watch/last-prompt")
           assert "LOCAL_DATE=" in prompt and "WEEKDAY=" in prompt, prompt
-          assert guest(memberA, "stat -c %a /home/infra/cve-watch/*.log").split() == ["600"]
-          # the failed run: a notice for the brief
+          assert guest_jobs(memberA, "stat -c %a /home/infra-jobs/cve-watch/*.log").split() == ["640"]
+          guest(memberA, "cat /home/infra-jobs/cve-watch/last-prompt")
+          # the failed run: a notice through the registry proxy for the brief
           memberA.wait_until_succeeds(
               "nixos-container run infra-space -- runuser -u infra -- decision notice --list | grep -q 'cve-watch failed on '",
               timeout=60,
           )
           guest(memberA, "decision notice --sent $(decision notice --list | grep -o 'N[0-9]*')")
-          guest(memberA, "rm -r /home/infra/hyperconfig /home/infra/nixpkgs-bump /home/infra/cve-watch")
+          guest_jobs(memberA, "rm -r /home/infra-jobs/hyperconfig /home/infra-jobs/cve-watch")
           guest_root(memberA, "systemctl reset-failed cve-watch.service")
 
       with subtest("the nightly bump's nix: its own cores and jobs, from an untrusted client"):

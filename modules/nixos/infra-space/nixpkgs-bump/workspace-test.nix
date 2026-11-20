@@ -62,7 +62,7 @@ pkgs.runCommand "nixpkgs-bump-workspace-test"
     }
 
     for n in 1 2; do
-      ws=$(w create hyperconfig-nixpkgs-bump-test-$n 2>$TMPDIR/err)
+      ws=$(w create hyperconfig-nixpkgs-bump-test-$n 2>$TMPDIR/err) || { cat $TMPDIR/err; exit 1; }
       [ "$ws" = "$PWD/hyperconfig-nixpkgs-bump-test-$n" ] # stdout: the path alone
       grep -q "Created workspace in" $TMPDIR/err
       [ -f "$ws/flake.nix" ] && [ -f "$ws/.git" ]
@@ -158,8 +158,8 @@ pkgs.runCommand "nixpkgs-bump-workspace-test"
 
     # remove works on a leftover of jj's failed add alone (no jj new)
     mkdir hyperconfig-nixpkgs-bump-test-5
-    jj -R "$repo" --ignore-working-copy workspace add --colocate -r main@origin \
-      hyperconfig-nixpkgs-bump-test-5 >/dev/null 2>&1 || true
+    (cd hyperconfig-nixpkgs-bump-test-5 && jj --config 'snapshot.auto-track="none()"' -R "$repo" \
+      workspace add --colocate -r main@origin "$PWD") >/dev/null 2>&1 || true
     w remove hyperconfig-nixpkgs-bump-test-5
     clean
     echo "ok: remove clears a half-made workspace"
@@ -297,7 +297,8 @@ pkgs.runCommand "nixpkgs-bump-workspace-test"
 
     # remove goes by path: another jj workspace registered at the path ...
     mkdir hyperconfig-nixpkgs-bump-test-9
-    jr workspace add --name other hyperconfig-nixpkgs-bump-test-9 >/dev/null 2>&1 || true
+    (cd hyperconfig-nixpkgs-bump-test-9 && jj --config 'snapshot.auto-track="none()"' -R "$repo" \
+      workspace add --name other "$PWD") >/dev/null 2>&1 || true
     echo keep >hyperconfig-nixpkgs-bump-test-9/keep
     if w remove hyperconfig-nixpkgs-bump-test-9 2>$TMPDIR/err; then echo "FAILED: removed a foreign workspace"; exit 1; fi
     grep -q "another jj workspace is at" $TMPDIR/err
@@ -307,7 +308,8 @@ pkgs.runCommand "nixpkgs-bump-workspace-test"
     # ... a bump-named workspace somewhere else (not forgotten, its git
     # worktree kept) ...
     mkdir $TMPDIR/elsewhere
-    jr workspace add --colocate --name hyperconfig-nixpkgs-bump-test-10 $TMPDIR/elsewhere >/dev/null 2>&1 || true
+    (cd $TMPDIR/elsewhere && jj --config 'snapshot.auto-track="none()"' -R "$repo" \
+      workspace add --colocate --name hyperconfig-nixpkgs-bump-test-10 "$PWD") >/dev/null 2>&1 || true
     wt_before=$(git -C "$repo" worktree list --porcelain)
     if w remove hyperconfig-nixpkgs-bump-test-10 2>$TMPDIR/err; then echo "FAILED: removed a workspace elsewhere"; exit 1; fi
     grep -q "jj workspace hyperconfig-nixpkgs-bump-test-10 is not at" $TMPDIR/err
