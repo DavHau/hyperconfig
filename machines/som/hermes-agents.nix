@@ -30,6 +30,27 @@
   ...
 }:
 let
+  # Agents on Claude Opus 5.5 through TeamClaude (see the mkMerge below).
+  opusAgents = [
+    "adam"
+    "anke"
+    "chris"
+    "daniel"
+    "dave-hermes"
+    "domi"
+    "egg"
+    "fpv"
+    "j"
+    "janine"
+    "momentum"
+    "pinpox"
+    "rti"
+    "roman"
+    "stefan"
+    "thaigersprint"
+    "willi"
+    "wolfgang"
+  ];
   data = import ./hermes-agents-data.nix;
   # Agents in vault-ro: all but those marked `vault = false`.
   vaultReaders = lib.filterAttrs (_: a: a.vault or true) data;
@@ -126,6 +147,20 @@ in
     (lib.mapAttrs (_: _: { rea.enable = true; }) (lib.filterAttrs (_: a: a.rea or true) data))
     # The gpu-host skill: the agents with an account on vit.
     (lib.mapAttrs (_: _: { skillDirs = [ "${gpuSkill}/share/skills" ]; }) gpuUsers)
+    # Claude Opus 5.5 through TeamClaude, thinking at medium, for every
+    # agent but daniel-meli (Melious), b3x (Codex), voice (spoken replies)
+    # and joe (Dave, 2026-11-20). initialModel seeds only a config without a
+    # model (it replaces p0's Qwen seed, ./hermes-inference.nix); agents
+    # that already had one were switched once by hand in their state
+    # config.yaml (`model:` = anthropic/claude-opus-5-5).
+    (lib.genAttrs opusAgents (_: {
+      teamclaude.enable = true;
+      initialModel = {
+        provider = "anthropic";
+        default = "claude-opus-5-5";
+      };
+      settings.agent.reasoning_effort = "medium";
+    }))
     {
       # Account and description from users/stefan-vault.nix.
       stefan = { };
@@ -300,13 +335,6 @@ in
         sshKeys = config.services.hyperhermes.agents.daniel.sshKeys;
         # Claude through the TeamClaude gateway, as client `janine`.
         teamclaude.enable = true;
-        # Instead of p0's Qwen (./hermes-inference.nix): written once into
-        # her config.yaml, her own /model choice persists after that.
-        initialModel = {
-          provider = "anthropic";
-          default = "claude-opus-5-5";
-        };
-        settings.agent.reasoning_effort = "medium";
       };
 
       # wolfgang, anke: Wolfgang's and Anke's agents. No vault, wallet,
@@ -322,11 +350,6 @@ in
         teamclaude.enable = true;
         # The shared OpenRouter key as OPENROUTER_API_KEY (./hermes-inference.nix).
         openrouter = true;
-        initialModel = {
-          provider = "anthropic";
-          default = "claude-opus-5-5";
-        };
-        settings.agent.reasoning_effort = "medium";
       };
       anke = {
         description = "anke - Anke's hermes agent, no vault access";
@@ -336,11 +359,6 @@ in
         teamclaude.enable = true;
         # The shared OpenRouter key as OPENROUTER_API_KEY (./hermes-inference.nix).
         openrouter = true;
-        initialModel = {
-          provider = "anthropic";
-          default = "claude-opus-5-5";
-        };
-        settings.agent.reasoning_effort = "medium";
       };
 
       # daniel-meli: a second agent of Daniel's. In
