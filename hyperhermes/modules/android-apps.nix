@@ -53,9 +53,14 @@ let
     '') apps}
     cp ${index} "$tmp/index.html"
     chmod 0644 "$tmp"/*
-    # Replace the served set at once; old versions go.
-    find ${dir} -maxdepth 1 -type f -delete
+    # Move the new set in first, then drop only the stale files, so no
+    # request falls into a gap; old versions go.
+    keep=$(cd "$tmp" && ls)
     mv "$tmp"/* ${dir}/
+    for f in ${dir}/*; do
+      case " $(echo $keep) " in *" $(basename "$f") "*) ;; *) rm -f -- "$f" ;; esac
+    done
+    find ${dir} -maxdepth 1 -name '.sign.*' -type d -exec rm -rf -- {} +
   '';
 in
 {
@@ -104,6 +109,15 @@ in
         ProtectSystem = "strict";
         ReadWritePaths = [ dir ];
         NoNewPrivileges = true;
+        # Offline signing: no network, no capabilities, no other homes.
+        PrivateNetwork = true;
+        RestrictAddressFamilies = "none";
+        CapabilityBoundingSet = "";
+        ProtectHome = true;
+        ProtectKernelTunables = true;
+        ProtectKernelModules = true;
+        ProtectKernelLogs = true;
+        ProtectControlGroups = true;
         ExecStart = sign;
       };
     };
@@ -118,6 +132,7 @@ in
           default_type application/octet-stream;
           add_header X-Content-Type-Options nosniff always;
           add_header Cache-Control "no-cache" always;
+          add_header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'" always;
         '';
       };
     };
