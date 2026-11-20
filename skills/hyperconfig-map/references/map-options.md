@@ -51,6 +51,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.ipv4Forward: modules/nixos/ipv4-forward.nix
 - hyper.lanPrinter: modules/nixos/lan-printer.nix
 - hyper.luksUnlock.name: modules/nixos/luks-unlock/default.nix
+- hyper.meshDashboards: modules/nixos/dave-desktop/mesh-dashboards.nix
 - hyper.monitoringAlertDigest: modules/nixos/monitoring-alert-digest/default.nix
 - hyper.monitoringAlerts: modules/nixos/monitoring-alerts.nix
 - hyper.mullvadEgress: modules/nixos/mullvad-egress/egress.nix

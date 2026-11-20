@@ -16,6 +16,14 @@
 # directory is gone, in the container and here; another user cannot run
 # the helper.
 #
+# No route (../spaces/host.nix, chain no-route): a stand-in internet in a
+# network namespace (192.0.2.2, 2001:db8:5::2, 2001:db8:99::1 behind it).
+# With no v6 route here, 30 parallel connects of the guest to a global v6
+# address all fail within 1 s (not after the kernel's rate-limited ICMP
+# and SYN retries, which took up to 5 s), while v4 and this host's own
+# v6 address work; with a route, the same v6 connect succeeds; and
+# without it again, it fails fast again.
+#
 # Light/dark (./color-scheme.py): a stand-in for alice's session portal
 # (Settings, value from /tmp/host-scheme) says dark, then light; an app run
 # through space-gui sees it in the run's portal (ReadOne), its env and its
@@ -321,6 +329,67 @@ pkgs.testers.runNixOSTest {
         )
         assert rc != 0, f"the guest built through the host's nix-daemon: {out}"
         print(out)
+
+    with subtest("no route: the guest's connect fails at once, v4 and a routed v6 work"):
+        # a stand-in internet behind a veth of this host: 192.0.2.2 and
+        # 2001:db8:5::2 on the link, 2001:db8:99::1 behind it, routed here
+        # only when the test adds the route (as amy's Wi-Fi gives or not)
+        machine.succeed(
+            "ip netns add inet",
+            "ip link add inet0 type veth peer name eth0 netns inet",
+            "ip addr add 192.0.2.1/24 dev inet0",
+            "ip -6 addr add 2001:db8:5::1/64 dev inet0 nodad",
+            "ip link set inet0 up",
+            "ip -n inet link set lo up",
+            "ip -n inet link set eth0 up",
+            "ip -n inet addr add 192.0.2.2/24 dev eth0",
+            "ip -n inet -6 addr add 2001:db8:5::2/64 dev eth0 nodad",
+            "ip -n inet -6 addr add 2001:db8:99::1/128 dev lo",
+            "ip -n inet -6 route add default via 2001:db8:5::1",
+            "systemd-run --unit=inet-listener ip netns exec inet "
+            "${pkgs.socat}/bin/socat TCP6-LISTEN:80,ipv6only=0,reuseaddr,fork EXEC:true",
+        )
+        machine.wait_until_succeeds("ip netns exec inet ss -Htln 'sport = :80' | grep -q .")
+        # no v6 default route here (as amy on a v4-only Wi-Fi)
+        machine.succeed("sysctl -w net.ipv6.conf.all.accept_ra=0 net.ipv6.conf.default.accept_ra=0",
+                        "ip -6 route flush default || true")
+        print(machine.succeed("ip -6 route"))
+        machine.fail("ip -6 route get 2001:db8:99::1")
+
+        def in_gui(cmd):
+            return machine.succeed("nixos-container run gui -- bash -c " + shlex.quote(cmd))
+
+        # 30 at once, as an Electron app's happy eyeballs opens them; each
+        # gets 5 s, longer than the kernel's own (rate-limited) answer took
+        parallel = (
+            "s=$(date +%s%N); "
+            "for i in $(seq 1 30); do "
+            "  ( timeout 5 bash -c 'echo > /dev/tcp/2001:db8:99::1/80' 2>/dev/null && echo connected ) & "
+            "done; wait; "
+            "echo ms=$(( ($(date +%s%N) - s) / 1000000 ))"
+        )
+
+        def fails_fast():
+            out = in_gui(parallel)
+            assert "connected" not in out, out
+            ms = int(out.split("ms=")[1].split()[0])
+            assert ms < 1000, f"30 v6 connects without a route took {ms} ms: {out}"
+            # other protocols: an ICMP no-route at once, not silence
+            out = in_gui("${pkgs.iputils}/bin/ping -6 -c 1 -W 3 2001:db8:99::1 2>&1 || true")
+            assert "unreachable" in out.lower(), out
+
+        fails_fast()
+        # v4 works meanwhile (masqueraded out), and this host's own v6
+        # address is no forward and stays reachable
+        in_gui("timeout 5 bash -c 'echo > /dev/tcp/192.0.2.2/80'")
+        in_gui("${pkgs.iputils}/bin/ping -6 -c 1 -W 2 fd23:5ace:9::1")
+        # a route: v6 goes out
+        machine.succeed("ip -6 route add 2001:db8:99::/48 via 2001:db8:5::2")
+        in_gui("timeout 5 bash -c 'echo > /dev/tcp/2001:db8:99::1/80'")
+        # gone again (amy leaves the network): fast again
+        machine.succeed("ip -6 route del 2001:db8:99::/48")
+        fails_fast()
+        machine.succeed("systemctl stop inet-listener; ip netns del inet")
 
     with subtest("light/dark: the host session's preference, dark by default, followed live"):
         home = "/var/lib/gui-space/home"

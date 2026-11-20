@@ -12,6 +12,8 @@
     - the shells: "<space> (<machine>)" plus a herdr machine of the same
       label for every copy of infra-space and of the named spaces
       (../spaces/client.nix).
+    - ./mesh-dashboards.nix: the apps' dashboard and sign-in names resolve
+      to som's and edi's yggdrasil addresses (not on som).
 
   Which agent gets which kind of app: ./apps.nix.
 
@@ -28,6 +30,7 @@ in
     ./shared-app.nix
     ./isolated-apps.nix
     ./hermes-one.nix
+    ./mesh-dashboards.nix
     ../spaces/client.nix
     ../voxtype-archive.nix
   ];

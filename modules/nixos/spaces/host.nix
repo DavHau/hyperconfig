@@ -24,7 +24,23 @@
       other space's or infra-space's ssh proxy, no other host service).
       `siblingForwards` ({ address, port } each) are the exceptions: the
       ssh forwards of the same space's copies on its other machines
-      (./default.nix), accepted before the rejects, that port only.
+      (./default.nix), accepted before the rejects, that port only. So
+      are the hermes dashboards' yggdrasil endpoints, tcp 443 only
+      (`hyper.meshDashboards.endpoints`, ../dave-desktop/mesh-dashboards.nix:
+      the desktops' apps reach them over the mesh).
+    - No route, fast failure: a forwarded packet from the guest to an
+      address this host has no route for (v6 on a v4-only Wi-Fi: amy
+      roams) is refused in prerouting, TCP with a reset, the rest with
+      ICMP no-route (chain no-route). The kernel's own answer, an ICMP
+      no-route, is not enough: a SYN whose socket connect() still holds
+      takes it as a soft error and is retried after 1 s, and ICMP errors
+      are rate-limited per guest address, so with many connections at
+      once (Electron's happy eyeballs) most of them hang in SYN-SENT
+      until they time out, v4 fallback included. A reset is neither.
+      Decided per packet by a route lookup (nft fib), so the guest's v6
+      works again the moment this host has a route. Not for a
+      `hyper.mullvadEgress.sources` veth, whose packets take the tunnel's
+      table by an iif rule that the lookup does not see.
     - The guest's home at homeDir here, read-write.
     - `tpm`: /dev/tpmrm0 bound in, a POSIX ACL for the guest's uid set at
       every container start.
@@ -216,7 +232,11 @@ let
     flakeIgnore = [ "E501" ];
   } (builtins.readFile ./immutable-helper.py);
 
-  # The named spaces: no mesh, no LAN, and of this host DNS only.
+  # The hermes dashboards over yggdrasil (../dave-desktop/mesh-dashboards.nix).
+  meshEndpoints = config.hyper.meshDashboards.endpoints or [ ];
+
+  # The named spaces: no mesh (but the exceptions), no LAN, and of this
+  # host DNS only.
   confinement = ''
 
     chain confine-forward {
@@ -226,6 +246,7 @@ let
         ''iifname "${veth}" ${if lib.hasInfix ":" f.address then "ip6" else "ip"} daddr ${f.address} tcp dport ${toString f.port} accept
         ''
       ) siblingForwards}
+      ${lib.optionalString (meshEndpoints != [ ]) ''iifname "${veth}" ip6 daddr ${set meshEndpoints} tcp dport 443 accept''}
       ${lib.optionalString (lib.elem veth (config.hyper.mullvadEgress.sources or [ ])) ''
         # DNS this host redirected (../mullvad-egress `sources`: Mullvad's
         # in-tunnel resolver, a private address)
@@ -417,6 +438,27 @@ lib.mkMerge [
       chain refuse {
         meta l4proto tcp reject with tcp reset
         reject with icmpx admin-prohibited
+      }
+    ''
+    + lib.optionalString (!lib.elem veth (config.hyper.mullvadEgress.sources or [ ])) ''
+      # No route for the destination: refuse at once (see the header).
+      # After DNAT (dstnat), before the routing decision; the lookup sees
+      # the policy rules on destination and fwmark only (no source, iif
+      # or uid): the mark, so a mark-routed reply (som's
+      # ../ipv4-forward.nix) is looked up in its own table.
+      # fib reports this host's own addresses as missing too (a local
+      # route is no forward path), so they, multicast (ND) and
+      # link-local, never forwarded anyway, pass first.
+      chain no-route {
+        type filter hook prerouting priority filter; policy accept;
+        iifname != "${veth}" return
+        fib daddr type { local, broadcast, multicast, anycast } return
+        ip6 daddr fe80::/10 return
+        fib daddr . mark oif missing jump no-route-refuse
+      }
+      chain no-route-refuse {
+        meta l4proto tcp reject with tcp reset
+        reject with icmpx no-route
       }
     ''
     + lib.optionalString confine confinement;

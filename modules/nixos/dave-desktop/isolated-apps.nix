@@ -20,7 +20,8 @@
     - private veth, v4 10.235.1.<4i+2> (this host .<4i+1>), v6
       fd23:5ace:1:<i>::2, `index` from ./apps.nix; NAT out;
     - confined like the named spaces (../spaces/blocked-destinations.nix):
-      the internet, and of this host DNS only; no mesh, no LAN, no other
+      the internet, and of this host DNS only; no mesh (but the
+      dashboards' yggdrasil endpoints on 443, ./mesh-dashboards.nix), no LAN, no other
       container (on som its own public dashboards are reached by their
       public v4 address, as from anywhere);
     - no sshd, no credentials, no TPM: nothing logs in, no secret enters;
