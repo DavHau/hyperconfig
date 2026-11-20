@@ -504,6 +504,21 @@ in
                     limit_conn_status 429;
                   '';
                   locations."/" = location;
+                  # The phone apps reload the open session's history (1-3 MB
+                  # of JSON, uncompressed from hermes) on every return to
+                  # the app, over mobile data. Compress just the transcript
+                  # and session list: no token-bearing response (sign-in,
+                  # tickets) is gzipped, so there is nothing for a BREACH
+                  # style length oracle; SSE and websockets stay unbuffered.
+                  locations."~ ^/api/sessions(/[^/]+/messages)?$" = location // {
+                    extraConfig = location.extraConfig + ''
+                      gzip on;
+                      gzip_proxied any;
+                      gzip_comp_level 5;
+                      gzip_min_length 0;
+                      gzip_types application/json;
+                    '';
+                  };
                   locations."= /auth/login" = signIn;
                   # The app's sign-in always asks again (the header).
                   locations."= /auth/native/authorize" = signIn // {

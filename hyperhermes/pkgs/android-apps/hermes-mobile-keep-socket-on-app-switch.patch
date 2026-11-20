@@ -1,0 +1,309 @@
+From 659f821b7cced5621fa798108183f95e6c63659c Mon Sep 17 00:00:00 2001
+From: infra <infra@davhau.com>
+Date: Fri, 20 Nov 2026 16:16:56 +0700
+Subject: [PATCH] fix(ws): keep the socket and the composer across a quick app
+ switch
+
+onStop released an idle socket at once, so every trip to another app
+cost a ws-ticket + upgrade + session.resume round trip on return, with
+the composer disabled (enabled = isConnected) until it finished.
+
+- WsTransport: an idle socket outlives the app leaving the foreground by
+  BACKGROUND_IDLE_GRACE_MS (60 s) before it is released; lease releases
+  and turn ends inside the grace no longer close it early.
+- Returning with the socket gone (Android cuts a backgrounded app's
+  network within seconds) dials at once instead of waiting out the
+  reconnect backoff.
+- ChatComposer: the text field stays editable while reconnecting; only
+  Send waits for the connection.
+---
+ .../hermescontrol/data/ws/HermesWsClient.kt   |  3 +
+ .../m57/hermescontrol/data/ws/WsTransport.kt  | 72 ++++++++++++++++++-
+ .../ui/chat/components/ChatComposer.kt        |  5 +-
+ .../ws/HermesWsClientCharacterizationTest.kt  |  4 ++
+ .../data/ws/HermesWsClientTest.kt             |  4 ++
+ .../hermescontrol/data/ws/WsTransportTest.kt  | 68 ++++++++++++++++++
+ 6 files changed, 153 insertions(+), 3 deletions(-)
+
+diff --git a/app/src/main/java/com/m57/hermescontrol/data/ws/HermesWsClient.kt b/app/src/main/java/com/m57/hermescontrol/data/ws/HermesWsClient.kt
+index dfe024a1..7d343815 100644
+--- a/app/src/main/java/com/m57/hermescontrol/data/ws/HermesWsClient.kt
++++ b/app/src/main/java/com/m57/hermescontrol/data/ws/HermesWsClient.kt
+@@ -360,6 +360,9 @@ object HermesWsClient {
+     @VisibleForTesting
+     internal fun setReconnectBackoffForTest(initialMillis: Long) = transport.setReconnectBackoffForTest(initialMillis)
+ 
++    @VisibleForTesting
++    internal fun setBackgroundIdleGraceForTest(graceMs: Long) = transport.setBackgroundIdleGraceForTest(graceMs)
++
+     @VisibleForTesting
+     internal fun setConnectionStatusForTest(status: ConnectionStatus) = transport.setConnectionStatusForTest(status)
+ 
+diff --git a/app/src/main/java/com/m57/hermescontrol/data/ws/WsTransport.kt b/app/src/main/java/com/m57/hermescontrol/data/ws/WsTransport.kt
+index ed238d36..01c0c65e 100644
+--- a/app/src/main/java/com/m57/hermescontrol/data/ws/WsTransport.kt
++++ b/app/src/main/java/com/m57/hermescontrol/data/ws/WsTransport.kt
+@@ -58,8 +58,14 @@ internal class WsTransport(
+         private const val OPEN_SOCKET_IDLE_TIMEOUT_MS = 10_000L
+         private const val MAX_OUTBOUND_MESSAGE_BYTES = 16 * 1024 * 1024
+         private const val OUTBOUND_DRAIN_TIMEOUT_MS = 60_000L
++
++        /** How long an idle socket outlives the app leaving the foreground. */
++        internal const val BACKGROUND_IDLE_GRACE_MS = 60_000L
+     }
+ 
++    @Volatile
++    private var backgroundIdleGraceMs = BACKGROUND_IDLE_GRACE_MS
++
+     private val connectionGeneration = AtomicInteger(0)
+ 
+     internal val currentGeneration: Int get() = connectionGeneration.get()
+@@ -100,15 +106,65 @@ internal class WsTransport(
+ 
+     val isConnected: Boolean get() = connected.get()
+ 
++    /**
++     * A short trip to another app must not cost the connection: the idle
++     * socket is kept for [BACKGROUND_IDLE_GRACE_MS] and only then released.
++     * Coming back reuses a live socket (liveness probe) or, when the OS
++     * dropped it meanwhile (Android cuts a backgrounded app's network about
++     * 5 s after it leaves the foreground), dials at once instead of waiting
++     * out the reconnect backoff.
++     */
+     fun setAppForeground(foreground: Boolean) {
+         appInForeground.set(foreground)
+         if (!foreground) {
+-            disconnectIfIdleInBackground()
++            scheduleBackgroundIdleDisconnect()
+             return
+         }
++        backgroundIdleJob?.cancel()
++        backgroundIdleJob = null
++        if (reconnectNowOnForeground()) return
+         connectionHealth.probeLivenessOnWake()
+     }
+ 
++    @Volatile
++    private var backgroundIdleJob: Job? = null
++
++    private fun scheduleBackgroundIdleDisconnect() {
++        backgroundIdleJob?.cancel()
++        backgroundIdleJob = null
++        if (backgroundIdleGraceMs <= 0L) {
++            disconnectIfIdleInBackground(graceElapsed = true)
++            return
++        }
++        backgroundIdleJob =
++            scope.launch {
++                delay(backgroundIdleGraceMs)
++                disconnectIfIdleInBackground(graceElapsed = true)
++            }
++    }
++
++    /** Skips a pending backoff when the user returns; true when a dial was started. */
++    @VisibleForTesting
++    internal fun reconnectNowOnForeground(openReplacement: () -> Unit = ::openSocket): Boolean {
++        val shouldOpen =
++            synchronized(outboundLock) {
++                if (connected.get() ||
++                    intentionalClose.get() ||
++                    _connectionStatus.value != ConnectionStatus.RECONNECTING ||
++                    reconnectJob?.isActive != true ||
++                    !NetworkMonitor.isConnected.value
++                ) {
++                    return@synchronized false
++                }
++                reconnectJob?.cancel()
++                reconnectJob = null
++                reconnectPolicy.reset()
++                true
++            }
++        if (shouldOpen) openReplacement()
++        return shouldOpen
++    }
++
+     fun acquireExternalActivityConnectionLease() {
+         externalActivityConnectionLease.set(true)
+     }
+@@ -129,8 +185,15 @@ internal class WsTransport(
+ 
+     internal fun hasBackgroundConnectionLease(): Boolean = backgroundConnectionLease.get()
+ 
+-    fun disconnectIfIdleInBackground() {
++    fun disconnectIfIdleInBackground() = disconnectIfIdleInBackground(graceElapsed = false)
++
++    /**
++     * Releases an idle socket while backgrounded. Before the background grace
++     * has run out (a quick app switch) only the grace timer may close it.
++     */
++    private fun disconnectIfIdleInBackground(graceElapsed: Boolean) {
+         synchronized(outboundLock) {
++            if (!graceElapsed && backgroundIdleJob?.isActive == true) return
+             if (!appInForeground.get() &&
+                 !externalActivityConnectionLease.get() &&
+                 !backgroundConnectionLease.get() &&
+@@ -896,6 +959,11 @@ internal class WsTransport(
+     @VisibleForTesting
+     internal fun createListenerForTest(generation: Int): WebSocketListener = WsListenerImpl(generation)
+ 
++    @VisibleForTesting
++    internal fun setBackgroundIdleGraceForTest(graceMs: Long) {
++        backgroundIdleGraceMs = graceMs
++    }
++
+     @VisibleForTesting
+     internal fun setConnectionStatusForTest(status: ConnectionStatus) {
+         _connectionStatus.value = status
+diff --git a/app/src/main/java/com/m57/hermescontrol/ui/chat/components/ChatComposer.kt b/app/src/main/java/com/m57/hermescontrol/ui/chat/components/ChatComposer.kt
+index 7a1e30a8..8538e6f6 100644
+--- a/app/src/main/java/com/m57/hermescontrol/ui/chat/components/ChatComposer.kt
++++ b/app/src/main/java/com/m57/hermescontrol/ui/chat/components/ChatComposer.kt
+@@ -424,7 +424,10 @@ fun ChatInputBar(
+                                                 Modifier
+                                             },
+                                         ),
+-                                enabled = isConnected,
++                                // Typing never waits for the socket: after a quick app
++                                // switch the reconnect runs in the background and only
++                                // Send waits for it (ChatInputPolicy.canSend).
++                                enabled = true,
+                                 inputTransformation =
+                                     InputTransformation {
+                                         if (isRecordingVoice) revertAllChanges()
+diff --git a/app/src/test/java/com/m57/hermescontrol/data/ws/HermesWsClientCharacterizationTest.kt b/app/src/test/java/com/m57/hermescontrol/data/ws/HermesWsClientCharacterizationTest.kt
+index 3ea56819..638e25f3 100644
+--- a/app/src/test/java/com/m57/hermescontrol/data/ws/HermesWsClientCharacterizationTest.kt
++++ b/app/src/test/java/com/m57/hermescontrol/data/ws/HermesWsClientCharacterizationTest.kt
+@@ -88,6 +88,9 @@ class HermesWsClientCharacterizationTest {
+         HermesWsClient.releaseExternalActivityConnectionLease()
+         HermesWsClient.releaseBackgroundConnectionLease()
+         HermesWsClient.setAppForeground(true)
++        // These tests pin the idle-background policy itself; the quick-switch
++        // grace (WsTransportTest) is off here.
++        HermesWsClient.setBackgroundIdleGraceForTest(0L)
+         HermesWsClient.acceptQueuedMessagesForTest.set(true)
+         HermesWsClient.clearCredentialWarning()
+         HermesWsClient.clearSeqWatermarks()
+@@ -96,6 +99,7 @@ class HermesWsClientCharacterizationTest {
+ 
+     @After
+     fun tearDown() {
++        HermesWsClient.setBackgroundIdleGraceForTest(WsTransport.BACKGROUND_IDLE_GRACE_MS)
+         HermesWsClient.rejectAllPending()
+         HermesWsClient.releaseExternalActivityConnectionLease()
+         HermesWsClient.releaseBackgroundConnectionLease()
+diff --git a/app/src/test/java/com/m57/hermescontrol/data/ws/HermesWsClientTest.kt b/app/src/test/java/com/m57/hermescontrol/data/ws/HermesWsClientTest.kt
+index e1c89583..6b3fdee7 100644
+--- a/app/src/test/java/com/m57/hermescontrol/data/ws/HermesWsClientTest.kt
++++ b/app/src/test/java/com/m57/hermescontrol/data/ws/HermesWsClientTest.kt
+@@ -113,12 +113,16 @@ class HermesWsClientTest {
+         HermesWsClient.releaseExternalActivityConnectionLease()
+         HermesWsClient.releaseBackgroundConnectionLease()
+         HermesWsClient.setAppForeground(true)
++        // These tests pin the idle-background policy itself; the quick-switch
++        // grace (WsTransportTest) is off here.
++        HermesWsClient.setBackgroundIdleGraceForTest(0L)
+         HermesWsClient.acceptQueuedMessagesForTest.set(true)
+     }
+ 
+     @After
+     fun tearDown() {
+         try {
++        HermesWsClient.setBackgroundIdleGraceForTest(WsTransport.BACKGROUND_IDLE_GRACE_MS)
+             HermesWsClient.releaseExternalActivityConnectionLease()
+             HermesWsClient.releaseBackgroundConnectionLease()
+             HermesWsClient.disconnect(clearPendingMessages = true)
+diff --git a/app/src/test/java/com/m57/hermescontrol/data/ws/WsTransportTest.kt b/app/src/test/java/com/m57/hermescontrol/data/ws/WsTransportTest.kt
+index f00331f3..0e33e9fd 100644
+--- a/app/src/test/java/com/m57/hermescontrol/data/ws/WsTransportTest.kt
++++ b/app/src/test/java/com/m57/hermescontrol/data/ws/WsTransportTest.kt
+@@ -456,6 +456,7 @@ class WsTransportTest {
+     fun combinedLeasesSurviveIdleBackgroundUntilBothReleased() =
+         runTest {
+             val fixture = Fixture(this, testJson)
++            fixture.transport.setBackgroundIdleGraceForTest(0L)
+             val socket = mockk<WebSocket>(relaxed = true)
+ 
+             fixture.transport.connectedForTest.set(true)
+@@ -484,6 +485,7 @@ class WsTransportTest {
+     fun observeEventMarksPendingReplyStartAndCompleteRespectingIdlePolicy() =
+         runTest {
+             val fixture = Fixture(this, testJson)
++            fixture.transport.setBackgroundIdleGraceForTest(0L)
+             val socket = mockk<WebSocket>(relaxed = true)
+ 
+             fixture.transport.connectedForTest.set(true)
+@@ -625,4 +627,70 @@ class WsTransportTest {
+             scope.cancel()
+         }
+     }
++
++    @Test
++    fun quickAppSwitchKeepsIdleSocketThroughTheGrace() =
++        runTest {
++            val fixture = Fixture(this, testJson)
++            val socket = mockk<WebSocket>(relaxed = true)
++            fixture.transport.connectedForTest.set(true)
++            fixture.transport.webSocketForTest = socket
++            fixture.transport.setConnectionStatusForTest(ConnectionStatus.CONNECTED)
++
++            // Two seconds in another app: the idle socket and its status survive.
++            fixture.transport.setAppForeground(false)
++            advanceTimeBy(2_000)
++            assertTrue(fixture.transport.isConnected)
++            assertEquals(ConnectionStatus.CONNECTED, fixture.transport.connectionStatus.value)
++            // A lease release inside the grace does not close it early either.
++            fixture.transport.disconnectIfIdleInBackground()
++            assertTrue(fixture.transport.isConnected)
++
++            fixture.transport.setAppForeground(true)
++            advanceTimeBy(WsTransport.BACKGROUND_IDLE_GRACE_MS * 2)
++            assertTrue(fixture.transport.isConnected)
++            verify(exactly = 0) { socket.cancel() }
++            verify(exactly = 0) { socket.close(any(), any()) }
++        }
++
++    @Test
++    fun idleSocketIsReleasedOnceTheBackgroundGraceRunsOut() =
++        runTest {
++            val fixture = Fixture(this, testJson)
++            val socket = mockk<WebSocket>(relaxed = true)
++            fixture.transport.connectedForTest.set(true)
++            fixture.transport.webSocketForTest = socket
++            fixture.transport.setConnectionStatusForTest(ConnectionStatus.CONNECTED)
++
++            fixture.transport.setAppForeground(false)
++            advanceTimeBy(WsTransport.BACKGROUND_IDLE_GRACE_MS - 1)
++            assertTrue(fixture.transport.isConnected)
++            advanceTimeBy(2)
++            assertFalse(fixture.transport.isConnected)
++            assertEquals(ConnectionStatus.DISCONNECTED, fixture.transport.connectionStatus.value)
++        }
++
++    @Test
++    fun returningToTheAppDialsAtOnceWhenTheSocketDroppedMeanwhile() =
++        runTest {
++            val fixture = Fixture(this, testJson)
++            fixture.transport.intentionalCloseForTest.set(false)
++            fixture.transport.connectedForTest.set(false)
++            // The OS cut the socket while backgrounded; a backoff redial is pending.
++            fixture.transport.setConnectionStatusForTest(ConnectionStatus.RECONNECTING)
++            every { AuthManager.isAutoReconnect() } returns true
++            fixture.transport.setReconnectBackoffForTest(30_000)
++            fixture.transport.scheduleReconnectForTest()
++
++            var opens = 0
++            assertTrue(fixture.transport.reconnectNowOnForeground { opens++ })
++            assertEquals(1, opens)
++            // No second dial from the cancelled backoff.
++            advanceTimeBy(60_000)
++            assertEquals(1, opens)
++            // Nothing to skip while connected.
++            fixture.transport.connectedForTest.set(true)
++            assertFalse(fixture.transport.reconnectNowOnForeground { opens++ })
++            assertEquals(1, opens)
++        }
+ }
+-- 
+2.56.0
+

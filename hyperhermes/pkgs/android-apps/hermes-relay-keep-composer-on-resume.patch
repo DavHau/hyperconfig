@@ -1,0 +1,161 @@
+From fd49997ac289e026ee78f28a2f0421cf5abe3ad1 Mon Sep 17 00:00:00 2001
+From: infra <infra@davhau.com>
+Date: Fri, 20 Nov 2026 16:24:14 +0700
+Subject: [PATCH] fix(chat): keep the composer usable while the gateway socket
+ redials after a quick app switch
+
+Android destroys a backgrounded app's TCP sockets within seconds, so a
+brief app switch drops /api/ws. On return the dashboard probe reports
+GatewayAvailability.Unknown ('signed in, the socket decides'), which
+replaced Ready and disabled the composer (enabled = chatReady) for the
+whole ws-ticket + upgrade + gateway.ready round trip (3-6 s on mobile).
+
+reconcileGatewayAvailability now keeps Ready on the same route while the
+live client is merely idle/redialing with a retryable disposition; a send
+already waits for ensureConnected(), and a failed redial still downgrades
+through the client's own callbacks (Unreachable/SignInRequired/Unsupported).
+---
+ .../connection/UpstreamTransportController.kt | 16 +++++
+ ...streamTransportControllerAuthClientTest.kt | 71 +++++++++++++++++++
+ 2 files changed, 87 insertions(+)
+
+diff --git a/app/src/main/kotlin/com/hermesandroid/relay/viewmodel/connection/UpstreamTransportController.kt b/app/src/main/kotlin/com/hermesandroid/relay/viewmodel/connection/UpstreamTransportController.kt
+index 29a2413e..a3a6b488 100644
+--- a/app/src/main/kotlin/com/hermesandroid/relay/viewmodel/connection/UpstreamTransportController.kt
++++ b/app/src/main/kotlin/com/hermesandroid/relay/viewmodel/connection/UpstreamTransportController.kt
+@@ -12,6 +12,7 @@ import com.hermesandroid.relay.network.upstream.EncryptedDashboardCookieStore
+ import com.hermesandroid.relay.network.upstream.GatewayAvailability
+ import com.hermesandroid.relay.network.upstream.GatewayChatClient
+ import com.hermesandroid.relay.network.upstream.GatewayConnectionState
++import com.hermesandroid.relay.network.upstream.GatewayReconnectDisposition
+ import com.hermesandroid.relay.network.upstream.InMemoryDashboardCookieStore
+ import com.hermesandroid.relay.network.upstream.NativeDashboardAuthClient
+ import com.hermesandroid.relay.network.upstream.clearNativeDashboardTokens
+@@ -26,13 +27,27 @@ import kotlinx.coroutines.flow.MutableStateFlow
+ import kotlinx.coroutines.flow.StateFlow
+ import kotlinx.coroutines.flow.asStateFlow
+ 
++/**
++ * A dashboard probe that finds the session signed in reports [GatewayAvailability.Unknown]
++ * ("the socket decides"). When the chat was already Ready on this route and its socket is
++ * merely down or redialing (Android cuts a backgrounded app's sockets within seconds), that
++ * verdict must not take the composer away for the whole ticket + upgrade round trip after
++ * every quick app switch: the visible chat redials in the background, a send waits for
++ * that dial, and a failed dial still downgrades through the client's own callbacks.
++ */
+ internal fun reconcileGatewayAvailability(
+     current: GatewayAvailability,
+     probed: GatewayAvailability,
+     liveState: GatewayConnectionState?,
+     liveRouteMatches: Boolean = true,
++    liveReconnectDisposition: GatewayReconnectDisposition? = null,
+ ): GatewayAvailability = when {
+     liveRouteMatches && liveState == GatewayConnectionState.Ready -> GatewayAvailability.Ready
++    liveRouteMatches && liveState != null &&
++        current == GatewayAvailability.Ready &&
++        probed == GatewayAvailability.Unknown &&
++        liveReconnectDisposition != null &&
++        liveReconnectDisposition != GatewayReconnectDisposition.Terminal -> GatewayAvailability.Ready
+     current == GatewayAvailability.Unsupported &&
+         (probed == GatewayAvailability.Ready || probed == GatewayAvailability.Unknown) -> current
+     else -> probed
+@@ -428,6 +443,7 @@ class UpstreamTransportController(
+             probed,
+             liveState,
+             liveRouteMatches,
++            live?.third?.reconnectDisposition?.value,
+         )
+     }
+ 
+diff --git a/app/src/test/kotlin/com/hermesandroid/relay/viewmodel/connection/UpstreamTransportControllerAuthClientTest.kt b/app/src/test/kotlin/com/hermesandroid/relay/viewmodel/connection/UpstreamTransportControllerAuthClientTest.kt
+index 594dc81b..7108c090 100644
+--- a/app/src/test/kotlin/com/hermesandroid/relay/viewmodel/connection/UpstreamTransportControllerAuthClientTest.kt
++++ b/app/src/test/kotlin/com/hermesandroid/relay/viewmodel/connection/UpstreamTransportControllerAuthClientTest.kt
+@@ -5,6 +5,7 @@ import com.hermesandroid.relay.network.upstream.DashboardBearerAuth
+ import com.hermesandroid.relay.network.upstream.GatewayAvailability
+ import com.hermesandroid.relay.network.upstream.GatewayChatClient
+ import com.hermesandroid.relay.network.upstream.GatewayConnectionState
++import com.hermesandroid.relay.network.upstream.GatewayReconnectDisposition
+ import com.hermesandroid.relay.network.upstream.InMemoryDashboardCookieStore
+ import com.hermesandroid.relay.network.upstream.NativeDashboardTokenStore
+ import com.hermesandroid.relay.network.upstream.NativeDashboardTokens
+@@ -57,6 +58,76 @@ class UpstreamTransportControllerAuthClientTest {
+         )
+     }
+ 
++    @Test
++    fun signedInProbeKeepsReadyWhileTheSocketRedialsAfterAQuickAppSwitch() {
++        // Android cut the socket in the background; the resume probe finds the
++        // dashboard signed in (Unknown = "the socket decides").
++        for (state in listOf(
++            GatewayConnectionState.Idle,
++            GatewayConnectionState.MintingTicket,
++            GatewayConnectionState.Connecting,
++            GatewayConnectionState.AwaitingReady,
++        )) {
++            assertEquals(
++                state.toString(),
++                GatewayAvailability.Ready,
++                reconcileGatewayAvailability(
++                    current = GatewayAvailability.Ready,
++                    probed = GatewayAvailability.Unknown,
++                    liveState = state,
++                    liveReconnectDisposition = GatewayReconnectDisposition.Retryable,
++                ),
++            )
++        }
++    }
++
++    @Test
++    fun aGatewayThatWasNeverReadyOrGaveUpStillSettlesThroughTheProbe() {
++        assertEquals(
++            GatewayAvailability.Unknown,
++            reconcileGatewayAvailability(
++                current = GatewayAvailability.Unknown,
++                probed = GatewayAvailability.Unknown,
++                liveState = GatewayConnectionState.Idle,
++                liveReconnectDisposition = GatewayReconnectDisposition.Retryable,
++            ),
++        )
++        assertEquals(
++            GatewayAvailability.Unknown,
++            reconcileGatewayAvailability(
++                current = GatewayAvailability.Ready,
++                probed = GatewayAvailability.Unknown,
++                liveState = GatewayConnectionState.Idle,
++                liveReconnectDisposition = GatewayReconnectDisposition.Terminal,
++            ),
++        )
++        // Signed out, unreachable or another route: the probe's verdict wins.
++        for (probed in listOf(
++            GatewayAvailability.SignInRequired,
++            GatewayAvailability.Unreachable,
++        )) {
++            assertEquals(
++                probed,
++                reconcileGatewayAvailability(
++                    current = GatewayAvailability.Ready,
++                    probed = probed,
++                    liveState = GatewayConnectionState.Idle,
++                    liveReconnectDisposition = GatewayReconnectDisposition.Retryable,
++                ),
++            )
++        }
++        assertEquals(
++            GatewayAvailability.Unknown,
++            reconcileGatewayAvailability(
++                current = GatewayAvailability.Ready,
++                probed = GatewayAvailability.Unknown,
++                liveState = GatewayConnectionState.Idle,
++                liveRouteMatches = false,
++                liveReconnectDisposition = GatewayReconnectDisposition.Retryable,
++            ),
++        )
++    }
++
+     @Test
+     fun retiredGatewayClientCallbackCannotChangeCurrentConnection() {
+         val current = mockk<GatewayChatClient>()
+-- 
+2.56.0
+

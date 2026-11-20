@@ -12,6 +12,9 @@ pair and a loopback redirect, the issuer asked for a fresh login
 (prompt=login, which nginx adds), the one-time code redeemed at
 /auth/native/token for bearer tokens, which then call the API and refresh.
 Refused, the callback mints no code.
+
+--gzip: also check nginx's compression (the dashboards module): the session
+list comes back gzipped, the session itself (/api/auth/me) never does.
 """
 
 import base64
@@ -27,7 +30,8 @@ import requests
 args = sys.argv[1:]
 refused = "--refused" in args
 native = "--native" in args
-args = [a for a in args if a not in ("--refused", "--native")]
+check_gzip = "--gzip" in args
+args = [a for a in args if a not in ("--refused", "--native", "--gzip")]
 origin, email, password, groups = args
 s = requests.Session()
 
@@ -127,3 +131,13 @@ assert me["org_id"] == groups, me
 r = s.get(f"{origin}/api/config")
 assert r.status_code == 200, (r.status_code, r.text[:500])
 print("gated /api/config: 200")
+
+if check_gzip:
+    # requests asks for gzip itself; check the raw Content-Encoding.
+    listed = s.get(f"{origin}/api/sessions?limit=50", headers={"Accept-Encoding": "gzip"})
+    assert listed.status_code == 200, (listed.status_code, listed.text[:300])
+    assert listed.headers.get("Content-Encoding") == "gzip", dict(listed.headers)
+    listed.json()
+    me = s.get(f"{origin}/api/auth/me", headers={"Accept-Encoding": "gzip"})
+    assert "Content-Encoding" not in me.headers, dict(me.headers)
+    print("gzip: /api/sessions compressed, /api/auth/me not")

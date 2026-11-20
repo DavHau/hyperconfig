@@ -319,7 +319,7 @@ pkgs.testers.runNixOSTest (
 
       with subtest("the app's sign-in asks the issuer again; bob gets no code"):
           print(client.succeed(
-              "${withRoot} ${python}/bin/python3 ${../local-sso/login.py} --native https://alice.${domain} "
+              "${withRoot} ${python}/bin/python3 ${../local-sso/login.py} --native --gzip https://alice.${domain} "
               "alice@example.test alice-password hermes-alice,hermes"
           ))
           print(client.succeed(
