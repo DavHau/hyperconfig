@@ -62,6 +62,9 @@ let
     # After the three vault-payment patches: isolated world and two-phase
     # writes for every fill script they and upstream send.
     ./patches/hermes-vault-fill-isolated-world.patch
+    # After the isolated-world patch: Dave's rule, cards and addresses fill
+    # on any site after a per-fill confirmation; logins stay origin-bound.
+    ./patches/hermes-vault-payment-any-site.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {

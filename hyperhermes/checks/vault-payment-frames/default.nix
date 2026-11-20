@@ -15,6 +15,12 @@
 # nothing (the shipped #136981 guard does: the control), and a frame or page
 # that moves to the attacker after the check gets nothing. The upstream
 # test files whose fakes the patch extends run too.
+#
+# Any site (hermes-vault-payment-any-site.patch, Dave's rule): a card or
+# address fills on a site it was not saved for only after a confirmation
+# naming that site, asked on every fill and never remembered; declined,
+# nothing is resolved or written; logins and codes on another origin are
+# still refused before anything is resolved.
 {
   pkgs,
   hermesPackage,
@@ -34,7 +40,7 @@ pkgs.runCommand "hyperhermes-vault-payment-frames-check" { nativeBuildInputs = [
   for t in test_browser_vault_origin_guard test_bot_desktop_browser_fence test_browser_vault_page_backend; do
     mkdir -p tests/tools && cp ${hermesSrc}/tests/tools/$t.py tests/tools/ && chmod u+w tests/tools/$t.py
   done
-  for p in hermes-vault-payment-consent-needs-card hermes-vault-payment-iframe-fill hermes-vault-payment-iframe-page-backend hermes-vault-fill-isolated-world; do
+  for p in hermes-vault-payment-consent-needs-card hermes-vault-payment-iframe-fill hermes-vault-payment-iframe-page-backend hermes-vault-fill-isolated-world hermes-vault-payment-any-site; do
     filterdiff -p1 -i 'tests/*' -x 'tests/tools/test_browser_vault.py' ${patches}/$p.patch | patch -p1 -F0
   done
   PYTHONPATH=${pytestPath} ${py} -m pytest -q -p no:cacheprovider \

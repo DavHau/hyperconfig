@@ -160,7 +160,7 @@ def _store(req: dict, label: str, secret: dict) -> str:
     token = set_hermes_home_override(str(home))
     try:
         meta = VaultStore(base_dir=home / "vault").add_item(
-            kind=req["kind"], label=label, secret=secret, origin=req["origin"])
+            kind=req["kind"], label=label, secret=secret, origin=req.get("origin") or None)
     finally:
         reset_hermes_home_override(token)
     return meta.id
@@ -185,10 +185,20 @@ button{{margin-top:1.4rem;padding:.65rem 1.4rem;font-size:1rem;border:0;border-r
 </style></head><body>{body}</body></html>""".encode()
 
 
+def _site_row(req: dict) -> tuple[str, str]:
+    """A login fills only on its exact site; a card or address on any site, each fill confirmed by the
+    user (hermes-vault-payment-any-site.patch), its origin if given only a hint."""
+    e = html.escape
+    if req["kind"] == "login":
+        return ("Filled only on", f"<b>{e(req['origin'])}</b>")
+    hint = f" (mostly {e(req['origin'])})" if req.get("origin") else ""
+    return ("Usable on", f"<b>any site</b>{hint}; you confirm each {'payment' if req['kind'] == 'payment' else 'fill'}")
+
+
 def _summary(req: dict) -> str:
     e = html.escape
     rows = [("What", KIND_NAMES[req["kind"]]), ("Label", e(req["label"])),
-            ("Filled only on", f"<b>{e(req['origin'])}</b>"),
+            _site_row(req),
             ("Link expires", time.strftime("%H:%M %Z", time.localtime(float(req["expires"]))))]
     if req.get("reason"):
         rows.append(("Agent's reason", f"<i>{e(req['reason'])}</i>"))
@@ -199,8 +209,9 @@ def _form(req: dict, error: str = "") -> bytes:
     e = html.escape
     parts = [f"<h1>Add {KIND_NAMES[req['kind']]} to your agent's vault</h1>",
              "<p>Your agent asked for this. What you enter goes straight into its encrypted vault: the "
-             "agent never sees the values, it can only fill them into the site below. Only continue if "
-             "you expected this request.</p>", _summary(req)]
+             "agent never sees the values, it can only fill them into "
+             + ("the site below" if req["kind"] == "login" else "web pages after you confirm each fill")
+             + ". Only continue if you expected this request.</p>", _summary(req)]
     if error:
         parts.append(f'<p class="warn"><b>{e(error)}</b> Nothing was saved.</p>')
     parts.append('<form method="post" autocomplete="on">'

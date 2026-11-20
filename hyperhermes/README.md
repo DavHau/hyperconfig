@@ -185,6 +185,18 @@ page code, on the patched package).
   template. Checks: `vault-payment-frames` (hooked node document, the
   navigation race), `browser` (hooked login page and card frame in a real
   Camofox, the frame hijacked after the check).
+- `hermes-vault-payment-any-site`: Dave's rule. A saved card or address
+  fills on any website (upstream: only on the exact origin it was saved
+  for, so one card had to be saved per shop); every fill asks the user,
+  once and never remembered, naming the page origin, the processor frame
+  origin(s), the origin it was saved for when different (a hint) and the
+  total the page shows (digits and a currency mark only, unverified).
+  Declined: nothing is resolved or written. The confirmed origin is what
+  the two-phase isolated-world write re-asserts. Logins and one-time
+  codes stay exact-origin bound (phishing guard). `browser_vault list`
+  shows cards/addresses as usable on any site. Not upstream (policy).
+  Checks: `vault-payment-frames`, `browser`, `vault-request` (cards and
+  addresses are requested without a site).
 - `hermes-busy-message-yields-command`: a message sent while a foreground
   terminal command runs (with an image too, over the messaging gateway or
   the classic CLI) moves the command to the background, still running,

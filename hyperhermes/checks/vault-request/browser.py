@@ -100,7 +100,7 @@ for header, want in (("Cache-Control", "no-store"), ("X-Frame-Options", "DENY"),
     assert r.headers.get(header) == want, (header, r.headers.get(header))
 assert "default-src 'none'" in r.headers.get("Content-Security-Policy", ""), r.headers
 assert 'autocomplete="cc-number"' in r.text and 'autocomplete="cc-csc"' in r.text, r.text
-assert "https://shop.example.com" in r.text, r.text
+assert "any site" in r.text and "you confirm each payment" in r.text, r.text
 match = re.search(r'name="token" value="([^"]+)"', r.text)
 assert match, r.text
 token = match.group(1)

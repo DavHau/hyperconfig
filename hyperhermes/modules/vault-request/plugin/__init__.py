@@ -22,7 +22,7 @@ SCHEMA = {
     "description": (
         "Ask the user to add a missing card, login or address to your vault on a secure web page, "
         "never in chat. Use it when a task needs an item browser_vault list does not have (e.g. a "
-        "checkout needs a card and the vault has none). Actions: create (kind, label, origin, reason) "
+        "checkout needs a card and the vault has none). Actions: create (kind, label, origin for a login, reason) "
         "returns a one-time link valid 30 minutes: send it to the user with one sentence of what it is "
         "for and wait; wait (request_id) blocks until the user saved it (up to timeout_seconds) and "
         "returns the item's handle for browser_vault fill; status (request_id); cancel (request_id). "
@@ -38,8 +38,9 @@ SCHEMA = {
             "label": {"type": "string",
                       "description": "create: short name shown to the user and in the vault, e.g. 'Card for shop.example.com'."},
             "origin": {"type": "string",
-                       "description": "create: the site the item will be filled on, e.g. https://shop.example.com "
-                                      "(the vault fills it there only)."},
+                       "description": "create: a login's exact site, e.g. https://shop.example.com (the vault "
+                                      "fills it there only). Omit for a card or address: they fill on any "
+                                      "site, the user confirms each fill."},
             "reason": {"type": "string",
                        "description": "create: one line the page shows the user: why you need it."},
             "request_id": {"type": "string", "description": "wait / status / cancel: the id create returned."},
@@ -88,7 +89,8 @@ def _wait(rid: str, timeout: int) -> str:
             break
         time.sleep(1)
     if view["state"] == "done":
-        view["next"] = "Use browser_vault fill with this handle on the item's origin."
+        view["next"] = ("Use browser_vault fill with this handle: a login on its site; a card or address "
+                        "on the checkout page, after the user confirms that fill.")
     elif view["state"] in ("expired", "error", "cancelled"):
         view["next"] = "Create a new request if the user still wants to add it."
     return _ok(**view)

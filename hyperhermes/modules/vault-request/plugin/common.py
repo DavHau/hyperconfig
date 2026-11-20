@@ -120,19 +120,12 @@ def one_line(value: str, limit: int, what: str) -> str:
     return text
 
 
-def create(kind: str, label: str, origin: str, reason: str, hermes_home: str) -> dict:
-    """A new pending request (no secrets in it). Raises RequestError."""
-    from agent.vault_store import VaultError, normalize_origin
-
-    if kind not in KINDS:
-        raise RequestError(f"kind must be one of {', '.join(KINDS)}")
-    label = one_line(label, MAX_LABEL, "label")
-    if not label:
-        raise RequestError("label is required (e.g. 'Visa for shop.example.com')")
+def _clean_origin(origin: str, normalize_origin, VaultError) -> str:
+    """The http(s) origin the page shows, ASCII host. Raises RequestError."""
     try:
         origin = normalize_origin(origin)
     except VaultError as exc:
-        raise RequestError(f"origin: {exc} (the site the item is filled on, e.g. https://shop.example.com)") from None
+        raise RequestError(f"origin: {exc} (a login's site, e.g. https://shop.example.com)") from None
     scheme, _, hostport = origin.partition("://")
     if scheme not in ("https", "http"):
         raise RequestError("origin must be an http(s) origin")
@@ -148,7 +141,24 @@ def create(kind: str, label: str, origin: str, reason: str, hermes_home: str) ->
         raise RequestError("origin: not a valid host name") from None
     if not re.fullmatch(r"[a-z0-9.-]+", host):
         raise RequestError("origin: a host name or IPv4 address")
-    origin = f"{scheme}://{host}{colon}{port}"
+    return f"{scheme}://{host}{colon}{port}"
+
+
+def create(kind: str, label: str, origin: str, reason: str, hermes_home: str) -> dict:
+    """A new pending request (no secrets in it). Raises RequestError. ``origin``: a login's exact site
+    (required); for a card or address optional, a hint (they fill on any site, each fill confirmed)."""
+    from agent.vault_store import VaultError, normalize_origin
+
+    if kind not in KINDS:
+        raise RequestError(f"kind must be one of {', '.join(KINDS)}")
+    label = one_line(label, MAX_LABEL, "label")
+    if not label:
+        raise RequestError("label is required (e.g. 'Visa for shop.example.com')")
+    origin = str(origin or "").strip()
+    if kind == "login" or origin:
+        origin = _clean_origin(origin, normalize_origin, VaultError)
+    # A card or address has no site: the vault fills it on any site, after the user confirms each fill
+    # (hermes-vault-payment-any-site.patch). An origin given for one is kept as a hint only.
     reason = one_line(reason, MAX_REASON, "reason")
     d = request_dir()
     d.mkdir(mode=0o700, exist_ok=True)
@@ -190,7 +200,7 @@ def public_view(req: dict) -> dict:
     """What the agent may see of a request: never the form token."""
     state = state_of(req)
     out = {"request_id": req["id"], "state": state, "kind": req["kind"], "label": req["label"],
-           "origin": req["origin"]}
+           "origin": req.get("origin") or ""}
     if state == "pending":
         out["expires_in_seconds"] = max(0, int(float(req["expires"]) - time.time()))
     if state == "done":

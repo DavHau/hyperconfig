@@ -166,11 +166,17 @@ pkgs.testers.runNixOSTest {
     with subtest("bad requests are refused by the tool"):
         assert not call({"action": "create", "kind": "payment", "label": "x", "origin": "shop.example.com"})["success"]
         assert not call({"action": "create", "kind": "crypto", "label": "x", "origin": "https://a.example"})["success"]
+        # a login stays bound to its exact site: it needs one (cards and addresses fill on any site)
+        assert not call({"action": "create", "kind": "login", "label": "x"})["success"]
+        hint = call({"action": "create", "kind": "address", "label": "Home", "origin": "https://shop.example.com/a"})
+        assert hint["success"] and hint["origin"] == "https://shop.example.com", hint
+        assert call({"action": "cancel", "request_id": hint["request_id"]})["state"] == "cancelled"
         assert not call({"action": "status", "request_id": "..%2f" + "x" * 30})["success"]
 
+    # A card has no site (hermes-vault-payment-any-site.patch): usable anywhere, each fill confirmed.
     req = call({"action": "create", "kind": "payment", "label": "Card for shop.example.com",
-                "origin": "https://shop.example.com:443/checkout", "reason": "checkout needs a card"})
-    assert req["success"] and req["state"] == "pending" and req["origin"] == "https://shop.example.com", req
+                "reason": "checkout needs a card"})
+    assert req["success"] and req["state"] == "pending" and req["origin"] == "", req
     rid = req["request_id"]
     assert req["link"] == f"${origin "alice"}/vault/{rid}", req
     assert "token" not in json.dumps(req), req
@@ -189,7 +195,7 @@ pkgs.testers.runNixOSTest {
         items = tool("--vault")
         print(items)
         assert [(i["id"], i["kind"], i["label"], i["origin"]) for i in items] == [
-            (done["handle"], "payment", "Test card", "https://shop.example.com")], items
+            (done["handle"], "payment", "Test card", None)], items
         assert machine.succeed("stat -c '%U %a' ${aliceHome}/vault/vault.json.enc ${aliceHome}/vault/vault.key").split() == ["alice", "600", "alice", "600"]
         machine.fail("grep -rq 4111111111111111 ${aliceHome}/vault ${hlib.stateDir "alice"}/vault-requests")
         machine.succeed("journalctl -o cat > /tmp/journal && test -s /tmp/journal")

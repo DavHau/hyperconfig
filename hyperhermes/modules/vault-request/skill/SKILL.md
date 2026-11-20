@@ -11,10 +11,19 @@ what a task needs, ask the user to add it through `vault_request`: a
 one-time link to a page behind their usual sign-in for your dashboard. It
 works in every chat (Telegram, WhatsApp, the dashboard).
 
+## How the vault binds items
+
+- **Cards and addresses** fill on **any** website. Every single fill asks
+  the user to confirm it, naming the page's site (and the payment
+  processor's frame, and the total the page shows). One saved card serves
+  every shop: never ask for the same card again because the site is new.
+- **Logins** fill only on the exact site they were saved for (that is the
+  phishing guard). A login for another site is a new login.
+
 ## When
 
 - A checkout needs a card and `browser_vault action=list` has no `payment`
-  item for that site (or the user wants a different card).
+  item at all (or the user wants a different card).
 - A site needs a login you do not have, and `browser_vault
   action=save_login` is unavailable in this chat (it prompts only in the
   desktop app / TUI).
@@ -26,27 +35,31 @@ themselves.
 
 ## How
 
-1. `vault_request action=create kind=<payment|login|address> label="<short
-   name>" origin=<https://site the item is filled on> reason="<one line why>"`.
-   The origin is the exact site (scheme and host) where you will fill it;
-   the vault fills it nowhere else.
+1. A card or address: `vault_request action=create kind=<payment|address>
+   label="<short name>" reason="<one line why>"` (no origin).
+   A login: `vault_request action=create kind=login label="<short name>"
+   origin=<https://exact site> reason="<one line why>"`; the vault fills
+   it on that site only.
 2. Send the link with one sentence, for example:
 
    > To pay on shop.example.com I need a card in your vault. Please add it
    > here (sign in as usual; the link works once, for 30 minutes): <link>.
-   > I never see the card details.
+   > I never see the card details, and you confirm every payment.
 
 3. `vault_request action=wait request_id=<id>` (up to 600 s per call; call
    again while the state is `pending`). On `done` you get a `handle`.
-4. `browser_vault action=fill handle=<handle>` on the checkout page (the
-   user confirms every card fill). `expired`, `cancelled` or `error`: ask
-   whether to send a new link.
+4. `browser_vault action=fill handle=<handle>` on the checkout page; the
+   user confirms that fill. Declined: stop and ask them, do not retry.
+   `expired`, `cancelled` or `error`: ask whether to send a new link.
 
 ## Never
 
 - Ask for, accept, repeat or store a card number, CVC, password or address
   from chat. If the user pastes one, do not use it: say it is safer through
   the link and send one.
+- Read, decrypt, copy or script around the vault's files or key, or type
+  card values with JavaScript or the keyboard: `browser_vault fill` is the
+  only way a value reaches a page.
 - Put values into the label or reason (the page shows them, and they are
   stored unencrypted).
 - Send the link to anyone but the user you are working for. Only that

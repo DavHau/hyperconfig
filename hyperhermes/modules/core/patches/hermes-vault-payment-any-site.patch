@@ -1,0 +1,821 @@
+hermes v0.23.0 (+ the vault-payment and isolated-world patches): a saved
+payment card (and an address) fills only on the exact origin it was saved
+for (`_bound_page_origin`, `snapshot_refusal`); a card saved without an
+origin never fills. One card is used on many shops, so the agent asked for
+the same card again per site, or proposed workarounds around the vault.
+
+Dave's rule (hyperhermes): a saved card or address fills on ANY website,
+and every fill needs the user's explicit confirmation naming the exact
+page origin (and the processor frame origins for hosted card fields, and
+the total the page shows, best effort and marked unverified). Logins and
+their one-time codes stay bound to their exact saved origins: that binding
+is the phishing guard.
+
+Change:
+- tools/browser_vault_context.py `fills_on_any_site(meta)`: payment and
+  address. `snapshot_refusal` accepts such an item if the re-read item is
+  still the same kind.
+- `_bound_page_origin`: for those kinds, the one open tab holding a form
+  of this kind (`focus_page(unique=True)` probes every tab; several such
+  tabs are refused as `ambiguous_page`, since the tool can't tell which one
+  the agent drives), else the current page (a saved origin is only a hint
+  and never picks a tab); only http(s) pages, and https for cards (plain
+  http only on loopback, parsed with urlsplit + ipaddress); returns that
+  page's origin.
+- `browser_vault_fill`: addresses get the confirmation too (previously
+  cards only). The prompt (`_confirm_payment_fill`) names the page origin,
+  the saved-for origin when it differs ("this page is a different site"),
+  the processor frame origins and a page-shown total reduced to a currency
+  mark and digits (description only, marked unverified). The title leads
+  with the site (a long host cut from the left, so its real end shows) and
+  ends with the agent-chosen label and a per-fill tag, so the gateway
+  never merges two fills' prompts into one answer. No remember_key: every
+  fill asks once, nothing carries to the next fill or to another origin;
+  decline, cancel, timeout and headless sessions write nothing.
+- `enter_code` takes only a login's handle (a card handle is refused).
+- The confirmed origin is the one the two-phase write pins (value-free
+  precheck and the in-script `expectedOrigin` assert, in the isolated
+  world); the frame-ancestry checks still require processor frames embedded
+  directly by that page. Unchanged for logins.
+- `browser_vault action=list`: cards and addresses are `available` with
+  `sites: "any site; the user confirms each fill"`; no values.
+- `hermes vault add` asks for an optional hint origin for cards/addresses.
+
+Tests: tests/tools/test_browser_vault_payment_consent.py (unseen site
+fills only after consent naming it, declined/cancel writes nothing, asked
+on every fill, no remember_key, card without origin, amount, non-web page
+refused), test_browser_vault_origin_guard.py (login/code still refused on
+another origin; card/address declined = nothing resolved; accepted =
+write pinned to the confirmed origin), test_vault_payment_iframe.py
+(snapshot must stay a card).
+
+Residual: `delegation.subagent_auto_approve: true` (not set by
+hyperhermes) answers a subagent's prompts "once", which would confirm a
+card fill without the user. The desktop app's vault settings still ask an
+origin for cards (cosmetic).
+
+Not upstream; carried by hyperhermes as Dave's policy.
+
+diff --git a/hermes_cli/vault.py b/hermes_cli/vault.py
+index d9366393..a42a14f4 100644
+--- a/hermes_cli/vault.py
++++ b/hermes_cli/vault.py
+@@ -88,10 +88,10 @@ def _cmd_add(args) -> None:
+             from agent.vault_store import ADDRESS_FIELDS, PAYMENT_FIELDS, REQUIRED_FIELDS
+ 
+             fields = PAYMENT_FIELDS if kind == "payment" else ADDRESS_FIELDS
+-            origin = ""
+-            while not origin:
+-                origin = input("Site origin the item may be filled on (e.g. https://shop.example.com): ").strip()
+-            c.print(f"[dim]{kind} fields are filled only on that origin; card values are read hidden.[/]")
++            # hyperhermes: a card or address is usable on any site; the user confirms every fill, naming
++            # the page's origin. An origin given here is only a hint shown in that confirmation.
++            origin = input("Site it is mostly used on (optional, a hint only; Enter to skip): ").strip() or None
++            c.print(f"[dim]{kind} items fill on any site, after you confirm each fill; card values are read hidden.[/]")
+             secret = {}
+             for field in fields:
+                 required = field in REQUIRED_FIELDS[kind]
+diff --git a/tests/tools/test_browser_vault_origin_guard.py b/tests/tools/test_browser_vault_origin_guard.py
+index 355ee79a..1bfa4318 100644
+--- a/tests/tools/test_browser_vault_origin_guard.py
++++ b/tests/tools/test_browser_vault_origin_guard.py
+@@ -1,4 +1,5 @@
+-"""Every secret-bearing browser_vault fill is bound to the item's saved origins.
++"""Every login fill (password, one-time code, save-then-fill) is bound to the item's saved origins;
++cards and addresses (hyperhermes) fill on any site, after the user confirms that fill.
+ 
+ One behaviour per fill path (password, one-time code, payment card, address, save-then-fill): on a page
+ whose origin is not one the item was saved for, the tool refuses BEFORE the backend resolves any secret
+@@ -50,9 +51,12 @@ class _FakePage:
+     def __init__(self, href: str, controls: list[dict]):
+         self.href, self.controls, self.writes = href, controls, []
+ 
+-    def focus_page(self, origin: str, accept=None) -> dict:
++    def focus_page(self, origin: str, accept=None, **kw) -> dict:
+         return {"ok": bool(origin) and normalize_origin(self.href) == origin, "url": self.href}
+ 
++    def page_child_oopifs(self) -> dict:  # no processor card frames on this page
++        return {"ok": True, "frames": []}
++
+     def evaluate_isolated(self, expression: str, frame_id=None) -> dict:
+         if '"stamps"' in expression or "stamps" in expression and "data-hermes-vault-slot" in expression:
+             # phase 1 of a secret write (no values): still on this origin, the inspection's stamps present
+@@ -174,27 +178,40 @@ class TestFill:
+             out = json.loads(browser_vault_tool.browser_vault_fill(meta.id, task_id="t"))
+         _refused_before_resolution(out, backend, page)
+ 
+-    def test_card_is_refused_before_the_user_is_asked_to_confirm(self, vault):
++    # hyperhermes (Dave's rule): a card or address fills on ANY site, but only after the user confirms that
++    # fill for the page's exact origin; declined, nothing is resolved or written. Logins stay bound (above).
++    @pytest.mark.parametrize("kind, secret, controls", [("payment", _CARD, _CARD_CONTROLS),
++                                                        ("address", _ADDRESS, _ADDRESS_CONTROLS)])
++    def test_card_or_address_on_another_origin_is_declined_before_resolution(self, vault, kind, secret, controls):
+         from tools import browser_vault_tool
+ 
+         store, backend, _ = vault
+-        meta = store.add_item(kind="payment", label="Card", origin="https://shop.example", secret=_CARD)
+-        page = _FakePage("https://elsewhere.example/checkout", _CARD_CONTROLS)
++        meta = store.add_item(kind=kind, label="Item", origin="https://shop.example", secret=secret)
++        page = _FakePage("https://elsewhere.example/checkout", controls)
+         with _on_page(page), \
+-             patch("tools.approval_prompt.request_elicitation_consent", return_value="accept") as consent:
++             patch("tools.approval_prompt.request_elicitation_consent", return_value="decline") as consent:
+             out = json.loads(browser_vault_tool.browser_vault_fill(meta.id, task_id="t"))
+-        _refused_before_resolution(out, backend, page)
+-        consent.assert_not_called()
+-
+-    def test_address_is_not_resolved_for_a_page_on_another_origin(self, vault):
++        assert out["success"] is False and out["error_type"] == "payment_declined"
++        assert backend.resolved == [] and page.writes == []
++        consent.assert_called_once()
++        assert "https://elsewhere.example" in consent.call_args.args[0]
++
++    @pytest.mark.parametrize("kind, secret, controls", [("payment", _CARD, _CARD_CONTROLS),
++                                                        ("address", _ADDRESS, _ADDRESS_CONTROLS)])
++    def test_card_or_address_on_another_origin_fills_after_consent_pinned_to_it(self, vault, kind, secret, controls):
+         from tools import browser_vault_tool
+ 
+         store, backend, _ = vault
+-        meta = store.add_item(kind="address", label="Home", origin="https://shop.example", secret=_ADDRESS)
+-        page = _FakePage("https://elsewhere.example/shipping", _ADDRESS_CONTROLS)
+-        with _on_page(page):
++        meta = store.add_item(kind=kind, label="Item", origin="https://shop.example", secret=secret)
++        page = _FakePage("https://elsewhere.example/checkout", controls)
++        with _on_page(page), \
++             patch("tools.approval_prompt.request_elicitation_consent", return_value="accept") as consent:
+             out = json.loads(browser_vault_tool.browser_vault_fill(meta.id, task_id="t"))
+-        _refused_before_resolution(out, backend, page)
++        assert out["success"] is True and out["origin"] == "https://elsewhere.example"
++        consent.assert_called_once()
++        assert backend.resolved == ["secret"]
++        [write] = page.writes
++        assert '"https://elsewhere.example"' in write  # the in-page assert names the CONFIRMED origin
+ 
+     def test_save_login_fill_is_refused_when_the_page_left_the_saved_origin(self, vault):
+         """save_login stores the login for the page it read, then fills through the same guard: a page that
+diff --git a/tests/tools/test_browser_vault_payment_consent.py b/tests/tools/test_browser_vault_payment_consent.py
+index 31422acb..8fc4b0de 100644
+--- a/tests/tools/test_browser_vault_payment_consent.py
++++ b/tests/tools/test_browser_vault_payment_consent.py
+@@ -1,4 +1,4 @@
+-"""A card fill asks for consent only when the bound page can take the card.
++"""A card fill asks for consent only when the page can take the card (hyperhermes: on any site).
+ 
+ The page is inspected before the prompt (no card number control: refused without asking) and again after
+ it; only the post-consent inspection's controls may be written. The page is a stand-in for the CDP
+@@ -32,11 +32,12 @@ class _FakePage:
+ 
+     def __init__(self, href: str, controls: list[dict]):
+         self.href, self.controls = href, controls
++        self.amounts: list[str] = []
+         self.events: list[str] = []
+         self.nonces: list[str] = []
+         self.writes: list[str] = []
+ 
+-    def focus_page(self, origin: str, accept=None) -> dict:
++    def focus_page(self, origin: str, accept=None, **kw) -> dict:
+         return {"ok": bool(origin) and normalize_origin(self.href) == origin, "url": self.href}
+ 
+     def evaluate_isolated(self, expression: str, frame_id=None) -> dict:
+@@ -48,6 +49,11 @@ class _FakePage:
+     def evaluate_runtime(self, expression: str) -> dict:
+         if expression.strip() == "window.location.href":
+             return {"ok": True, "result": self.href}
++        if expression.startswith("((s) => { const w = (r)"):  # the tab probe: this page holds a card form
++            return {"ok": True, "result": bool(self.controls)}
++        if "hermes-vault-amount" in expression:  # the consent prompt's best-effort total
++            self.events.append("amount")
++            return {"ok": True, "result": json.dumps(self.amounts)}
+         if "expectedOrigin" in expression:  # the fill script (build_fill_js)
+             self.writes.append(expression)
+             return {"ok": True, "result": json.dumps({"filled": 1})}
+@@ -71,11 +77,13 @@ def card(tmp_path):
+         redact.clear_vault_redaction_values()
+ 
+ 
+-def _fill(meta, page: _FakePage, *, decision: str = "accept", controls_after_consent=None) -> dict:
++def _fill(meta, page: _FakePage, *, decision: str = "accept", controls_after_consent=None, prompts=None) -> dict:
+     from tools import browser_vault_tool
+ 
+     def consent(*args, **kwargs):
+         page.events.append("prompt")
++        if prompts is not None:
++            prompts.append((args, kwargs))
+         if controls_after_consent is not None:
+             page.controls = controls_after_consent
+         return decision
+@@ -95,25 +103,129 @@ def test_a_page_without_a_card_number_field_is_refused_without_asking(card, cont
+     assert "prompt" not in page.events and page.writes == []
+ 
+ 
+-def test_a_page_on_another_origin_is_refused_before_inspection_or_asking(card):
++def test_a_card_fills_on_a_site_it_was_not_saved_for_only_after_consent_naming_that_site(card):
++    """hyperhermes (Dave's rule): a saved card fills on ANY site, after a per-fill confirmation naming the exact
++    page origin; the origin it was saved for is a hint in that prompt, and the write is pinned to the
++    confirmed origin."""
+     page = _FakePage("https://elsewhere.example/checkout", _CARD_CONTROLS)
++    prompts = []
++    out = _fill(card, page, prompts=prompts)
++    assert out["success"] is True and out["origin"] == "https://elsewhere.example"
++    assert page.events == ["inspect", "amount", "prompt", "inspect"]
++    [(args, kwargs)] = prompts
++    assert "https://elsewhere.example" in args[0] and "https://shop.example" in args[1]
++    assert "remember_key" not in kwargs  # once only: no session/always choice
++    [write] = page.writes
++    assert '"https://elsewhere.example"' in write and '"https://shop.example"' not in write
++    assert _CARD["card_number"] not in json.dumps(out) and _CARD["cvc"] not in json.dumps(out)
++
++
++def test_a_card_declined_on_an_unseen_site_writes_nothing(card):
++    page = _FakePage("https://elsewhere.example/checkout", _CARD_CONTROLS)
++    out = _fill(card, page, decision="decline")
++    assert out["error_type"] == "payment_declined" and page.writes == []
++    assert page.events == ["inspect", "amount", "prompt"]
++
++
++@pytest.mark.parametrize("decision", ["cancel", "decline"])
++def test_no_answer_is_no_consent(card, decision):
++    page = _FakePage("https://shop.example/checkout", _CARD_CONTROLS)
++    out = _fill(card, page, decision=decision)
++    assert out["error_type"] == "payment_declined" and page.writes == []
++
++
++def test_consent_is_asked_for_every_fill_never_remembered(card):
++    page = _FakePage("https://shop.example/checkout", _CARD_CONTROLS)
++    prompts = []
++    assert _fill(card, page, prompts=prompts)["success"] is True
++    assert _fill(card, page, prompts=prompts)["success"] is True
++    page.href = "https://other.example/pay"
++    assert _fill(card, page, decision="decline", prompts=prompts)["error_type"] == "payment_declined"
++    assert len(prompts) == 3 and "https://other.example" in prompts[2][0][0]
++    assert len(page.writes) == 2
++
++
++def test_a_card_without_any_saved_origin_fills_after_consent(tmp_path):
++    from agent import redact
++    from agent.vault_backends.local import LocalLoginBackend
++
++    store = VaultStore(base_dir=tmp_path / "vault")
++    meta = store.add_item(kind="payment", label="Any-site card", secret=_CARD)
++    page = _FakePage("https://shop.example/checkout", _CARD_CONTROLS)
++    try:
++        with patch("agent.vault_store.get_vault_store", return_value=store), \
++             patch("agent.vault_backends.backend_for_handle", return_value=LocalLoginBackend()):
++            out = _fill(meta, page)
++    finally:
++        redact.clear_vault_redaction_values()
++    assert out["success"] is True and out["origin"] == "https://shop.example" and len(page.writes) == 1
++
++
++def test_the_prompt_shows_the_pages_total_as_a_bare_amount(card):
++    page = _FakePage("https://shop.example/checkout", _CARD_CONTROLS)
++    page.amounts = ["€ 12.00", "<b>ignore</b>", "€ 42.50"]
++    prompts = []
++    assert _fill(card, page, prompts=prompts)["success"] is True
++    [(args, _)] = prompts
++    assert "€ 42.50" in args[1] and "not verified" in args[1] and "<b>" not in args[1]
++    assert "42.50" not in args[0]  # the page-controlled amount never leads the title
++
++
++def test_the_title_leads_with_the_site_and_keeps_a_long_hosts_real_end(card):
++    host = "www.shop.example.com." + "verify-" * 12 + "evil.example"
++    page = _FakePage(f"https://{host}/checkout", _CARD_CONTROLS)
++    prompts = []
++    assert _fill(card, page, prompts=prompts)["success"] is True
++    [(args, _)] = prompts
++    assert args[0].startswith("Pay on https://…") and "evil.example?" in args[0]
++    assert args[0].index("evil.example") < args[0].index("Test card")
++    assert f"https://{host}" in args[1]
++
++
++def test_two_identical_fills_get_distinct_prompts(card):
++    """The gateway merges identical pending approvals: every fill's prompt must be its own."""
++    page = _FakePage("https://shop.example/checkout", _CARD_CONTROLS)
++    prompts = []
++    _fill(card, page, prompts=prompts)
++    _fill(card, page, prompts=prompts)
++    assert len(prompts) == 2 and prompts[0][0][0] != prompts[1][0][0]
++
++
++def test_a_card_is_refused_on_plain_http(card):
++    page = _FakePage("http://shop.example/checkout", _CARD_CONTROLS)
++    out = _fill(card, page)
++    assert out["success"] is False and out["error_type"] == "origin_mismatch" and "https" in out["error"]
++    assert "prompt" not in page.events and page.writes == []
++
++
++def test_enter_code_refuses_a_card_handle(card):
++    from tools import browser_vault_tool
++
++    page = _FakePage("https://evil.example/2fa", _CARD_CONTROLS)
++    with patch.object(browser_vault_tool, "_ensure_supervisor", return_value=page):
++        out = json.loads(browser_vault_tool.browser_vault_enter_code(card.id, task_id="t"))
++    assert out["success"] is False and out["error_type"] == "wrong_kind" and page.writes == []
++
++
++@pytest.mark.parametrize("href", ["chrome://settings", "moz-extension://abc"])
++def test_a_card_is_never_filled_into_a_non_web_page(card, href):
++    page = _FakePage(href + "/x", _CARD_CONTROLS)
+     out = _fill(card, page)
+-    assert out["error_type"] == "origin_mismatch"
+-    assert page.events == [] and page.writes == []
++    assert out["success"] is False and page.writes == [] and "prompt" not in page.events
+ 
+ 
+ def test_a_declined_card_is_not_written(card):
+     page = _FakePage("https://shop.example/checkout", _CARD_CONTROLS)
+     out = _fill(card, page, decision="decline")
+     assert out["error_type"] == "payment_declined"
+-    assert page.events == ["inspect", "prompt"] and page.writes == []
++    assert page.events == ["inspect", "amount", "prompt"] and page.writes == []
+ 
+ 
+ def test_an_approved_card_is_written_to_the_post_consent_inspection_only(card):
+     page = _FakePage("https://shop.example/checkout", _CARD_CONTROLS)
+     out = _fill(card, page)
+     assert out["success"] is True and out["filled_fields"] == 1
+-    assert page.events == ["inspect", "prompt", "inspect"]
++    assert page.events == ["inspect", "amount", "prompt", "inspect"]
+     first, second = page.nonces
+     assert first != second
+     [write] = page.writes
+@@ -124,4 +236,37 @@ def test_a_card_form_removed_while_the_prompt_was_open_is_not_written(card):
+     page = _FakePage("https://shop.example/checkout", _CARD_CONTROLS)
+     out = _fill(card, page, controls_after_consent=[])
+     assert out["error_type"] == "no_payment_fields"
+-    assert page.events == ["inspect", "prompt", "inspect"] and page.writes == []
++    assert page.events == ["inspect", "amount", "prompt", "inspect"] and page.writes == []
++
++
++def test_list_shows_cards_as_usable_on_any_site_without_values(card, tmp_path):
++    from tools import browser_vault_tool
++
++    from agent.vault_backends.local import LocalLoginBackend
++
++    with patch("agent.vault_backends.enabled_backends", return_value=[LocalLoginBackend()]):
++        raw = browser_vault_tool.browser_vault_list()
++    [item] = json.loads(raw)["items"]
++    assert item["kind"] == "payment" and item["available"] is True and "any site" in item["sites"]
++    for value in _CARD.values():  # short values (CVC, month) could match a random handle or a timestamp
++        assert len(value) < 5 or value not in raw
++    assert '"cvc"' not in raw and '"secret"' not in raw
++
++
++def test_several_tabs_with_a_card_form_are_refused_without_asking(card):
++    """The tool cannot tell which checkout the agent drives: it must not guess and name the wrong site."""
++    page = _FakePage("https://shop.example/checkout", _CARD_CONTROLS)
++    page.focus_page = lambda origin, accept=None, **kw: {
++        "ok": False, "error": "several", "ambiguous": ["https://shop.example/checkout", "https://other.example/pay"]}
++    out = _fill(card, page)
++    assert out["success"] is False and out["error_type"] == "ambiguous_page"
++    assert "other.example" in out["error"] and "prompt" not in page.events and page.writes == []
++
++
++@pytest.mark.parametrize("url,loop", [
++    ("http://localhost:8080/x", True), ("http://a.localhost/", True), ("http://127.0.0.2/", True),
++    ("http://[::1]:8080/x", True), ("http://[::1]/", True), ("http://[::1:8080]/", False),
++    ("http://localhost.evil.com/", False), ("http://10.0.0.1/", False), ("http://shop.example/", False)])
++def test_loopback_is_parsed_not_split(url, loop):
++    from tools.browser_vault_tool import _is_loopback_origin
++    assert _is_loopback_origin(url) is loop
+diff --git a/tests/tools/test_vault_fill_hostile_page.py b/tests/tools/test_vault_fill_hostile_page.py
+index 71056867..f2ceca51 100644
+--- a/tests/tools/test_vault_fill_hostile_page.py
++++ b/tests/tools/test_vault_fill_hostile_page.py
+@@ -204,7 +204,7 @@ class _HostileSupervisor:
+         self.calls: list[tuple[str, str | None, str]] = []
+         self.checked: set = set()
+ 
+-    def focus_page(self, origin, accept=None):
++    def focus_page(self, origin, accept=None, **kw):
+         return {"ok": origin == PAGE, "url": PAGE + "/checkout"}
+ 
+     def page_child_oopifs(self):
+diff --git a/tests/tools/test_vault_payment_iframe.py b/tests/tools/test_vault_payment_iframe.py
+index 7cfa4cdd..920e0591 100644
+--- a/tests/tools/test_vault_payment_iframe.py
++++ b/tests/tools/test_vault_payment_iframe.py
+@@ -232,12 +232,15 @@ def test_evaluate_runtime_frame_id_uses_the_iframe_session():
+     assert seen == ["frame-session"]
+ 
+ 
+-@pytest.mark.parametrize("page_origin, snapshot_origin, succeeds", [
+-    (PAGE, PAGE, True),
+-    ("https://evil.test", PAGE, False),
+-    (PAGE, "https://evil.test", False),
++# hyperhermes: a card fills on any site after consent, so a page or snapshot origin other than the saved one
++# no longer refuses (the frame and ancestry checks still do, below); the snapshot must still be a card.
++@pytest.mark.parametrize("page_origin, snapshot_origin, snapshot_kind, succeeds", [
++    (PAGE, PAGE, "payment", True),
++    ("https://evil.test", PAGE, "payment", True),
++    (PAGE, "https://evil.test", "payment", True),
++    (PAGE, PAGE, "login", False),
+ ])
+-def test_payment_frame_fill_obeys_backend_context_and_snapshot(store, page_origin, snapshot_origin, succeeds):
++def test_payment_frame_fill_obeys_backend_context_and_snapshot(store, page_origin, snapshot_origin, snapshot_kind, succeeds):
+     from dataclasses import replace
+     from agent.vault_backends.local import LocalLoginBackend
+ 
+@@ -259,7 +262,7 @@ def test_payment_frame_fill_obeys_backend_context_and_snapshot(store, page_origi
+ 
+         def get_meta(self, handle):
+             if self.active:
+-                return replace(meta, origin=snapshot_origin, allowed_origins=[snapshot_origin])
++                return replace(meta, origin=snapshot_origin, allowed_origins=[snapshot_origin], kind=snapshot_kind)
+             return meta
+ 
+         def resolve_secret(self, handle):
+diff --git a/tools/browser_supervisor.py b/tools/browser_supervisor.py
+index c3da64d6..d6955f75 100644
+--- a/tools/browser_supervisor.py
++++ b/tools/browser_supervisor.py
+@@ -274,12 +274,15 @@ class CDPSupervisor(DialogSupervisionMixin, FrameTrackingMixin):
+             value = result_obj.get("description") or result_obj.get("unserializableValue")
+         return {"ok": True, "result": value, "result_type": result_type}
+ 
+-    def focus_page(self, origin: str, *, accept: Optional[str] = None, timeout: float = 10.0) -> dict[str, Any]:
++    def focus_page(self, origin: str, *, accept: Optional[str] = None, unique: bool = False,
++                   timeout: float = 10.0) -> dict[str, Any]:
+         """Re-attach the supervisor's page session to an open page target on ``origin``
+         (``scheme://host[:port]``). The initial attach picks the FIRST page target, but tools
+         that open their own tabs (browser_exec) put the login form somewhere else. With
+         ``accept`` (a JS expression) the first same-origin tab where it evaluates truthy wins,
+-        so a login and a checkout tab on one site resolve to the right one. Returns
++        so a login and a checkout tab on one site resolve to the right one. With ``unique`` (hyperhermes,
++        card/address fills on any site) every candidate is probed and more than one match is a failure
++        carrying ``ambiguous`` (their URLs): the tool cannot tell which tab the agent drives. Returns
+         ``{"ok": True, "url"}`` or ``{"ok": False, "error"}``; on failure the previous session stays."""
+         loop = self._loop
+         if loop is None or not loop.is_running():
+@@ -305,6 +308,7 @@ class CDPSupervisor(DialogSupervisionMixin, FrameTrackingMixin):
+                         candidates.append((t["targetId"], url))
+                 except Exception:
+                     continue
++            matches: list[tuple[str, str]] = []
+             for target_id, url in candidates:
+                 sid = await _attach(target_id)
+                 if accept:
+@@ -313,6 +317,16 @@ class CDPSupervisor(DialogSupervisionMixin, FrameTrackingMixin):
+                     if not probe.get("result", {}).get("result", {}).get("value"):
+                         await self._cdp("Target.detachFromTarget", {"sessionId": sid}, timeout=timeout)
+                         continue
++                matches.append((sid, url))
++                if not unique:
++                    break
++            if len(matches) > 1:
++                for sid, _ in matches:
++                    await self._cdp("Target.detachFromTarget", {"sessionId": sid}, timeout=timeout)
++                return {"ok": False, "error": "several open pages hold the expected form",
++                        "ambiguous": [u for _, u in matches]}
++            if matches:
++                sid, url = matches[0]
+                 with self._state_lock:
+                     self._page_session_id = sid
+                 return {"ok": True, "url": url}
+diff --git a/tools/browser_vault_context.py b/tools/browser_vault_context.py
+index c676a1e3..78c3b9e8 100644
+--- a/tools/browser_vault_context.py
++++ b/tools/browser_vault_context.py
+@@ -32,8 +32,16 @@ def saved_origins(meta) -> list[str]:
+     return list(meta.allowed_origins) or ([str(meta.origin)] if meta.origin else [])
+ 
+ 
++def fills_on_any_site(meta) -> bool:
++    """hyperhermes: cards and addresses fill on any website, each fill after the user's confirmation
++    naming the page's origin; a saved origin is only a hint shown in that prompt. Logins (and their
++    one-time codes) stay bound to their exact saved origins: that binding is the phishing guard."""
++    return getattr(meta, "kind", None) in ("payment", "address")
++
++
+ def snapshot_refusal(backend, handle, meta, page_origin):
+-    """Inside ``fill_context``: ``None`` when the item still binds ``page_origin``, else the refusal.
++    """Inside ``fill_context``: ``None`` when the item still binds ``page_origin`` (a card or address:
++    is still the same kind of item), else the refusal.
+     Only a backend with its own context is re-read (the built-in managers' metadata read is a full
+     listing, and their default context freezes nothing)."""
+     from agent.vault_backends.base import LoginBackend
+@@ -41,7 +49,7 @@ def snapshot_refusal(backend, handle, meta, page_origin):
+     if type(backend).fill_context is LoginBackend.fill_context:
+         return None
+     fresh = backend.get_meta(handle)
+-    if fresh is not None and fresh.kind == meta.kind and page_origin in saved_origins(fresh):
++    if fresh is not None and fresh.kind == meta.kind and (fills_on_any_site(fresh) or page_origin in saved_origins(fresh)):
+         return None
+     return {"success": False, "error_type": "origin_mismatch",
+             "error": (f"Refused: the saved item changed before the fill and no longer binds {page_origin}. "
+diff --git a/tools/browser_vault_tool.py b/tools/browser_vault_tool.py
+index b55c4254..c82a8bd0 100644
+--- a/tools/browser_vault_tool.py
++++ b/tools/browser_vault_tool.py
+@@ -10,8 +10,10 @@ paid per request) and available wherever a browser is. Its actions:
+ - ``fill``  → server-side fill of the CURRENT page from a vault
+   handle: the password field for logins, card fields for payment items (after
+   the user confirms), address fields for address items. The secret is
+-  resolved locally, the page origin must EXACTLY match the item's bound
+-  origin (pre-checked AND re-asserted synchronously inside the fill script),
++  resolved locally; for a login the page origin must EXACTLY match the item's bound
++  origin, a card or address (hyperhermes) fills on any http(s) site after the user
++  confirms that fill for the page's origin; either origin is pre-checked AND
++  re-asserted synchronously inside the fill script,
+   the field is chosen by the ported login-control classifier, injection runs
+   exclusively over the supervisor CDP WebSocket (never argv) — or, for a plugin browser with no CDP
+   endpoint, through its registered ``BrowserPageBackend`` (Camofox's REST evaluate) — and the tool
+@@ -39,7 +41,7 @@ import logging
+ import string
+ from typing import Any, Dict, NamedTuple, Optional
+ 
+-from tools.browser_vault_context import plugin_errors_as_refusal, saved_origins, snapshot_refusal, write_backend_code
++from tools.browser_vault_context import fills_on_any_site, plugin_errors_as_refusal, saved_origins, snapshot_refusal, write_backend_code
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -248,12 +250,17 @@ def _parse_json_result(raw: Any) -> Any:
+     return raw
+ 
+ 
+-def _current_page_origin(task_id: str) -> Optional[str]:
++def _current_page_href(task_id: str) -> Optional[str]:
+     res = _eval_js(task_id, "window.location.href")
+     if not res.get("success"):
+         return None
+     href = str(res.get("result") or "").strip().strip('"').strip("'")
+-    if not href or href == "about:blank":
++    return None if not href or href == "about:blank" else href
++
++
++def _current_page_origin(task_id: str) -> Optional[str]:
++    href = _current_page_href(task_id)
++    if not href:
+         return None
+     try:
+         from agent.vault_store import normalize_origin
+@@ -303,11 +310,13 @@ _TAB_PROBES = {
+ }
+ 
+ 
+-def _focus_bound_origin(task_id: str, origin: str, kind: str) -> Optional[str]:
++def _focus_bound_origin(task_id: str, origin: str, kind: str, *, unique: bool = False) -> Optional[str] | dict[str, Any]:
+     """Point the supervisor's page session at the open tab on ``origin`` that holds a ``kind`` form
+     (browser_exec sessions open their own tabs, so the tab the supervisor attached to first is rarely the
+     login page). Returns the origin when a tab was focused, else None (caller falls back to the current page).
+-    A plugin page backend's current page IS the tab the agent drove, so there is nothing to focus."""
++    A plugin page backend's current page IS the tab the agent drove, so there is nothing to focus.
++    hyperhermes: with ``unique`` several open tabs holding such a form are a refusal (returned as a dict):
++    the tool cannot tell which one the agent drives, and the confirmation must name the right site."""
+     if _page_backend(task_id) is not None:
+         return None
+     try:
+@@ -316,10 +325,26 @@ def _focus_bound_origin(task_id: str, origin: str, kind: str) -> Optional[str]:
+         supervisor = None
+     if supervisor is None:
+         return None
+-    focused = supervisor.focus_page(origin, accept=_TAB_PROBES.get(kind))
++    if unique:
++        focused = supervisor.focus_page(origin, accept=_TAB_PROBES.get(kind), unique=True)
++    else:
++        focused = supervisor.focus_page(origin, accept=_TAB_PROBES.get(kind))
++    if not focused.get("ok") and focused.get("ambiguous"):
++        sites = ", ".join(sorted({_safe_origin(u) for u in focused["ambiguous"]}))
++        return {"success": False, "error_type": "ambiguous_page",
++                "error": (f"Refused: several open tabs hold a {kind} form ({sites}); close the ones you are "
++                          "not checking out on, then call fill again.")}
+     return (origin or focused.get("url")) if focused.get("ok") else None
+ 
+ 
++def _safe_origin(url: str) -> str:
++    try:
++        from agent.vault_store import normalize_origin
++        return normalize_origin(url)
++    except Exception:  # health: allow BLE001 -- a label only
++        return "?"
++
++
+ def _frame_eval(task_id: str, frame_id: str, expression: str) -> dict[str, Any]:
+     """Evaluate NON-SECRET JS inside one iframe: a plugin page backend's frame, else an out-of-process
+     iframe over the supervisor."""
+@@ -451,13 +476,59 @@ def _precheck_failure(evaluate, check: _WriteCheck) -> Optional[dict[str, Any]]:
+     return None
+ 
+ 
++def _is_loopback_origin(url: str) -> bool:
++    """Whether ``url``'s host is loopback: ``localhost``/``*.localhost`` or a loopback IP (``ipaddress``;
++    IPv6 parsed from its brackets by ``urlsplit``, never by splitting on ':')."""
++    import ipaddress
++    from urllib.parse import urlsplit
++    try:
++        host = urlsplit(url).hostname or ""
++    except ValueError:
++        return False
++    if host == "localhost" or host.endswith(".localhost"):
++        return True
++    try:
++        return ipaddress.ip_address(host).is_loopback
++    except ValueError:
++        return False
++
++
+ def _bound_page_origin(task_id: str, meta: Any, probe_kind: str) -> str | dict[str, Any]:
+     """The origin guard every fill of a stored secret (password, one-time code, card, address) passes
+     BEFORE the backend resolves any value: the page origin when it is one of the item's saved origins,
+-    else the refusal to return. Manager items may bind several websites; matching is exact and
++    else the refusal to return. hyperhermes: a card or address is not bound (``fills_on_any_site``): the
++    page's origin is returned for the caller's per-fill confirmation, which names it. Manager items may bind several websites; matching is exact and
+     nothing wildcard or parent-domain is inferred. The caller hands the returned origin to ``build_fill_js``,
+     which re-asserts it inside the page immediately before the write (navigation between check and fill)."""
+     allowed = saved_origins(meta)
++    if fills_on_any_site(meta):
++        # hyperhermes: a card or address fills on any site, after the per-fill confirmation that names
++        # the origin returned here (the fill script then re-asserts exactly that confirmed origin). A
++        # saved origin is only a hint, never a reason to pick a tab.
++        # Every open tab is probed: exactly one holding a form of this kind is the page; several are a
++        # refusal (which one the agent drives is unknown); none (or a plugin page backend, whose current
++        # page is the driven tab) falls back to the current page.
++        focused = _focus_bound_origin(task_id, "", probe_kind, unique=True)
++        if isinstance(focused, dict):
++            return focused
++        page_url = focused or _current_page_href(task_id)
++        page_origin = None
++        if page_url:
++            from agent.vault_store import VaultError, normalize_origin
++            try:
++                page_origin = normalize_origin(page_url)
++            except VaultError:
++                page_origin = None
++        if not page_origin:
++            return {"success": False,
++                    "error": "Could not determine the current page origin. Navigate to the checkout page first."}
++        if not page_origin.startswith(("https://", "http://")):
++            return {"success": False, "error_type": "origin_mismatch",
++                    "error": f"Refused: {meta.kind} items are filled only on http(s) pages (this page is {page_origin})."}
++        if meta.kind == "payment" and page_origin.startswith("http://") and not _is_loopback_origin(page_url):
++            return {"success": False, "error_type": "origin_mismatch",
++                    "error": f"Refused: a card is filled only on https pages (this page is {page_origin})."}
++        return page_origin
+     if not allowed:
+         return {"success": False, "error_type": "no_origin",
+                 "error": f"Vault item {meta.id!r} has no bound origin; {meta.kind} items are filled only on "
+@@ -502,6 +573,10 @@ def browser_vault_list() -> str:
+         for meta in metas:
+             entry = {"handle": meta.id, "backend": backend.name, "label": meta.label, "kind": meta.kind,
+                      "origin": meta.origin, "available": meta.kind == "login" or bool(meta.origin)}
++            if fills_on_any_site(meta):
++                # hyperhermes: usable on any site; the user confirms every fill (the origin is a hint).
++                entry["available"] = True
++                entry["sites"] = "any site; the user confirms each fill"
+             if len(meta.allowed_origins) > 1:
+                 entry["allowed_origins"] = list(meta.allowed_origins)
+             if meta.has_otp or backend.needs_unlock:
+@@ -720,6 +795,9 @@ def browser_vault_enter_code(handle: str = "", task_id: Optional[str] = None) ->
+ 
+     effective_task_id = task_id or "default"
+     backend, meta = _saved_login(handle)
++    if meta is not None and meta.kind != "login":
++        return json.dumps({"success": False, "error_type": "wrong_kind",
++                           "error": "enter_code takes a login's handle (or none, to ask the user for the code)."})
+     if meta is not None:
+         bound = _bound_page_origin(effective_task_id, meta, "otp")
+         if isinstance(bound, dict):
+@@ -821,17 +899,22 @@ def browser_vault_fill(handle: str, task_id: Optional[str] = None) -> str:
+     page_origin = _bound_page_origin(effective_task_id, meta, meta.kind)
+     if isinstance(page_origin, dict):
+         return json.dumps(page_origin)
+-    if meta.kind == "payment":
+-        # Ask only when this page can take the card: a checkout whose card inputs sit in a processor's
++    if meta.kind in ("payment", "address"):
++        # Ask only when this page can take the item: a checkout whose card inputs sit in a processor's
+         # cross-origin frame would otherwise prompt for a fill that cannot happen. The page is inspected
+-        # again after consent and only that inspection's controls are written.
++        # again after consent and only that inspection's controls are written. hyperhermes: cards and
++        # addresses fill on any site, so every fill is confirmed (once, never remembered) naming the
++        # page origin the write is then pinned to and the processor frame origin(s).
+         inspected = _inspect_page(effective_task_id, meta.kind, page_origin)
+         if isinstance(inspected, dict):
+             return json.dumps(inspected)
+         consented_frames = sorted({t[1] for t in inspected[2]})
+-        if not _confirm_payment_fill(meta.label, page_origin, consented_frames):
++        amount = _page_amount(effective_task_id) if meta.kind == "payment" else None
++        if not _confirm_payment_fill(meta.label, page_origin, consented_frames, kind=meta.kind,
++                                     saved_for=saved_origins(meta), amount=amount):
+             return json.dumps({"success": False, "error_type": "payment_declined",
+-                               "error": "The user did not confirm filling this payment card. Do not retry; ask them instead."})
++                               "error": (f"The user did not confirm filling this {'payment card' if meta.kind == 'payment' else 'address'}. "
++                                         "Nothing was written. Do not retry; ask them instead.")})
+ 
+     with backend.fill_context():
+         refusal = snapshot_refusal(backend, handle, meta, page_origin)
+@@ -1095,22 +1178,96 @@ def _run_fill_writes(task_id: str, writes: list[tuple[str, Optional[str], str, s
+     return filled, None
+ 
+ 
+-def _confirm_payment_fill(label: str, origin: str, frame_origins: Optional[list[str]] = None) -> bool:
+-    """Human confirmation before a card is written into a page: a prompt injection that reaches a checkout
+-    must not be able to spend. Routes through the approval surface of the active session (gateway button
+-    round-trip or CLI panel); headless sessions cannot confirm and the fill is refused. Names the payment
+-    processor frame origin(s) that will receive card fields, when any."""
++def _confirm_payment_fill(label: str, origin: str, frame_origins: Optional[list[str]] = None, *, kind: str = "payment",
++                          saved_for: Optional[list[str]] = None, amount: Optional[str] = None) -> bool:
++    """Human confirmation before a card (or address) is written into a page: a prompt injection that reaches
++    a checkout must not be able to spend. Routes through the approval surface of the active session (gateway
++    button round-trip or CLI panel); headless sessions cannot confirm and the fill is refused. Names the payment
++    processor frame origin(s) that will receive card fields, when any.
++
++    hyperhermes: a card or address fills on any site, so this prompt is the only gate: it names the exact page
++    origin the write is pinned to, the origin the item was saved for when that differs (a hint only), and the
++    amount the page shows (best effort, page-controlled, never trusted). One call, one fill: no remember_key,
++    so no "session"/"always" choice exists and no consent carries to another fill or origin."""
+     from tools.approval_prompt import request_elicitation_consent
+ 
+     frames = (" Card fields go into the payment processor's frame from " + ", ".join(frame_origins) + "."
+               if frame_origins else "")
++    import secrets as _secrets
++
++    hint = ""
++    others = [o for o in (saved_for or []) if o != origin]
++    if others:
++        hint = f" It was saved for {', '.join(others)}; this page is a different site."
++    shown = f" The page says the total is {amount} (read from the page, not verified)." if amount else ""
++    # The site leads the title, its host cut from the left so a long host's real end stays visible; the
++    # agent-chosen label comes last. A per-fill tag keeps two identical prompts from being merged into one
++    # answer (the gateway coalesces identical pending approvals).
++    site = _site_for_title(origin)
++    tag = f" [fill {_secrets.token_hex(2)}]"
++    if kind == "address":
++        return request_elicitation_consent(
++            f"Give {site} your address? ({_one_line(label)}){tag}",
++            f"The agent wants to enter your saved address into a form on {origin}." + hint
++            + " Approve only if you want to give this site your address.",
++            surface="vault-payment", title="Confirm address fill?") == "accept"
+     return request_elicitation_consent(
+-        f"Fill payment card '{label}' on {origin}",
+-        "The agent wants to enter your saved card details into this checkout page." + frames + " The card number "
+-        "and CVC never enter the conversation. Approve only if you intend to pay here.",
++        f"Pay on {site}? Card: {_one_line(label)}{tag}",
++        f"The agent wants to enter your saved card details into the checkout on {origin}." + frames + hint + shown
++        + " The card number and CVC never enter the conversation. Approve only if you intend to pay this site.",
+         surface="vault-payment", title="Confirm payment card fill?") == "accept"
+ 
+ 
++def _site_for_title(origin: str, limit: int = 60) -> str:
++    """``origin`` for a prompt title: the scheme and the last ``limit`` characters of ``host[:port]`` (a
++    host like ``www.shop.com.verify.evil.example`` must show its real end). A very long host can cut a
++    non-default port off the title; the description always names the full origin."""
++    scheme, _, hostport = origin.partition("://")
++    return f"{scheme}://" + (hostport if len(hostport) <= limit else "…" + hostport[-limit:])
++
++
++def _one_line(text: str, limit: int = 40) -> str:
++    text = " ".join(str(text or "").split())
++    return repr(text if len(text) <= limit else text[:limit] + "…")
++
++
++# The amount a checkout shows, for the consent prompt only: page-controlled and never trusted, so it is
++# reduced to a currency mark and digits (no page text reaches the prompt) and dropped when ambiguous.
++_AMOUNT_JS = r"""(() => { /* hermes-vault-amount */
++  "use strict";
++  const text = (document.body && document.body.innerText || "").slice(0, 200000);
++  const re = /(?:total|amount|to pay|pay now|order total|gesamt|summe|betrag)[^\n0-9€$£¥]{0,40}((?:[€$£¥]|EUR|USD|GBP|CHF|THB|฿)?\s?[0-9][0-9.,' ]{0,14}[0-9](?:\s?(?:[€$£¥]|EUR|USD|GBP|CHF|THB|฿))?)/gi;
++  const found = [];
++  let m;
++  while ((m = re.exec(text)) && found.length < 20) found.push(m[1].trim());
++  return JSON.stringify(found);
++})()"""
++
++_AMOUNT_RE = None
++
++
++def _page_amount(task_id: str) -> Optional[str]:
++    """Best effort: the checkout's total as the page shows it (``"€ 42.00"``), or None. The last match of a
++    total-like label wins (order summaries list the grand total last). Never trusted, never a gate."""
++    import re
++
++    global _AMOUNT_RE
++    if _AMOUNT_RE is None:
++        _AMOUNT_RE = re.compile(r"^(?:[€$£¥฿]|EUR|USD|GBP|CHF|THB)?\s?[0-9][0-9.,' ]{0,14}[0-9](?:\s?(?:[€$£¥฿]|EUR|USD|GBP|CHF|THB))?$")
++    try:
++        res = _eval_js(task_id, _AMOUNT_JS)
++    except Exception:  # health: allow BLE001 -- no amount is fine
++        return None
++    found = _parse_json_result(res.get("result")) if res.get("success") else None
++    if isinstance(found, str):
++        found = _parse_json_result(found)
++    if not isinstance(found, list):
++        return None
++    good = [s for s in (str(x)[:24] for x in found)
++            if _AMOUNT_RE.fullmatch(s) and any(m in s for m in ("€", "$", "£", "¥", "฿", "EUR", "USD", "GBP", "CHF", "THB"))]
++    return re.sub(r"\s+", " ", good[-1]) if good else None
++
++
+ # ---------------------------------------------------------------------------
+ # Schemas + registration
+ # ---------------------------------------------------------------------------
+@@ -1122,8 +1279,8 @@ BROWSER_VAULT_SCHEMA = {
+         "enter the conversation. "
+         "Actions: list (call first: saved logins/cards/addresses as handles; logins carry the identifier you type "
+         "yourself with the browser's input tool; locked password managers appear under `locked`); fill (handle: "
+-        "the password for a login, card fields after the user confirms, address fields; refused unless the page "
+-        "origin matches the item); create_login (identifier: signing up for a new account or a choose/set-password "
++        "the password for a login, refused unless the page origin is the login's saved site; card or address fields "
++        "on any site, each fill after the user confirms it for this page); create_login (identifier: signing up for a new account or a choose/set-password "
+         "step: Hermes generates a strong password, saves it with the identifier for this origin and fills the "
+         "password and confirmation fields; use it instead of asking the user for a password); save_login (only for "
+         "an account the user already has and nothing is saved for this site: the user enters it in a masked prompt, "

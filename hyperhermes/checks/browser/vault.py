@@ -191,11 +191,21 @@ def card(site, processor):
               and card_value("expiry") == "12/34", "the processor frame holds the card")
         check(CARD["cvc"] not in last and "4242" not in last, "the result carries no card value")
 
+        # Dave's rule (hermes-vault-payment-any-site.patch): the card fills on ANY site, each fill after a
+        # confirmation naming that site's origin; declined, nothing is written.
         other = site.replace("127.0.0.1", "localhost")
         check(call("browser_navigate", url=other + "/checkout").get("success") is True,
-              "the same checkout on another origin loads")
+              "the same checkout on a site the card was not saved for loads")
+        with patch("tools.approval_prompt.request_elicitation_consent", side_effect=lambda *a, **k: asked.append(a[0]) or "decline"):
+            out = call("browser_vault", action="fill", handle=meta.id)
+        check(out.get("error_type") == "payment_declined" and len(asked) == 2 and other in asked[1],
+              "on another site the fill asks, naming that site, and stops when declined")
+        check(card_value("number") == "" and card_value("cvc") == "", "and writes nothing")
         out = call("browser_vault", action="fill", handle=meta.id)
-        check(out.get("error_type") == "origin_mismatch" and len(asked) == 1, "the fill refuses another origin")
+        check(out.get("success") is True and out.get("origin") == other and out.get("frames") == [processor]
+              and len(asked) == 3 and other in asked[2], "confirmed, the card fills on that site, asked again")
+        check(card_value("number") == CARD["card_number"], "the processor frame there holds the card")
+        check(CARD["cvc"] not in last and "4242" not in last, "the result carries no card value")
 
     requests.delete(f"{bc.get_camofox_url()}/sessions/{bc.get_session(T)['user_id']}",
                     headers=bc._auth_headers(), timeout=30)
