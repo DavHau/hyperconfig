@@ -27,6 +27,7 @@ in
     ../../modules/nixos/zfs-remote-unlock
     ../../modules/nixos/tang-server.nix
     ./disko.nix
+    ./self-heal.nix
     ../../modules/nixos/vault-nfs-client.nix
     ../../modules/nixos/users/hsjobeki-vault.nix
     ./hermes-agents.nix

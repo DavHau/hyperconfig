@@ -8,7 +8,7 @@ generator modules/nixos/pi-chat-openrouter.nix openrouter
 generator modules/nixos/porkbun-records/default.nix porkbun
 generator modules/nixos/storagebox.nix storagebox
 generator modules/nixos/tang-server.nix tang
-machine-loc machines/som/configuration.nix 626
+machine-loc machines/som/configuration.nix 627
 sshkey machines/edi/users.nix 32c38694c56c
 sshkey machines/edi/users.nix 58db6831a050
 sshkey machines/edi/users.nix a3c4af270668

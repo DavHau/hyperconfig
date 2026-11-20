@@ -156,4 +156,9 @@
   '';
 
   system.stateVersion = "19.03"; # Did you read the comment?
+
+  # sp5100_tco (AMD FCH) has no suspend hooks: in s2idle nobody pings it and
+  # it could reset amy mid-sleep. Off until a suspend test on amy proves the
+  # firmware stops it (modules/nixos/self-heal/hardware-watchdog.nix).
+  hyper.selfHeal.hardwareWatchdog.enable = false;
 }

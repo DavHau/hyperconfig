@@ -118,13 +118,14 @@
   #
   # vit is the GPU box the hermes agents run jobs on, so a hang takes it
   # offline until someone walks to the machine. Self-recover
-  # where possible: hardware watchdog reboots a wedged kernel, hung tasks
+  # where possible: hardware watchdog (iTCO, 30 s, fleet-wide from
+  # modules/nixos/self-heal/hardware-watchdog.nix) reboots a wedged kernel,
+  # hung tasks
   # (D-state > 120s) escalate to a panic, hard/soft lockups panic too
   # (2026-07-24: they defaulted to backtrace-and-continue, which on a dead
   # console is indistinguishable from a hang), and kernel.panic reboots 10s
   # after any panic so the box cycles instead of sitting at a dead console.
   # Panics land in efi-pstore (/sys/fs/pstore) for post-mortem.
-  systemd.watchdog.runtimeTime = "30s";
   boot.kernel.sysctl = {
     "kernel.hung_task_timeout_secs" = 120;
     "kernel.hung_task_panic" = 1;

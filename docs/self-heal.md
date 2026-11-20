@@ -13,7 +13,7 @@ one CLI `selfheal`), enabled on every machine but the installer by
 | # | Part | What it does | Status |
 |---|---|---|---|
 | 1 | Deploy guard | Every live switch must leave the machine reachable; otherwise restore stopped units, then roll back to the previous generation and reboot into it. | on main, not yet deployed |
-| 2 | Hardware watchdog | Systemd pets `/dev/watchdog`; a hung kernel or PID 1 reboots. | planned |
+| 2 | Hardware watchdog | Systemd pets `/dev/watchdog`; a hung kernel or PID 1 reboots. | on main, not yet deployed |
 | 3 | Boot counting | systemd-boot machines (amy joy nas som vit) fall back to the last good entry when a new generation never boots healthy. | planned |
 | 4 | Runtime watchdog | A local timer notices "I am cut off" (not an upstream outage) and escalates: restart units, restart the network, reboot. | planned |
 | 5 | External power-cycle | Out of scope for now. | not planned |
@@ -161,6 +161,34 @@ the guard's included: nothing is armed, and a rollback flag does not block.
 Use it only when you mean "no guard"; `selfheal hold` is the normal way to
 keep a deliberate cut-off.
 
+## Part 2: hardware watchdog
+
+`modules/nixos/self-heal/hardware-watchdog.nix` sets
+`RuntimeWatchdogSec=30s` and `RebootWatchdogSec=10min` (systemd's
+default, already in effect; pinned so it is explicit) (options
+`hyper.selfHeal.hardwareWatchdog.{enable,runtime,reboot}`). systemd pings
+the device every 7.5-15 s from its main loop; if the kernel or PID 1 hangs
+for 30 s the board resets the machine. PID 1 doesn't ping while it
+re-execs or reloads during a switch: <= 3.3 s on every machine but som,
+where it took 25 s (2026-11-19), so som runs 2 min. It only catches full
+hangs, never "sshd stopped".
+Where no device exists systemd logs it and carries on.
+
+| Machine | Device | Setting |
+|---|---|---|
+| bam | SP5100 TCO (live, 2026-11-20) | on |
+| som | SP5100 TCO (live) | on, **2 min** (re-exec/reload took up to 25 s) |
+| edi | iTCO_wdt (live) | on |
+| cm-pi | StarFive (live, max 357 s) | on |
+| vit | iTCO (already had 30 s; now from the module) | on |
+| joy | Intel 13th gen (Framework 12): iTCO expected; offline, unchecked | on |
+| nas | Intel: iTCO expected; offline, unchecked | on (harmless without a device) |
+| sgp | none (Proxmox VM without i6300esb) | on, inert; would need the provider to add a virtual watchdog |
+| amy | AMD FCH (`i2c_piix4` in facter.json): SP5100 TCO | **off**: sp5100_tco has no suspend hooks, so in s2idle nobody pings it and it could reset amy mid-sleep. Enable after a suspend test on amy. |
+
+On first deploy check: `systemctl show -P RuntimeWatchdogUSec` = 30s and
+`cat /sys/class/watchdog/watchdog0/state` = active.
+
 ## Per-machine policy
 
 From the proposal, adjusted by Dave's decisions (2026-11-20).
@@ -171,7 +199,7 @@ From the proposal, adjusted by Dave's decisions (2026-11-20).
 | Always-on desktops | vit, som | yes | yes (iTCO / SP5100) | yes | full; on-screen warning with a ~5 min countdown, cancellable once; never both in the same window (mutual tang) |
 | Wired/cloud servers | bam, edi, sgp | yes | bam, edi (sgp has none) | no (GRUB) | restart steps; reboot when unreachable |
 | Home Pi | cm-pi | yes | yes (StarFive) | no (extlinux) | full, reboot allowed |
-| Laptops | amy, joy | yes | if present | yes | metric only, no actions |
+| Laptops | amy, joy | yes | joy yes; amy off (suspend) | yes | metric only, no actions |
 
 Binding rules for the parts to come: an unreachable machine reboots
 whether or not someone uses it (remote sessions never block it); an
@@ -192,3 +220,10 @@ hold suspends the rollback; an upstream-only outage is confirmed
 not judged; a hung clan-switch unit gets the restore at the first deadline
 and the rollback only after maxExtend; a broken state dir does not block
 the switch.
+
+`checks.x86_64-linux.self-heal-hardware-watchdog`
+(`modules/nixos/self-heal/hardware-watchdog-test.nix`): a VM with a
+virtual i6300esb; systemd arms it with 30 s, and a PID 1 frozen with
+ptrace gets the VM reset 15-50 s later (25 s measured; earlier would be a
+panic, not the watchdog). Mutation check (module off, reset subtest only,
+90 s wait): the reset never comes and the subtest fails.

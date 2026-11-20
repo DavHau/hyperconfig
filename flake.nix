@@ -312,6 +312,11 @@
           import ./modules/nixos/self-heal/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
+        # A hung PID 1 gets the VM reset by its (virtual) hardware watchdog.
+        self-heal-hardware-watchdog =
+          import ./modules/nixos/self-heal/hardware-watchdog-test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          };
         user-manager-restart =
           import ./modules/nixos/user-manager-restart/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;

@@ -5,9 +5,9 @@
 # docs/self-heal.md. Enabled on every machine but the installer by
 # modules/nixos/common.nix.
 #
-# Parts here: ./deploy-guard.nix (confirm a live switch or roll it back).
-# The hardware watchdog, boot counting and the runtime watchdog will join
-# this directory and reuse `selfheal health`.
+# Parts here: ./deploy-guard.nix (confirm a live switch or roll it back),
+# ./hardware-watchdog.nix (systemd drives /dev/watchdog). Boot counting and
+# the runtime watchdog will join this directory and reuse `selfheal health`.
 #
 # Health (`selfheal health [--level deploy|local] [--json]`):
 #   deploy: sshd active and listening on services.openssh.ports, every mesh
@@ -135,7 +135,10 @@ let
   '';
 in
 {
-  imports = [ ./deploy-guard.nix ];
+  imports = [
+    ./deploy-guard.nix
+    ./hardware-watchdog.nix
+  ];
 
   options.hyper.selfHeal = {
     enable = lib.mkEnableOption "self-heal (docs/self-heal.md): the selfheal CLI and its parts";
