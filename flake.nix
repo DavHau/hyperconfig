@@ -411,6 +411,11 @@
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
             inherit inputs;
           };
+        # The search canary's verdict on a recorded junk and good SearXNG
+        # answer (no network).
+        searxng-canary = import ./modules/nixos/searxng-canary/test.nix {
+          pkgs = nixpkgs.legacyPackages.x86_64-linux;
+        };
         # The nightly bump's pre-push guard in a scratch repo, with stubs
         # for GitHub and the prefetch (no network).
         nixpkgs-bump-guard = import ./modules/nixos/infra-space/nixpkgs-bump/guard-test.nix {

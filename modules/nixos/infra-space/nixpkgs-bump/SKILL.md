@@ -316,12 +316,12 @@ exactly the picked diff (its hash in the pick file).
 
 Always (also after `STAYS` or `HELD-BACK`: it checks the new nixpkgs
 with SearXNG). It builds som's SearXNG package from the workspace and
-som runs it in a sandbox (its own uid, Mullvad egress like production,
-no secrets; started through `/run/searxng-candidate/socket`), with the
-search canary (fixed test queries; enough with an expected site in the
-top 5, results from at least two engines). It can take longer than the
-terminal's 600 s: start it in the background with its output in a log,
-and poll the log:
+som runs it in a sandbox (its own uid, Mullvad egress, no residential
+proxy, no secrets; started through `/run/searxng-candidate/socket`),
+with the search canary (fixed test queries; enough with an expected site
+in the top 5 for 2 of 4, at least one engine on topic, none junk). It
+can take longer than the terminal's 600 s: start it in the background
+with its output in a log, and poll the log:
 
     nixpkgs-bump-searxng canary > $TMPDIR/searxng-canary.log 2>&1
 
@@ -334,12 +334,12 @@ again. Its last line:
 - `NO-SIGNAL`: main@origin's own lock fails as well (the egress or the
   sites): searxng stays, the nixpkgs bump goes on, the report says so.
 - `FAIL`, or anything else: the new nixpkgs breaks SearXNG (main@origin's
-  lock passes, the bump's does not), or the check could not run. A
-  failed night, as any failed gate: step 4 may fix it.
+  lock passes, the bump's does not, also on a second try), or the check
+  could not run. A failed night, as any failed gate: step 4 may fix it.
 
 A line `SEARXNG-STUCK: ...` (from any SearXNG step: the third night in
-a row held back, or staying because upstream force-pushed away the aged
-tips) goes into the report verbatim, near the top; a decision is
+a row held back, staying because upstream force-pushed away the aged
+tips, or `NO-SIGNAL` with a moved pin) goes into the report verbatim, near the top; a decision is
 recorded with it (decided with its recommendation).
 
 Never edit the `searxng` node by hand, never write its files

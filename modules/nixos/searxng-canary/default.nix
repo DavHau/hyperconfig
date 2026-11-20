@@ -1,24 +1,31 @@
 # searxng-canary: is web_search's SearXNG (../../../hyperhermes/modules/
 # browser/searxng.nix, 127.0.0.1:8890) still answering with relevant
-# results? Every 10 min a oneshot sends a few fixed test queries (no user
-# data) the way hermes' web_search does and writes Prometheus metrics for
-# Alloy, like ../monitoring-zfs-pools.nix; the alerts live in
-# ../monitoring-alerts.nix (searxng-degraded).
+# results? Every 10 min a oneshot sends one fixed test query (no user
+# data, rotating through ./canary.py's list) the way hermes' web_search
+# does and writes Prometheus metrics for Alloy, like
+# ../monitoring-zfs-pools.nix; the alerts live in ../monitoring-alerts.nix
+# (searxng-degraded).
 #
 # "Relevant" is cheap on purpose (./canary.py): a query passes when one of
-# its expected domains is in the top 5 result URLs, the 5 hermes keeps.
-# Metrics: queries sent and relevant, results, engines answering and the
-# ones SearXNG reports unresponsive/suspended (`unresponsive_engines`, per
-# engine with a short class of its error), and the run's timestamp
-# (staleness).
+# its expected domains is in the top 5 result URLs, the 5 hermes keeps;
+# an engine is on topic when its own top 5 carries the query's domains or
+# terms, junk when it answers off topic. Metrics: queries sent and
+# relevant, results, engines answering, on topic and junk (per engine
+# too), the ones SearXNG reports unresponsive/suspended
+# (`unresponsive_engines`, per engine with a short class of its error),
+# and the run's timestamp (staleness). The verdict on fixtures recorded
+# from a junk and a good state is the flake check `searxng-canary`
+# (./test.nix).
 #
 # ./package.nix is the script as a command, so other gates judge with the
 # same queries: ./candidate.nix, the nightly bump's scratch instance of a
 # candidate SearXNG build, runs it.
 #
-# The unit queries loopback only; the engines' traffic is searx's own
-# (Mullvad egress). 4 queries per 10 min are ~1 % of the instance's load.
-# Engines on the residential proxy (paid traffic) are left out of them.
+# The unit queries loopback only; the engines' traffic is searx's own. On
+# som the general engines run on the paid residential proxy
+# (../residential-proxy): one query per run, ~30 KB of proxy traffic, ~4 MB
+# a day. Pass: that query relevant, at least two engines on topic, none
+# junk.
 {
   config,
   lib,
@@ -28,9 +35,6 @@
 let
   dir = "/run/searxng-canary";
   canary = import ./package.nix { inherit pkgs; };
-  # Engines on the paid residential proxy stay out of the fixed queries.
-  paid = config.services.hyperhermes.browser.residentialProxy.searxngEngines or [ ];
-  exclude = lib.optionalString (paid != [ ]) "--exclude ${lib.concatStringsSep "," paid}";
 in
 {
   imports = [ ./candidate.nix ];
@@ -65,7 +69,8 @@ in
         # whose timestamp the staleness alert catches.
         script = ''
           ${lib.getExe canary} --url http://127.0.0.1:${toString config.services.searx.settings.server.port} \
-            --queries 4 --pause 2 ${exclude} --prom ${dir}/searxng.prom || true
+            --queries 1 --rotate 600 --min-relevant 1 --min-engines 2 --max-junk 0 \
+            --prom ${dir}/searxng.prom || true
         '';
       };
 

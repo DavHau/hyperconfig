@@ -63,83 +63,93 @@ in
         # Merged by name into the stock engine list. hermes queries the
         # general category; arxiv, github and stackoverflow answer in
         # their own (science, it) or by bang (!arx, !gh, !st). A failing
-        # engine is suspended by SearXNG itself, so keyless scrapers that
-        # sometimes hit a CAPTCHA or a 429 stay in the list. No result
-        # cache: the instance is shared, and a cache would let one agent
-        # learn another's queries.
+        # engine is suspended by SearXNG itself. No result cache: the
+        # instance is shared, and a cache would let one agent learn
+        # another's queries.
+        #
+        # General web search is DuckDuckGo and Google's CSE endpoint
+        # (stock-enabled), plus Mojeek where the host routes it through
+        # its residential proxy (browser.residentialProxy.searxngEngines:
+        # those go through it). Measured from som, 2026-11: over the
+        # shared Mullvad exit DDG answers CAPTCHAs, the CSE 429 and Mojeek
+        # 403; through the proxy DDG and the CSE answer on topic, Mojeek
+        # mostly too (some exits 403 it as well).
+        # Every engine appears once in this list (one entry per name).
         engines =
           map
             (name: {
               inherit name;
               disabled = false;
             })
-            [
-              "bing"
-              "duckduckgo"
-              "arxiv"
-              "github"
-              "stackoverflow"
-            ]
-          ++ [
-            # Which curl_cffi target a site lets through depends on the
-            # egress; measured from som (Mullvad), 2026-11, all others
-            # tried were blocked. `impersonate` per engine is our patch
-            # (./searxng-package.nix; with nixpkgs' searxng it is an
-            # unused engine attribute).
-            {
-              name = "yahoo";
-              disabled = false;
-              impersonate = "safari2601"; # chrome/firefox targets: HTTP 500
-            }
-            {
-              name = "brave";
-              disabled = false;
-              impersonate = "chrome131_android"; # desktop targets: 429
-              # Brave answers 429 over the egress' IPv6, 200 over IPv4.
-              network = "ipv4";
-            }
-          ]
-          # Stock-inactive engines are not even loaded.
-          ++ [
-            {
-              name = "mojeek";
-              disabled = false;
-              inactive = false;
-            }
-          ]
-          # Dead from the egress with every curl_cffi target (2026-11):
-          # Google: /wml/search 403 (searxng#6835, open); Qwant: API 403
-          # AccessDenied. Off so they don't sit suspended, unless the host
-          # routes them through its residential proxy
-          # (browser.residentialProxy.searxngEngines, ./residential-proxy.nix):
-          # then on, their own network with that proxy and the default exit
-          # country (the proxy username).
-          ++ map (
-            name:
-            if lib.elem name rp.searxngEngines then
-              {
-                inherit name;
-                disabled = false;
-                network = {
-                  proxies."all://" = "http://${rp.defaultCountry}:x@${lib.removePrefix "http://" rp.url}";
-                  # The proxy, not this host, resolves and dials the site.
-                  retries = 1;
-                };
-              }
-            else
-              {
-                inherit name;
+            (
+              lib.subtractLists rp.searxngEngines [
+                "duckduckgo"
+                "google cse"
+                "arxiv"
+                "github"
+                "stackoverflow"
+              ]
+            )
+          # Off: they answer, but with junk or nothing (som, 2026-11, the
+          # same from the Mullvad exit and through the residential proxy):
+          #   bing    results unrelated to the query, a different set on
+          #           every request, whatever market, language or TLS
+          #           target (searxng#4964, #6944): it filled the top 5
+          #           with Microsoft Rewards and Outlook pages
+          #   yahoo   Bing's index; junk over Mullvad, timeouts and empty
+          #           pages through the proxy
+          #   brave   429 over Mullvad; through the proxy every result
+          #           URL is a cloaked /go/v1/<hash> link (searxng#6967)
+          #   mojeek  403 access denied over Mullvad (fine through the proxy)
+          #   google  403 on both the old /wml/search and upstream's new
+          #           adtest endpoint (searxng#6835)
+          #   qwant   API 403 AccessDenied
+          # Retest by hand with `searxng-canary --per-engine` (../../../
+          # modules/nixos/searxng-canary) before turning one back on;
+          # `impersonate` (our patch, ./searxng-package.nix) was the
+          # target that got through from Mullvad.
+          ++ map
+            (
+              e:
+              e
+              // {
                 disabled = true;
               }
-          ) [
-            "google"
-            "qwant"
-          ]
+            )
+            (
+              lib.filter (e: !lib.elem e.name rp.searxngEngines) [
+                { name = "bing"; }
+                {
+                  name = "yahoo";
+                  impersonate = "safari2601";
+                }
+                {
+                  name = "brave";
+                  impersonate = "chrome131_android";
+                  network = "ipv4"; # 429 over the egress' IPv6
+                }
+                {
+                  # stock-inactive: loaded only when proxied (below)
+                  name = "mojeek";
+                }
+                { name = "google"; }
+                { name = "qwant"; }
+              ]
+            )
+          # Through the residential proxy: their own network with it and
+          # the default exit country (the proxy username). The proxy, not
+          # this host, resolves and dials the site; the extra hop needs
+          # more than the 3 s default (DDG and the CSE time out at 3 s).
           ++ map (name: {
             inherit name;
             disabled = false;
-            network.proxies."all://" = "http://${rp.defaultCountry}:x@${lib.removePrefix "http://" rp.url}";
-          }) (lib.subtractLists [ "google" "qwant" ] rp.searxngEngines)
+            inactive = false;
+            timeout = 8.0;
+            network = {
+              proxies."all://" = "http://${rp.defaultCountry}:***@${lib.removePrefix "http://" rp.url}";
+              retries = 1;
+            };
+          }) rp.searxngEngines
           # Startpage: an Anubis challenge for every target (2026-11). Back
           # to stock-inactive on purpose (not even loaded) rather than
           # merely disabled; turn it on again by hand after a manual

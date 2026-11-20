@@ -38,6 +38,25 @@ challenge itself (up to 2 min). On `solved`, submit the page's form. On
 `failed`, call it once more; after a second failure report the CAPTCHA
 as the blocker. Do not click grid tiles yourself.
 
+## When web_search results look irrelevant
+
+Search engines sometimes answer with junk: pages that have nothing to do
+with the query (unrelated shops, forums, login pages). Do not build an
+answer on them. Instead:
+
+1. Tell the user in one line that the search returned unrelated results
+   (with no user in the loop, note it in your result).
+2. Rephrase the query once: fewer words, the key names, no quotes or
+   numbers that may not appear on the page.
+3. Still junk: go to the site directly. Guess the obvious URL (the
+   operator's, vendor's or project's own site, e.g. `https://dialog.lk`
+   for Dialog Sri Lanka) and read it with `web_extract`; if that is
+   blocked, the browser, then the `residential-proxy` skill if this host
+   has it.
+
+Nothing else: no loop of further rephrasings, no reports or tickets about
+the search engine.
+
 ## Downloads
 
 The browser keeps every file a click starts: a download link or button,

@@ -111,6 +111,7 @@ Shared vars generated (vars/shared): agave-geninf-ro clan-secrets-pull esphome-c
 - infra-space: modules/nixos/infra-space/test.nix
 - infra-space-agent-tools: modules/nixos/infra-space/agent-tools-test.nix
 - spaces: modules/nixos/spaces/test.nix
+- searxng-canary: modules/nixos/searxng-canary/test.nix
 - nixpkgs-bump-guard: modules/nixos/infra-space/nixpkgs-bump/guard-test.nix
 - nixpkgs-bump-workspace: modules/nixos/infra-space/nixpkgs-bump/workspace-test.nix
 - fleet-bump: modules/nixos/infra-space/fleet-bump/test.nix

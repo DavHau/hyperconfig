@@ -7,9 +7,10 @@
 # In the guest it would run as `infra`, next to the fleet push key, the
 # ssh CA, API keys, ~/hyperconfig and ~/clan-secrets. Here it runs as its
 # own static uid (searxng-candidate, ../vault-ids.nix ladder) with none of
-# that, and through the same Mullvad egress as som's production searx
-# (hyper.mullvadEgress, set on som), so the gate judges what production
-# will see.
+# that, through som's Mullvad egress (hyper.mullvadEgress) with
+# production's settings, except that the engines production sends
+# through the residential proxy go over Mullvad here (below): same code
+# and settings, a harder egress for those engines.
 #
 # Interface, like ../infra-space/gcroots.nix: the guest connects to
 # /run/searxng-candidate/socket (the directory bound read-only and
@@ -61,13 +62,31 @@ let
   address = "127.88.99.1";
   port = 8899;
   canary = import ./package.nix { inherit pkgs; };
-  # The candidate's uid may not use the residential proxy: its paid
-  # engines are left out of the queries (./default.nix too).
+  # The candidate's uid may not use the residential proxy (unreviewed
+  # code next to paid traffic): engines production routes through it run
+  # over the candidate's own Mullvad egress here, with their stock network
+  # and timeout. Over Mullvad DuckDuckGo answers some queries and Google's
+  # CSE mostly 429s, so the gate asks less than ./default.nix (one engine
+  # on topic); main@origin's lock failing too is NO-SIGNAL, never a FAIL.
   paid = config.services.hyperhermes.browser.residentialProxy.searxngEngines or [ ];
-  exclude = lib.optionalString (paid != [ ]) "--exclude ${lib.concatStringsSep "," paid}";
+  settings = builtins.removeAttrs config.services.searx.settings [ "redis" ];
   settingsJson = pkgs.writeText "searxng-candidate-settings.json" (
     builtins.toJSON (
-      lib.recursiveUpdate (builtins.removeAttrs config.services.searx.settings [ "redis" ]) {
+      lib.recursiveUpdate (
+        settings
+        // {
+          engines = map (
+            e:
+            if lib.elem e.name paid then
+              builtins.removeAttrs e [
+                "network"
+                "timeout"
+              ]
+            else
+              e
+          ) settings.engines;
+        }
+      ) {
         server = {
           bind_address = address;
           inherit port;
@@ -149,7 +168,7 @@ let
       searxng-canary --url "http://${address}:${toString port}" --source ${address} \
         --expect-instance "$name" --expect-version "$version" \
         --queries ${toString cfg.queries} --min-relevant ${toString cfg.minRelevant} \
-        --min-engines ${toString cfg.minEngines} --pause 2 ${exclude} 2>&1 || rc=$?
+        --min-engines ${toString cfg.minEngines} --max-junk 0 --pause 2 2>&1 || rc=$?
     fi
     if ! kill -0 "$pid" 2>/dev/null; then
       tail -n 30 "$run/log"
@@ -172,11 +191,12 @@ in
     };
     minRelevant = lib.mkOption {
       type = lib.types.ints.positive;
-      default = 3;
+      default = 2;
     };
     minEngines = lib.mkOption {
       type = lib.types.ints.positive;
-      default = 2;
+      default = 1;
+      description = "Engines on topic, at least (over Mullvad only DuckDuckGo answers reliably).";
     };
   };
 

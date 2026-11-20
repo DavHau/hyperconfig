@@ -54,5 +54,5 @@ services, otherwise the default.
 - Still blocked through the proxy: the site blocks more than the IP
   (fingerprint, account). Report it; do not loop.
 
-SearXNG's Google and Qwant results (`web_search`) already go through
-the proxy on their own; nothing to do there.
+`web_search` needs nothing from you: SearXNG's engines that this host's
+own exit cannot reach go through the proxy on their own.

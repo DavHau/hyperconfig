@@ -6,8 +6,9 @@
 #   - who: every hyperhermes agent on som (their uids), opt-in per request
 #     (hyperhermes' browser.residentialProxy: web_extract_residential,
 #     browser_residential, RESIDENTIAL_PROXY_URL, the residential-proxy
-#     skill), and searx for Google and Qwant (which block som's Mullvad
-#     exit; on by default through the proxy). Nothing else uses it.
+#     skill), and searx for its general engines (DuckDuckGo, Google's
+#     CSE, Mojeek: they block som's Mullvad exit; always through the
+#     proxy). Nothing else uses it.
 #   - egress: the gateway's uid is Mullvad-tunneled (hyper.mullvadEgress)
 #     and tunnelOnly (only its own listener and the tunnel's DNS on
 #     loopback), so Evomi sees a Mullvad address, never som's.
@@ -86,12 +87,19 @@ in
     tunnelOnly.residential-proxy = [ "127.0.0.1:${toString rp.port}" ];
   };
 
-  # The agents' tools, SearXNG's Google and Qwant.
+  # The agents' tools, and web_search's general engines: over the shared
+  # Mullvad exit DuckDuckGo answers CAPTCHAs, Google's CSE 429 and Mojeek
+  # 403; through the proxy they answer on topic (Mojeek not from every
+  # exit) (../../../hyperhermes/modules/browser/searxng.nix). ~30 KB of proxy
+  # traffic per search for the three; ~30 agent searches a day (2026-11)
+  # plus the canary's one per 10 min (../searxng-canary): ~6 MB a day,
+  # under 200 MB a month.
   services.hyperhermes.browser.residentialProxy = {
     inherit (rp) url defaultCountry;
     searxngEngines = [
-      "google"
-      "qwant"
+      "duckduckgo"
+      "google cse"
+      "mojeek"
     ];
   };
   # searx's tunnelOnly (../../../machines/som/hermes-agents.nix) admits

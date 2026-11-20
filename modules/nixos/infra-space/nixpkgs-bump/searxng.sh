@@ -50,17 +50,19 @@
 #       NO-SIGNAL  0  searxng back (if it moved); main@origin's own lock
 #                     fails too: the egress or the sites, not the bump
 #       FAIL       1  the new nixpkgs breaks SearXNG (main@origin's lock
-#                     passes, the bump's fails with either pin), or the
-#                     check could not run: a failed night
+#                     passes, the bump's fails with either pin and once
+#                     more after that), or the check could not run: a
+#                     failed night
 #     It writes `<verdict> searxng=<rev> nixpkgs=<rev>` to
 #     @logDir@/<ws>.searxng-canary; the guard lets a moved searxng through
 #     only with a PASS for exactly the lock it checks.
 #
 # Every outcome that holds SearXNG back is one line per night in
-# @logDir@/searxng-history; the third night in a row HELD-BACK or
-# STAYS-FORCE-PUSH (upstream force-pushed away the aged tip) prints a
-# loud SEARXNG-STUCK line (for the report) and files a decision (our
-# patches probably need rebasing onto master).
+# @logDir@/searxng-history; the third night in a row HELD-BACK,
+# STAYS-FORCE-PUSH (upstream force-pushed away the aged tip) or NO-SIGNAL
+# with a moved pin (no canary signal over the candidate's Mullvad egress)
+# prints a loud SEARXNG-STUCK line (for the report) and files a decision
+# (our patches probably need rebasing onto master).
 
 say() { echo "nixpkgs-bump-searxng: $*" >&2; }
 die() {
@@ -147,10 +149,10 @@ record() { # outcome old new
   touch "$history"
   { grep -v "^$name " "$history" || true; echo "$line"; } | tail -n 30 >"$tmp/history"
   cat "$tmp/history" >"$history"
-  if [ "$(tail -n 3 "$history" | awk '$2 == "HELD-BACK" || $2 == "STAYS-FORCE-PUSH"' | wc -l)" = 3 ]; then
-    echo "nixpkgs-bump-searxng: SEARXNG-STUCK: SearXNG held back 3 nights in a row ($(tail -n 3 "$history" | awk '{print $1 " " $2}' | paste -sd ',' -)); our patches probably need rebasing onto master, or upstream force-pushed away every aged tip. Put this line in the report."
+  if [ "$(tail -n 3 "$history" | awk '$2 == "HELD-BACK" || $2 == "STAYS-FORCE-PUSH" || $2 == "NO-SIGNAL"' | wc -l)" = 3 ]; then
+    echo "nixpkgs-bump-searxng: SEARXNG-STUCK: SearXNG held back 3 nights in a row ($(tail -n 3 "$history" | awk '{print $1 " " $2}' | paste -sd ',' -)); our patches probably need rebasing onto master, upstream force-pushed away every aged tip, or the candidate's Mullvad egress gives the canary no signal (NO-SIGNAL). Put this line in the report."
     decide "SearXNG stuck on an old upstream for 3 nights" \
-      "The nightly bump held SearXNG back three nights in a row (canary, review, diff size or code the review cannot see, or upstream force-pushed away the tips old enough to take). web_search keeps working on the old pin, but falls behind upstream's engine fixes; usually one of our patches no longer fits master." \
+      "The nightly bump held SearXNG back three nights in a row (canary, review, diff size or code the review cannot see, upstream force-pushed away the tips old enough to take, or no canary signal over the candidate's Mullvad egress). web_search keeps working on the old pin, but falls behind upstream's engine fixes; usually one of our patches no longer fits master." \
       "a) (have a session) rebase our SearXNG patches onto master and retest" \
       "SearXNG still at ${old:0:8} on main" \
       "${old:0:8}" \
@@ -456,6 +458,14 @@ case "$cmd" in
       cat "$tmp/bump.lock" >flake.lock
       restore_lock=
       if [ "$rc" = 0 ]; then
+        # Over Mullvad the canary rests on few engines (som's general
+        # engines run on the residential proxy, the sandbox may not use
+        # it): one more try of the bump's lock before blaming nixpkgs.
+        say "main@origin's lock passes; the bump's lock once more"
+        if check; then
+          # after a revert the bump's lock carries main@origin's pin
+          if [ "$(rev flake.lock)" = "$new" ]; then verdict PASS; else verdict HELD-BACK; fi
+        fi
         die "main@origin's lock passes, the new nixpkgs fails: it breaks SearXNG"
       fi
       say "main@origin's lock fails too: no signal from this egress"

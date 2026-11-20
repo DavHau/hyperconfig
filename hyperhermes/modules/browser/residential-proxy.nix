@@ -16,8 +16,8 @@
 #     it (only after a block; never for logins to the owner's accounts
 #     unless asked), costs, countries, the error when the traffic is gone;
 #   - RESIDENTIAL_PROXY_URL in the agent's .env, for the terminal (curl -x).
-# SearXNG's engines that the host's egress cannot reach go through it by
-# default (browser.residentialProxy.searxngEngines, ./searxng.nix).
+# SearXNG's engines that the host's egress cannot reach go through it:
+# those the host lists (browser.residentialProxy.searxngEngines, ./searxng.nix).
 #
 # The URL carries no secret: the proxy holds the provider's credentials
 # and decides who may connect (the host's job; hyperconfig gates the port
@@ -59,12 +59,12 @@ in
       type = types.listOf types.str;
       default = [ ];
       example = [
-        "google"
-        "qwant"
+        "duckduckgo"
+        "google cse"
       ];
       description = ''
         SearXNG engines that always go through the proxy (and are switched
-        on): those that block the host's own egress outright.
+        on): those that block the host's own egress (./searxng.nix).
       '';
     };
   };

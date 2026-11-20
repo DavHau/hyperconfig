@@ -332,7 +332,8 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/searxng-canary/canary.py — - <- m/searxng-canary/package.nix
 - modules/nixos/searxng-canary/candidate.nix — searxng-candidate: the nightly bump's scratch SearXNG, run on this host in a sandbox instead of in the infra-space gues… <- m/searxng-canary/default.nix
 - modules/nixos/searxng-canary/default.nix — searxng-canary: is web_search's SearXNG (../../../hyperhermes/modules/ browser/searxng.nix, 127.0.0.1:8890) still answe… <- machines/som/hermes-agents.nix
-- modules/nixos/searxng-canary/package.nix — The canary script (./canary.py) as a command, for ./default.nix (som's 10-min timer) and ./candidate.nix (the nightly b… <- m/searxng-canary/candidate.nix, m/searxng-canary/default.nix
+- modules/nixos/searxng-canary/package.nix — The canary script (./canary.py) as a command, for ./default.nix (som's 10-min timer) and ./candidate.nix (the nightly b… <- m/searxng-canary/candidate.nix, m/searxng-canary/default.nix, m/searxng-canary/test.nix
+- modules/nixos/searxng-canary/test.nix — The canary's verdict on recorded SearXNG answers (no network), the flake check `searxng-canary`: <- flake.nix
 - modules/nixos/security-fixes/overlays.nix — Package overlays of the unattended security jobs (../security-fixes.nix applies them on every machine): <- m/security-fixes.nix
 - modules/nixos/security-takedown/default.nix — Security takedowns: services the unattended security jobs (or anyone) stopped because of a critical, exploitable vulner… <- m/common.nix
 - modules/nixos/security-takedown/eligible.nix — Units a security takedown (./takedowns.json) may stop, per machine: <- m/security-takedown/default.nix
@@ -459,7 +460,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyperhermes/modules/browser/options.nix — Options of the agents' web tools (./default.nix). <- hyperhermes/modules/browser/default.nix
 - hyperhermes/modules/browser/residential-proxy.nix — The agents' opt-in residential proxy (browser.residentialProxy.url): <- hyperhermes/modules/browser/default.nix
 - hyperhermes/modules/browser/searxng-package.nix — The SearXNG package of ./searxng.nix: <- hyperhermes/modules/browser/options.nix, hyperhermes/modules/browser/searxng.nix
-- hyperhermes/modules/browser/searxng.nix — A private SearXNG metasearch instance on loopback, the web_search backend of the agents. <- hyperhermes/modules/browser/default.nix
+- hyperhermes/modules/browser/searxng.nix — A private SearXNG metasearch instance on loopback, the web_search backend of the agents. <- hyperhermes/modules/browser/default.nix, hyperhermes/modules/browser/residential-proxy.nix
 - hyperhermes/modules/browser/web-access-skill.nix — The agents' `web-access` skill (./web-access-skill): <- hyperhermes/modules/browser/default.nix
 - hyperhermes/modules/browser/web-extract.nix — The web_extract backend of the agents: <- hyperhermes/modules/browser/default.nix
 - hyperhermes/modules/browser/ocr-skill/SKILL.md — Read text from scanned PDFs, photos and screenshots of documents (English and Thai) with the `ocr` CLI, which runs on th <- hyperhermes/modules/browser/ocr.nix

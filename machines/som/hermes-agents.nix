@@ -83,7 +83,7 @@ in
     inputs.hyperhermes.nixosModules.browser
     ../../modules/nixos/searxng-canary
     # The agents' opt-in residential proxy (Evomi, via Mullvad), and
-    # SearXNG's Google and Qwant through it.
+    # SearXNG's general engines through it.
     ../../modules/nixos/residential-proxy
     # Nightly borg backup of the agents' homes and state to nas.
     ../../modules/nixos/hermes-agents-backup
