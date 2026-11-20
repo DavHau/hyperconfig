@@ -1,4 +1,4 @@
-From 659f821b7cced5621fa798108183f95e6c63659c Mon Sep 17 00:00:00 2001
+From 58c0301548a2ca3d720af01bcbbc969106d955b7 Mon Sep 17 00:00:00 2001
 From: infra <infra@davhau.com>
 Date: Fri, 20 Nov 2026 16:16:56 +0700
 Subject: [PATCH] fix(ws): keep the socket and the composer across a quick app
@@ -193,7 +193,7 @@ index 3ea56819..638e25f3 100644
          HermesWsClient.releaseExternalActivityConnectionLease()
          HermesWsClient.releaseBackgroundConnectionLease()
 diff --git a/app/src/test/java/com/m57/hermescontrol/data/ws/HermesWsClientTest.kt b/app/src/test/java/com/m57/hermescontrol/data/ws/HermesWsClientTest.kt
-index e1c89583..6b3fdee7 100644
+index e1c89583..26d85fbf 100644
 --- a/app/src/test/java/com/m57/hermescontrol/data/ws/HermesWsClientTest.kt
 +++ b/app/src/test/java/com/m57/hermescontrol/data/ws/HermesWsClientTest.kt
 @@ -113,12 +113,16 @@ class HermesWsClientTest {
@@ -209,7 +209,7 @@ index e1c89583..6b3fdee7 100644
      @After
      fun tearDown() {
          try {
-+        HermesWsClient.setBackgroundIdleGraceForTest(WsTransport.BACKGROUND_IDLE_GRACE_MS)
++            HermesWsClient.setBackgroundIdleGraceForTest(WsTransport.BACKGROUND_IDLE_GRACE_MS)
              HermesWsClient.releaseExternalActivityConnectionLease()
              HermesWsClient.releaseBackgroundConnectionLease()
              HermesWsClient.disconnect(clearPendingMessages = true)

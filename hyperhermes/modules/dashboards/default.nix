@@ -507,16 +507,28 @@ in
                   # The phone apps reload the open session's history (1-3 MB
                   # of JSON, uncompressed from hermes) on every return to
                   # the app, over mobile data. Compress just the transcript
-                  # and session list: no token-bearing response (sign-in,
-                  # tickets) is gzipped, so there is nothing for a BREACH
-                  # style length oracle; SSE and websockets stay unbuffered.
+                  # and session list; SSE and websockets stay unbuffered.
+                  # BREACH: no sign-in token or ticket is in these bodies,
+                  # but a transcript can hold secrets the owner pasted or a
+                  # tool printed, next to text an outsider got in (a mail,
+                  # a web page the agent read). The length oracle needs the
+                  # victim's browser to fetch the body again and again on
+                  # the attacker's cue: the Fetch Metadata gate (exposure)
+                  # already refuses other sites' fetches, and a JSON
+                  # endpoint is never a page, so other sites' navigations
+                  # to it are refused here too. Left: the apps' own reloads
+                  # (no Sec-Fetch-Site), which only the owner triggers.
                   locations."~ ^/api/sessions(/[^/]+/messages)?$" = location // {
                     extraConfig = location.extraConfig + ''
+                      if ($http_sec_fetch_site ~ "^(cross-site|same-site)$") {
+                        return 403 "Refused: a request from another site.\n";
+                      }
                       gzip on;
                       gzip_proxied any;
                       gzip_comp_level 5;
                       gzip_min_length 0;
                       gzip_types application/json;
+                      gzip_vary on;
                     '';
                   };
                   locations."= /auth/login" = signIn;

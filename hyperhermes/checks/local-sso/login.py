@@ -137,7 +137,19 @@ if check_gzip:
     listed = s.get(f"{origin}/api/sessions?limit=50", headers={"Accept-Encoding": "gzip"})
     assert listed.status_code == 200, (listed.status_code, listed.text[:300])
     assert listed.headers.get("Content-Encoding") == "gzip", dict(listed.headers)
+    assert "Accept-Encoding" in listed.headers.get("Vary", ""), dict(listed.headers)
     listed.json()
+    # Another site cannot make the browser load the compressed body (BREACH),
+    # not even as a top-level navigation the gate lets through elsewhere.
+    for site in ("cross-site", "same-site"):
+        nav = s.get(f"{origin}/api/sessions?limit=50", headers={
+            "Accept-Encoding": "gzip", "Sec-Fetch-Site": site,
+            "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document"})
+        assert nav.status_code == 403, (site, nav.status_code, nav.text[:300])
+    same = s.get(f"{origin}/api/sessions?limit=50", headers={
+        "Accept-Encoding": "gzip", "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"})
+    assert same.status_code == 200 and same.headers.get("Content-Encoding") == "gzip", dict(same.headers)
     me = s.get(f"{origin}/api/auth/me", headers={"Accept-Encoding": "gzip"})
     assert "Content-Encoding" not in me.headers, dict(me.headers)
     print("gzip: /api/sessions compressed, /api/auth/me not")
