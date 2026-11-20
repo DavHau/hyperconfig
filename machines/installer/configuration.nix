@@ -22,6 +22,21 @@
   nixpkgs.pkgs = inputs.nixpkgs.legacyPackages.x86_64-linux;
   system.stateVersion = config.system.nixos.release;
 
+  # The kexec image carries bcachefs. Linux 6.18.64 backported
+  # inode_state_read{,_once} and inode_state_set_raw to include/linux/fs.h,
+  # while bcachefs-tools 1.39.7's out-of-tree module still defines its own
+  # copies for every kernel before 6.19 (redefinition errors). Move its cut-off
+  # to 6.18.64. --replace-fail breaks the build once upstream changes the
+  # line: drop this override then.
+  boot.bcachefs.modulePackage =
+    (config.boot.kernelPackages.callPackage config.boot.bcachefs.package.kernelModule { }).overrideAttrs
+      (old: lib.optionalAttrs (config.boot.kernelPackages.kernel.kernelAtLeast "6.18.64") {
+        postPatch = old.postPatch + ''
+          substituteInPlace src/fs/bcachefs/vfs/fs.h \
+            --replace-fail 'LINUX_VERSION_CODE < KERNEL_VERSION(6,19,0)' 'LINUX_VERSION_CODE < KERNEL_VERSION(6,18,64)'
+        '';
+      });
+
   # Nothing in this image pulls in nixpkgs' installation-cd profile, so it had
   # neither firmware (wifi card absent) nor the boot-device modules - the iso
   # variant only adds virtio. This is the install-media knob: every bootable
