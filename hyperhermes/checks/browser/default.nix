@@ -68,6 +68,15 @@ let
     "runuser -u ${user} -- sh -c 'set -a; . ${hlib.stateDir user}/.hermes/.env; set +a; "
     + "HERMES_HOME=/home/${user}/hermes-test TERMINAL_CWD=${hlib.workspace user} CAMOFOX_PLUGIN=${plugin} CAMOFOX_PLUGIN_RECORD=${plugin.installRecord} "
     + "exec ${hermes.hermesVenv}/bin/python3 ${script} ${args}' 2>&1";
+  # The vault driver resolves values, which alice's vault broker
+  # (modules/core/vault-broker.nix) hands only to the main process of a
+  # filling unit: it runs as one (vaultBroker.fillUnits), like her gateway.
+  vaultDriverScript =
+    hermes: script: user: args:
+    "systemd-run --quiet --wait --pipe --collect --unit=hermes-vault-driver -p User=${user} -p Group=users "
+    + "${pkgs.runtimeShell} -c 'set -a; . ${hlib.stateDir user}/.hermes/.env; set +a; "
+    + "export HERMES_HOME=/home/${user}/hermes-test TERMINAL_CWD=${hlib.workspace user} CAMOFOX_PLUGIN=${plugin} CAMOFOX_PLUGIN_RECORD=${plugin.installRecord}; "
+    + "exec ${hermes.hermesVenv}/bin/python3 ${script} ${args}' 2>&1";
   privateTmp = "/tmp/systemd-private-*-hermes-camofox-alice.service-*/tmp";
   agents = [
     "alice"
@@ -88,6 +97,7 @@ pkgs.testers.runNixOSTest {
 
     services.hyperhermes = {
       agents.alice.uid = aliceUid;
+      agents.alice.vaultBroker.fillUnits = [ "hermes-vault-driver.service" ];
       agents.bob.uid = aliceUid + 1;
       browser = {
         enable = true;
@@ -160,7 +170,7 @@ pkgs.testers.runNixOSTest {
       driverOf = driverScript hermes;
       driver = driverOf ./downloads.py;
       captchaDriver = driverOf ./captcha.py;
-      vaultDriver = driverOf ./vault.py;
+      vaultDriver = vaultDriverScript hermes ./vault.py;
       residentialDriver = driverOf ./residential.py;
     in
     ''

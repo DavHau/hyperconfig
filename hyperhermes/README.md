@@ -13,7 +13,7 @@ store path.
 
 | module | what it does |
 |---|---|
-| `core` | agent registry (`agents.<name>`: uid, keys, `secretEnv` (into the home's `.env` and every named profile's, new profiles included; the home's blocks fill in only what a profile doesn't set itself, so a profile's own `ANTHROPIC_TOKEN`, provider key or `ANTHROPIC_BASE_URL` wins), settings, `lockedConfig` for a root-owned, Nix-only configuration), the patched hermes package, gateway and dashboard units, owner-checked forwards, firewall; opt-in `hardening.enable` (no namespaces, setuid, io_uring or syscalls outside `@system-service` for the agent units, the agent account's user manager and their tools; rootless podman/docker, bwrap and sudo stop working there, slots and nix builds do not) |
+| `core` | agent registry (`agents.<name>`: uid, keys, `secretEnv` (into the home's `.env` and every named profile's, new profiles included; the home's blocks fill in only what a profile doesn't set itself, so a profile's own `ANTHROPIC_TOKEN`, provider key or `ANTHROPIC_BASE_URL` wins), settings, `lockedConfig` for a root-owned, Nix-only configuration), the patched hermes package, gateway and dashboard units, owner-checked forwards, firewall, the vault broker (each agent's hermes vault out of its own uid's reach, values only to its gateway and dashboard for a fill; `agents.<name>.vaultBroker.enable`); opt-in `hardening.enable` (no namespaces, setuid, io_uring or syscalls outside `@system-service` for the agent units, the agent account's user manager and their tools; rootless podman/docker, bwrap and sudo stop working there, slots and nix builds do not) |
 | `exposure` | nginx routing by host name below `domain`; `mode = "local"` (HTTP on `127.0.0.1:8473`, `hermes.localhost`) or `"public"` (HTTPS, ACME DNS-01, `dnsRecords`) |
 | `sso` | OIDC sign-in: the issuer, client secrets, which account owns which agent; local mode runs dex with password users |
 | `dashboards` | each agent's hermes dashboard at `<agent>.<domain>`, group-checked, plus an optional front door |
@@ -115,7 +115,7 @@ secrets; `lib.clan` has the per-agent ones):
 ## Checks
 
 `nix flake check`: VM tests `core`, `hardening`, `local-sso`, `public`, `publish`,
-`browser`, `wallet`, `mail`, `vault-request`, `slots`, `slots-local`, `container-slots-storage`,
+`browser`, `wallet`, `mail`, `vault-request`, `vault-broker`, `slots`, `slots-local`, `container-slots-storage`,
 `local-deployment`;
 evaluation-only `client-features` and `clan-eval`; offline `vision` (image
 routing, vision backend and vision tools per main model, on the patched
@@ -197,6 +197,18 @@ page code, on the patched package).
   shows cards/addresses as usable on any site. Not upstream (policy).
   Checks: `vault-payment-frames`, `browser`, `vault-request` (cards and
   addresses are requested without a site).
+- `hermes-vault-broker-client`: the vault through the host's vault broker
+  (`modules/core/vault-broker.nix`, `docs/hermes-vault-broker.md` in
+  hyperconfig), so the agent's own uid cannot read it (upstream: key and
+  ciphertext in `<HERMES_HOME>/vault/`, readable by every command the agent
+  runs). With root's marker `/run/hermes-vault/<user>.on`, VaultStore's
+  calls go to `/run/hermes-vault/<user>.sock`; a server of the caller's own
+  uid is refused, an unreachable broker fails closed. The broker hands
+  values only to the main process of the agent's gateway or dashboard;
+  `modules/core/vault-migrate.py` moves legacy vault files in (backed up to
+  root's `/root/hermes-vault-backup`). Not upstream (needs the host's
+  broker). Checks: `vault-broker`, `vault-payment-frames` (client tests),
+  `vault-request`, `browser`.
 - `hermes-busy-message-yields-command`: a message sent while a foreground
   terminal command runs (with an image too, over the messaging gateway or
   the classic CLI) moves the command to the background, still running,

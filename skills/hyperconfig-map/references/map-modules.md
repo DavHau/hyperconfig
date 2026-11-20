@@ -498,6 +498,9 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyperhermes/modules/core/profile-env.py — - <- hyperhermes/modules/core/agents.nix
 - hyperhermes/modules/core/reap-stray-gateway.py — Run as the agent's user before its gateway unit starts (./agents.nix, preStart): <- hyperhermes/modules/core/agents.nix
 - hyperhermes/modules/core/replay-memory-pending.py — Run in the hermes venv as the agent's user before its gateway unit starts (./agents.nix, preStart), once per HERMES_HOM… <- hyperhermes/modules/core/agents.nix
+- hyperhermes/modules/core/vault-broker.nix — The vault broker: an agent's hermes vault (saved logins, cards, addresses) out of the agent's own reach (docs/hermes-va… <- hyperhermes/modules/core/default.nix
+- hyperhermes/modules/core/vault-broker.py — - <- hyperhermes/modules/core/vault-broker.nix
+- hyperhermes/modules/core/vault-migrate.py — - <- hyperhermes/modules/core/vault-broker.nix
 - hyperhermes/modules/dashboards/default.nix — Every agent's hermes web dashboard at its own host name, <agent>.<domain> (exposure), with hermes' own OIDC login (sso)…
 - hyperhermes/modules/desktop/connections.py — - <- hyperhermes/modules/desktop/default.nix, m/space-gui/hermes-app.nix
 - hyperhermes/modules/desktop/default.nix — Hermes launchers on a workstation for the agents of a hyperhermes host (`services.hyperhermes.desktop`):

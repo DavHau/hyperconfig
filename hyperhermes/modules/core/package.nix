@@ -65,6 +65,9 @@ let
     # After the isolated-world patch: Dave's rule, cards and addresses fill
     # on any site after a per-fill confirmation; logins stay origin-bound.
     ./patches/hermes-vault-payment-any-site.patch
+    # The vault through the host's vault broker (vault-broker.nix): the
+    # agent's uid cannot read it.
+    ./patches/hermes-vault-broker-client.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {

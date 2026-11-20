@@ -38,12 +38,9 @@
 #     cookies reach no other agent's host.
 #   - the `vault-request` skill: when to send a link and what to say.
 #
-# Card data at rest: hermes' encrypted vault, <HERMES_HOME>/vault/
-# vault.json.enc (Fernet), the key in vault.key beside it (0600, the
-# agent's 0700 home), or the OS keychain with vault.key_storage: keychain.
-# The agent's uid can read both, as it always could: the vault keeps values
-# out of the model's context, the session and the logs, not away from the
-# agent's own processes.
+# Card data at rest: the agent's vault broker (../core/vault-broker.nix),
+# out of the agent's uid's reach; the page (another process of that uid)
+# may add items there, never read values back.
 #
 # The page's defences: Fetch Metadata (exposure's gate refuses cross-site
 # posts at nginx; the page itself wants Sec-Fetch-Site same-origin, or
@@ -174,6 +171,8 @@ in
           "hermes-vault-request-${user}" = {
             description = "Vault request page of ${user}";
             requires = [ "hermes-vault-request-${user}.socket" ];
+            # it writes into the vault broker (../core/vault-broker.nix)
+            after = lib.optional cfg.agents.${user}.vaultBroker.enable "hermes-vault-migrate-${user}.service";
             unitConfig.RequiresMountsFor = [ (hlib.stateDir user) ];
             # The dashboard's HOME, HERMES_HOME and managed config dir.
             environment = lib.getAttrs [ "HOME" "HERMES_HOME" "HERMES_MANAGED_DIR" ] config.systemd.services."hermes-dashboard-${user}".environment // {

@@ -1,0 +1,390 @@
+hyperhermes: the hermes vault through the host's vault broker
+(modules/core/vault-broker.nix), so the agent's own uid cannot read it.
+
+hermes v0.23.0 keeps the vault in <HERMES_HOME>/vault/ (vault.json.enc
+and its Fernet key vault.key beside it), owned by the agent's uid; every
+terminal command and script the model runs could decrypt it.
+
+Change (agent/vault_store.py): when root's marker
+/run/hermes-vault/<user>.on exists (the directory root's and closed to
+others, else the vault refuses to work), VaultStore's public API (add_item, list_items, has_items,
+remove_item, get_meta, resolve_secret) goes to that broker for the home
+the store's directory belongs to (<home>/vault: the agent's home or a
+profile) over /run/hermes-vault/<user>.sock. One connection per request, close-on-exec, closed before
+returning; a server running as the caller's own uid is refused (an
+impostor); no fallback to the files. key_location reports "broker",
+migrate_key refuses, own_copied_key is a no-op (the copied directory
+holds no key). The broker's own store is VaultStore(direct=True).
+hermes_cli/vault.py: `hermes vault key` says where the key is.
+The fill path, consent and redaction are unchanged; the broker hands
+values only to the agent's gateway or dashboard process.
+
+diff --git a/agent/vault_store.py b/agent/vault_store.py
+index dc981d48..d5a51ee0 100644
+--- a/agent/vault_store.py
++++ b/agent/vault_store.py
+@@ -15,6 +15,12 @@ Design notes:
+   (MIT): lib/manager/server/secret-store.ts + vault services.
+ - Three item kinds: ``login`` (password-only secret), ``payment`` (card fields) and
+   ``address``; ``PAYMENT_FIELDS`` / ``ADDRESS_FIELDS`` are the canonical payload names.
++- Vault broker (hyperhermes, hermes-vault-broker-client.patch): when the host runs one for this
++  account (the root-owned marker ``/run/hermes-vault/<user>.on``), every store of this uid talks to
++  ``/run/hermes-vault/<user>.sock`` instead of the files: the key and the ciphertext live where this
++  uid cannot read them, and the broker resolves a secret only for the agent's gateway or dashboard
++  process itself. The root-owned marker alone decides, never an environment switch (which an
++  agent's ``.env`` could flip); with the marker and no broker, the vault fails, never the files.
+ """
+ 
+ from __future__ import annotations
+@@ -23,6 +29,8 @@ import json
+ import logging
+ import os
+ import re
++import socket
++import struct
+ import threading
+ import uuid
+ from contextlib import contextmanager, suppress
+@@ -205,13 +213,100 @@ class VaultItemMeta:
+         return out
+ 
+ 
++# -- vault broker (hyperhermes: hermes-vault-broker-client.patch) ------------------------------
++
++BROKER_DIR = "/run/hermes-vault"
++_BROKER_TIMEOUT = 30.0
++_BROKER_MAX_REPLY = 4 * 1024 * 1024
++
++
++def broker_socket_path() -> Optional[str]:
++    """This account's vault broker socket, or None when the host runs none for it (file vault).
++
++    Fails closed: a broker directory that is not root's and closed to others is a host fault, not a
++    reason to fall back to files the agent could read."""
++    if os.name != "posix" or not hasattr(os, "getuid"):
++        return None
++    try:
++        st = os.stat(BROKER_DIR)
++    except OSError:
++        return None
++    if st.st_uid != 0 or st.st_mode & 0o022:
++        raise VaultError(f"{BROKER_DIR} is not root's and closed to others; the vault is not used")
++    try:
++        import pwd
++
++        name = pwd.getpwuid(os.getuid()).pw_name
++    except (ImportError, KeyError):
++        # the host runs brokers: an account it cannot name must not fall back to the files
++        raise VaultError("cannot tell whether this account's vault is held by the vault broker; "
++                         "the vault is not used") from None
++    try:
++        marker = os.lstat(os.path.join(BROKER_DIR, f"{name}.on"))
++    except OSError:
++        return None
++    if marker.st_uid != 0:
++        return None
++    return os.path.join(BROKER_DIR, f"{name}.sock")
++
++
++def _broker_call(path: str, op: str, **args: Any) -> Any:
++    """One request, one connection (close-on-exec, closed before returning: no connection a forked
++    child could inherit). Never falls back to the files."""
++    payload = json.dumps({"op": op, **args}).encode("utf-8") + b"\n"
++    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM | getattr(socket, "SOCK_CLOEXEC", 0))
++    try:
++        sock.settimeout(_BROKER_TIMEOUT)
++        sock.connect(path)
++        # The listening socket is the host's (systemd's): a server running as this uid is an impostor.
++        _pid, uid, _gid = struct.unpack("3i", sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED,
++                                                              struct.calcsize("3i")))
++        if uid == os.getuid():
++            raise VaultError("the vault broker socket is not the host's; the vault is not used")
++        sock.sendall(payload)
++        sock.shutdown(socket.SHUT_WR)
++        chunks, size = [], 0
++        while True:
++            chunk = sock.recv(65536)
++            if not chunk:
++                break
++            size += len(chunk)
++            if size > _BROKER_MAX_REPLY:
++                raise VaultError("the vault broker's reply is too large")
++            chunks.append(chunk)
++    except OSError as exc:
++        raise VaultError(f"the vault broker is not reachable ({type(exc).__name__})") from None
++    finally:
++        sock.close()
++    try:
++        reply = json.loads(b"".join(chunks).decode("utf-8"))
++    except (UnicodeDecodeError, json.JSONDecodeError):
++        raise VaultError("the vault broker sent no valid reply") from None
++    if not isinstance(reply, dict) or not reply.get("ok"):
++        raise VaultError(str((reply or {}).get("error") or "the vault broker refused the request")[:300])
++    return reply.get("result")
++
++
++def _meta_from_dict(d: dict[str, Any]) -> VaultItemMeta:
++    return VaultItemMeta(
++        id=str(d.get("id", "")), kind=str(d.get("kind", "")), label=str(d.get("label", "")),
++        origin=d.get("origin"), created_at=str(d.get("created_at", "")),
++        identifier_type=d.get("identifier_type"), identifier=d.get("identifier"),
++        has_otp=bool(d.get("has_otp")), allowed_origins=tuple(d.get("allowed_origins") or ()),
++    )
++
++
+ class VaultStore:
+-    """Encrypted, profile-scoped vault under ``<HERMES_HOME>/vault/``."""
++    """Encrypted, profile-scoped vault under ``<HERMES_HOME>/vault/``.
++
++    With a vault broker on the host (``broker_socket_path``) the public API goes to the broker, for
++    the home this store's directory belongs to; ``direct=True`` is the broker's own file store."""
+ 
+-    def __init__(self, base_dir: Optional[Path] = None):
++    def __init__(self, base_dir: Optional[Path] = None, *, direct: bool = False):
+         self._base = Path(base_dir) if base_dir is not None else (
+             Path(get_hermes_home()) / "vault"
+         )
++        self._broker = None if direct else broker_socket_path()
+         self._vault_path = self._base / "vault.json.enc"
+         self._key_path = self._base / "vault.key"
+         # Keychain mode (vault.key_storage: keychain) keeps only this non-secret pointer beside the
+@@ -346,6 +441,8 @@ class VaultStore:
+         the clone must not be published sharing the source's entry."""
+         from agent import vault_keychain as kc
+ 
++        if self._broker:
++            return None  # the broker holds the key; nothing of it is in the copied directory
+         ref = kc.read_ref(self._keyref_path)
+         if ref is None or self._key_path.exists():
+             return None  # key file layout (a vault.key always wins on read): nothing is shared
+@@ -412,6 +509,9 @@ class VaultStore:
+         """Where this vault's key lives (never the key itself), for ``hermes vault key``."""
+         from agent import vault_keychain as kc
+ 
++        if self._broker:
++            return {"storage": "broker", "path": self._broker}
++
+         ref = kc.read_ref(self._keyref_path)
+         if self._key_path.exists():
+             where = {"storage": "file", "path": str(self._key_path)}
+@@ -426,6 +526,9 @@ class VaultStore:
+         and re-running it finishes the job."""
+         if target not in ("file", "keychain"):
+             raise VaultError("key storage must be 'file' or 'keychain'")
++        if self._broker:
++            raise VaultError("this vault's key is held by the host's vault broker, out of this account's "
++                             "reach; it cannot be moved from here")
+         with self._locked():
+             self._ensure_dir()
+             return self._migrate_to_keychain() if target == "keychain" else self._migrate_to_file()
+@@ -560,6 +663,9 @@ class VaultStore:
+         ``password`` stays in the encrypted secret payload. ``payment`` and
+         ``address`` payloads remain fully secret.
+         """
++        if self._broker:
++            return _meta_from_dict(self._call("add_item", kind=kind, label=label, secret=dict(secret),
++                                              origin=origin))
+         if kind not in VAULT_KINDS:
+             raise VaultError(f"unknown vault kind {kind!r} (expected one of {VAULT_KINDS})")
+         label = (label or "").strip()
+@@ -614,17 +720,23 @@ class VaultStore:
+ 
+     def list_items(self) -> list[VaultItemMeta]:
+         """Metadata-only listing. Secret payloads are never included."""
++        if self._broker:
++            return [_meta_from_dict(d) for d in self._call("list_items") or []]
+         with self._locked():
+             return [self._meta(rec) for rec in self._read_all()]
+ 
+     def has_items(self) -> bool:
+         try:
++            if self._broker:
++                return bool(self._call("has_items"))
+             with self._locked():
+                 return bool(self._read_all())
+         except Exception:
+             return False
+ 
+     def remove_item(self, item_id: str) -> bool:
++        if self._broker:
++            return bool(self._call("remove_item", item_id=item_id))
+         with self._locked():
+             items = self._read_all()
+             remaining = [rec for rec in items if rec.get("id") != item_id]
+@@ -634,6 +746,9 @@ class VaultStore:
+             return True
+ 
+     def get_meta(self, item_id: str) -> Optional[VaultItemMeta]:
++        if self._broker:
++            found = self._call("get_meta", item_id=item_id)
++            return _meta_from_dict(found) if found else None
+         with self._locked():
+             for rec in self._read_all():
+                 if rec.get("id") == item_id:
+@@ -645,13 +760,23 @@ class VaultStore:
+ 
+         Callers must never place the returned values into tool results,
+         logs, exceptions, or any string that reaches the session DB.
++
++        With a vault broker only the agent's gateway or dashboard process itself gets the values;
++        any other process of the account (a terminal command, a script, a cron worker) is refused.
+         """
++        if self._broker:
++            found = self._call("resolve_secret", item_id=item_id)
++            return {str(k): str(v) for k, v in (found or {}).items()}
+         with self._locked():
+             for rec in self._read_all():
+                 if rec.get("id") == item_id:
+                     return dict(rec.get("secret") or {})
+         raise VaultError(f"no vault item with id {item_id!r}")
+ 
++    def _call(self, op: str, **args: Any) -> Any:
++        """A broker request for the home this store's directory belongs to (``<home>/vault``)."""
++        return _broker_call(self._broker, op, home=str(self._base.parent), **args)
++
+     @staticmethod
+     def _meta(rec: dict[str, Any]) -> VaultItemMeta:
+         identifier = rec.get("identifier")
+diff --git a/hermes_cli/vault.py b/hermes_cli/vault.py
+index a42a14f4..100cde6f 100644
+--- a/hermes_cli/vault.py
++++ b/hermes_cli/vault.py
+@@ -214,6 +214,9 @@ def _cmd_key(args) -> None:
+                 c.print("Keychain entry removed.")
+         return
+     where = store.key_location()
++    if where["storage"] == "broker":
++        c.print(f"Vault key: [bold]held by the host's vault broker[/] ({where['path']}), out of this account's reach")
++        return
+     if where["storage"] == "file":
+         c.print(f"Vault key: [bold]file[/] {where['path']} (0600, beside the encrypted vault)")
+     elif where["storage"] == "keychain":
+diff --git a/tests/agent/test_vault_broker_client.py b/tests/agent/test_vault_broker_client.py
+new file mode 100644
+index 00000000..bf4ca4bc
+--- /dev/null
++++ b/tests/agent/test_vault_broker_client.py
+@@ -0,0 +1,123 @@
++"""hyperhermes hermes-vault-broker-client.patch: VaultStore through the host's vault broker."""
++import json
++import os
++import socket
++import threading
++
++import pytest
++
++from agent import vault_store as vs
++
++
++def _serve(path, handler, uid_ok=True):
++    srv = socket.socket(socket.AF_UNIX)
++    srv.bind(str(path))
++    srv.listen(4)
++    seen = []
++
++    def loop():
++        while True:
++            try:
++                conn, _ = srv.accept()
++            except OSError:
++                return
++            data = b""
++            while not data.endswith(b"\n"):
++                chunk = conn.recv(65536)
++                if not chunk:
++                    break
++                data += chunk
++            if not data:  # the client hung up before sending (refused the server)
++                conn.close()
++                continue
++            req = json.loads(data)
++            seen.append(req)
++            conn.sendall(json.dumps(handler(req)).encode())
++            conn.close()
++
++    threading.Thread(target=loop, daemon=True).start()
++    return srv, seen
++
++
++@pytest.fixture
++def broker(tmp_path, monkeypatch):
++    sock = tmp_path / "me.sock"
++    monkeypatch.setattr(vs, "broker_socket_path", lambda: str(sock))
++    return sock
++
++
++def test_no_marker_means_files(tmp_path, monkeypatch):
++    monkeypatch.setattr(vs, "BROKER_DIR", str(tmp_path / "absent"))
++    assert vs.broker_socket_path() is None
++    store = vs.VaultStore(tmp_path / "vault")
++    meta = store.add_item("payment", "c", {"card_number": "4111", "exp_month": "1", "exp_year": "2030", "cvc": "1"})
++    assert (tmp_path / "vault" / "vault.json.enc").exists() and store.get_meta(meta.id)
++
++
++def test_marker_not_root_is_ignored(tmp_path, monkeypatch):
++    if os.getuid() == 0:
++        pytest.skip("runs as root")
++    d = tmp_path / "run"
++    d.mkdir(mode=0o755)
++    monkeypatch.setattr(vs, "BROKER_DIR", str(d))
++    with pytest.raises(vs.VaultError):  # the directory itself is not root's: fail, never the files
++        vs.broker_socket_path()
++
++
++def test_impostor_server_of_own_uid_is_refused(broker, tmp_path):
++    srv, seen = _serve(broker, lambda req: {"ok": True, "result": []})
++    try:
++        store = vs.VaultStore(tmp_path / "home" / "vault")
++        with pytest.raises(vs.VaultError, match="not the host's"):
++            store.list_items()
++        assert seen == []  # nothing was sent
++    finally:
++        srv.close()
++
++
++def test_unreachable_broker_fails_closed(broker, tmp_path):
++    store = vs.VaultStore(tmp_path / "home" / "vault")
++    with pytest.raises(vs.VaultError, match="not reachable"):
++        store.add_item("payment", "c", {"card_number": "4111", "exp_month": "1", "exp_year": "2030", "cvc": "1"})
++    assert not (tmp_path / "home" / "vault").exists()  # no local vault minted
++
++
++def test_requests_name_the_home_and_map_replies(broker, tmp_path, monkeypatch):
++    monkeypatch.setattr(vs, "_broker_call", lambda path, op, **a: _fake(op, a))
++    calls = []
++
++    def _fake(op, a):
++        calls.append((op, a))
++        if op == "list_items":
++            return [{"id": "vault_1", "kind": "login", "label": "x", "origin": "https://a.example",
++                     "created_at": "t", "identifier": "me", "identifier_type": "email"}]
++        if op == "resolve_secret":
++            return {"password": "pw"}
++        if op == "get_meta":
++            return None
++        return True
++
++    store = vs.VaultStore(tmp_path / "home" / "vault")
++    [meta] = store.list_items()
++    assert meta.identifier_type == "email" and meta.origin == "https://a.example"
++    assert store.resolve_secret("vault_1") == {"password": "pw"}
++    assert store.get_meta("nope") is None
++    assert calls[0] == ("list_items", {"home": str(tmp_path / "home")})
++    assert store.key_location()["storage"] == "broker"
++    with pytest.raises(vs.VaultError):
++        store.migrate_key("file")
++    assert store.own_copied_key(tmp_path / "x") is None
++
++
++def test_unnamed_account_with_brokers_fails_closed(tmp_path, monkeypatch):
++    import pwd
++
++    d = tmp_path / "run"
++    d.mkdir(mode=0o755)
++    real_stat = os.stat
++    monkeypatch.setattr(vs, "BROKER_DIR", str(d))
++    monkeypatch.setattr(vs.os, "stat", lambda p, *a, **k: os.stat_result((0o40755, 0, 0, 0, 0, 0, 0, 0, 0, 0))
++                        if str(p) == str(d) else real_stat(p, *a, **k))
++    monkeypatch.setattr(pwd, "getpwuid", lambda uid: (_ for _ in ()).throw(KeyError(uid)))
++    with pytest.raises(vs.VaultError, match="cannot tell"):
++        vs.broker_socket_path()

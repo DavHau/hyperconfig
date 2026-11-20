@@ -195,6 +195,8 @@
         # agent's vault, and the refusals (reuse, cross-site, another
         # agent's owner).
         vault-request = import ./checks/vault-request { inherit pkgs self hermesPackage; };
+        # The vault out of the agent's reach: migration, refusals, fills.
+        vault-broker = import ./checks/vault-broker { inherit pkgs self; };
         slots = import ./checks/slots { inherit pkgs self; };
         slots-local = import ./checks/slots/local.nix { inherit pkgs self; };
         container-slots-storage = import ./checks/container-slots-storage { inherit pkgs self; };

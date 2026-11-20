@@ -11,8 +11,9 @@
 #  - cross-site and same-site posts are refused before the page, a wrong
 #    form token by the page; then a TEST card (4111 1111 1111 1111) with a
 #    real browser's headers is saved, and the tool's `wait` returns its
-#    handle. alice's vault lists the item (metadata only); the card number
-#    is in no request file, no journal and not in the vault file in plain;
+#    handle. alice's vault lists the item (metadata only), held by her vault
+#    broker; the card number is in no request file, no journal and not in
+#    the vault file in plain;
 #  - the same link again: refused (single use);
 #  - bob, who owns another agent, is refused by alice's dashboard sign-in
 #    and stays outside the page; signed in to his own dashboard, alice's
@@ -196,8 +197,11 @@ pkgs.testers.runNixOSTest {
         print(items)
         assert [(i["id"], i["kind"], i["label"], i["origin"]) for i in items] == [
             (done["handle"], "payment", "Test card", None)], items
-        assert machine.succeed("stat -c '%U %a' ${aliceHome}/vault/vault.json.enc ${aliceHome}/vault/vault.key").split() == ["alice", "600", "alice", "600"]
-        machine.fail("grep -rq 4111111111111111 ${aliceHome}/vault ${hlib.stateDir "alice"}/vault-requests")
+        # in alice's vault broker (modules/core/vault-broker.nix), out of her uid's reach
+        machine.fail("test -e ${aliceHome}/vault/vault.json.enc")
+        machine.succeed("test -s /var/lib/private/hermes-vault/alice/home/vault/vault.json.enc")
+        machine.fail("runuser -u alice -- ls /var/lib/private/hermes-vault/alice")
+        machine.fail("grep -rq 4111111111111111 /var/lib/private/hermes-vault ${hlib.stateDir "alice"}")
         machine.succeed("journalctl -o cat > /tmp/journal && test -s /tmp/journal")
         machine.fail("grep -qF 4111111111111111 /tmp/journal")
         # (the logs exist: a grep of a missing dir fails too)

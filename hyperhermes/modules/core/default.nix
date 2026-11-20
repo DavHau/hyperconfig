@@ -18,7 +18,10 @@
 #   - owner-only iptables gates on those ports and their backends
 #     (firewall.nix),
 #   - lockedConfig: what hermes reads as its configuration root's and
-#     Nix-generated, out of the agent's reach (locked-config.nix).
+#     Nix-generated, out of the agent's reach (locked-config.nix),
+#   - the vault (saved logins, cards) in a broker the agent's uid cannot
+#     read; values only to its gateway and dashboard processes for a fill
+#     (vault-broker.nix).
 #
 # `hermes-agent` is this flake's input: the package source and its
 # config merge script.
@@ -41,5 +44,6 @@ in
     ./forwards.nix
     ./firewall.nix
     ./locked-config.nix
+    ./vault-broker.nix
   ];
 }

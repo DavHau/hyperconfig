@@ -21,6 +21,12 @@
 # naming that site, asked on every fill and never remembered; declined,
 # nothing is resolved or written; logins and codes on another origin are
 # still refused before anything is resolved.
+#
+# Vault broker client (hermes-vault-broker-client.patch): without root's
+# marker the file vault as before; with it, every call goes to the broker
+# for the store's home, a server of the caller's own uid is refused, an
+# unreachable broker fails closed (no local vault minted). The broker
+# itself: ../vault-broker.
 {
   pkgs,
   hermesPackage,
@@ -40,7 +46,7 @@ pkgs.runCommand "hyperhermes-vault-payment-frames-check" { nativeBuildInputs = [
   for t in test_browser_vault_origin_guard test_bot_desktop_browser_fence test_browser_vault_page_backend; do
     mkdir -p tests/tools && cp ${hermesSrc}/tests/tools/$t.py tests/tools/ && chmod u+w tests/tools/$t.py
   done
-  for p in hermes-vault-payment-consent-needs-card hermes-vault-payment-iframe-fill hermes-vault-payment-iframe-page-backend hermes-vault-fill-isolated-world hermes-vault-payment-any-site; do
+  for p in hermes-vault-payment-consent-needs-card hermes-vault-payment-iframe-fill hermes-vault-payment-iframe-page-backend hermes-vault-fill-isolated-world hermes-vault-payment-any-site hermes-vault-broker-client; do
     filterdiff -p1 -i 'tests/*' -x 'tests/tools/test_browser_vault.py' ${patches}/$p.patch | patch -p1 -F0
   done
   PYTHONPATH=${pytestPath} ${py} -m pytest -q -p no:cacheprovider \
@@ -50,6 +56,7 @@ pkgs.runCommand "hyperhermes-vault-payment-frames-check" { nativeBuildInputs = [
     tests/tools/test_vault_fill_hostile_page.py \
     tests/tools/test_browser_vault_origin_guard.py \
     tests/tools/test_bot_desktop_browser_fence.py \
-    tests/tools/test_browser_vault_page_backend.py 2>&1 | tee $out
+    tests/tools/test_browser_vault_page_backend.py \
+    tests/agent/test_vault_broker_client.py 2>&1 | tee $out
   [ "''${PIPESTATUS[0]}" = 0 ]
 ''
