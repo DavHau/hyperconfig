@@ -319,6 +319,13 @@
           import ./modules/nixos/self-heal/boot-counting-test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
+        # The runtime watchdog: no action on an upstream outage, staged
+        # repair and one reboot on a local fault, the seat warning, the tang
+        # peer gate, report-only laptops.
+        self-heal-net-watchdog =
+          import ./modules/nixos/self-heal/watchdog-test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          };
         # A hung PID 1 gets the VM reset by its (virtual) hardware watchdog.
         self-heal-hardware-watchdog =
           import ./modules/nixos/self-heal/hardware-watchdog-test.nix {

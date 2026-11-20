@@ -8,8 +8,8 @@
 # Parts here: ./deploy-guard.nix (confirm a live switch or roll it back),
 # ./hardware-watchdog.nix (systemd drives /dev/watchdog),
 # ./boot-counting.nix (systemd-boot falls back from a generation that never
-# boots healthy). The runtime watchdog will join this directory and reuse
-# `selfheal health`.
+# boots healthy), ./watchdog.nix (the runtime watchdog: repairs, reboots
+# when cut off; reuses the health checks).
 #
 # Health (`selfheal health [--level deploy|local|boot] [--json]`):
 #   deploy: sshd active and listening on services.openssh.ports, every mesh
@@ -104,7 +104,7 @@ let
   publicAnchors = lib.unique (lib.concatMap publicOf anchorMachines);
 
   cliConfig = pkgs.writeText "selfheal-config.json" (
-    builtins.toJSON {
+    builtins.toJSON (cfg.extraCliConfig // {
       hostName = me;
       stateDir = "/var/lib/selfheal";
       metricsDir = "/run/selfheal";
@@ -143,8 +143,8 @@ let
         pkgs.iproute2
         pkgs.iputils # ping, arping
         pkgs.util-linux
-      ];
-    }
+      ] + lib.optionalString (cfg.extraPath != [ ]) ":${lib.makeBinPath cfg.extraPath}";
+    })
   );
 
   script = pkgs.writers.writePython3 "selfheal.py" { flakeIgnore = [ "E501" ]; } (
@@ -160,6 +160,7 @@ in
     ./boot-counting.nix
     ./deploy-guard.nix
     ./hardware-watchdog.nix
+    ./watchdog.nix
   ];
 
   options.hyper.selfHeal = {
@@ -206,6 +207,20 @@ in
       type = lib.types.ints.positive;
       default = 24 * 60;
       description = "Upper bound of `selfheal hold <minutes>`, so a forgotten hold expires.";
+    };
+
+    extraCliConfig = lib.mkOption {
+      type = lib.types.attrsOf lib.types.anything;
+      internal = true;
+      default = { };
+      description = "More keys of the CLI's config json, from the parts (./watchdog.nix).";
+    };
+
+    extraPath = lib.mkOption {
+      type = lib.types.listOf lib.types.package;
+      internal = true;
+      default = [ ];
+      description = "More packages on the CLI's PATH, from the parts.";
     };
 
     roaming = lib.mkOption {

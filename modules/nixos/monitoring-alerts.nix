@@ -18,6 +18,9 @@
 #     15 min); one generic rule, the SLOs come with the metrics
 #   - a machine's deploy guard rolled back a live switch (critical, while
 #     its rollback flag is set: ./self-heal/deploy-guard.nix)
+#   - the runtime watchdog rebooted a cut-off machine (critical, 2 h); it
+#     repaired one (warning, digest); a gate holds its reboot for 30 min
+#     (warning) (./self-heal/watchdog.nix)
 #   - a recurring-tasks exporter silent for 1 h (critical): the dead man's
 #     switch, evaluated here on edi, independent of the exporting host
 # ZFS is judged per pool from ./monitoring-zfs-pools.nix (pool health and the
@@ -314,6 +317,56 @@ in
                 for = "30m";
                 severity = "warning";
                 summary = "{{ .Labels.instance }} runs an older generation than its system profile: the new one never booted healthy (boot counting fell back) or was not picked; see `selfheal status` and docs/self-heal.md";
+              })
+              # Runtime watchdog (./self-heal/watchdog.nix). A watchdog
+              # reboot pages once: the machine was cut off for 30 min and
+              # came back by itself; look at why. The stamp lasts, so the
+              # window (2 h) bounds the alert; the reboot itself (minutes
+              # without samples) sits inside it. A watchdog ROLLBACK sets the
+              # deploy guard's flag and pages as "Deploy rolled back" above,
+              # so it has no rule of its own (one page per event).
+              (rule {
+                uid = "selfheal-watchdog-reboot";
+                title = "Watchdog rebooted a cut-off machine";
+                expr = ''max by (instance, kind) (time() - selfheal_watchdog_last_reboot_timestamp_seconds{kind="reboot"} < 7200)'';
+                for = "0s";
+                severity = "critical";
+                summary = "{{ .Labels.instance }} was unreachable (sshd down or no overlay anchor) for 30 min and the runtime watchdog rebooted it; `selfheal watchdog status` and /var/lib/selfheal/log.jsonl on {{ .Labels.instance }} (docs/self-heal.md)";
+              })
+              # Repairs that worked are routine; the digest lists the
+              # machines that needed one in the last day.
+              (rule {
+                uid = "selfheal-watchdog-repair";
+                title = "Watchdog repaired a machine";
+                expr = ''sum by (instance) (increase(selfheal_watchdog_actions_total{action=~"restore|mesh_restart|uplink_restart"}[1h])) > 0'';
+                for = "0s";
+                keepFiringFor = "1h";
+                severity = "warning";
+                summary = "the runtime watchdog on {{ .Labels.instance }} restarted stopped services, mesh daemons or the uplink in the last hour (`selfheal watchdog status`)";
+              })
+              # Reachable, but a mesh daemon stays dead after the repairs
+              # (never a reboot for it): digest.
+              (rule {
+                uid = "selfheal-watchdog-degraded";
+                title = "Mesh daemon down (reachable)";
+                expr = ''max by (instance) (selfheal_watchdog_state{state="degraded"}) > 0'';
+                for = "1h";
+                severity = "warning";
+                summary = "a mesh daemon on {{ .Labels.instance }} stays down although the machine is reachable; the runtime watchdog keeps restarting it but never reboots for it (`selfheal watchdog status`)";
+              })
+              # Cut off but a gate holds the reboot (the tang peer, a hold,
+              # the daily cap): a person must look. Seat gates are excluded
+              # (a cancel blocks for exactly 30 min by design); 35 min rides
+              # out a gate that clears at its edge. peer-rebooting while the
+              # tang peer counts down or was seat-cancelled can reach it, which
+              # is wanted; peer-handshake and just-repaired last one tick.
+              (rule {
+                uid = "selfheal-watchdog-blocked";
+                title = "Watchdog reboot blocked";
+                expr = ''max by (instance, gate) (selfheal_watchdog_reboot_blocked{gate!~"seat-.*"}) > 0'';
+                for = "35m";
+                severity = "warning";
+                summary = "{{ .Labels.instance }} is cut off but its runtime watchdog may not reboot ({{ .Labels.gate }}); docs/self-heal.md";
               })
               (rule {
                 uid = "fleet-unit-failed";

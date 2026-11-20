@@ -64,7 +64,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/houses-grmpf.nix — grmpf's nix-housing houses (see houses.nix): <- amy
 - modules/nixos/houses.nix — nix-housing (codeberg.org/decentstates/nix-housing): <- m/houses-grmpf.nix
 - modules/nixos/initrd-ssh.nix — sshd in the initrd on port 2222: <- vit
-- modules/nixos/initrd-wifi.nix — Wifi in the initrd, so a machine without a cable can reach its Tang servers (./tang-client.nix). <- vit
+- modules/nixos/initrd-wifi.nix — Wifi in the initrd, so a machine without a cable can reach its Tang servers (./tang-client.nix). <- vit, m/self-heal/watchdog.nix
 - modules/nixos/iodine-password.nix — Password of the iodine IP-over-DNS tunnel (ns.bruch-bu.de). <- m/role-iodine/default.nix
 - modules/nixos/ipv4-forward.nix — Lend sgp's public IPv4 to som. <- sgp, som, m/agave-tunnel.nix, m/ipv4-forward-slots-test/default.nix
 - modules/nixos/jujutsu.nix — jj (jujutsu) on Dave's desktops, with its config. <- m/dave.nix
@@ -339,12 +339,14 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/security-takedown/eligible.nix — Units a security takedown (./takedowns.json) may stop, per machine: <- m/security-takedown/default.nix
 - modules/nixos/self-heal/boot-counting-test.nix — VM test of ./boot-counting.nix (check self-heal-boot-counting), modelled on nixpkgs' nixos/tests/systemd-boot.nix bootC… <- flake.nix
 - modules/nixos/self-heal/boot-counting.nix — Self-heal part 3: boot counting on the systemd-boot machines (amy joy nas som vit; docs/self-heal.md has the full walk-… <- m/self-heal/default.nix
-- modules/nixos/self-heal/default.nix — Self-heal: machines that drop off the network get themselves back, without a person at the console. One module family,… <- m/common.nix, m/self-heal/boot-counting-test.nix, m/self-heal/hardware-watchdog-test.nix, m/self-heal/test.nix
+- modules/nixos/self-heal/default.nix — Self-heal: machines that drop off the network get themselves back, without a person at the console. One module family,… <- m/common.nix, m/self-heal/boot-counting-test.nix, m/self-heal/hardware-watchdog-test.nix, m/self-heal/test.nix, m/self-heal/watchdog-test.nix
 - modules/nixos/self-heal/deploy-guard.nix — Deploy guard: every live switch must prove the machine is still reachable, or it is rolled back and the machine reboots… <- m/self-heal/default.nix
 - modules/nixos/self-heal/hardware-watchdog-test.nix — VM test of ./hardware-watchdog.nix (check self-heal-hardware-watchdog): <- flake.nix
 - modules/nixos/self-heal/hardware-watchdog.nix — Self-heal part 2: the hardware watchdog (docs/self-heal.md). systemd (PID 1) pings /dev/watchdog from its main loop eve… <- m/self-heal/default.nix
 - modules/nixos/self-heal/selfheal.py — - <- m/self-heal/default.nix
 - modules/nixos/self-heal/test.nix — VM test of ./deploy-guard.nix (check self-heal-deploy-guard): <- flake.nix
+- modules/nixos/self-heal/watchdog-test.nix — VM test of ./watchdog.nix (check self-heal-net-watchdog). <- flake.nix
+- modules/nixos/self-heal/watchdog.nix — Self-heal part 4: the runtime watchdog (docs/self-heal.md). Every minute `selfheal watchdog tick` (./selfheal.py, secti… <- m/self-heal/default.nix
 - modules/nixos/short-videos/default.nix — - <- m/dave.nix
 - modules/nixos/short-videos/short-videos.sh — !/usr/bin/env bash List video files in DIR (default: <- m/short-videos/default.nix
 - modules/nixos/skills/external-scripts/SKILL.md — >

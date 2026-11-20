@@ -15,7 +15,7 @@ one CLI `selfheal`), enabled on every machine but the installer by
 | 1 | Deploy guard | Every live switch must leave the machine reachable; otherwise restore stopped units, then roll back to the previous generation and reboot into it. | on main, not yet deployed |
 | 2 | Hardware watchdog | Systemd pets `/dev/watchdog`; a hung kernel or PID 1 reboots. | on main, not yet deployed |
 | 3 | Boot counting | systemd-boot machines (amy joy nas som vit) fall back to the last good entry when a new generation never boots healthy. | on main, not yet deployed |
-| 4 | Runtime watchdog | A local timer notices "I am cut off" (not an upstream outage) and escalates: restart units, restart the network, reboot. | planned |
+| 4 | Runtime watchdog | A local timer notices "I am cut off" (not an upstream outage) and escalates: restart units, restart the network, reboot. | on main, not yet deployed |
 | 5 | External power-cycle | Out of scope for now. | not planned |
 
 ## Health
@@ -393,6 +393,199 @@ with the uplink down fails on "no default route" and restarts; a running
 `clan-switch-*` unit blocks the restart (`why=a switch is running`); a
 `switch` to the profile renames its bad entry back to `+2`.
 
+## Part 4: runtime watchdog
+
+`modules/nixos/self-heal/watchdog.nix` (options `hyper.selfHeal.watchdog.*`),
+code in `selfheal.py` (section "runtime watchdog"). The timer
+`selfheal-net-watchdog.timer` runs `selfheal watchdog tick` every minute
+(first 2 min after boot). One tick probes in parallel, with the health
+checks above (no second implementation):
+
+- sshd: active and listening on its ports (`check_sshd`)
+- S: sshd plus every mesh daemon active (`check_mesh`)
+- G: a default route's gateway answers (`check_gateway`); if one exists
+  but is silent, a LAN neighbour: an all-nodes ping (`ff02::1`) on the
+  default route's interface answered by an address that isn't ours, or the
+  tang peer's link-local address (`watchdog.lanPeers`). A neighbour counts
+  only if it came in through a physical port with carrier: on a bridge,
+  its MAC must sit on a real NIC member in `bridge fdb` (som's br0 also
+  carries its nspawn containers' veths, which answer even when enp6s0 is
+  dead). No default route at all (lease/RA lost, a config error) is our
+  own fault: link, whatever the LAN says.
+- I: one of `hyper.selfHeal.internetProbes` answers ICMP or TCP 443
+- M: one overlay anchor answers (`check_anchors`, the deploy guard's anchors)
+
+### Reachable
+
+"Reachable by us" = sshd runs and listens AND M ok (some overlay,
+yggdrasil, zerotier or wireguard, reaches an anchor: edi, sgp, bam). That
+is how we get in; every path in we use is an overlay, so the brief's "I ok
+and some path in" comes to the same. Each tick sorts the result into one
+state (first match wins):
+
+| State | Condition | Meaning | Action (modes repair and full) | Counts towards the reboot |
+|---|---|---|---|---|
+| ok | sshd, S, M ok | reachable | end the incident | - |
+| services | sshd down or not listening | we can't get in | `reset-failed`, then start sshd, the mesh units and multi-user.target (the deploy guard's restore) | yes |
+| degraded | sshd and M ok, a mesh daemon down | reachable, one overlay fewer | the same restore | never (warning alert after 1 h) |
+| link | M down, gateway silent (or no default route), no LAN neighbour answers | our own link (vit's wedged Wi-Fi) | after 5 min: restart the uplink (NetworkManager, else wpa_supplicant; systemd-networkd); on vit first reload the Wi-Fi driver (`hyper.initrdWifi.reloadDriver`, shared with initrd-wifi-watchdog) | yes |
+| noroute | M down, no default route, but a LAN neighbour answers on the uplink remembered from the last route | our DHCP/RA, or a router dead longer than its DHCP lease (~48 h; the RA route expires after 30 min) | the same uplink restart as link | never: a reboot can't bring back a lease from a dead router, and every healthy LAN machine would reboot daily |
+| upstream | M down, and gateway silent but a LAN neighbour answers (the router is dead), or gateway ok and internet down | casa's router or ISP | nothing, ever: log + metric | never |
+| anchors_down | M down, G and I ok, anchors silent on their public addresses (TCP 22) too | the anchors are down, not us | nothing | never |
+| mesh | M down, G and I ok, the anchors answer on their public addresses (or none are known) | our overlays are wedged | restart the mesh daemons | only after `meshRebootAfter` (2 h) + up to `meshRebootJitter` (30 min, fixed per host) AND two mesh restarts: an anchor-side overlay outage (a bad zerotier/yggdrasil deploy on edi/sgp/bam) would otherwise reboot the whole fleet |
+
+Repairs run only after a fault was seen on 2 ticks in a row
+(`repairAfterTicks`: a deploy's stop window is shorter), each step at most
+every 10 min, and never while a switch runs or `selfheal hold` is on (one
+`watchdog-repairs-held` log line). The incident starts at the first
+counted tick and ends at the first tick that isn't (ok, degraded,
+noroute, upstream, anchors_down), so an upstream outage never adds to it.
+Known residual of noroute: a route lost through our own fault while the
+router lives and the LAN answers is restarted every 10 min but never
+rebooted (planned: ask the remembered gateway directly, ARP/ND, and call
+it link if it answers). A machine with no remembered uplink (fresh
+state) only checks the tang peer, else link. A link
+that flaps back for one tick every < 30 min therefore never reaches the
+reboot: "reachable sometimes" is reachable. Unreachable (counted) for
+30 min (`rebootAfter`) in mode full: reboot if every gate passes; a tick
+that just ran a repair waits one more tick. If the running system came
+from a live switch less than 24 h ago that the deploy guard never
+confirmed (a pending deploy, or `/run/current-system` !=
+`/run/booted-system` without a confirm), the deploy guard's rollback runs
+instead, back to the last confirmed system (else the booted one). If
+`systemctl reboot` can't be queued, the watchdog logs `reboot-failed` and
+forces it (the same tail as the deploy guard's rollback).
+
+### Gates
+
+All must pass; the first that blocks is logged (`watchdog-reboot-blocked
+gate=...`, `selfheal watchdog status`, metric
+`selfheal_watchdog_reboot_blocked{gate}`):
+
+1. boot-grace: up for at least 30 min.
+2. daily-cap: no watchdog reboot or rollback in the last 24 h
+   (`/var/lib/selfheal/watchdog/last-reboot.json`; a stamp from the future,
+   a bad RTC, is ignored and logged).
+3. switch: no clan-switch-*/clan-boot-* unit, no switch-to-configuration
+   process, younger than `switchHungAfter` (the deploy guard's maxExtend,
+   1 h). An older one is hung (a switch with the guard disarmed:
+   NIXOS_NO_CHECK, by hand, arm-failed): it no longer holds repairs or the
+   reboot, logged once as `switch-hung`.
+4. hold: no `selfheal hold` (the same hold as the deploy guard's).
+5. tang peer (vit <-> som, below).
+6. seat (below).
+
+### vit and som: never both in the same window
+
+vit and som hold each other's tang key (`watchdog.tangPeer`, derived: we
+run a tang server and our first tang server is the peer). Rule: they never
+reboot in the same window.
+
+1. A tick that wants to reboot first PUBLISHES its intent
+   (`/run/selfheal/watchdog-peer.json`: rebootPending, intentAt, rebooting),
+   then asks the peer, and waits at least one tick after publishing
+   (gate `peer-handshake`), so a peer that starts wanting at the same time
+   sees our intent before either acts.
+2. Peer booted < 30 min ago (`peer-recent`), or committed to its reboot
+   (`peer-rebooting`): refuse. Never overridden; both are bounded.
+3. Both want to: the earlier intent goes first, a tie the lower name
+   (som before vit). Both compare the same two published numbers, so they
+   agree; the winner re-queries once before committing. The other then
+   sees "rebooting", then the peer down or freshly booted.
+4. Peer unreachable (`peer-down`, also no key yet): refuse until our own
+   outage passes `peerOverrideHours` (6 h); vit (later in name order)
+   waits `peerStaggerMinutes` (60 min, must exceed peerRecent + a boot)
+   longer, so after a shared outage som goes at 6 h, vit sees som down or
+   just booted and can only go at 7 h, after som is back.
+
+How we learn the peer's state: ssh to the peer as root with a dedicated
+key (clan var `selfheal-peer-ssh`, shared by vit and som) whose
+authorized_keys line is
+`command="selfheal watchdog peer-info",from="fe80::*%<our tang interface>,<peer's yggdrasil address>",restrict`
+(sshd matches a link-local client with its `%scope`: a CIDR like
+`fe80::/10` never matches, the wildcard does):
+it can only print `{"host", "bootId", "uptime", "rebootPending",
+"intentAt", "rebooting"}`. The host key is pinned from the peer's clan
+openssh var (an assertion refuses a production build without it), the
+port is the peer's first sshd port. Addresses, in order: the peer's fixed
+tang link-local address on our LAN interface (works with the internet and
+every overlay down; vit and som share Dave's LAN), then `<peer>.d`.
+Rejected: an unauthenticated endpoint (anyone on the LAN could fake "peer
+just booted" and hold our reboot off) and "tang answers" (says up, not
+since when).
+
+Trade-offs (Dave's rule; open question filed by the lead): if WE are cut
+off we probably can't reach the peer either, so we wait the 6 h override
+(vit 7 h). A peer-down override reboot needs the other's tang to unlock:
+if the LAN itself is what's broken (both see each other down for > 7 h),
+som reboots at 6 h and waits in its initrd for vit's tang, vit reboots at
+7 h and waits for som's: both then need `clan-unlock` by hand. Before
+part 4 both simply came back when the LAN did. The 30 min/1 h stagger
+only prevents the same window, not this.
+
+### Seat warning (vit, som)
+
+`watchdog.seatWarning` (default: mode full and a display manager). When
+every other gate passes and a local user session is on seat0 (logind:
+Seat=seat0, Remote=no; ssh sessions and agents never count), the tick
+starts a 5 min countdown (`countdown`) instead, writes
+`selfheal: <host> is unreachable from the network and will reboot in 5:00 — cancel once: ...`
+to every terminal (wall) and the session's tty on each tick, and sends a
+critical desktop notification to the session's user (notify-send on their
+session bus, with a Cancel action; noctalia's notification server
+advertises `actions`). A person at the seat may cancel once per incident:
+
+- the notification's "Cancel the reboot" action, or
+- `selfheal cancel` in a terminal on the seat (any user, no sudo). It talks
+  to `/run/selfheal/cancel.sock`; the socket's service reads the caller's
+  pid (SO_PEERCRED) and accepts only a caller in a seat0 session scope with
+  Remote=no, or in an `app-*` scope/service of the user manager of a user
+  with an active local seat0 session (what niri and the launchers start
+  terminals in). ssh, `systemd-run --user` (run-*) and agents' own units
+  are refused. Residual: a process of the seat user running in an app-*
+  unit (e.g. `systemd-run --user --unit=app-x`, possible over ssh) still
+  passes; one cancel costs 30 min, once per incident.
+
+After a cancel it warns again 30 min later (`rearmAfter`); that warning
+can't be cancelled, and the reboot follows when its countdown ends. No
+session on the seat: no warning, the reboot follows at once.
+
+### Modes
+
+| Machine | Mode | Why |
+|---|---|---|
+| amy, joy | report | `hyper.selfHeal.roaming`: they roam and go offline on purpose; probes + metrics only |
+| nas, cm-pi, bam | full | unattended, or at a site without a person |
+| vit, som | full + seat warning + tang peer | Dave's rule: unreachable must reboot, even while used |
+| edi, sgp | full | Dave's rule covers every machine that would otherwise lock us out. Both have a provider console, but that needs a person at a browser; the gates (30 min, once a day, never for upstream, mesh only after 2 h) make a wrong reboot of a cloud box cheap, while a missed one costs pocket-id and grafana (edi) or som's IPv4 (sgp) until someone logs in. |
+
+`mode = "repair"` (restart steps, never a reboot) stays available per
+machine.
+
+### Commands
+
+| Command | What |
+|---|---|
+| `selfheal watchdog status [--json]` | state, time cut off, blocking gate, repairs held, warning, last watchdog reboot, action counts |
+| `selfheal cancel` | cancel a seat warning once (only from the seat) |
+| `selfheal hold <minutes>` | holds the watchdog's repairs AND its reboot (and the deploy guard) |
+| `selfheal watchdog tick` | one tick by hand |
+
+Metrics (`/run/selfheal/watchdog.prom`): `selfheal_watchdog_state{state}`,
+`selfheal_watchdog_actions_total{action}` (restore, mesh_restart,
+uplink_restart, warn, cancel, reboot, rollback; kept across reboots),
+`selfheal_watchdog_unreachable_seconds`,
+`selfheal_watchdog_last_reboot_timestamp_seconds{kind}`,
+`selfheal_watchdog_reboot_blocked{gate}`, `selfheal_watchdog_mode{mode}`.
+Alerts (`modules/nixos/monitoring-alerts.nix`): "Watchdog rebooted a cut-off
+machine" (critical, for 2 h after it), a watchdog rollback pages as "Deploy
+rolled back" (its flag), "Watchdog repaired a machine" and "Mesh daemon
+down (reachable)" (warnings, digest), "Watchdog reboot blocked" (warning,
+35 min, seat gates excluded).
+
+New clan vars generator: `selfheal-peer-ssh` (shared by vit and som,
+prompt-free): run `clan vars generate vit` before their first deploy.
+
 ## Per-machine policy
 
 From the proposal, adjusted by Dave's decisions (2026-11-20).
@@ -401,11 +594,11 @@ From the proposal, adjusted by Dave's decisions (2026-11-20).
 |---|---|---|---|---|---|
 | Remote, unattended | nas | yes | if present | yes, gate on sshd + gateway | full, reboot allowed |
 | Always-on desktops | vit, som | yes | yes (iTCO / SP5100) | yes, gate after the unlock: som sshd + gateway, vit sshd (Wi-Fi unproven); restarts only while the other's Tang answers (never both in the same window) | full; on-screen warning with a ~5 min countdown, cancellable once; never both in the same window (mutual tang) |
-| Wired/cloud servers | bam, edi, sgp | yes | bam, edi (sgp has none) | no (GRUB) | restart steps; reboot when unreachable |
+| Wired/cloud servers | bam, edi, sgp | yes | bam, edi (sgp has none) | no (GRUB) | full: restart steps, reboot when unreachable |
 | Home Pi | cm-pi | yes | yes (StarFive) | no (extlinux) | full, reboot allowed |
 | Laptops | amy, joy | yes | joy yes; amy off (suspend) | yes, gate on sshd only (they boot offline) | metric only, no actions |
 
-Binding rules for the parts to come: an unreachable machine reboots
+Binding rules (part 4 implements them): an unreachable machine reboots
 whether or not someone uses it (remote sessions never block it); an
 upstream-only outage never triggers a reboot; at most one watchdog reboot
 per day, none within 30 min of boot, none while a switch runs; vit and som
@@ -431,3 +624,30 @@ virtual i6300esb; systemd arms it with 30 s, and a PID 1 frozen with
 ptrace gets the VM reset 15-50 s later (25 s measured; earlier would be a
 panic, not the watchdog). Mutation check (module off, reset subtest only,
 90 s wait): the reset never comes and the subtest fails.
+
+`checks.x86_64-linux.self-heal-net-watchdog`
+(`modules/nixos/self-heal/watchdog-test.nix`): router + upstream nodes,
+ticks by hand with a fake clock (`watchdog.testClockFile`). (a) upstream
+outage (the router drops the anchor and the internet probe) for 2 simulated
+hours: state upstream, no action. (h) the router dead but a LAN neighbour
+answers: upstream, also through a bridged uplink (node brh); our own link
+dead: link, uplink restart after 5 min; brh's NIC wedged while a local
+container on its bridge still answers ff02::1: link. (j) no default route
+while the tang peer answers on the LAN: link.
+(b) stopped sshd + mesh stand-in are restarted on the 2nd bad tick; a mesh
+stand-in that stays dead while the anchor answers is "degraded" for 2 h,
+never a reboot; an unrestartable sshd reboots once (an ssh session open
+meanwhile), then the boot grace and the daily cap block. (f) a running
+clan-switch unit and `selfheal hold` hold repairs and the reboot; a switch
+older than switchHungAfter doesn't (event switch-hung once). (g) the
+mesh state: mesh restarts, counted only after meshRebootAfter and two
+restarts. (c) a tty login on seat0: countdown, `selfheal cancel` over ssh
+and from the seat user's manager over ssh refused, from the seat accepted
+once, the re-armed warning refuses it, then the reboot. (d) tang peer:
+handshake tick, down -> refused, back but just booted -> refused even after
+7 h, down after 6 h -> reboot; the forced command answers peer-info only.
+The peers query each other over their eth1 link-local addresses with
+`from="fe80::*"`, the path vit and som use.
+(i) both peers cut off at once and ticked concurrently: never both
+"rebooted" in any round, exactly one goes, the other waits for the peer-down
+override (+60 min for the later name). (e) roaming laptop: report only.

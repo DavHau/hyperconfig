@@ -678,15 +678,7 @@ def rollback(p, h):
           notes="; ".join(notes))
     write_metrics()
     os.sync()
-    run(["systemctl", "reboot"], timeout=60)
-    # A hung stop job is covered by reboot.target's JobTimeoutSec=30min /
-    # reboot-force. This loop only helps when `systemctl reboot` could not
-    # queue the job at all (we are not stopped then).
-    end = time.monotonic() + 600
-    while time.monotonic() < end:
-        time.sleep(1)
-    event("reboot-forced")
-    run(["systemctl", "reboot", "--force"], timeout=60)
+    reboot_or_force("rollback")
 
 
 def switch_wait(p):
@@ -1237,6 +1229,960 @@ def cmd_status(args):
     return 0
 
 
+# ---------------------------------------------------------------- runtime watchdog
+#
+# Part 4 (./watchdog.nix): `selfheal watchdog tick` runs every minute,
+# probes S (sshd + mesh daemons), G (default gateway, else a LAN
+# neighbour), I (internet probes), M (overlay anchors) with the health
+# checks above, classifies the result and escalates: restart units, restart
+# the mesh, restart the uplink, and after `rebootAfter` s of being
+# unreachable: reboot (or roll back an unconfirmed live switch), behind the
+# gates of docs/self-heal.md.
+# Locking: the state Lock is held only to read-modify-write state.json;
+# probes, repairs and the peer query run outside it, so `selfheal cancel`
+# and the deploy guard never wait on the network.
+# Clocks: incident times use /proc/uptime of the current boot (an NTP jump
+# can't shorten them); the daily reboot stamp is wall clock (it must
+# survive the reboot).
+
+WD_STATES = ["ok", "degraded", "services", "link", "noroute", "mesh", "upstream", "anchors_down"]
+WD_ACTIONS = ["restore", "mesh_restart", "uplink_restart", "warn", "cancel", "reboot", "rollback"]
+# A fault on our side: repaired (after `repairAfterTicks` ticks in a row).
+WD_BAD = {"degraded", "services", "link", "noroute", "mesh"}
+# Unreachable by us: counted towards the reboot (mesh only after
+# meshRebootAfter + two mesh restarts, see wd_counts()). Never noroute:
+# the LAN still answers, so it may be a router dead past the DHCP lease.
+WD_COUNTED = {"services", "link", "mesh"}
+
+
+def wd():
+    return CFG["watchdog"]
+
+
+def wd_dir():
+    return os.path.join(state_dir(), "watchdog")
+
+
+def wd_path(name):
+    return os.path.join(wd_dir(), name)
+
+
+def wd_offset():
+    """Test-only fake clock (option testClockFile, null on machines): seconds
+    added to the uptime and the wall clock the watchdog judges by."""
+    f = wd().get("testClockFile")
+    if not f:
+        return 0.0
+    try:
+        with open(f) as fh:
+            return float(fh.read().strip() or 0)
+    except (OSError, ValueError):
+        return 0.0
+
+
+def wd_uptime():
+    with open("/proc/uptime") as f:
+        return float(f.read().split()[0]) + wd_offset()
+
+
+def wd_now():
+    return now() + wd_offset()
+
+
+def wd_state():
+    return read_json(wd_path("state.json")) or {}
+
+
+def wd_save(st):
+    os.makedirs(wd_dir(), mode=0o700, exist_ok=True)
+    write_json(wd_path("state.json"), st)
+
+
+def wd_jitter():
+    """Per-host delay (0..meshRebootJitter s), stable across runs, so an
+    anchor-side overlay outage doesn't reboot the whole fleet at once."""
+    import hashlib
+    span = int(wd().get("meshRebootJitter", 0))
+    if span <= 0:
+        return 0
+    return int(hashlib.sha256(host().encode()).hexdigest(), 16) % span
+
+
+def own_addresses():
+    r = run(["ip", "-o", "addr", "show"], timeout=5)
+    out = set()
+    for line in r.stdout.splitlines():
+        cols = line.split()
+        if "inet" in cols or "inet6" in cols:
+            k = cols.index("inet6") if "inet6" in cols else cols.index("inet")
+            out.add(cols[k + 1].split("/")[0])
+    return out
+
+
+def gateway_devs():
+    """The devices of the default routes (part 3's default_gateways())."""
+    devs = []
+    for _gw, d in default_gateways():
+        if d and d not in devs:
+            devs.append(d)
+    return devs
+
+
+def is_bridge(dev):
+    return os.path.isdir(f"/sys/class/net/{dev}/brif")
+
+
+def phys_ports(dev):
+    """dev itself, or a bridge's member ports that are real NICs (have a
+    device): never the veths/taps of local containers and VMs. A bridge
+    over a VLAN or bond has none here (the LAN check is skipped: link):
+    extend this first before bridging one (none in the fleet today)."""
+    if not is_bridge(dev):
+        return [dev]
+    return [p for p in os.listdir(f"/sys/class/net/{dev}/brif") if os.path.exists(f"/sys/class/net/{p}/device")]
+
+
+def carrier(dev):
+    try:
+        with open(f"/sys/class/net/{dev}/carrier") as f:
+            return f.read().strip() == "1"
+    except OSError:
+        return False
+
+
+def via_phys(src, dev):
+    """A neighbour counts only if its frames come in through a physical
+    port: on a bridge, its MAC (neighbour table, after one unicast ping)
+    must sit on a physical member port in the bridge's fdb. som's br0
+    carries its nspawn containers' veths, which answer ff02::1 even when
+    enp6s0 is dead (L2)."""
+    if not is_bridge(dev):
+        return True
+
+    def lladdr():
+        nb = run(["ip", "-6", "neigh", "show", src, "dev", dev], timeout=5).stdout.split()
+        return nb[nb.index("lladdr") + 1].lower() if "lladdr" in nb else None
+
+    mac = lladdr()
+    if mac is None:
+        run(["ping", "-6", "-n", "-c", "1", "-W", "1", f"{src}%{dev}"], timeout=4)
+        mac = lladdr()
+    if mac is None:
+        return False
+    ports = phys_ports(dev)
+    for line in run(["bridge", "fdb", "show", "br", dev], timeout=5).stdout.splitlines():
+        c = line.split()
+        if c and c[0].lower() == mac and "dev" in c:
+            return c[c.index("dev") + 1] in ports
+    return False
+
+
+def lan_neighbour(devs=None):
+    """The gateway is silent or there is no default route (then `devs`
+    are the uplinks remembered while one existed): does anyone else on
+    our LAN answer? An all-nodes ping (ff02::1) on each default-route
+    interface with a reply from an address that isn't ours and that came
+    in through a physical port with carrier (L2), or the tang peer's
+    link-local address under the same rule. Yes = the router is dead, not
+    our link (S1): upstream (noroute when there is no route). A wedged
+    Wi-Fi or NIC hears nobody: link."""
+    mine = own_addresses()
+    for dev in (devs if devs is not None else gateway_devs()):
+        if not any(carrier(p) for p in phys_ports(dev)):
+            continue
+        r = run(["ping", "-6", "-n", "-c", "2", "-w", "3", f"ff02::1%{dev}"], timeout=8)
+        seen = []
+        for line in r.stdout.splitlines():
+            if " from " in line and "bytes" in line:
+                src = line.split(" from ", 1)[1].split()[0].rstrip(":").split("%")[0]
+                if src not in mine and src not in seen:
+                    seen.append(src)
+        for src in seen:
+            if via_phys(src, dev):
+                return f"{src} on {dev}"
+    for addr in wd().get("lanPeers", []):
+        dev = addr.split("%", 1)[1] if "%" in addr else None
+        if dev and not any(carrier(p) for p in phys_ports(dev)):
+            continue
+        if run(["ping", "-n", "-c", "1", "-W", "2", addr], timeout=5).returncode != 0:
+            continue
+        if dev is None or via_phys(addr.split("%", 1)[0], dev):
+            return addr
+    return None
+
+
+def wd_probe():
+    """S, G, I, M in parallel with part 1's checks (no second health
+    implementation): S = check_sshd + check_mesh, G = check_gateway,
+    M = check_anchors, I = reachable_set(internetProbes, 443). The public
+    addresses of the anchors are only probed when I is up and M is down,
+    a LAN neighbour only when G is silent."""
+    sshd_items, mesh_items, g_items, m_items, inet = [], [], [], [], []
+    check_sshd(sshd_items)
+    check_mesh(mesh_items)
+    threads = [
+        threading.Thread(target=check_gateway, args=(g_items,)),
+        threading.Thread(target=check_anchors, args=(m_items,)),
+        threading.Thread(target=lambda: inet.extend(reachable_set(CFG.get("internetProbes", []), port=443))),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(20)
+    s_items = sshd_items + mesh_items
+    obs = {
+        "sshd": all(i["ok"] for i in sshd_items),
+        "S": all(i["ok"] for i in s_items),
+        "G": bool(g_items) and all(i["ok"] for i in g_items),
+        "M": bool(m_items) and all(i["ok"] for i in m_items),
+        "I": bool(inet) or not CFG.get("internetProbes"),
+        "items": s_items + g_items + m_items + [{"name": "internet", "ok": bool(inet),
+                                                 "detail": inet[0] if inet else "no probe answers"}],
+        "public": None,
+        "lan": None,
+    }
+    if obs["I"] and not obs["M"] and CFG.get("anchorsPublic"):
+        # like upstream_only(): TCP 22 only, a CDN in front of a name proves nothing
+        obs["public"] = bool(reachable_set(CFG["anchorsPublic"], port=22, icmp=False))
+    # No default route: our own DHCP/RA/config fault, or a router dead past
+    # the DHCP lease (~48 h, the RA route after 30 min). Look on the uplinks
+    # remembered while a route existed: a LAN that answers = noroute
+    # (uplink repairs, never a reboot: R1), silence = link.
+    if obs["sshd"] and not obs["M"] and not obs["G"]:
+        obs["noRoute"] = not default_gateways()
+        obs["lan"] = lan_neighbour(wd_state().get("gwDevs", []) if obs["noRoute"] else None)
+        obs["items"].append({"name": "lan", "ok": bool(obs["lan"]), "detail": obs["lan"] or "no neighbour answers"})
+    return obs
+
+
+def wd_classify(o):
+    """The state, first match wins (docs/self-heal.md, "Reachable"):
+    services      sshd down or not listening: we can't get in.
+    ok            sshd fine, every mesh daemon active, an anchor answers.
+    degraded      reachable (sshd + an anchor), but a mesh daemon is down:
+                  repaired, never a reboot.
+    link          gateway silent (or no default route) and no LAN
+                  neighbour answers: our link.
+    noroute       no default route, but a LAN neighbour answers: our
+                  DHCP/RA, or a router dead past its lease; the uplink is
+                  restarted, never counted towards the reboot.
+    upstream      gateway (or a LAN neighbour) answers, internet down; or
+                  the gateway alone is dead: never acted on.
+    anchors_down  internet up, but the anchors are silent on their public
+                  addresses too: the anchors are down, not us.
+    mesh          internet up, overlays down (anchors' public addresses
+                  answer, or none are known): our overlays are wedged."""
+    if not o["sshd"]:
+        return "services"
+    if o["M"]:
+        return "ok" if o["S"] else "degraded"
+    if not o["G"]:
+        if not o.get("lan"):
+            return "link"
+        return "noroute" if o.get("noRoute") else "upstream"
+    if not o["I"]:
+        return "upstream"
+    if o["public"] is False:
+        return "anchors_down"
+    return "mesh"
+
+
+def wd_count(st, action):
+    c = st.setdefault("actions", {})
+    c[action] = c.get(action, 0) + 1
+
+
+def wd_due(st, step, up):
+    """A repair step runs at most every repairInterval s."""
+    last = st.setdefault("lastRepair", {}).get(step)
+    if last is not None and up - last < wd()["repairInterval"]:
+        return False
+    st["lastRepair"][step] = up
+    return True
+
+
+def wd_plan_repairs(st, o, cls, up):
+    """Which repair steps are due (decided under the Lock, run outside)."""
+    steps = []
+    if not o["S"] and wd_due(st, "restore", up):
+        steps.append("restore")
+    if cls == "mesh" and wd_due(st, "mesh", up):
+        steps.append("mesh")
+    if cls in ("link", "noroute"):
+        since = st.setdefault("linkSince", up)
+        if up - since >= wd()["linkGrace"] and wd_due(st, "uplink", up):
+            steps.append("uplink")
+    else:
+        st.pop("linkSince", None)
+    for s in steps:
+        wd_count(st, {"restore": "restore", "mesh": "mesh_restart", "uplink": "uplink_restart"}[s])
+        if s == "mesh":
+            st["meshRestarts"] = st.get("meshRestarts", 0) + 1
+    return steps
+
+
+def wd_run_repairs(steps, o):
+    for s in steps:
+        if s == "restore":
+            restore({"items": o["items"]})
+        elif s == "mesh":
+            done = []
+            for u in CFG["meshUnits"]:
+                r = run(["systemctl", "restart", "--no-block", u], timeout=30)
+                done.append(u if r.returncode == 0 else f"{u}(failed)")
+            event("watchdog-mesh-restart", units=",".join(done))
+        elif s == "uplink":
+            done = []
+            if wd().get("uplinkReload"):
+                r = run([wd()["uplinkReload"]], timeout=120)
+                done.append("driver-reload" if r.returncode == 0 else f"driver-reload(failed {r.returncode})")
+            for u in wd()["uplinkUnits"]:
+                run(["systemctl", "reset-failed", u], timeout=15)
+                r = run(["systemctl", "restart", "--no-block", u], timeout=30)
+                done.append(u if r.returncode == 0 else f"{u}(failed)")
+            event("watchdog-uplink-restart", done=",".join(done))
+
+
+def wd_counts(st, cls, up):
+    """Seconds this incident counts towards the reboot (None = not yet).
+    services and link count from the incident's start. mesh only after
+    meshRebootAfter (+ per-host jitter) AND two mesh restarts tried (S2):
+    an anchor-side overlay outage must not reboot the fleet."""
+    if cls not in WD_COUNTED or st.get("incidentStart") is None:
+        return None
+    inc = up - st["incidentStart"]
+    if cls == "mesh":
+        need = wd()["meshRebootAfter"] + wd_jitter()
+        if inc < need or st.get("meshRestarts", 0) < 2:
+            return None
+    return inc
+
+
+# ---- peer (vit <-> som: each holds the other's tang key)
+
+def publish_peer(intent_at, rebooting=False):
+    """watchdog-peer.json, what the peer reads through peer-info:
+    intentAt = wall time our reboot intent started (None = no intent),
+    published BEFORE we ask the peer, so two concurrent ticks see each
+    other; rebooting = committed."""
+    try:
+        os.makedirs(CFG["metricsDir"], exist_ok=True)
+        f = os.path.join(CFG["metricsDir"], "watchdog-peer.json")
+        write_atomic(f, json.dumps({"rebootPending": intent_at is not None, "intentAt": intent_at,
+                                    "rebooting": bool(rebooting)}) + "\n")
+        os.chmod(f, 0o644)
+    except OSError as e:
+        log(f"cannot publish the reboot intent: {e}")
+
+
+def peer_info():
+    """What `selfheal watchdog peer-info` prints (the forced command of the
+    peer's key; reads only /proc and the world-readable summary)."""
+    summary = read_json(os.path.join(CFG["metricsDir"], "watchdog-peer.json")) or {}
+    return {"host": host(), "bootId": boot_id(), "uptime": wd_uptime(),
+            "rebootPending": bool(summary.get("rebootPending")), "intentAt": summary.get("intentAt"),
+            "rebooting": bool(summary.get("rebooting"))}
+
+
+def cmd_peer_info(args):
+    print(json.dumps(peer_info()))
+    return 0
+
+
+def query_peer():
+    """The peer's peer-info over ssh (dedicated key, forced command), first
+    address that answers. None = unknown (counts as down)."""
+    w = wd()
+    key = w.get("peerKeyFile")
+    if not key or not os.path.exists(key):
+        log(f"no peer key at {key}: peer {w['tangPeer']} unknown")
+        return None
+    kh = os.path.join(CFG["metricsDir"], "peer-known-hosts")
+    if w.get("peerHostKey"):
+        write_atomic(kh, f"{w['tangPeer']} {w['peerHostKey']}\n")
+        hk = ["-o", f"UserKnownHostsFile={kh}", "-o", "StrictHostKeyChecking=yes"]
+    else:
+        hk = ["-o", "UserKnownHostsFile=/dev/null", "-o", "StrictHostKeyChecking=no"]
+    for addr in w["peerAddresses"]:
+        r = run(["ssh", "-n", "-i", key, "-p", str(w["peerPort"]), "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
+                 "-o", "ConnectTimeout=4", "-o", f"HostKeyAlias={w['tangPeer']}",
+                 "-o", "GlobalKnownHostsFile=/dev/null", "-o", "UpdateHostKeys=no", *hk,
+                 f"root@{addr}", "peer-info"], timeout=12)
+        if r.returncode == 0:
+            try:
+                return json.loads(r.stdout.strip().splitlines()[-1])
+            except (ValueError, IndexError):
+                pass
+        log(f"peer {w['tangPeer']} at {addr}: {r.stderr.strip()[-160:] or r.returncode}")
+    return None
+
+
+def peer_decide(incident, intent_age, intent_at):
+    """None = we may reboot, else (gate, detail). Called with our intent
+    already published (B2). Dave's rule: vit and som never reboot in the
+    same window.
+    - peer down/unknown: refuse until cut off > peerOverride (the lower
+      name; the higher name waits peerStagger longer, > peerRecent + a
+      boot). The only gate the override lifts.
+    - peer booted < peerRecent ago, or committed to its reboot: refuse,
+      never overridden (both are bounded).
+    - our intent younger than one tick: refuse (the peer gets a tick to
+      publish its own; this is the handshake).
+    - both pending: the earlier intent goes first, a tie (same second)
+      the lower name; both sides compare the same two published numbers,
+      so they agree. The winner re-queries once (the peer may have just
+      committed). Because each side waits a tick after publishing, a peer
+      that starts wanting later sees our older intent and yields."""
+    w = wd()
+    if not w.get("tangPeer"):
+        return None
+    me, peer = host(), w["tangPeer"]
+    info = query_peer()
+    if info is None:
+        override = w["peerOverride"] + (w["peerStagger"] if me > peer else 0)
+        if incident >= override:
+            log(f"peer {peer} unreachable, but cut off for {int(incident)} s >= {override} s: overriding")
+            return None
+        return "peer-down", f"{peer} unreachable (counts as down), override after {override} s cut off"
+    if info.get("uptime", 0) < w["peerRecent"]:
+        return "peer-recent", f"{peer} booted {int(info['uptime'])} s ago"
+    if info.get("rebooting"):
+        return "peer-rebooting", f"{peer} is rebooting"
+    if intent_age < w["interval"]:
+        return "peer-handshake", f"intent published {int(intent_age)} s ago, waiting a tick for {peer}"
+    if info.get("rebootPending"):
+        theirs = int(info.get("intentAt") or 0)
+        if (theirs, peer) < (int(intent_at), me):
+            return "peer-rebooting", f"{peer} wants to reboot too and goes first"
+        again = query_peer()
+        if again is None or again.get("rebooting") or again.get("uptime", 0) < w["peerRecent"]:
+            return "peer-rebooting", f"{peer} changed state, re-checking next tick"
+    return None
+
+
+# ---- seat warning (vit, som)
+
+def loginctl_props(sid):
+    r = run(["loginctl", "show-session", sid, "-p", "Id", "-p", "Name", "-p", "User", "-p", "Seat",
+             "-p", "Remote", "-p", "Type", "-p", "State", "-p", "Class", "-p", "TTY", "-p", "Leader"], timeout=10)
+    return dict(line.split("=", 1) for line in r.stdout.splitlines() if "=" in line)
+
+
+def seat_sessions(uid=None):
+    """Local sessions on seat0 (not remote, a user session, active or
+    online), the graphical ones first."""
+    r = run(["loginctl", "list-sessions", "--no-legend"], timeout=10)
+    out = []
+    for line in r.stdout.splitlines():
+        cols = line.split()
+        if not cols:
+            continue
+        p = loginctl_props(cols[0])
+        local = p.get("Seat") == "seat0" and p.get("Remote") == "no" and p.get("Class") == "user"
+        live = p.get("State") in ("active", "online") and (uid is None or p.get("User") == str(uid))
+        if local and live:
+            out.append(p)
+    out.sort(key=lambda p: (p.get("Type") not in ("wayland", "x11"), p.get("State") != "active"))
+    return out
+
+
+def fmt_left(secs):
+    secs = max(0, int(secs))
+    return f"{secs // 60}:{secs % 60:02d}"
+
+
+def warn_text(w, left):
+    msg = (f"selfheal: {host()} is unreachable from the network and will reboot in {fmt_left(left)}")
+    if w["cancellable"]:
+        msg += " — cancel once: `selfheal cancel` or the notification's Cancel action"
+    else:
+        msg += " — already cancelled once in this incident, this one can't be cancelled"
+    return msg
+
+
+def warn_seat(w, sess, left):
+    text = warn_text(w, left)
+    run(["wall", text], timeout=10)
+    # wall reads utmp, which logind-only sessions may lack: also the
+    # session's own terminal
+    tty = sess.get("TTY")
+    if tty:
+        try:
+            with open(f"/dev/{os.path.basename(tty)}", "w") as f:
+                f.write(f"\r\n{text}\r\n")
+        except OSError as e:
+            log(f"cannot write to {tty}: {e}")
+    if sess.get("Type") in ("wayland", "x11") and not w.get("notified"):
+        w["notified"] = True
+        run(["systemd-run", "--no-block", "--collect", f"--unit=selfheal-watchdog-notify-{w['token']}",
+             "--", *self_cmd(), "watchdog", "notify", "--token", w["token"], "--user", sess["Name"],
+             "--uid", sess["User"], "--seconds", str(int(left)), *(["--cancellable"] if w["cancellable"] else [])],
+            timeout=30)
+
+
+def seat_gate(st, up):
+    """Dave's rule: the reboot happens anyway; a person at seat0 gets a
+    `countdown` s warning and may cancel it ONCE per incident, then it
+    re-arms after `rearmAfter` s, uncancellable. Remote sessions never
+    count. Returns (gate, detail, session to warn or None)."""
+    w = wd()
+    if not w.get("seatWarning"):
+        return None
+    sessions = seat_sessions()
+    warning = st.get("warning")
+    if st.get("cancelledAt") is not None and warning is None:
+        if up - st["cancelledAt"] < w["rearmAfter"]:
+            return "seat-cancelled", f"cancelled at the seat, re-arms in {int(w['rearmAfter'] - up + st['cancelledAt'])} s", None
+    if warning is None:
+        if not sessions:
+            return None
+        warning = st["warning"] = {"token": uuid.uuid4().hex[:12], "until": up + w["countdown"],
+                                   "cancellable": st.get("cancelledAt") is None, "n": 2 if st.get("cancelledAt") is not None else 1}
+        event("watchdog-warn", n=warning["n"], cancellable=warning["cancellable"], session=sessions[0].get("Id"),
+              user=sessions[0].get("Name"))
+        wd_count(st, "warn")
+    left = warning["until"] - up
+    if left > 0:
+        return "seat-countdown", f"warning {warning['n']}, {fmt_left(left)} left", (sessions[0] if sessions else None)
+    return None
+
+
+def do_cancel(how, token=None):
+    with Lock():
+        st = wd_state()
+        w = st.get("warning")
+        if not w:
+            return False, f"{host()}: no reboot warning to cancel"
+        if token and w.get("token") != token:
+            return False, f"{host()}: that warning is over"
+        if not w.get("cancellable"):
+            return False, f"{host()}: this warning can't be cancelled (already cancelled once in this incident)"
+        st["cancelledAt"] = wd_uptime()
+        st["warning"] = None
+        wd_count(st, "cancel")
+        wd_save(st)
+        event("watchdog-cancel", how=how)
+        wd_metrics(st)
+    run(["systemctl", "stop", "--no-block", f"selfheal-watchdog-notify-{w['token']}.service"], timeout=15)
+    run(["wall", f"selfheal: reboot of {host()} cancelled ({how}); it warns again in "
+                 f"{int(wd()['rearmAfter'] // 60)} min if still cut off, and that warning can't be cancelled"], timeout=10)
+    return True, f"{host()}: reboot cancelled; it warns again in {int(wd()['rearmAfter'])} s if still cut off (no second cancel)"
+
+
+def caller_seat_ok(pid):
+    """The caller runs in a local seat0 session: its cgroup is a session
+    scope of seat0 (not remote), or (a terminal the compositor started)
+    an app scope/service of its user's manager (app-*.scope, app-*.service,
+    what niri's spawn and the launchers create) while that user has an
+    active local seat0 session. System services, agents (their own
+    services), `systemd-run --user` (run-*) and ssh sessions (Remote=yes)
+    are refused. Residual (docs): a process of the seat user that runs in
+    an app-* unit, e.g. `systemd-run --user --unit=app-x`, still passes."""
+    try:
+        with open(f"/proc/{pid}/cgroup") as f:
+            cg = f.read().strip()
+    except OSError:
+        return False, "caller vanished"
+    parts = cg.split("/")
+    for part in parts:
+        if part.startswith("session-") and part.endswith(".scope"):
+            p = loginctl_props(part[len("session-"):-len(".scope")])
+            ok = p.get("Seat") == "seat0" and p.get("Remote") == "no"
+            return ok, f"session {p.get('Id')} seat={p.get('Seat') or '-'} remote={p.get('Remote')}"
+    for i, part in enumerate(parts):
+        if part.startswith("user@") and part.endswith(".service"):
+            uid = part[len("user@"):-len(".service")]
+            unit = parts[-1]
+            app = unit.startswith("app-") and (unit.endswith(".scope") or unit.endswith(".service"))
+            if not app:
+                return False, f"user {uid}'s {unit} (not an app started on the desktop)"
+            ok = any(s.get("State") == "active" for s in seat_sessions(uid=uid))
+            return ok, f"user {uid}'s {unit}" + ("" if ok else ", no active seat0 session")
+    return False, "not in a user session"
+
+
+def cmd_cancel_request(args):
+    """selfheal-cancel@.service (socket-activated, stdin = the connection)."""
+    import struct
+    conn = socket.socket(fileno=os.dup(0))
+    pid, uid, _gid = struct.unpack("3i", conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))
+    ok, why = caller_seat_ok(pid)
+    if not ok:
+        reply = f"{host()}: refused: `selfheal cancel` only works from the local seat ({why})"
+        event("watchdog-cancel-refused", uid=uid, why=why)
+    else:
+        _done, reply = do_cancel(f"seat uid {uid}")
+    conn.sendall((reply + "\n").encode())
+    conn.close()
+    return 0
+
+
+def cmd_cancel(args):
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(30)
+    try:
+        s.connect(os.path.join(CFG["metricsDir"], "cancel.sock"))
+        data = b""
+        while True:
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+    except socket.timeout:
+        print(f"selfheal: {host()} did not answer within 30 s; try `selfheal cancel` again", file=sys.stderr)
+        return 1
+    except OSError as e:
+        print(f"selfheal: no cancel socket ({e}): no seat warning on this machine", file=sys.stderr)
+        return 1
+    reply = data.decode().strip()
+    print(reply)
+    return 0 if "cancelled;" in reply else 1
+
+
+def cmd_notify(args):
+    """The desktop notification, in a transient unit as root: notify-send
+    runs as the seat user on their session bus; its Cancel action comes
+    back on stdout."""
+    cmd = ["runuser", "-u", args.user, "--", "env", f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{args.uid}/bus",
+           "notify-send", "--app-name=selfheal", "-u", "critical", "-t", str(args.seconds * 1000)]
+    if args.cancellable:
+        cmd += ["--wait", "-A", "cancel=Cancel the reboot"]
+    w = {"cancellable": args.cancellable}
+    cmd += [f"{host()} will reboot", warn_text(w, args.seconds)]
+    r = run(cmd, timeout=args.seconds + 30)
+    if args.cancellable and r.stdout.strip() == "cancel":
+        print(do_cancel("notification", token=args.token)[1])
+    elif r.returncode != 0:
+        log(f"notify-send failed ({r.returncode}): {r.stderr.strip()[-200:]}")
+    return 0
+
+
+# ---- rollback or reboot
+
+def rollback_target():
+    """The deploy guard's rollback applies when the running system was
+    switched live < rollbackWindow s ago and never confirmed: a pending
+    deploy of it, or a live switch (booted != current) without a confirm.
+    Target: the last confirmed system if it still exists and isn't the
+    running one, else the booted one (S6)."""
+    cur = current_system()
+    p = pending()
+    if p and p.get("new") == cur and os.path.exists(f"{p.get('prev')}/bin/switch-to-configuration"):
+        return p
+    booted = realpath("/run/booted-system")
+    if booted == cur:
+        return None
+    conf = read_json(path("last-confirm.json")) or {}
+    if conf.get("system") == cur:
+        return None
+    try:
+        age = now() - os.lstat("/run/current-system").st_mtime
+    except OSError:
+        return None
+    if age >= wd()["rollbackWindow"]:
+        return None
+    prev = conf.get("system")
+    if not (prev and prev != cur and os.path.exists(f"{prev}/bin/switch-to-configuration")):
+        prev = booted
+    if not os.path.exists(f"{prev}/bin/switch-to-configuration"):
+        return None
+    return {"prev": prev, "new": cur}
+
+
+def wd_reset_incident(st):
+    for k in ("incidentStart", "warning", "cancelledAt", "lastBlock", "linkSince", "lastRepair",
+              "badTicks", "meshRestarts", "intentSince", "intentAt", "repairsHeld"):
+        st.pop(k, None)
+
+
+def wd_metrics(st):
+    try:
+        lines = ["# TYPE selfheal_watchdog_state gauge"]
+        for s in WD_STATES:
+            lines.append(f'selfheal_watchdog_state{{state="{s}"}} {1 if st.get("state") == s else 0}')
+        lines.append("# TYPE selfheal_watchdog_actions_total counter")
+        for a in WD_ACTIONS:
+            lines.append(f'selfheal_watchdog_actions_total{{action="{a}"}} {st.get("actions", {}).get(a, 0)}')
+        inc = st.get("incidentStart")
+        lines += ["# TYPE selfheal_watchdog_unreachable_seconds gauge",
+                  f"selfheal_watchdog_unreachable_seconds {int(wd_uptime() - inc) if inc is not None else 0}",
+                  "# TYPE selfheal_watchdog_mode gauge",
+                  f'selfheal_watchdog_mode{{mode="{wd()["mode"]}"}} 1']
+        lr = read_json(wd_path("last-reboot.json"))
+        if lr:
+            lines += ["# TYPE selfheal_watchdog_last_reboot_timestamp_seconds gauge",
+                      f'selfheal_watchdog_last_reboot_timestamp_seconds{{kind="{lr.get("kind", "reboot")}"}} {int(lr["timestamp"])}']
+        blk = st.get("lastBlock")
+        lines.append("# TYPE selfheal_watchdog_reboot_blocked gauge")
+        lines.append(f'selfheal_watchdog_reboot_blocked{{gate="{blk}"}} 1' if blk else "selfheal_watchdog_reboot_blocked 0")
+        os.makedirs(CFG["metricsDir"], exist_ok=True)
+        write_atomic(os.path.join(CFG["metricsDir"], "watchdog.prom"), "\n".join(lines) + "\n")
+    except Exception as e:  # noqa: BLE001 -- metrics never break an action
+        log(f"cannot write watchdog metrics: {e}")
+
+
+def daily_cap(w):
+    """(gate, detail) while the last watchdog reboot is < rebootCap ago. A
+    stamp from the future (a bad RTC before NTP) is ignored and logged
+    (N4): it would otherwise block reboots until that date."""
+    lr = read_json(wd_path("last-reboot.json"))
+    if not lr:
+        return None
+    ts = lr.get("timestamp", 0)
+    if ts > now() + 300:
+        log(f"last-reboot stamp {lr.get('time')} lies in the future: ignored")
+        return None
+    if now() - ts < w["rebootCap"]:
+        return "daily-cap", f"last watchdog {lr.get('kind', 'reboot')} at {lr.get('time')}"
+    return None
+
+
+def local_gates(up, sw=None):
+    """The gates without side effects or network, in order: boot grace,
+    daily cap, running switch (not a hung one), hold."""
+    w = wd()
+    if up < w["bootGrace"]:
+        return "boot-grace", f"up {int(up)} s < {w['bootGrace']} s"
+    g = daily_cap(w)
+    if g:
+        return g
+    if sw:
+        return "switch", f"switch running ({sw})"
+    hd = hold()
+    if hd:
+        return "hold", f"selfheal hold until {iso(hd['until'])}"
+    return None
+
+
+def reboot_or_force(why):
+    """`systemctl reboot`; if it can't be queued, log it and force it (S4).
+    A queued job that hangs is reboot.target's JobTimeoutSec=30min /
+    reboot-force; the loop only covers a job that never started."""
+    r = run(["systemctl", "reboot"], timeout=60)
+    if r.returncode != 0:
+        event("reboot-failed", why=why, rc=r.returncode, err=r.stderr.strip()[-200:])
+        run(["systemctl", "reboot", "--force"], timeout=60)
+        return
+    end = time.monotonic() + 600
+    while time.monotonic() < end:
+        time.sleep(1)
+    event("reboot-forced", why=why)
+    run(["systemctl", "reboot", "--force"], timeout=60)
+
+
+def switch_ages():
+    """(what, seconds running) of every clan deploy unit and
+    switch-to-configuration process (part 1's switch_units/switch_pids),
+    on the watchdog's clock."""
+    # CLOCK_MONOTONIC, like systemd's *TimestampMonotonic (N13: not
+    # /proc/uptime, which counts suspend); the process start times below
+    # are CLOCK_BOOTTIME like /proc/uptime.
+    mono_now = time.clock_gettime(time.CLOCK_MONOTONIC) + wd_offset()
+    up = wd_uptime()
+    out = []
+    for u in switch_units():
+        # set when activation starts (N14: ActiveEnter is 0 while activating)
+        mono = run(["systemctl", "show", "-P", "InactiveExitTimestampMonotonic", u], timeout=10).stdout.strip()
+        start = int(mono) / 1e6 if mono.isdigit() and int(mono) > 0 else None
+        out.append((u, mono_now - start if start is not None else 0))
+    tck = os.sysconf("SC_CLK_TCK")
+    for pid in switch_pids():
+        try:
+            with open(f"/proc/{pid}/stat") as f:
+                start = int(f.read().rsplit(")", 1)[1].split()[19]) / tck
+        except (OSError, ValueError, IndexError):
+            start = None
+        out.append((f"pid {pid}", up - start if start is not None else 0))
+    return out
+
+
+def wd_switch():
+    """(running, hung): a switch younger than switchHungAfter holds repairs
+    and the reboot; an older one is hung (the 2026-11-19 case with the
+    deploy guard disarmed) and is ignored (L4)."""
+    lim = wd()["switchHungAfter"]
+    ages = switch_ages()
+    young = [f"{w} ({int(a)} s)" for w, a in ages if a < lim]
+    hung = [f"{w} ({int(a)} s)" for w, a in ages if a >= lim]
+    return (young[0] if young else None), (hung[0] if hung else None)
+
+
+def wd_block(st, gate, detail, incident):
+    log(f"reboot blocked by {gate}: {detail} (cut off {int(incident)} s)")
+    if st.get("lastBlock") != gate:
+        event("watchdog-reboot-blocked", gate=gate, detail=detail, cut_off=int(incident))
+    st["lastBlock"] = gate
+
+
+def cmd_wd_tick(args):
+    w = wd()
+    mode = w["mode"]
+    o = wd_probe()
+    cls = wd_classify(o)
+    up = wd_uptime()
+    failing_txt = "; ".join(f"{i['name']}: {i['detail']}" for i in o["items"] if not i["ok"])
+    sw, sw_hung = wd_switch()
+    held = sw or (hold() and "selfheal hold")
+    steps, incident, want = [], None, False
+    # phase 1 (Lock): state, incident, which repairs are due, intent
+    with Lock():
+        st = wd_state()
+        if st.get("bootId") != boot_id():
+            wd_reset_incident(st)
+            st["bootId"] = boot_id()
+        prev = st.get("state")
+        st["state"] = cls
+        st["checked"] = iso(now())
+        devs = gateway_devs()
+        if devs:
+            st["gwDevs"] = devs
+        if sw_hung and st.get("switchHung") != sw_hung.split(" (")[0]:
+            st["switchHung"] = sw_hung.split(" (")[0]
+            event("switch-hung", switch=sw_hung, after=wd()["switchHungAfter"])
+        elif not sw_hung:
+            st.pop("switchHung", None)
+        if cls != prev:
+            event("watchdog-state", state=cls, was=prev, mode=mode, failing=failing_txt)
+        if cls not in WD_BAD:
+            if cls in ("upstream", "anchors_down"):
+                log(f"{cls}: nothing to repair here (no action, ever)")
+            wd_reset_incident(st)
+        else:
+            st["badTicks"] = st.get("badTicks", 0) + 1
+            if cls in WD_COUNTED:
+                st.setdefault("incidentStart", up)
+            else:
+                st.pop("incidentStart", None)
+            if mode != "report":
+                if held:
+                    if not st.get("repairsHeld"):
+                        event("watchdog-repairs-held", why=held)
+                    st["repairsHeld"] = True
+                    log(f"repairs held ({held})")
+                elif st["badTicks"] >= w["repairAfterTicks"]:
+                    st.pop("repairsHeld", None)
+                    steps = wd_plan_repairs(st, o, cls, up)
+            incident = wd_counts(st, cls, up)
+            if mode == "full" and incident is not None and incident >= w["rebootAfter"]:
+                g = local_gates(up, sw)
+                if g:
+                    wd_block(st, *g, incident)
+                else:
+                    want = True
+                    st.setdefault("intentSince", up)
+                    st.setdefault("intentAt", int(now()))
+            if not want:
+                st.pop("intentSince", None)
+                st.pop("intentAt", None)
+        intent_age = up - st.get("intentSince", up)
+        intent_at = st.get("intentAt")
+        publish_peer(intent_at)
+        wd_save(st)
+        wd_metrics(st)
+    # outside the Lock: repairs and the peer query
+    if steps:
+        wd_run_repairs(steps, o)
+    if not want:
+        return 0
+    pg = peer_decide(incident, intent_age, intent_at)
+    act = None
+    with Lock():
+        st = wd_state()
+        if st.get("bootId") != boot_id() or st.get("state") != cls:
+            return 0
+        g = pg or seat_gate(st, up)
+        if not g and steps:
+            # a repair just ran: give it a tick before rebooting
+            g = ("just-repaired", "repairs ran this tick, re-checking next tick")
+        warn = None
+        if g:
+            gate, detail = g[0], g[1]
+            warn = g[2] if len(g) > 2 else None
+            wd_block(st, gate, detail, incident)
+        else:
+            target = rollback_target()
+            act = ("rollback", target) if target else ("reboot", None)
+            stamp = {"timestamp": now(), "time": iso(now()), "kind": act[0], "state": cls,
+                     "cutOff": int(incident), "bootId": boot_id()}
+            write_json(wd_path("last-reboot.json"), stamp)
+            wd_count(st, act[0])
+            event(f"watchdog-{act[0]}", state=cls, cut_off=int(incident), failing=failing_txt)
+            publish_peer(intent_at, rebooting=True)
+        wd_save(st)
+        wd_metrics(st)
+    if warn is not None and st.get("warning"):
+        with Lock():
+            cur = wd_state().get("warning") or {}
+        # N9: cancelled (or replaced) between the Lock and here: no stale warning
+        if cur.get("token") == st["warning"]["token"]:
+            warn_seat(st["warning"], warn, st["warning"]["until"] - up)
+        with Lock():
+            st2 = wd_state()
+            if st2.get("warning") and st2["warning"].get("token") == st["warning"]["token"]:
+                st2["warning"]["notified"] = st["warning"].get("notified", False)
+                wd_save(st2)
+    if act is None:
+        return 0
+    run(["wall", f"selfheal: {host()} has been unreachable for {int(incident // 60)} min: {act[0]} now"], timeout=10)
+    if act[0] == "rollback":
+        rollback(act[1], {"items": o["items"]})
+        return 0
+    write_metrics()
+    os.sync()
+    if w.get("testRebootCommand"):
+        # tests only (two peers ticked at once): stands in for the reboot
+        run([w["testRebootCommand"]], timeout=60)
+        return 0
+    reboot_or_force("watchdog")
+    return 0
+
+
+def cmd_wd_status(args):
+    st = wd_state()
+    lr = read_json(wd_path("last-reboot.json"))
+    if args.json:
+        print(json.dumps({"mode": wd()["mode"], "state": st, "lastReboot": lr}, indent=1))
+        return 0
+    print(f"{host()}: runtime watchdog, mode {wd()['mode']}")
+    print(f"  state: {st.get('state', 'unknown')} (checked {st.get('checked', 'never')})")
+    if st.get("incidentStart") is not None:
+        print(f"  cut off for {int(wd_uptime() - st['incidentStart'])} s (reboot after {wd()['rebootAfter']} s)")
+    if st.get("repairsHeld"):
+        print("  repairs held (switch running or selfheal hold)")
+    if st.get("lastBlock"):
+        print(f"  reboot blocked by: {st['lastBlock']}")
+    if st.get("warning"):
+        w = st["warning"]
+        how = "cancellable once" if w["cancellable"] else "not cancellable"
+        print(f"  seat warning {w['n']}: {fmt_left(w['until'] - wd_uptime())} left, {how}")
+    print(f"  last watchdog reboot: {lr.get('kind')} at {lr.get('time')}" if lr else "  last watchdog reboot: none")
+    print("  actions: " + ", ".join(f"{k}={v}" for k, v in sorted(st.get("actions", {}).items())))
+    return 0
+
+
+def add_watchdog_parsers(sub):
+    s = sub.add_parser("cancel", help="cancel a pending watchdog reboot once (only from the local seat)")
+    s.set_defaults(fn=cmd_cancel, nonroot=True)
+    wdp = sub.add_parser("watchdog", help="runtime watchdog (part 4)")
+    wds = wdp.add_subparsers(dest="wdcmd", required=True)
+    s = wds.add_parser("tick", help="probe, classify, repair, maybe reboot")
+    s.set_defaults(fn=cmd_wd_tick)
+    s = wds.add_parser("status")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_wd_status)
+    s = wds.add_parser("peer-info", help=argparse.SUPPRESS)
+    s.set_defaults(fn=cmd_peer_info, nonroot=True)
+    s = wds.add_parser("cancel-request", help=argparse.SUPPRESS)
+    s.set_defaults(fn=cmd_cancel_request)
+    s = wds.add_parser("notify", help=argparse.SUPPRESS)
+    s.add_argument("--token", required=True)
+    s.add_argument("--user", required=True)
+    s.add_argument("--uid", required=True)
+    s.add_argument("--seconds", type=int, required=True)
+    s.add_argument("--cancellable", action="store_true")
+    s.set_defaults(fn=cmd_notify)
+
+
 def main():
     ap = argparse.ArgumentParser(prog="selfheal", description="self-heal: deploy guard, boot counting (docs/self-heal.md)")
     ap.add_argument("--config", required=True, help=argparse.SUPPRESS)
@@ -1275,12 +2221,13 @@ def main():
     s.add_argument("toplevel")
     s.add_argument("action")
     s.set_defaults(fn=cmd_pre_switch)
+    add_watchdog_parsers(sub)
     args = ap.parse_args()
     with open(args.config) as f:
         CFG.update(json.load(f))
     CFG["_configPath"] = args.config
     os.environ["PATH"] = CFG["path"]
-    if os.geteuid() != 0:
+    if os.geteuid() != 0 and not getattr(args, "nonroot", False):
         print("selfheal: run as root", file=sys.stderr)
         return 2
     return args.fn(args)

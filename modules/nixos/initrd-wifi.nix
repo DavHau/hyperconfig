@@ -25,6 +25,18 @@ let
   # iwlwifi, a pipeline through /run/booted-system/sw/bin that does not exist
   # in the initrd, so plain `modprobe -r iwlwifi` fails there.
   unloadDriver = map (m: "-/bin/modprobe -r -i ${m}") cfg.unloadModules;
+
+  # Stage 2's driver reload: the boot watchdog below and the runtime
+  # watchdog (./self-heal/watchdog.nix) both run this.
+  # Loads every module even if one fails, then exits 1 if any did (so the
+  # boot watchdog's unit still shows a failed load).
+  reloadDriver = pkgs.writeShellScript "initrd-wifi-reload-driver" ''
+    echo "reloading ${lib.concatStringsSep " " cfg.unloadModules}"
+    failed=0
+    ${lib.concatMapStrings (m: "${modprobe} -r -i ${m} || true\n") cfg.unloadModules}
+    ${lib.concatMapStrings (m: "${modprobe} ${m} || failed=1\n") cfg.modules}
+    exit "$failed"
+  '';
 in
 {
   options.hyper.initrdWifi = {
@@ -47,6 +59,12 @@ in
       type = lib.types.listOf lib.types.str;
       example = [ "iwlmld" "iwlwifi" ];
       description = "Modules to unload before switch-root, users before what they use.";
+    };
+    reloadDriver = lib.mkOption {
+      type = lib.types.package;
+      readOnly = true;
+      default = reloadDriver;
+      description = "Script that unloads and reloads the driver (stage 2).";
     };
     firmware = lib.mkOption {
       type = lib.types.listOf lib.types.str;
@@ -163,9 +181,8 @@ in
       script = ''
         carrier() { [ "$(cat /sys/class/net/${cfg.interface}/carrier 2>/dev/null)" = 1 ]; }
         for _ in $(seq 120); do carrier && exit 0; sleep 1; done
-        echo "${cfg.interface} has no carrier after 120s, reloading ${lib.concatStringsSep " " cfg.unloadModules}"
-        ${lib.concatMapStrings (m: "${modprobe} -r -i ${m} || true\n") cfg.unloadModules}
-        ${lib.concatMapStrings (m: "${modprobe} ${m}\n") cfg.modules}
+        echo "${cfg.interface} has no carrier after 120s"
+        exec ${reloadDriver}
       '';
     };
   };
