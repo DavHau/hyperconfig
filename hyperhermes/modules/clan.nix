@@ -49,6 +49,11 @@
 # mail.remoteMailboxes.<name>.passwordFile), and with an owner page
 # mailgate-oauth2-proxy (`cookie_secret`) fills
 # mail.ownerPage.cookieSecretFile.
+#
+# android-apps, with services.hyperhermes.androidApps on
+# (./android-apps.nix): the shared generator android-app-signing
+# (`keystore.p12`, `password`, root-only) fills its keystoreFile and
+# passwordFile. Back it up: a lost key means every phone uninstalls.
 {
   config,
   lib,
@@ -77,6 +82,7 @@ let
   frontDoor = hasSso && cfg.sso.enable && cfg.sso.frontDoor.host != null;
   hasPublish = options ? services.hyperhermes.publish;
   publishOn = hasPublish && cfg.publish.enable;
+  hasAndroidApps = options ? services.hyperhermes.androidApps;
 in
 {
   # Declared unconditionally (an `options ?` test here would recurse), so
@@ -253,6 +259,36 @@ in
             runtimeInputs = [ pkgs.openssl ];
             script = ''
               printf 'http-password=%s\n' "$(openssl rand -hex 32)" > "$out"/phoenix.conf
+            '';
+          };
+        };
+      })
+
+      (lib.optionalAttrs hasAndroidApps {
+        services.hyperhermes.androidApps = lib.mkIf cfg.androidApps.enable {
+          keystoreFile = lib.mkDefault generators.android-app-signing.files."keystore.p12".path;
+          passwordFile = lib.mkDefault generators.android-app-signing.files.password.path;
+        };
+
+        clan.core.vars.generators = lib.mkIf cfg.androidApps.enable {
+          android-app-signing = {
+            # One key for every machine that serves the apps: a phone only
+            # takes an update signed like the installed app.
+            share = true;
+            files."keystore.p12".restartUnits = [ "android-apps-sign.service" ];
+            files.password.restartUnits = [ "android-apps-sign.service" ];
+            runtimeInputs = [
+              pkgs.openssl
+              pkgs.coreutils
+              pkgs.jdk21_headless
+            ];
+            script = ''
+              ${random 24} > "$out/password"
+              keytool -genkeypair -noprompt -storetype PKCS12 \
+                -keystore "$out/keystore.p12" -alias hermes \
+                -keyalg RSA -keysize 4096 -validity 36500 \
+                -dname "CN=Hermes apps (hyperconfig)" \
+                -storepass:file "$out/password" -keypass:file "$out/password"
             '';
           };
         };

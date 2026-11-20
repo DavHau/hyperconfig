@@ -12,12 +12,19 @@
     # says so); pointing the input at this flake keeps home-manager out of
     # the lock file.
     hermes-agent.inputs.home-manager.follows = "";
+
+    # The phone apps' builds (pkgs/android-apps) only: their gradle lock
+    # files hold exactly the plugins this nixpkgs' gradle fetches, so it
+    # moves only together with them (pkgs/android-apps/README.md), never
+    # with a consumer's nixpkgs bump.
+    nixpkgs-android-apps.url = "github:NixOS/nixpkgs/e21fec321d73511849707a7585e4ea155ee4bf40";
   };
 
   outputs =
     {
       self,
       nixpkgs,
+      nixpkgs-android-apps,
       hermes-agent,
       ...
     }:
@@ -52,6 +59,8 @@
         publish = ./modules/publish;
         mail = ./modules/mail;
         vault-request = ./modules/vault-request;
+        # Our signed builds of the Hermes phone apps, served for Obtainium.
+        android-apps = ./modules/android-apps.nix;
         # Agent slots (a NixOS container per agent) on container-slots,
         # which is generic (not hermes-specific) and also usable alone;
         # slots imports it.
@@ -76,6 +85,7 @@
             self.nixosModules.publish
             self.nixosModules.mail
             self.nixosModules.vault-request
+            self.nixosModules.android-apps
             self.nixosModules.slots
           ];
         };
@@ -113,7 +123,19 @@
         # REA, the CLI and MCP server of nixosModules.rea (which calls it
         # with the host's pkgs).
         rea-agents = pkgs.callPackage ./pkgs/rea-agents { };
-      };
+      }
+      # The Hermes phone apps with our patches, unsigned (pkgs/android-apps;
+      # nixosModules.android-apps signs and serves them). The Android SDK
+      # is unfree and wants its license accepted.
+      // (import nixpkgs-android-apps {
+        inherit system;
+        config = {
+          android_sdk.accept_license = true;
+          # This instance builds only these two apps: the unfree parts are
+          # the SDK's (meta.position is not set yet when the predicate runs).
+          allowUnfree = true;
+        };
+      }).callPackages ./pkgs/android-apps { };
 
       # For consumers that must name an agent's paths, ports or units
       # without evaluating the host that runs it (lib/core.nix: stateDir,
@@ -165,6 +187,9 @@
 
         browser = import ./checks/browser { inherit pkgs self; };
         wallet = import ./checks/wallet { inherit pkgs self; };
+        # nixosModules.android-apps: signs at runtime, serves /apps/
+        # without the host's sign-in.
+        android-apps = import ./checks/android-apps { inherit pkgs self; };
         mail = import ./checks/mail { inherit pkgs self; };
         # A request link, the signed-in owner saving a test card into the
         # agent's vault, and the refusals (reuse, cross-site, another

@@ -454,6 +454,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/flake-parts/devShells/esphome-fhs.sh — - <- modules/flake-parts/devShells/default.nix
 - modules/flake-parts/nixvim/default.nix — -
 ### hyperhermes/modules
+- hyperhermes/modules/android-apps.nix — Dave's builds of the two Hermes phone apps (../pkgs/android-apps), signed with our own key and served for Obtainium at…
 - hyperhermes/modules/clan.nix — Secrets of hyperhermes from clan vars, for a host in a clan (https://clan.lol).
 - hyperhermes/modules/container-slots.nix — Container slots: NixOS containers that behave like small VMs owned by another repo. This host declares only the shell o… <- hyperhermes/modules/slots/default.nix
 - hyperhermes/modules/exposure.nix — How the agents' web surfaces are reached:

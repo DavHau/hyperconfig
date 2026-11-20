@@ -88,6 +88,7 @@ in
     # Nightly borg backup of the agents' homes and state to nas.
     ../../modules/nixos/hermes-agents-backup
     inputs.hyperhermes.nixosModules.publish
+    inputs.hyperhermes.nixosModules.android-apps
     inputs.hyperhermes.nixosModules.wallet
     # The infra-space agent's mailbox, browser and wallet, from the modules
     # above (web signups).
@@ -472,6 +473,15 @@ in
     }) config.services.hyperhermes.sso.oidcClients;
   };
   services.hyperhermes.dashboards.enable = true;
+  # Dave's builds of the two phone apps (hyperhermes/pkgs/android-apps),
+  # signed with the clan's key, public at https://<front door>/apps/.
+  services.hyperhermes.androidApps = {
+    enable = true;
+    host = dashboards.frontDoor;
+    apps = {
+      inherit (inputs.hyperhermes.packages.${pkgs.stdenv.hostPlatform.system}) hermes-mobile hermes-relay;
+    };
+  };
   services.hyperhermes.publish = {
     enable = true;
     # The serve ports before hyperhermes' 100-port window (30000 + (uid -

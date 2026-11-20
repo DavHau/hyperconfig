@@ -1,0 +1,17 @@
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+index 9ce88aa3..dc04e67e 100644
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -167,11 +167,7 @@ android {
+             )
+             // Use release signing if keystore exists, otherwise fall back to debug signing
+             val releaseSigningConfig = signingConfigs.getByName("release")
+-            signingConfig = if (releaseSigningConfig.storeFile?.exists() == true) {
+-                releaseSigningConfig
+-            } else {
+-                signingConfigs.getByName("debug")
+-            }
++            signingConfig = null
+         }
+         create("candidate") {
+             initWith(getByName("release"))

@@ -1,0 +1,13 @@
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+index 80a6641d..e9c4fa27 100644
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -100,7 +100,7 @@ android {
+                 getDefaultProguardFile("proguard-android-optimize.txt"),
+                 "proguard-rules.pro",
+             )
+-            signingConfig = signingConfigs["release"]
++            signingConfig = null
+             buildConfigField("boolean", "ALLOW_CLEARTEXT", "true")
+             manifestPlaceholders["usesCleartextTraffic"] = "true"
+         }

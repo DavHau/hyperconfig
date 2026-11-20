@@ -64,6 +64,22 @@
         "type": "github"
       }
     },
+    "nixpkgs-android-apps": {
+      "locked": {
+        "lastModified": 1794840529,
+        "narHash": "sha256-ySrWnmZB5UsZTYGHHnBjllT05O5iFjElCRS+mabtfP0=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "e21fec321d73511849707a7585e4ea155ee4bf40",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "e21fec321d73511849707a7585e4ea155ee4bf40",
+        "type": "github"
+      }
+    },
     "npm-lockfile-fix": {
       "inputs": {
         "nixpkgs": [
@@ -138,7 +154,8 @@
     "root": {
       "inputs": {
         "hermes-agent": "hermes-agent",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "nixpkgs-android-apps": "nixpkgs-android-apps"
       }
     },
     "uv2nix": {
