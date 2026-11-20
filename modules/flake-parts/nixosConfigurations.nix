@@ -285,6 +285,9 @@ in {
                   # TODO(janine's email): unknown, so none set (pocket-id's
                   # email is optional here, like the others'); add hers here.
                   janine = { displayName = "Janine"; groups = [ "hermes" ]; };
+                  # TODO(wolfgang's and anke's email): unknown, none set; add here.
+                  wolfgang = { displayName = "Wolfgang"; groups = [ "hermes" ]; };
+                  anke = { displayName = "Anke"; groups = [ "hermes" ]; };
                   nico = { displayName = "Nico"; groups = [ "apps" ]; };
                   # The coding agent's account for end-to-end login tests
                   # (`pocket-id-enroll agent` on edi gives it a one-time

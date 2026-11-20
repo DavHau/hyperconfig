@@ -44,6 +44,8 @@
     daniel = "daniel";
     daniel-meli = "daniel";
     janine = "janine";
+    wolfgang = "wolfgang";
+    anke = "anke";
     voice = "dave";
     # Project FPV, owned by dave and adam, each with his own account.
     fpv = [

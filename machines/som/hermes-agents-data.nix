@@ -15,6 +15,9 @@
 # destination on som and vit (hyper.ztEuLanGuard.noLan: ./hermes-agents.nix,
 # ../../modules/nixos/hermes-agents-gpu-host.nix; default: LAN reachable).
 #
+# `gpu = false` gives the agent no account on vit (and so no gpu-host
+# skill and no ssh to vit); it stays here for the per-agent flags above.
+#
 # `vault = false` keeps an agent out of `vault-ro` on som and vit. That
 # alone does not lock it out: /vault/parquet is world-readable on bam, so
 # such an agent's uid also carries a deny ACL on bam's /vault
@@ -42,6 +45,25 @@
   # (hyper.ztEuLanGuard.noLan; on som vit's ssh, captcha and OCR only).
   janine = {
     uid = 1121;
+    lan = false;
+  };
+  # Wolfgang's and Anke's agents: no vault, wallet, REA, GPU account on
+  # vit or LAN (hyper.ztEuLanGuard.noLan; on som only vit's captcha and
+  # OCR). Here only for those flags.
+  wolfgang = {
+    uid = 1122;
+    vault = false;
+    wallet = false;
+    rea = false;
+    gpu = false;
+    lan = false;
+  };
+  anke = {
+    uid = 1123;
+    vault = false;
+    wallet = false;
+    rea = false;
+    gpu = false;
     lan = false;
   };
   thaigersprint = {

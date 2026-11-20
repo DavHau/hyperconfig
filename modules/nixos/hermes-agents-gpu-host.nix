@@ -1,8 +1,9 @@
 # GPU host for som's hermes agents: one account per agent, same uid as
 # there, reachable only with the agent's own key. Names and uids come from
-# ../../machines/som/hermes-agents-data.nix, the public keys from som's clan
-# vars (hermes-agent-ssh-<agent>, hyperhermes.nixosModules.clan), so the
-# list lives in one place and this host never evaluates som.
+# ../../machines/som/hermes-agents-data.nix (except `gpu = false`), the
+# public keys from som's clan vars (hermes-agent-ssh-<agent>,
+# hyperhermes.nixosModules.clan), so the list lives in one place and this
+# host never evaluates som.
 #
 # Per account: reader on /vault/parquet (`vault-ro`, unless the agent's data
 # entry says `vault = false`), linger (detached
@@ -29,7 +30,8 @@
 }:
 let
   agentsHost = "som";
-  agents = import ../../machines/som/hermes-agents-data.nix;
+  # All but those marked `gpu = false`.
+  agents = lib.filterAttrs (_: a: a.gpu or true) (import ../../machines/som/hermes-agents-data.nix);
   publicKeyOf =
     name:
     inputs.clan-core.clanLib.getPublicValue {

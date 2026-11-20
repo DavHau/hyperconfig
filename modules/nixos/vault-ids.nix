@@ -64,7 +64,8 @@
 # Home Assistant agent, no vault access, denied above), 1117 daniel,
 # 1118 daniel-meli (no vault access, denied above), 1119 voice (the Voice
 # PE's untrusted agent, modules/nixos/voice-gateway), 1120 fpv (Project
-# FPV, dave's and adam's shared agent), 1121 janine,
+# FPV, dave's and adam's shared agent), 1121 janine, 1122 wolfgang
+# and 1123 anke (no vault access, denied above),
 # 1200 agent,
 # 1201 slot-asof, 1202 slot-mm, 1203 infra (uid and gid; the infra-space
 # container's user, no host account: infra-space/default.nix; on members
@@ -116,6 +117,8 @@
     thaigersprint = 1114;
     roman = 1116;
     daniel-meli = 1118;
+    wolfgang = 1122;
+    anke = 1123;
   };
 
   config.users.groups.vault.gid = 1101;

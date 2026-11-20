@@ -5,7 +5,7 @@ Agents run natively on som via hyperhermes (`services.hyperhermes.agents.<name>`
 | file | holds |
 |---|---|
 | `machines/som/hermes-agents.nix` | per-agent entry: description, `sshKeys`, `teamclaude.enable`, `openrouter`, `mail.enable`, skillDirs; host-wide hermes settings; deny-ACL assertion |
-| `machines/som/hermes-agents-data.nix` | plain data read by som AND vit: `<name>.uid` (+ `vault`/`wallet`/`rea`/`lan = false`) for agents with vault/GPU account |
+| `machines/som/hermes-agents-data.nix` | plain data read by som AND vit: `<name>.uid` (+ `vault`/`wallet`/`rea`/`gpu`/`lan = false`) for agents with vault/GPU account or no LAN (`gpu = false`: no vit account) |
 | `machines/som/hermes-dashboards.nix` | agent -> pocket-id account, or a list of owning accounts (`accounts`), `domain` davhau.fyi, front door |
 | `machines/som/hermes-inference.nix` | models/providers (p0 Qwen, auxiliary vision/titles) |
 | `machines/som/configuration.nix` | `slotIds.<name>` (never reuse; 18 retired), `slotNames` (>11 chars), set `hermes-agents-data.nix // { roman = {}; ... }` for non-data agents |

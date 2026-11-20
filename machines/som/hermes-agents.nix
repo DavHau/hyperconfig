@@ -33,6 +33,8 @@ let
   data = import ./hermes-agents-data.nix;
   # Agents in vault-ro: all but those marked `vault = false`.
   vaultReaders = lib.filterAttrs (_: a: a.vault or true) data;
+  # Agents with an account on vit: all but those marked `gpu = false`.
+  gpuUsers = lib.filterAttrs (_: a: a.gpu or true) data;
   dashboards = import ./hermes-dashboards.nix;
   # The clan sshd instance fills root's list; accounts without keys of their
   # own reuse it.
@@ -122,7 +124,7 @@ in
     (lib.mapAttrs (_: _: { wallet.enable = true; }) (lib.filterAttrs (_: a: a.wallet or true) data))
     (lib.mapAttrs (_: _: { rea.enable = true; }) (lib.filterAttrs (_: a: a.rea or true) data))
     # The gpu-host skill: the agents with an account on vit.
-    (lib.mapAttrs (_: _: { skillDirs = [ "${gpuSkill}/share/skills" ]; }) data)
+    (lib.mapAttrs (_: _: { skillDirs = [ "${gpuSkill}/share/skills" ]; }) gpuUsers)
     {
       # Account and description from users/stefan-vault.nix.
       stefan = { };
@@ -299,6 +301,40 @@ in
         teamclaude.enable = true;
         # Instead of p0's Qwen (./hermes-inference.nix): written once into
         # her config.yaml, her own /model choice persists after that.
+        initialModel = {
+          provider = "anthropic";
+          default = "claude-opus-5-5";
+        };
+        settings.agent.reasoning_effort = "medium";
+      };
+
+      # wolfgang, anke: Wolfgang's and Anke's agents. No vault, wallet,
+      # REA, GPU account on vit or LAN (./hermes-agents-data.nix). No ssh
+      # keys: each uses the dashboard. Claude through TeamClaude (own
+      # client), the shared OpenRouter key, and Claude Opus 5.5 as the
+      # seed-once default model, thinking at medium (as janine's).
+      wolfgang = {
+        description = "wolfgang - Wolfgang's hermes agent, no vault access";
+        # None: Wolfgang uses the dashboard.
+        sshKeys = [ ];
+        # Claude through the TeamClaude gateway, as client `wolfgang`.
+        teamclaude.enable = true;
+        # The shared OpenRouter key as OPENROUTER_API_KEY (./hermes-inference.nix).
+        openrouter = true;
+        initialModel = {
+          provider = "anthropic";
+          default = "claude-opus-5-5";
+        };
+        settings.agent.reasoning_effort = "medium";
+      };
+      anke = {
+        description = "anke - Anke's hermes agent, no vault access";
+        # None: Anke uses the dashboard.
+        sshKeys = [ ];
+        # Claude through the TeamClaude gateway, as client `anke`.
+        teamclaude.enable = true;
+        # The shared OpenRouter key as OPENROUTER_API_KEY (./hermes-inference.nix).
+        openrouter = true;
         initialModel = {
           provider = "anthropic";
           default = "claude-opus-5-5";
@@ -558,11 +594,11 @@ in
           address = "2405:9800:b901:94e3::feed:da7a";
           ports = [ 443 ];
         }
-        # vit.d: ssh (GPU jobs), captchaSolver and ocr (browser above).
+        # vit.d: ssh (GPU jobs, only with an account there), captchaSolver
+        # and ocr (browser above).
         {
           address = vitYgg;
-          ports = [
-            22
+          ports = lib.optional (gpuUsers ? ${name}) 22 ++ [
             8096
             8098
           ];

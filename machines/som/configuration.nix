@@ -532,6 +532,8 @@ in
         fpv = 23;
         # 24: ./stefan-pq.nix (services.container-slots), not an agent.
         janine = 25;
+        wolfgang = 26;
+        anke = 27;
       };
       # Container names are capped at 11 chars (nspawn veth names,
       # hyperhermes container-slots); longer agent names get a short one
