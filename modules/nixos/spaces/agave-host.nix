@@ -167,10 +167,11 @@ in
                 # takes it with LoadCredential (root never writes into the
                 # tenant's home) and installs it as ~/.ssh/id_ed25519 (root
                 # on the computers trusts it). Setup reruns on every switch
-                # and takes a rotated key then. Before Dave adds the deploy
-                # key, main needs GitHub branch protection (no force-push,
-                # no deletion): the second guard, as keyFile's description
-                # says.
+                # and takes a rotated key then. No GitHub branch protection
+                # on main (Dave's decision 2026-11-20: he force-pushes
+                # sometimes), so the fast-forward-only push is the only
+                # guard against a rewrite with this key. A GitHub deploy key
+                # writes every branch, not main alone.
                 repository = {
                   url = "git@github.com:DavHau/hyperconfig.git";
                   branch = "main";

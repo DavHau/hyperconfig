@@ -50,6 +50,7 @@
 {
   config,
   lib,
+  pkgs,
   options,
   inputs,
   self,
@@ -98,6 +99,36 @@ in
       agave.desktop.enable = false;
 
       systemd.services.agave-tunnel.enable = hostKey != null;
+      # Quiet while Agave is unreachable or doesn't list this machine yet.
+      # agave's unit reruns ssh every 5 s (Restart=always, RestartSec=5,
+      # no start limit), and every switch then reported "failed:
+      # agave-tunnel.service": switch-to-configuration counts a service in
+      # auto-restart whose last exit was non-zero as failed. Here each run
+      # is one ssh session followed by a pause, then exits 0; systemd
+      # reruns it 5 s later as before, so a changed tunnel still takes over
+      # at the next reconnect (restartIfChanged is off upstream). The pause
+      # doubles from 5 s up to 5 min (state in /run) and drops to none
+      # after an attempt that lasted a minute (a session; rarely a slow
+      # failure such as a connect timeout): a dropped tunnel, say Agave
+      # restarting, reconnects within seconds. systemd's own RestartSteps
+      # would not do: it resets only on an explicit start. The forward is
+      # agave's own (template/modules/agave-tunnel.nix, `sshd`); an
+      # upstream change there needs the same change here.
+      systemd.services.agave-tunnel.serviceConfig.ExecStart = lib.mkForce (
+        pkgs.writeShellScript "agave-tunnel" ''
+          state=/run/agave-tunnel-backoff
+          delay=$(cat "$state" 2>/dev/null || true)
+          case "$delay" in "" | *[!0-9]*) delay=0 ;; esac
+          start=$SECONDS
+          rc=0
+          ${config.agave.tunnel.ssh "/run/agave/infra/${config.networking.hostName}.sock:localhost:22"} || rc=$?
+          if [ $((SECONDS - start)) -ge 60 ]; then delay=0; fi
+          next=$((delay == 0 ? 5 : (delay * 2 > 300 ? 300 : delay * 2)))
+          echo "$next" > "$state"
+          echo "agave-tunnel: ssh exited with $rc, next attempt in $((delay + 5))s"
+          sleep "$delay"
+        ''
+      );
       warnings = lib.optional (hostKey == null) "agave-tunnel: som's space-agave-host-hostkey is not generated yet; the tunnel is left out until it is.";
 
       # only through this machine's own tunnel (its forward ends at
