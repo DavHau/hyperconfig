@@ -15,8 +15,12 @@
     ./no-ca-derivations.nix
     ./security-takedown
     ./security-fixes.nix
+    ./self-heal
   ];
   users.mutableUsers = false;
+
+  # Live switches confirm or roll back (docs/self-heal.md).
+  hyper.selfHeal.enable = lib.mkDefault true;
 
   # A live switch never restarts wpa_supplicant: on a Wi-Fi uplink (nas via
   # role-parasit, vit, amy, joy) a restart mid-switch dropped the link and

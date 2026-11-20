@@ -87,6 +87,7 @@ the named owner and leave the copies to their unification.
 | hermes agent onboarding on som | `references/hermes-agents.md` (6 files today), `tools/hermes-onboard` | follow that list; the planned single agent entry will replace it |
 | secrets restarting their units | `modules/nixos/clan-vars-restart-units.nix` | set `restartUnits`; nothing else |
 | fleet-wide defaults | `modules/nixos/common.nix` (`lib.mkDefault`) | add there, not per machine |
+| self-heal (deploy guard, watchdogs, boot health; `selfheal` CLI) | `modules/nixos/self-heal/` (`hyper.selfHeal.*`, `/var/lib/selfheal`, `docs/self-heal.md`) | a new part = a file there + a `selfheal` subcommand; reuse `selfheal health` |
 | substituters, cache keys | `modules/clan/nix-cache/` | its settings |
 
 ## Where concerns live (one line each)

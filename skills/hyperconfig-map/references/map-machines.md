@@ -96,6 +96,7 @@ Shared vars generated (vars/shared): agave-geninf-ro clan-secrets-pull esphome-c
 - scan-trigger: modules/nixos/scan-trigger/test.nix
 - entity-storage: modules/nixos/entity-storage/test.nix
 - space-gui: modules/nixos/space-gui/test.nix
+- self-heal-deploy-guard: modules/nixos/self-heal/test.nix
 - user-manager-restart: modules/nixos/user-manager-restart/test.nix
 - zfs-keylocation-sync: modules/nixos/zfs-keylocation-sync/test.nix
 - nas-enc-guard: machines/nas/automount/test.nix

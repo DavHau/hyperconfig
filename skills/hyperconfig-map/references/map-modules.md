@@ -337,6 +337,10 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/security-fixes/overlays.nix — Package overlays of the unattended security jobs (../security-fixes.nix applies them on every machine): <- m/security-fixes.nix
 - modules/nixos/security-takedown/default.nix — Security takedowns: services the unattended security jobs (or anyone) stopped because of a critical, exploitable vulner… <- m/common.nix
 - modules/nixos/security-takedown/eligible.nix — Units a security takedown (./takedowns.json) may stop, per machine: <- m/security-takedown/default.nix
+- modules/nixos/self-heal/default.nix — Self-heal: machines that drop off the network get themselves back, without a person at the console. One module family,… <- m/common.nix, m/self-heal/test.nix
+- modules/nixos/self-heal/deploy-guard.nix — Deploy guard: every live switch must prove the machine is still reachable, or it is rolled back and the machine reboots… <- m/self-heal/default.nix
+- modules/nixos/self-heal/selfheal.py — - <- m/self-heal/default.nix
+- modules/nixos/self-heal/test.nix — VM test of ./deploy-guard.nix (check self-heal-deploy-guard): <- flake.nix
 - modules/nixos/short-videos/default.nix — - <- m/dave.nix
 - modules/nixos/short-videos/short-videos.sh — !/usr/bin/env bash List video files in DIR (default: <- m/short-videos/default.nix
 - modules/nixos/skills/external-scripts/SKILL.md — >

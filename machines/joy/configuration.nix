@@ -38,4 +38,7 @@
     xournalpp
     rnote
   ];
+
+  # Roams and goes offline on purpose (docs/self-heal.md, per-machine policy).
+  hyper.selfHeal.roaming = true;
 }

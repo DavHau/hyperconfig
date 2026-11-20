@@ -16,6 +16,8 @@
 #   - a recurring task (./recurring-tasks: registry, exporter) past its SLO:
 #     no successful run in time, or its result too old (warning, held
 #     15 min); one generic rule, the SLOs come with the metrics
+#   - a machine's deploy guard rolled back a live switch (critical, while
+#     its rollback flag is set: ./self-heal/deploy-guard.nix)
 #   - a recurring-tasks exporter silent for 1 h (critical): the dead man's
 #     switch, evaluated here on edi, independent of the exporting host
 # ZFS is judged per pool from ./monitoring-zfs-pools.nix (pool health and the
@@ -287,6 +289,19 @@ in
                 keepFiringFor = "15m";
                 severity = "critical";
                 summary = "{{ .Labels.instance }} has sent no metrics for 15 minutes";
+              })
+              # The flag stays until someone runs `selfheal clear` on the
+              # machine (deploys to it are blocked meanwhile): one page,
+              # repeated daily while it stays. The 20 min window bridges
+              # the reboot right after the rollback, when no samples
+              # arrive, so the alert neither waits for nor flaps on it.
+              (rule {
+                uid = "selfheal-deploy-rolled-back";
+                title = "Deploy rolled back";
+                expr = "max by (instance, reason) (max_over_time(selfheal_deploy_guard_rolled_back[20m])) > 0";
+                for = "0s";
+                severity = "critical";
+                summary = "{{ .Labels.instance }} rolled back a deploy ({{ .Labels.reason }} unhealthy after the switch) and rebooted into the previous generation; deploys to it are blocked until `selfheal clear` on {{ .Labels.instance }} (docs/self-heal.md)";
               })
               (rule {
                 uid = "fleet-unit-failed";

@@ -68,6 +68,8 @@
 
   # Dave's desktop session here is grmpf's (../../modules/nixos/dave-desktop).
   hyper.daveDesktop.user = "grmpf";
+  # Roams and goes offline on purpose (docs/self-heal.md, per-machine policy).
+  hyper.selfHeal.roaming = true;
   # amy forwards on purpose (infra-space's NAT, docker), not only for the
   # isolated hermes apps.
   hyper.daveDesktop.restrictForwarding = false;

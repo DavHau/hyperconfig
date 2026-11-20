@@ -306,6 +306,12 @@
           import ./modules/nixos/space-gui/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
+        # A live switch that cuts the machine off is restored, then rolled
+        # back with a reboot (systemd-boot VM); good switches confirmed.
+        self-heal-deploy-guard =
+          import ./modules/nixos/self-heal/test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          };
         user-manager-restart =
           import ./modules/nixos/user-manager-restart/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
