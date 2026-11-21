@@ -420,6 +420,10 @@ in {
                 "amy" "bam" "cm-pi" "joy" "nas"
                 "vit" "installer"
               ] (_: { });
+              # Phones as external peers of edi, mesh-only
+              # (../nixos/wg-edi-phones.nix).
+              roles.controller.extraModules = [ ../nixos/wg-edi-phones.nix ];
+              roles.peer.extraModules = [ ../nixos/wg-edi-phones.nix ];
             };
             # Fast local star for the vault NFS traffic: bam is the controller
             # with its LAN address as endpoint, so peers exchange traffic with

@@ -156,6 +156,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/storagebox.nix — The Hetzner storage box (sub-account u632961-sub1) mounted read-only over sshfs at /mnt/storagebox — the shared depth a… <- m/storagebox-sync.nix, m/storagebox-test.nix
 - modules/nixos/tang-client.nix — Boot unlock through Tang servers on the LAN (./tang-server.nix): <- m/luks-unlock/default.nix, m/zfs-remote-unlock/default.nix
 - modules/nixos/tang-server.nix — Tang server: lets LAN peers unlock their encrypted root at boot without a passphrase (client side: ./tang-client.nix). <- som, vit
+- modules/nixos/telegram-push-gateway.nix — Telegram push for Dave's phone over our own ntfy (UnifiedPush), no Google and no third-party gateway: <- edi
 - modules/nixos/thunderbird.nix — - <- m/dave.nix
 - modules/nixos/timedated-ntp.nix — - <- m/common.nix
 - modules/nixos/udev.nix — udev rules for Dave's USB devices: <- m/dave.nix
@@ -171,6 +172,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/vpn.nix — VPN clients on Dave's desktops: <- m/dave.nix
 - modules/nixos/wdisplays.nix — wdisplays + niri-display persistence. <- m/dave.nix
 - modules/nixos/web-bench-mullvad.nix — The fixed identity of `web-bench launch --egress mullvad` (tools/web-bench): <- som
+- modules/nixos/wg-edi-phones.nix — Phones on the wg-edi WireGuard mesh (edi is its controller): <- modules/flake-parts/nixosConfigurations.nix
 - modules/nixos/wired-link-local.nix — Keep wired interfaces usable on a peer-to-peer cable (laptop <-> laptop). <- m/networking-desktop.nix
 - modules/nixos/zfs-arc-max.nix — Cap the ZFS ARC. Unbounded it grows to nearly all of RAM and gives it back only under pressure, which shows up as "used… <- som
 - modules/nixos/zfs-ephemeral-tmp.nix — /tmp on a ZFS dataset instead of tmpfs: <- som, m/per-user-tmp/test.nix

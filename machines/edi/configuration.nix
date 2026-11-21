@@ -10,6 +10,8 @@
     ../../modules/nixos/wyoming-local-speech/voices-sso.nix
     # ntfy and the voice unlock app's front (../../modules/nixos/voice-gateway).
     ../../modules/nixos/voice-gateway/edi.nix
+    # Telegram push for Dave's phone via that ntfy (UnifiedPush).
+    ../../modules/nixos/telegram-push-gateway.nix
     ./reverse-proxy.nix
     ./nginx-file-server.nix
     ./reverse-proxy-maker.nix
