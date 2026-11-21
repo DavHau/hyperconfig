@@ -7,7 +7,10 @@
 # Readable by dave-hermes only, at
 # config.clan.core.vars.generators.ha-rack-plug-token.files.token.path
 # (/run/secrets/per-machine/som/ha-rack-plug-token/token); the skill reads
-# that file, it never enters the agent's state dir.
+# that file, it never enters the agent's state dir. The skill (agent-written,
+# in its state dir: smart-home/rack-power-plug) lets curl read the file
+# itself (`--variable token@<file>` + `--expand-header`): som has no
+# hidepid, so a token in `-H "... $(cat ...)"` is in every user's `ps`.
 {
   clan.core.vars.generators.ha-rack-plug-token = {
     prompts.token = {

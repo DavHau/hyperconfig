@@ -22,18 +22,34 @@ token. Nothing else of Home Assistant is reachable with it.
   refuse.
 - Say coordinates only as precisely as the task needs (a place or
   neighbourhood usually beats raw lat/lon).
+- Never send his coordinates to any outside service: no map or geocoding
+  URLs, no web search, no browser, no other API, unless Dave asks for
+  exactly that. Work out distances yourself (haversine) from places you
+  already know.
+- Read only when the task needs it: the current position by default,
+  `hours=` history only when a track is really needed.
+- No polling and no scheduled reads (cron jobs, loops, reminders) unless
+  Dave asked for that exact reminder or watch.
+- Whatever you read stays in this conversation's transcript, whatever the
+  memory rule says: read no more, and no more often, than needed.
 
 ## Read it
 
 ```bash
-curl -fsS -H "Authorization: Bearer $(cat @TOKEN_FILE@)" \
+curl -fsS --variable 'token@@TOKEN_FILE@' \
+  --expand-header 'Authorization: Bearer {{token:trim}}' \
   'http://cm-pi.d:8123/api/hyper_location'            # current position
-curl -fsS -H "Authorization: Bearer $(cat @TOKEN_FILE@)" \
+curl -fsS --variable 'token@@TOKEN_FILE@' \
+  --expand-header 'Authorization: Bearer {{token:trim}}' \
   'http://cm-pi.d:8123/api/hyper_location?hours=6'     # + track, up to 48 h
 ```
 
-Never print or echo the token; always read it from the file inside the
-command as above.
+Use exactly this form: curl reads the token from the file itself
+(`--variable name@file`), so it never appears in a command line. Every
+user on this host can read every process's command line (`ps`), so never
+put the token into one: no `$(cat <file>)` or shell variable inside a
+`-H` argument, never print or echo it. Never add `-v`, `--trace` or
+`--trace-ascii`: they print the Authorization header.
 
 Answer (JSON):
 
@@ -64,6 +80,7 @@ at most every 10 minutes) and otherwise once an hour. So:
 ## Errors
 
 - `401`: wrong or missing token (check the file path, never the value).
+- curl exit 26 `Failed to open`: the token file is missing or unreadable.
 - `403`: called from somewhere other than som.
 - `503` `no position yet`: the phone has not reported since setup.
 - Connection refused/timeout: cm-pi or its Home Assistant is down; say

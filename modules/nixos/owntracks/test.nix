@@ -7,8 +7,13 @@
 # a report under a wrong key is ignored; the reader gets position, battery
 # and track; a wrong or missing token is 401; a source outside `sources`
 # (HA's own loopback) is 403 even with a valid token; the endpoint is
-# GET-only; a restart keeps exactly one config entry per domain.
-# edi's nginx front (./edi.nix) is covered by edi's own build (nginx -t).
+# GET-only; a restart keeps exactly one config entry per domain; reads and
+# rejected reads are logged at HA's default level (WARNING, as on cm-pi);
+# the skill's own commands (./skill, rendered as ./agents.nix does) work
+# and put the token into no process's command line (execve traced, /proc
+# sampled by another user), while the old `Bearer $(cat ...)` form does.
+# edi's nginx front (./edi.nix) is not covered here: edi's build checks
+# its nginx.conf with gixy only, nginx -t runs at its start/reload.
 { pkgs }:
 let
   inherit (pkgs) lib;
@@ -17,6 +22,46 @@ let
   tokenInfra = "infra-token-0123456789";
   tokenDave = "dave-hermes-token-0123456789";
   sha = s: builtins.hashString "sha256" s;
+  agentToken = "/run/agent/location-token";
+  skillText = lib.replaceStrings [ "@TOKEN_FILE@" ] [ agentToken ] (builtins.readFile ./skill/SKILL.md);
+  # the skill's bash block, one command per entry, aimed at the test's HA
+  skillCommands = pkgs.writeText "skill-commands.json" (
+    builtins.toJSON (
+      let
+        block = builtins.elemAt (builtins.split "```bash\n|```\n" skillText) 2;
+        joined = lib.replaceStrings [ "\\\n" ] [ " " ] block;
+        lines = lib.filter (l: l != "") (lib.splitString "\n" joined);
+      in
+      map (
+        l:
+        lib.replaceStrings [ "cm-pi.d:8123" ] [ "ha:8123" ] (builtins.head (lib.splitString "  #" l))
+      ) lines
+    )
+  );
+  # sees other users' command lines as on som (no hidepid)
+  spy = pkgs.writers.writePython3 "cmdline-spy" { } ''
+    import glob
+    import os
+    import sys
+    import time
+
+    # from a file: in any argv it would match itself
+    secret = open(sys.argv[2], "rb").read().strip()
+    me = f"/proc/{os.getpid()}/cmdline"
+    curls = leaked = 0
+    end = time.time() + float(sys.argv[1])
+    while time.time() < end:
+        for f in glob.glob("/proc/[0-9]*/cmdline"):
+            if f == me:
+                continue
+            try:
+                c = open(f, "rb").read()
+            except OSError:
+                continue
+            curls += c.startswith(b"curl\0") and b"hyper_location" in c
+            leaked += secret in c
+    print(curls, leaked)
+  '';
   clanStub = {
     options.clan.core.vars.generators = lib.mkOption {
       type = lib.types.attrsOf (
@@ -110,7 +155,6 @@ pkgs.testers.runNixOSTest {
           };
           http = { };
           recorder = { };
-          logger.default = "info";
         };
       };
       systemd.tmpfiles.rules = [
@@ -124,11 +168,26 @@ pkgs.testers.runNixOSTest {
     environment.systemPackages = [
       pkgs.curl
       pkgs.python3
+      pkgs.strace
+    ];
+    users.users.agent = {
+      isNormalUser = true;
+      uid = 1001;
+    };
+    users.users.spy = {
+      isNormalUser = true;
+      uid = 1002;
+    };
+    systemd.tmpfiles.rules = [
+      "d /run/agent 0700 agent users -"
+      "f+ ${agentToken} 0400 agent users - ${tokenDave}"
     ];
   };
 
   testScript = ''
     import json
+    import re
+    import shlex
 
     webhook = "http://ha:8123/api/webhook/${webhookId}"
     api = "http://ha:8123/api/hyper_location"
@@ -210,7 +269,47 @@ pkgs.testers.runNixOSTest {
         )
         assert code == "405", code
 
-    with subtest("reads are logged by reader name"):
-        ha.succeed("journalctl -u home-assistant | grep 'location read by dave-hermes' >/dev/null")
+    with subtest("reads and rejections are logged at HA's default level"):
+        journal = ha.succeed("journalctl -u home-assistant")
+        assert re.search(r"location read by dave-hermes from (192\.168\.1\.\d+|2001:db8:1::[0-9a-f:]+)\s", journal), journal[-3000:]
+        assert re.search(r"location read rejected \(401, token\) from (192\.168\.1\.\d+|2001:db8:1::[0-9a-f:]+)\s", journal), journal[-3000:]
+        assert re.search(r"location read rejected \(403, source\) from (127\.0\.0\.1|::1)", journal), journal[-3000:]
+
+    with subtest("the skill's commands keep the token off every command line"):
+        skill = open("${pkgs.writeText "dave-location-SKILL.md" skillText}").read()
+        assert not re.search(r"Bearer \$[({]|-H\s*[\"'][^\"'\n]*\$\(", skill), "token-on-argv pattern in the skill"
+        cmds = json.loads(open("${skillCommands}").read())
+        assert len(cmds) == 2 and all(c.startswith("curl ") for c in cmds), cmds
+        assert all("--variable 'token@${agentToken}'" in c and "$" not in c for c in cmds), cmds
+        for c in cmds:
+            out = client.succeed(f"runuser -u agent -- bash -c {shlex.quote(c)}")
+            assert json.loads(out)["current"]["lat"] == 13.8, out
+        # every exec'd process's argv, deterministically
+        def traced(cmd):
+            client.succeed(
+                f"strace -f -qq -s 4096 -e trace=execve -o /tmp/trace "
+                f"runuser -u agent -- bash -c {shlex.quote(cmd)} >/dev/null"
+            )
+            return client.succeed("cat /tmp/trace")
+        for c in cmds:
+            t = traced(c)
+            assert "execve(" in t and "hyper_location" in t, t
+            assert "${tokenDave}" not in t, "token in an argv: " + t
+        # the old form leaks: proves the trace would catch it
+        old = "curl -fsS -H \"Authorization: Bearer $(cat ${agentToken})\" http://ha:8123/api/hyper_location"
+        assert "${tokenDave}" in traced(old)
+        # another user polling /proc during the calls sees curl, not the token
+        # (and does see it with the old form: the probe works)
+        client.succeed("install -m 0444 ${agentToken} /tmp/spy-secret")
+        def spied(cmd):
+            client.succeed(
+                "runuser -u spy -- ${spy} 6 /tmp/spy-secret > /tmp/spy & "
+                f"for i in $(seq 100); do runuser -u agent -- bash -c {shlex.quote(cmd)} >/dev/null; done; wait"
+            )
+            return tuple(map(int, client.succeed("cat /tmp/spy").split()))
+        curls, leaked = spied(cmds[0])
+        assert curls > 0 and leaked == 0, (curls, leaked)
+        curls, leaked = spied(old)
+        assert curls > 0 and leaked > 0, (curls, leaked)
   '';
 }

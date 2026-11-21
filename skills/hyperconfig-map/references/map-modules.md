@@ -313,7 +313,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/owntracks/vars.nix — The shared generator of ./default.nix, for cm-pi (HA reads webhook-id and encryption-key) and edi (owntracks-phone deri… <- m/owntracks/default.nix, m/owntracks/edi.nix, m/owntracks/home-assistant.nix
 - modules/nixos/owntracks/location_api/__init__.py — -
 - modules/nixos/owntracks/location_api/config_flow.py — -
-- modules/nixos/owntracks/skill/SKILL.md — "Where is Dave right now (or recently)? Read the location his phone reports (OwnTracks via Home Assistant): position, ac <- m/owntracks/agents.nix
+- modules/nixos/owntracks/skill/SKILL.md — "Where is Dave right now (or recently)? Read the location his phone reports (OwnTracks via Home Assistant): position, ac <- m/owntracks/agents.nix, m/owntracks/test.nix
 - modules/nixos/per-user-tmp/default.nix — A private /tmp and /var/tmp for every normal user (pam_namespace polyinstantiation). <- som, m/per-user-tmp/test.nix
 - modules/nixos/per-user-tmp/sweep.sh — Boot-time sweep of the shared /tmp and /var/tmp: <- m/per-user-tmp/default.nix
 - modules/nixos/per-user-tmp/test.nix — Per-user /tmp (./default.nix) on a ZFS /tmp emptied at boot (../zfs-ephemeral-tmp.nix). <- flake.nix

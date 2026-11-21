@@ -6,7 +6,17 @@
 #       per client with a burst; nginx dials HA's webhook on cm-pi over
 #       yggdrasil with the secret id (an include from the var, so neither
 #       the id nor the password is in the store). The phone's Authorization
-#       header never reaches HA. Everything else on the host: 404.
+#       header never reaches HA. Everything else on the host: 404. Its
+#       error_log is `crit` only: nginx's upstream errors (cm-pi down) name
+#       the upstream URL, i.e. the webhook id, and edi's journal goes to
+#       Loki; failed logins stay visible as 401s in the access log.
+#   https://bearhouse.davhau.com/api/webhook/<id>  404: bearhouse proxies
+#       all of HA, so without this the id would be a second, password-free
+#       way into the webhook. owntracks-bearhouse-block writes that
+#       location from owntracks-secrets/webhook-id (on edi already) into
+#       /run before nginx starts: no further var, no id in the store. It
+#       fails open (glob include, `wants`): a broken id file must not take
+#       down every vhost on edi for a defence-in-depth rule.
 #   https://stats.davhau.com/owntracks/  the setup page and the .otrc file
 #       (./phone-config.py), only for a Grafana session (pocket-id, group
 #       `stats`: Dave), as the TeamClaude usage pages
@@ -19,8 +29,14 @@
 let
   cfg = config.hyper.owntracks;
   gen = config.clan.core.vars.generators.owntracks-phone;
+  secrets = config.clan.core.vars.generators.owntracks-secrets.files;
+  bearhouseDir = "/run/owntracks-nginx";
+  bearhouseBlock = "${bearhouseDir}/bearhouse-block.conf";
   grafanaPort = config.services.grafana.settings.server.http_port;
+  # add_header_inherit merge: keep the server's own add_headers (HSTS, if
+  # ever set there) next to these instead of nginx dropping them.
   noStore = ''
+    add_header_inherit merge;
     add_header Cache-Control "private, no-store" always;
     add_header X-Content-Type-Options nosniff always;
     add_header Referrer-Policy no-referrer always;
@@ -66,6 +82,7 @@ in
     locations."= /pub" = {
       recommendedProxySettings = false;
       extraConfig = ''
+        error_log stderr crit;
         limit_except POST { deny all; }
         auth_basic "owntracks";
         auth_basic_user_file ${gen.files.htpasswd.path};
@@ -83,6 +100,35 @@ in
       '';
     };
   };
+
+  # exact-id prefix match: wins over bearhouse's `location /`
+  services.nginx.virtualHosts."bearhouse.davhau.com".extraConfig = ''
+    include ${bearhouseDir}/*.conf;
+  '';
+  systemd.services.owntracks-bearhouse-block = {
+    description = "bearhouse's 404 for the OwnTracks webhook id (nginx include)";
+    before = [ "nginx.service" ];
+    wantedBy = [ "nginx.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      Group = "nginx";
+      RuntimeDirectory = "owntracks-nginx";
+      RuntimeDirectoryMode = "0750";
+      RuntimeDirectoryPreserve = "yes";
+      UMask = "0227";
+    };
+    script = ''
+      id=$(cat ${secrets.webhook-id.path})
+      [[ $id =~ ^[0-9a-f]{64}$ ]] || { echo "webhook-id: not 64 hex chars" >&2; exit 1; }
+      printf 'location ^~ /api/webhook/%s { return 404; }\n' "$id" > ${bearhouseBlock}.tmp
+      mv ${bearhouseBlock}.tmp ${bearhouseBlock}
+    '';
+  };
+  clan.core.vars.generators.owntracks-secrets.files.webhook-id.restartUnits = [
+    "owntracks-bearhouse-block.service"
+    "nginx.service"
+  ];
 
   services.nginx.virtualHosts."stats.davhau.com".locations = {
     # Signed in = Grafana knows the session cookie; any other credential

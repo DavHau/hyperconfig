@@ -12,7 +12,9 @@ no HA token.
 
 Answers: 200 JSON, 403 from any other source, 401 for a missing or
 unknown token, 503 while no reader is configured or the entity has no
-position yet. Every read is logged with the reader's name.
+position yet. Every read is logged with the reader's name and every
+rejected one (403/401) with the client's address, at WARNING: cm-pi's HA
+logs WARNING and up only (no `logger:` section), so INFO would vanish.
 """
 
 from __future__ import annotations
@@ -98,11 +100,13 @@ class LocationView(HomeAssistantView):
 
     async def get(self, request: web.Request) -> web.Response:
         if not self._source_ok(request):
+            _LOGGER.warning("location read rejected (403, source) from %s", request.remote)
             return self.json({"error": "forbidden"}, 403)
         if not self.readers:
             return self.json({"error": "no readers configured"}, 503)
         reader = self._reader(request)
         if reader is None:
+            _LOGGER.warning("location read rejected (401, token) from %s", request.remote)
             return self.json({"error": "unauthorized"}, 401)
         try:
             hours = float(request.query.get("hours", "0"))
@@ -113,7 +117,7 @@ class LocationView(HomeAssistantView):
         hass: HomeAssistant = request.app[KEY_HASS]
         state = hass.states.get(self.entity_id)
         current = _point(state) if state else None
-        _LOGGER.info("location read by %s (hours=%s)", reader, hours)
+        _LOGGER.warning("location read by %s from %s (hours=%s)", reader, request.remote, hours)
         if current is None:
             return self.json({"error": "no position yet", "entity_id": self.entity_id}, 503)
 

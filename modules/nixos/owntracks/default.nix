@@ -13,13 +13,30 @@
           (HA's OwnTracks integration, ./home-assistant.nix)
 
   The phone never knows the webhook id: it lives only in edi's nginx
-  include and HA's config entry. The payload is encrypted with OwnTracks'
-  secretbox key, so nginx's logs and buffers see ciphertext only; edi's
-  root still could read the key (the setup page carries it). HA's integration would also take an unencrypted message from
-  whoever knows the webhook id, so the id (256 bits) and edi's basic auth
-  are the authentication; the key is confidentiality.
+  includes and HA's config entry (edi's /pub logs errors at `crit` only, as
+  nginx's upstream errors would name it). The payload is encrypted with
+  OwnTracks' secretbox key, so nginx's logs and buffers see ciphertext
+  only; edi's root still could read the key (the setup page carries it).
   bearhouse.davhau.com (../../../machines/edi/reverse-proxy.nix) proxies all
-  of HA publicly: the webhook id keeps that door shut as well.
+  of HA publicly; it answers 404 for /api/webhook/<id> (./edi.nix), so the
+  id works from the internet only through /pub (on yggdrasil, cm-pi:8123
+  itself still answers whoever knows the id).
+
+  What the /pub password alone gives (it is on the phone and the setup
+  page): HA's integration also takes UNENCRYPTED messages, so whoever has
+  it can, without the key,
+    - forge Dave's position (agents and automations act on it),
+    - create HA zones with a `waypoints` message (import is on), and
+    - read the coordinates of every HA `person`: HA answers each report
+      with all persons' positions, in plaintext to a plaintext request
+      (today the BearHouse person, i.e. the HA companion app's tracker).
+  So treat that password like read access to Dave's location. The reply
+  stays for now: the phone doesn't need it (OwnTracks only shows friends
+  from it), but plain nginx can't swap it for `[]` while still passing
+  HA's verdict through (`return` runs before auth_request; `mirror`
+  answers before HA has the fix, so the phone would stop re-sending fixes
+  HA failed to take: it queues and retries on non-2xx). Closing it means
+  wrapping the webhook in HA (refuse plaintext, answer `[]`).
 
   The tracker: device_tracker.dave_pixel (user `dave`, device `pixel`,
   tracker id `dh`), its history in HA's recorder (10 days by default).

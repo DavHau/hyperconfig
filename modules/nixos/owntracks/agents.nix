@@ -6,7 +6,10 @@
 # token goes:
 #   infra        infra-space's container credential `location-token`
 #                (/run/infra-space/secrets/location-token, owner infra);
-#                adding it restarts the container once.
+#                adding it restarts the container once. Every process
+#                running as `infra` can read it, unattended jobs too
+#                (nightly bump, cve-watch and others that read untrusted
+#                feeds): accepted at infra-space's trust level.
 #   dave-hermes  /run/secrets/per-machine/som/location-reader-dave-hermes/token,
 #                owner dave-hermes 0400 (as its ha-rack-plug-token).
 # Both get the skill ./skill (dave-location) with their token's path.

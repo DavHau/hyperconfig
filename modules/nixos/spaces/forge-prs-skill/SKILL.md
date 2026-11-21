@@ -107,7 +107,9 @@ Gitea tokens don't work there.
     nbo log 412 <attr-substring> --tail 200 -R gitea/generational-infrastructure/agave
 
 In a checkout `-R` and the build number come from `origin`/`HEAD`.
-Plain HTTP (docs: https://ci.geninf.io/docs):
-`curl -H "Authorization: Bearer $(cat /run/$USER/secrets/token-ci)"
+Plain HTTP (docs: https://ci.geninf.io/docs), with curl reading the
+token from the file itself, so it never lands on a command line (`ps`):
+`curl --variable "token@/run/$USER/secrets/token-ci" --expand-header
+'Authorization: Bearer {{token:trim}}'
 https://ci.geninf.io/api/repos/gitea/OWNER/REPO/builds/N/failures`
 (also `/builds`, `/builds/N`, `/builds/N/logs/ATTR/text?tail=200`).
