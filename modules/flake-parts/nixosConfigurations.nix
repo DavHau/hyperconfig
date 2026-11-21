@@ -416,9 +416,11 @@ in {
                 # Different port from wg-casa (which lives on the same NAT/WAN IP)
                 port = 51821;
               };
+              # som: reaches Dave's phone over wg-edi (adb from som,
+              # docs/dave-phone.md).
               roles.peer.machines = lib.genAttrs [
                 "amy" "bam" "cm-pi" "joy" "nas"
-                "vit" "installer"
+                "som" "vit" "installer"
               ] (_: { });
               # Phones as external peers of edi, mesh-only
               # (../nixos/wg-edi-phones.nix).
