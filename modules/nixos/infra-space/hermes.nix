@@ -482,7 +482,7 @@ in
           settings = {
             terminal.timeout = 3600;
             platform_toolsets = lib.genAttrs platforms (_: [ "terminal" "file" "todo" "delegation" ]);
-            agent.disabled_toolsets = disabledToolsets ++ [ "skills" ];
+            agent.disabled_toolsets = disabledToolsets ++ [ "skills" "camofox" ];
             checkpoints.enabled = false;
             delegation.max_concurrent_children = 4;
           };

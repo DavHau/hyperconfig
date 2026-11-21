@@ -128,6 +128,9 @@ in
     inputs.hyperhermes.nixosModules.teamclaude
   ];
 
+  # The infra agent delegates browsing to children (they inherit its toolsets).
+  hyper.infraSpace.agentTools.browser = true;
+
   # Claude subscription OAuth for every agent (hermes-claude-auth; the
   # module is imported in ./configuration.nix).
   services.hyperhermes.claudeAuth.enable = true;
