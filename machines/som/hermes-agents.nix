@@ -104,6 +104,8 @@ in
     # dave-hermes works on nmm in the asof-agents slot: `ssh asof-agents` as
     # `agent`, one static skill in its hermes profile `nmm`.
     ./dave-hermes-nmm.nix
+    # Dave's location (OwnTracks via cm-pi's HA) for infra and dave-hermes.
+    ../../modules/nixos/owntracks/agents.nix
     inputs.hyperhermes.nixosModules.browser
     ../../modules/nixos/searxng-canary
     # The agents' opt-in residential proxy (Evomi, via Mullvad), and

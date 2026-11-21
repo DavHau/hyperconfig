@@ -284,6 +284,11 @@
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
             inherit (self.nixosConfigurations.som.config.services.teamclaude) package;
           };
+        # OwnTracks reports into HA and the agents' location endpoint.
+        owntracks =
+          import ./modules/nixos/owntracks/test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          };
         porkbun-records =
           import ./modules/nixos/porkbun-records/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;

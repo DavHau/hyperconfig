@@ -8,6 +8,8 @@
     ./home-assistant.nix
     # hermes as HA's conversation agent (../../modules/nixos/voice-gateway).
     ../../modules/nixos/voice-gateway/cm-pi.nix
+    # OwnTracks from Dave's phone, and his location for two agents.
+    ../../modules/nixos/owntracks/home-assistant.nix
     # ./odoo.nix
   ];
 

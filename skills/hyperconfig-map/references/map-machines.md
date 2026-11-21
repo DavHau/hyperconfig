@@ -23,13 +23,13 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 ### cm-pi
 - header: -
 - own files: esphome/.gitignore, esphome/aircon_bed_room.yaml, esphome/aircon_common.yaml, esphome/aircon_living_room.yaml, esphome/chris.yaml, esphome/misubishi.yaml, esphome/mitsubishi_1.yaml, esphome/mitsubishi_2.yaml, esphome/mitsubishi_3.yaml, esphome/mitsubishi_4.yaml, esphome/mitsubishi_5.yaml, esphome/mitsubishi_common.yaml, hardware-configuration.nix, home-assistant.nix, odoo.nix
-- imports: m/common.nix, m/common-tools.nix, m/sbox.nix, m/riscv64.nix, m/voice-gateway/cm-pi.nix
+- imports: m/common.nix, m/common-tools.nix, m/sbox.nix, m/riscv64.nix, m/voice-gateway/cm-pi.nix, m/owntracks/home-assistant.nix
 - vars generated: agave-tunnel hyprspace openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version wireguard-keys-wg-edi wireguard-network-wg-edi yggdrasil
 
 ### edi
 - header: -
 - own files: disko.nix, nginx-file-server.nix, reverse-proxy-maker.nix, reverse-proxy.nix, users.nix
-- imports: m/common-tools.nix, m/sbox.nix, m/common.nix, m/dyndns-porkbun.nix, m/nix-gc-server.nix, m/monitoring-grafana-sso.nix, m/wyoming-local-speech/voices-sso.nix, m/voice-gateway/edi.nix
+- imports: m/common-tools.nix, m/sbox.nix, m/common.nix, m/dyndns-porkbun.nix, m/nix-gc-server.nix, m/monitoring-grafana-sso.nix, m/wyoming-local-speech/voices-sso.nix, m/voice-gateway/edi.nix, m/owntracks/edi.nix
 - input modules: srvos.nixosModules.mixins-cloud-init
 - vars generated: agave-tunnel grafana-admin hyprspace openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version wireguard-keys-wg-edi wireguard-keys-wireguard wireguard-network-wg-edi wireguard-network-wireguard yggdrasil
 
@@ -91,6 +91,7 @@ Shared vars generated (vars/shared): agave-geninf-ro clan-secrets-pull esphome-c
 - residential-proxy: modules/nixos/residential-proxy/test.nix
 - zt-eu-lan-guard: modules/nixos/zt-eu-lan-guard/test.nix
 - monitoring-teamclaude: modules/nixos/monitoring-teamclaude/test.nix
+- owntracks: modules/nixos/owntracks/test.nix
 - porkbun-records: modules/nixos/porkbun-records/test.nix
 - atproto-pds: modules/nixos/atproto-pds/test.nix
 - per-user-tmp: modules/nixos/per-user-tmp/test.nix

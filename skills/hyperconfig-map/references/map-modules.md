@@ -303,6 +303,17 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/ocr/ocr.py — - <- m/ocr/default.nix
 - modules/nixos/ocr-server/default.nix — Document OCR for the hermes agents on som: <- vit
 - modules/nixos/ocr-server/parse.py — - <- m/ocr-server/default.nix
+- modules/nixos/owntracks/agents.nix — som's part of ./default.nix: <- machines/som/hermes-agents.nix, m/owntracks/default.nix
+- modules/nixos/owntracks/default.nix — OwnTracks on Dave's phone -> Home Assistant on cm-pi, and Dave's location for two agents (infra-space's hermes, som's d… <- m/owntracks/agents.nix, m/owntracks/vars.nix
+- modules/nixos/owntracks/edi.nix — edi's part of ./default.nix: <- edi, m/owntracks/default.nix
+- modules/nixos/owntracks/home-assistant.nix — cm-pi's part of ./default.nix: <- cm-pi, m/owntracks/default.nix, m/owntracks/test.nix
+- modules/nixos/owntracks/phone-config.py — - <- m/owntracks/default.nix, m/owntracks/edi.nix
+- modules/nixos/owntracks/seed.py — - <- m/owntracks/default.nix, m/owntracks/home-assistant.nix
+- modules/nixos/owntracks/test.nix — ./home-assistant.nix in a NixOS container (checks.x86_64-linux.owntracks): <- flake.nix, m/owntracks/default.nix
+- modules/nixos/owntracks/vars.nix — The shared generator of ./default.nix, for cm-pi (HA reads webhook-id and encryption-key) and edi (owntracks-phone deri… <- m/owntracks/default.nix, m/owntracks/edi.nix, m/owntracks/home-assistant.nix
+- modules/nixos/owntracks/location_api/__init__.py — -
+- modules/nixos/owntracks/location_api/config_flow.py — -
+- modules/nixos/owntracks/skill/SKILL.md — "Where is Dave right now (or recently)? Read the location his phone reports (OwnTracks via Home Assistant): position, ac <- m/owntracks/agents.nix
 - modules/nixos/per-user-tmp/default.nix — A private /tmp and /var/tmp for every normal user (pam_namespace polyinstantiation). <- som, m/per-user-tmp/test.nix
 - modules/nixos/per-user-tmp/sweep.sh — Boot-time sweep of the shared /tmp and /var/tmp: <- m/per-user-tmp/default.nix
 - modules/nixos/per-user-tmp/test.nix — Per-user /tmp (./default.nix) on a ZFS /tmp emptied at boot (../zfs-ephemeral-tmp.nix). <- flake.nix

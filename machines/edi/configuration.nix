@@ -14,6 +14,8 @@
     ./nginx-file-server.nix
     ./reverse-proxy-maker.nix
     ./users.nix
+    # OwnTracks: the phone's public endpoint and Dave's setup page.
+    ../../modules/nixos/owntracks/edi.nix
   ];
 
   networking.useDHCP = true;

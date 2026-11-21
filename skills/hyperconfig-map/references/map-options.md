@@ -15,7 +15,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - clan.core.settings.directory: modules/nixos/infra-space/agent-tools-test.nix, modules/nixos/ipv4-forward-slots-test/default.nix
 - clan.core.state: modules/nixos/atproto-pds/test.nix
 - clan.core.vars: modules/nixos/clan-vars-restart-units-test.nix
-- clan.core.vars.generators: modules/nixos/atproto-pds/test.nix, modules/nixos/clan-secrets-mirror-test.nix, modules/nixos/infra-space/test-clan-stub.nix, modules/nixos/ipv4-forward-slots-test/default.nix, modules/nixos/porkbun-records/test.nix, modules/nixos/spaces/test.nix, modules/nixos/storagebox-test.nix
+- clan.core.vars.generators: modules/nixos/atproto-pds/test.nix, modules/nixos/clan-secrets-mirror-test.nix, modules/nixos/infra-space/test-clan-stub.nix, modules/nixos/ipv4-forward-slots-test/default.nix, modules/nixos/owntracks/test.nix, modules/nixos/porkbun-records/test.nix, modules/nixos/spaces/test.nix, modules/nixos/storagebox-test.nix
 - clanSecretsMirror.url: modules/nixos/clan-secrets-mirror.nix, modules/nixos/infra-space/nixpkgs-bump/guard-test.nix
 - clients: modules/clan/oidc/default.nix
 - containerSlot.cacheUsers: hyperhermes/modules/slot/default.nix
@@ -23,7 +23,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - dashboard.url: hyperhermes/modules/dashboards/default.nix
 - domain: modules/clan/wireguard/default.nix
 - encGuard: machines/nas/automount/enc-guard.nix
-- files: modules/nixos/atproto-pds/test.nix, modules/nixos/infra-space/test-clan-stub.nix, modules/nixos/ipv4-forward-slots-test/default.nix, modules/nixos/spaces/test.nix
+- files: modules/nixos/atproto-pds/test.nix, modules/nixos/infra-space/test-clan-stub.nix, modules/nixos/ipv4-forward-slots-test/default.nix, modules/nixos/owntracks/test.nix, modules/nixos/spaces/test.nix
 - hyper.afk.defaultModel: modules/nixos/afk.nix
 - hyper.afk.extraSkills: modules/nixos/afk.nix
 - hyper.afk.pinnedSettings: modules/nixos/afk.nix
@@ -59,6 +59,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.mullvadEgress.dns.services: modules/nixos/mullvad-egress/dns.nix
 - hyper.mullvadEgress.dns.upstream: modules/nixos/mullvad-egress/dns.nix
 - hyper.oidc: modules/clan/oidc/default.nix
+- hyper.owntracks: modules/nixos/owntracks/default.nix, modules/nixos/owntracks/home-assistant.nix
 - hyper.perUserTmp.enable: modules/nixos/per-user-tmp/default.nix
 - hyper.porkbunRecords: modules/nixos/porkbun-records/default.nix
 - hyper.providerKeyPaths: modules/nixos/provider-keys.nix
@@ -107,7 +108,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - networking.publicIPv6: modules/nixos/public-ipv6-token.nix
 - niri.outputExtras: modules/nixos/niri-output-extras.nix
 - openrouter: machines/som/hermes-inference.nix
-- path: modules/nixos/atproto-pds/test.nix, modules/nixos/infra-space/test-clan-stub.nix, modules/nixos/ipv4-forward-slots-test/default.nix, modules/nixos/monitoring-exec-usage.nix, modules/nixos/monitoring-teamclaude/default.nix, modules/nixos/spaces/test.nix
+- path: modules/nixos/atproto-pds/test.nix, modules/nixos/infra-space/test-clan-stub.nix, modules/nixos/ipv4-forward-slots-test/default.nix, modules/nixos/monitoring-exec-usage.nix, modules/nixos/monitoring-teamclaude/default.nix, modules/nixos/owntracks/test.nix, modules/nixos/spaces/test.nix
 - port: modules/clan/wireguard/default.nix
 - publish.enable: hyperhermes/modules/publish/default.nix
 - rea.enable: hyperhermes/modules/rea/default.nix
@@ -175,6 +176,8 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - nix-cache-${instanceName}: modules/clan/nix-cache/default.nix
 - nix-ssh-client: modules/nixos/nix-ssh-client.nix
 - openrouter: modules/nixos/pi-chat-openrouter.nix
+- owntracks-phone: modules/nixos/owntracks/edi.nix
+- owntracks-secrets: modules/nixos/owntracks/vars.nix
 - porkbun: modules/nixos/dyndns-porkbun.nix, modules/nixos/porkbun-records/default.nix
 - remote-building-${instanceName}: modules/clan/remote-building/default.nix
 - router-ais: modules/nixos/router-ais.nix

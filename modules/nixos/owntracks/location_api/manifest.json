@@ -1,0 +1,14 @@
+{
+  "domain": "location_api",
+  "name": "Location API (hyperconfig)",
+  "codeowners": [],
+  "config_flow": true,
+  "single_config_entry": true,
+  "dependencies": ["http"],
+  "after_dependencies": ["recorder"],
+  "documentation": "https://github.com/DavHau/hyperconfig",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "requirements": [],
+  "version": "1.0.0"
+}
