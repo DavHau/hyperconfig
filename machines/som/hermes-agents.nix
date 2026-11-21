@@ -101,6 +101,9 @@ in
     ./hermes-inference.nix
     # dave-hermes's HA token for the TV rack plug.
     ./dave-hermes-ha.nix
+    # dave-hermes drives nmm in the asof-agents slot: ssh as `agent`, and
+    # the skills afk sees there.
+    ./dave-hermes-nmm.nix
     inputs.hyperhermes.nixosModules.browser
     ../../modules/nixos/searxng-canary
     # The agents' opt-in residential proxy (Evomi, via Mullvad), and
