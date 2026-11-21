@@ -1,0 +1,72 @@
+--- a/src/config.js
++++ b/src/config.js
+@@ -295,14 +295,15 @@
+   try {
+     ({ pid, at } = JSON.parse(readFileSync(lockPath, 'utf8')));
+   } catch (err) {
+-    if (err.code === 'ENOENT') return false; // released under us; the retry takes it
++    // Never infer staleness from age when a privileged holder is unreadable.
++    if (err.code !== undefined) return false;
+     // Empty or garbled: the holder is between its open and its write, or died
+     // there. Only the file's age can tell those apart.
+     try { return Date.now() - statSync(lockPath).mtimeMs > LOCK_STALE_MS; } catch { return false; }
+   }
+-  if (Date.now() - at > LOCK_STALE_MS) return true;
+-  if (!Number.isInteger(pid) || pid <= 0) return false;
++  // A paused or slow live writer still owns its lock, regardless of age.
++  if (!Number.isInteger(pid) || pid <= 0) return Date.now() - at > LOCK_STALE_MS;
+   try { process.kill(pid, 0); return false; } catch (err) { return err.code === 'ESRCH'; }
+ }
+
+ /** Break a stale lock. True when this caller attempted the break and should
+@@ -333,7 +334,7 @@
+   }
+ }
+
+-/** True when the lock is ours; false when we gave up and proceed without it. */
++/** Acquire the lock, or refuse the write. */
+ async function acquireConfigLock(lockPath) {
+   const waitMs = lockWaitMs();
+   const deadline = Date.now() + waitMs;
+@@ -343,16 +344,10 @@
+       try { writeSync(fd, JSON.stringify({ pid: process.pid, at: Date.now() })); } finally { closeSync(fd); }
+       return true;
+     } catch (err) {
+-      if (err.code !== 'EEXIST') {
+-        console.error(`[TeamClaude] Cannot create ${lockPath} (${err.code || err.message}); writing the config without it`);
+-        return false;
+-      }
++      if (err.code !== 'EEXIST') throw err;
+     }
+     if (lockIsStale(lockPath) && await breakStaleLock(lockPath)) continue;
+-    if (Date.now() >= deadline) {
+-      console.error(`[TeamClaude] ${lockPath} is still held by another process after ${waitMs}ms; writing the config without it`);
+-      return false;
+-    }
++    if (Date.now() >= deadline) throw new Error('TeamClaude config lock is busy');
+     await new Promise(resolve => setTimeout(resolve, LOCK_POLL_MS));
+   }
+ }
+--- a/src/prober.js
++++ b/src/prober.js
+@@ -217,8 +217,12 @@
+       this.am.applyUsageData(account.index, usage);
+       await this._readProfile(account);
+       const finishedAt = Date.now();
++      // Recovery must not mistake cached quota (or inference headers) for
++      // a complete reading from this request. Keep both fields together.
++      const { utilization, resetAt } = usage.sevenDay ?? {};
+       this._recordAccount(account, {
+         status: 'ok',
++        weekly: { utilization: utilization ?? null, resetAt: resetAt ?? null },
+         error: null,
+         startedAt,
+         finishedAt,
+@@ -301,6 +305,7 @@
+           lastProbedAt: iso(status?.finishedAt),
+           startedAt: iso(status?.startedAt),
+           durationMs: status?.durationMs ?? null,
++          weekly: status?.status === 'ok' ? (status?.weekly ?? null) : null,
+           error: status?.error || null,
+         };
+       }),

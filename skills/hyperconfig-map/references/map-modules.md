@@ -277,6 +277,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/monitoring-teamclaude/ledger.py — - <- m/monitoring-teamclaude/default.nix, m/monitoring-teamclaude/test.nix
 - modules/nixos/monitoring-teamclaude/test.nix — The TeamClaude usage pipeline's logic, without a VM: <- flake.nix
 - modules/nixos/monitoring-teamclaude/test_ledger.py — - <- m/monitoring-teamclaude/test.nix
+- modules/nixos/monitoring-teamclaude/test_oauth_rules.py — - <- m/monitoring-teamclaude/test.nix
 - modules/nixos/mullvad-egress/default.nix — Mullvad egress for hyper.mullvadEgress.users (mechanism in ./egress.nix, their DNS in ./dns.nix), exiting in Singapore. <- som, m/spaces/agave-host.nix
 - modules/nixos/mullvad-egress/dns.nix — DNS of the tunneled users (./egress.nix) through the tunnel too, so the names they look up do not reach the host's reso… <- m/infra-space/agent-tools-test.nix, m/mullvad-egress/default.nix, m/mullvad-egress/egress.nix, m/mullvad-egress/test.nix, m/residential-proxy/test.nix
 - modules/nixos/mullvad-egress/egress.nix — Selected users reach the internet only through a Mullvad WireGuard tunnel; <- m/infra-space/agent-tools-test.nix, m/mullvad-egress/default.nix, m/mullvad-egress/test.nix, m/residential-proxy/test.nix

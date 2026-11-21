@@ -63,6 +63,7 @@ let
   domain = "teamclaude.davhau.com";
   stateFile = "/var/lib/teamclaude/teamclaude.json";
   configFile = config.clan.core.vars.generators.teamclaude-config.files."config.json".path;
+  seedFile = "/run/credentials/teamclaude.service/config.json";
   # Ordered once, so the jq arguments and the array line up.
   staticClients = lib.mapAttrsToList (name: generator: { inherit name generator; }) cfg.clientKeys;
   # Likewise; the non-secret part of each entry goes to preStart as is, the
@@ -142,6 +143,43 @@ let
       ${pkgs.coreutils}/bin/env TEAMCLAUDE_CONFIG=${stateFile} \
       ${pkgs.nodejs}/bin/node ${./accounts.mjs} \
       ${config.services.teamclaude.package}/share/teamclaude/src ${capsFile} ${toString usageCap} "$@"
+  '';
+  oauthSource = lib.fileset.toSource {
+    root = ./.;
+    fileset = lib.fileset.unions [ ./oauth-status.mjs ./oauth-relogin.mjs ];
+  };
+  teamclaudeSrc = "${config.services.teamclaude.package}/share/teamclaude/src";
+  # A private interactive terminal, not an agent job or a public endpoint.
+  # docs/teamclaude-oauth-recovery.md describes the guarded browser flow.
+  teamclaudeOAuth = pkgs.writeShellScriptBin "teamclaude-oauth" ''
+    if [ "$(${pkgs.coreutils}/bin/id -u)" -ne 0 ]; then
+      echo 'teamclaude-oauth: run as root on the gateway' >&2
+      exit 1
+    fi
+    if [ "''${1:-}" = re-login ]; then
+      if ! [ -t 0 ] || ! [ -t 1 ]; then
+        echo 'teamclaude-oauth: use an interactive, unrecorded terminal for re-login' >&2
+        exit 1
+      fi
+      # Reserve the operation across the browser flow without blocking the
+      # gateway or its config writers. /run is root-owned, outside app state.
+      umask 077
+      ulimit -c 0
+      exec 9>/run/teamclaude-oauth.lock
+      if ! ${pkgs.util-linux}/bin/flock -n 9; then
+        echo 'teamclaude-oauth: another recovery is running' >&2
+        exit 1
+      fi
+      # Keep this PID and its tty/lock fd; Node handles signals and cleanup.
+      exec ${pkgs.coreutils}/bin/env TEAMCLAUDE_CONFIG=${stateFile} TEAMCLAUDE_CONFIG_LOCK_WAIT_MS=250 \
+        ${pkgs.nodejs}/bin/node ${oauthSource}/oauth-relogin.mjs \
+        ${teamclaudeSrc} ${config.systemd.package}/bin/systemctl ${pkgs.coreutils}/bin/stty "$@"
+    else
+      exec ${pkgs.util-linux}/bin/runuser -u teamclaude -- \
+        ${pkgs.coreutils}/bin/env TEAMCLAUDE_CONFIG=${stateFile} \
+        ${pkgs.nodejs}/bin/node ${oauthSource}/oauth-relogin.mjs \
+        ${teamclaudeSrc} ${config.systemd.package}/bin/systemctl ${pkgs.coreutils}/bin/stty "$@"
+    fi
   '';
 in
 {
@@ -285,7 +323,12 @@ in
 
     services.teamclaude = {
       enable = true;
-      configSource = "/run/credentials/teamclaude.service/config.json";
+      package = (pkgs.callPackage "${inputs.teamclaude}/nix/package.nix" { }).overrideAttrs (old: {
+        patches = (old.patches or [ ]) ++ [ ./oauth-safety.patch ];
+      });
+      # Disable the upstream unlocked seed copy; our preStart uses seedFile
+      # under the same lock as the merge and the runtime writers.
+      configSource = null;
       host = "127.0.0.1";
       openFirewall = false;
       serviceConfig = {
@@ -313,14 +356,13 @@ in
         RestrictSUIDSGID = true;
         SystemCallArchitectures = "native";
         UMask = "0077";
+        KillMode = "control-group";
       };
     };
 
-    # The upstream module copies config.json into the state directory only
-    # when nothing is there yet, because that file also holds the enrolled
-    # accounts and their refreshed OAuth tokens; no later change to the
-    # generated config (a rotated key) would ever reach the service. So merge
-    # file, except two runtime lists. `accounts` stays as the service left it
+    # Seed from the service credential only when there is no live config.
+    # On every start, merge generated settings and rotated keys with live
+    # state, except two runtime lists. `accounts` stays as the service left it
     # but for its maxUsage: the account's own cap from capsFile
     # (teamclaude-accounts), else usageCap. The upstreamAccounts are the
     # exception: each is rebuilt from the Nix declaration plus the URL and
@@ -330,59 +372,58 @@ in
     # `proxy.clientKeys` keeps
     # every runtime-minted entry and gets the secret's static entries on top,
     # replacing a live entry of the same name (a rotated static key). Runs as
-    # root (PermissionsStartOnly), after the module's own copy-if-missing.
+    # root (PermissionsStartOnly), after the upstream directory setup.
     #
     # Every start, and with no account enrolled the service restarts every
     # 5 s, so the merge must not disturb a concurrent writer (teamclaude-keys,
-    # a `teamclaude login`): it takes TeamClaude's own advisory lock
-    # (src/config.js: <config>.lock, O_EXCL, {"pid","at"}, give up after 2 s)
-    # and replaces the file by rename of a copy that is already
-    # teamclaude-owned 0600, so no reader ever sees a root-owned file.
+    # a `teamclaude login`). Use the same fail-closed lock as all other
+    # writers, including stale-lock recovery after a killed operator session.
+    # Publish one teamclaude-owned 0600 file by rename, even on first boot.
     systemd.services.teamclaude.preStart = lib.mkAfter ''
-      live=${stateFile}
-      src=${lib.escapeShellArg config.services.teamclaude.configSource}
-      if [ -e "$live" ]; then
-        lock="$live.lock"
-        held=
-        for _ in $(seq 80); do
-          if (set -C; printf '{"pid":%d,"at":%d}' "$$" "$(date +%s%3N)" > "$lock") 2>/dev/null; then
-            chown teamclaude:teamclaude "$lock"
-            held=1
-            break
-          fi
-          sleep 0.025
-        done
-        tmp=$(mktemp "$live.merged.XXXXXX")
-        caps='{}'
-        [ ! -s ${capsFile} ] || caps=$(cat ${capsFile})
-        ${pkgs.jq}/bin/jq -s --argjson cap ${builtins.toJSON usageCap} --argjson caps "$caps" \
-          --argjson declared ${lib.escapeShellArg declaredAccounts} '
-          .[0] as $live
-          | (.[2].proxy.clientKeys // []) as $static
-          | ([ (.[2].accounts // [])[] | { key: .name, value: { apiKey, upstream } } ] | from_entries) as $secret
-          | $live * .[1] * (.[2] | del(.accounts) | del(.proxy.clientKeys))
-          | .accounts = (
-              [ (.accounts // [])[] | select(.name as $n | $declared | all(.name != $n))
-                | .maxUsage = ($caps[.name] // $cap) ]
-              + [ $declared[] as $d
-                  | ([ ($live.accounts // [])[] | select(.name == $d.name) ][0] // {})
-                    + $d + $secret[$d.name]
-                  | .maxUsage = ($caps[$d.name] // $d.maxUsage)
-                  | if .maxUsage == null then del(.maxUsage) else . end ])
-          | .proxy.clientKeys = (
-              [ ($live.proxy.clientKeys // [])[] | select(.name as $n | $static | all(.name != $n)) ]
-              + $static)
-        ' "$live" ${settingsFile} "$src" > "$tmp"
-        chown teamclaude:teamclaude "$tmp"
-        chmod 0600 "$tmp"
-        mv -f "$tmp" "$live"
-        [ -z "$held" ] || rm -f "$lock"
-      fi
+      ${pkgs.nodejs}/bin/node --input-type=module -e '
+        import { withConfigLock } from "${teamclaudeSrc}/config.js";
+        import { execFile } from "node:child_process";
+        import { promisify } from "node:util";
+        await withConfigLock(process.env.TEAMCLAUDE_CONFIG, () => promisify(execFile)(process.argv[1]))
+          .catch(() => { console.error("teamclaude: locked pre-start config merge failed"); process.exitCode = 1; });
+      ' ${pkgs.writeShellScript "teamclaude-merge-config" ''
+      set -eu
+      live="$TEAMCLAUDE_CONFIG"
+      src=${lib.escapeShellArg seedFile}
+      base="$live"
+      [ -e "$live" ] || base="$src"
+      tmp=$(mktemp "$live.merged.XXXXXX")
+      trap 'rm -f "$tmp"' EXIT
+      caps='{}'
+      [ ! -s ${capsFile} ] || caps=$(cat ${capsFile})
+      ${pkgs.jq}/bin/jq -s --argjson cap ${builtins.toJSON usageCap} --argjson caps "$caps" \
+        --argjson declared ${lib.escapeShellArg declaredAccounts} '
+        .[0] as $live
+        | (.[2].proxy.clientKeys // []) as $static
+        | ([ (.[2].accounts // [])[] | { key: .name, value: { apiKey, upstream } } ] | from_entries) as $secret
+        | $live * .[1] * (.[2] | del(.accounts) | del(.proxy.clientKeys))
+        | .accounts = (
+            [ (.accounts // [])[] | select(.name as $n | $declared | all(.name != $n))
+              | .maxUsage = ($caps[.name] // $cap) ]
+            + [ $declared[] as $d
+                | ([ ($live.accounts // [])[] | select(.name == $d.name) ][0] // {})
+                  + $d + $secret[$d.name]
+                | .maxUsage = ($caps[$d.name] // $d.maxUsage)
+                | if .maxUsage == null then del(.maxUsage) else . end ])
+        | .proxy.clientKeys = (
+            [ ($live.proxy.clientKeys // [])[] | select(.name as $n | $static | all(.name != $n)) ]
+            + $static)
+      ' "$base" ${settingsFile} "$src" > "$tmp"
+      chown teamclaude:teamclaude "$tmp"
+      chmod 0600 "$tmp"
+      mv -f "$tmp" "$live"
+      ''}
     '';
 
     environment.systemPackages = [
       teamclaudeKeys
       teamclaudeAccounts
+      teamclaudeOAuth
     ];
 
     services.nginx = {

@@ -283,6 +283,10 @@
           import ./modules/nixos/monitoring-teamclaude/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
             inherit (self.nixosConfigurations.som.config.services.teamclaude) package;
+            oauthRules = builtins.filter (r: nixpkgs.lib.hasPrefix "teamclaude-oauth-" r.uid) (
+              nixpkgs.lib.concatMap (g: g.rules)
+                self.nixosConfigurations.edi.config.services.grafana.provision.alerting.rules.settings.groups
+            );
           };
         # OwnTracks reports into HA and the agents' location endpoint.
         owntracks =

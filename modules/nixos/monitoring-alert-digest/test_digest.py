@@ -123,6 +123,25 @@ class Collect(unittest.TestCase):
         self.assertIn("A&lt;b&gt;&amp;", msg)
         self.assertIn("more (Grafana", msg)
 
+    def test_teamclaude_warnings_keep_distinct_accounts_private(self):
+        annotations = [
+            {"tags": ["severity:warning", "instance:som", f"account:{account}"],
+             "alertName": "TeamClaude OAuth needs attention", "time": NOW.timestamp() * 1000,
+             "prevState": "Pending", "newState": "Alerting"}
+            for account in ("one@example.test", "two&@example.test")
+        ]
+        alerts = [{"labels": {"severity": "warning", "instance": "som",
+                              "account": "one@example.test", "alertname": "TeamClaude OAuth needs attention"},
+                   "state": "Alerting", "annotations": {"summary": "Find the exact account in Grafana"}}]
+        entries = digest.collect(alerts, annotations, NOW)
+        self.assertEqual(sorted((e["state"], e["detail"]) for e in entries),
+                         [("firing", ""), ("resolved", "")])
+        self.assertNotIn("example.test", json.dumps(entries))
+        message = digest.render(entries)
+        assert message is not None
+        self.assertIn("Find the exact account in Grafana", message)
+        self.assertNotIn("example.test", message)
+
 
 class ErrorStates(unittest.TestCase):
     """A warning rule whose query fails is in Error (Grafana sends it as

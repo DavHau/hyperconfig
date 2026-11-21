@@ -23,6 +23,8 @@
 #     (warning) (./self-heal/watchdog.nix)
 #   - a recurring-tasks exporter silent for 1 h (critical): the dead man's
 #     switch, evaluated here on edi, independent of the exporting host
+#   - TeamClaude subscription OAuth expiring or rejected (warning); stale
+#     OAuth status is a separate gateway-level warning, not a re-login
 # ZFS is judged per pool from ./monitoring-zfs-pools.nix (pool health and the
 # root dataset's used/avail) plus per-dataset quota usage from the same
 # exporter; per-dataset filesystem series are skipped.
@@ -215,6 +217,15 @@ let
 
   recurring = import ./recurring-tasks/promql.nix { inherit lib; };
   recurringHosts = lib.unique (lib.mapAttrsToList (_: t: t.host) (import ./recurring-tasks/registry.nix));
+
+  # 5 min exporter timer; use its payload timestamp (Alloy can still scrape
+  # an old file). Allow 2 min of clock skew, not a far-future heartbeat.
+  teamclaudeHost = "som";
+  teamclaudeSelector = ''{instance="${teamclaudeHost}"}'';
+  teamclaudeOAuthAge = "(time() - teamclaude_oauth_status_collected_timestamp_seconds${teamclaudeSelector})";
+  teamclaudeOAuthFresh = "(${teamclaudeOAuthAge} >= -120 and ${teamclaudeOAuthAge} < 1200)";
+  teamclaudeExpiry = "teamclaude_account_oauth_refresh_expiry_timestamp_seconds${teamclaudeSelector}";
+  teamclaudeRunbook = "https://github.com/DavHau/hyperconfig/blob/main/docs/teamclaude-oauth-recovery.md";
 in
 {
   options.hyper.monitoringAlerts = {
@@ -476,6 +487,32 @@ in
                 for = "5m";
                 severity = "critical";
                 summary = "{{ .Labels.instance }} has not reported its recurring tasks for over an hour: nothing watches them";
+              })
+              (rule {
+                uid = "teamclaude-oauth-relogin";
+                title = "TeamClaude OAuth needs attention";
+                # One warning per account even when both signals are present.
+                # Keep overdue deadlines actionable, and warn two days ahead
+                # so at least one daily digest reaches the operator in time.
+                expr = ''
+                  max by (instance, account) (
+                    (teamclaude_account_oauth_relogin_required${teamclaudeSelector} == 1)
+                    or (${teamclaudeExpiry} > 0 and ${teamclaudeExpiry} <= time() + 172800)
+                  ) and on (instance) ${teamclaudeOAuthFresh}
+                '';
+                for = "15m";
+                severity = "warning";
+                summary = "A TeamClaude account has a refresh deadline within 48h (or overdue), or TeamClaude confirmed credential rejection. Authorized operators: find the exact account in Grafana and check status before re-login: ${teamclaudeRunbook}";
+              })
+              (rule {
+                uid = "teamclaude-oauth-telemetry";
+                title = "TeamClaude OAuth monitoring blind";
+                # This is missing/broken telemetry, not evidence that any
+                # credential expired. NoData on a quiet account rule is OK.
+                expr = ''label_replace(vector(1), "instance", "${teamclaudeHost}", "", "") unless on () ${teamclaudeOAuthFresh}'';
+                for = "30m";
+                severity = "warning";
+                summary = "No fresh TeamClaude OAuth status from som; check the exporter, Alloy and local gateway before attempting any re-login: ${teamclaudeRunbook}";
               })
             ];
           }

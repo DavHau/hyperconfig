@@ -52,6 +52,8 @@ SEVERITY = "warning"
 # Telegram caps a message at 4096 characters.
 MAX_LEN = 4000
 # Labels that say *which* series of a rule it is, in display order.
+# OAuth account labels contain email addresses. Keep them in series_key for
+# deduplication, not in the digest (including its downstream JSON consumers).
 DETAIL_LABELS = ("name", "mountpoint", "pool", "dataset", "zpool", "device")
 # Labels that only describe the rule or the scrape, not the series.
 IGNORED_LABELS = {"grafana_folder", "job", "__alert_rule_uid__",

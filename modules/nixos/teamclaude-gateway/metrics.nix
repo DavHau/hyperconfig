@@ -15,6 +15,9 @@
 # Each account's cap (maxUsage) and type/tier come from the live config
 # (teamclaude.json, which also holds the OAuth tokens: only those three
 # fields leave it).
+# OAuth recovery alerts use the running gateway's authenticated loopback
+# status, not the quota file: they export recorded refresh-token deadlines
+# and confirmed auth rejections for enabled Anthropic subscription OAuth.
 #
 # Per client AND account, and with cache reads/writes and the model's price
 # (which the lifetime counters above lack: their input is the uncached part
@@ -68,7 +71,7 @@ let
 in
 {
   systemd.services.teamclaude-metrics = {
-    description = "Write TeamClaude usage counters for Alloy";
+    description = "Write TeamClaude usage and OAuth status for Alloy";
     serviceConfig = {
       Type = "oneshot";
       User = "teamclaude";
@@ -79,12 +82,21 @@ in
       RuntimeDirectoryMode = "0755";
       StateDirectory = "teamclaude-metrics";
       UMask = "0022";
+      IPAddressDeny = "any";
+      IPAddressAllow = "localhost";
     };
     # Renamed into place so Alloy never reads a half-written file; a missing
     # state file (fresh gateway) just leaves the old one. The usage history
     # goes to a file of its own, so a failure there (a schema TeamClaude
     # changed) leaves the counters above flowing; the unit still fails.
     script = ''
+      # Keep the last atomic snapshot if status fails. The alert queries
+      # check its embedded timestamp, not the Alloy re-scrape timestamp.
+      if ${pkgs.nodejs}/bin/node ${./oauth-status.mjs} ${configFile} > ${dir}/teamclaude-oauth.prom.tmp; then
+        mv ${dir}/teamclaude-oauth.prom.tmp ${dir}/teamclaude-oauth.prom
+      else
+        rm -f ${dir}/teamclaude-oauth.prom.tmp
+      fi
       [ -e ${stateFile} ] || exit 0
       { ${lib.getExe pkgs.jq} -r -f ${jqProgram} ${stateFile}
         ${lib.getExe pkgs.jq} -r -f ${configJq} ${configFile}
