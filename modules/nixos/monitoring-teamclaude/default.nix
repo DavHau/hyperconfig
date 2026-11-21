@@ -232,12 +232,20 @@ in
 {
   services.mimir.configuration.limits.out_of_order_time_window = "8d";
 
+  users.users.monitoring-teamclaude = {
+    isSystemUser = true;
+    group = "nginx";
+  };
+
   systemd.services.monitoring-teamclaude = {
     description = "TeamClaude usage ledger for the usage pages";
     after = [ "mimir.service" ];
     serviceConfig = {
       Type = "oneshot";
-      DynamicUser = true;
+      # A static user, not DynamicUser: with DynamicUser systemd puts the
+      # RuntimeDirectory under /run/private (0700 root), and nginx can't
+      # reach data.json there (403 on every page).
+      User = "monitoring-teamclaude";
       Group = "nginx";
       StateDirectory = "monitoring-teamclaude";
       RuntimeDirectory = "monitoring-teamclaude";
