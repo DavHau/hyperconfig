@@ -174,6 +174,7 @@ let
         owners = lib.unique (lib.toList a.owner);
         allowlist = map lib.toLower a.allowlist;
         allowDomains = a.allowDomains or true;
+        trustedAliasDomains = a.trustedAliasDomains or { };
       }) mailboxes;
       ownerUrl = if ownerOrigin == null then null else "${ownerOrigin}/";
       inherit ownerOrigin;
@@ -384,6 +385,17 @@ in
                   every address of a domain (an agent with root elsewhere).
                 '';
               };
+              trustedAliasDomains = mkOption {
+                type = types.attrsOf (types.strMatching "[a-z0-9-]+(\\.[a-z0-9-]+)+");
+                default = { };
+                description = ''
+                  Exact existing tagged recipient address to trusted exact From domain.
+                  The alias must still be active. This restricts its INBOX to that
+                  domain, and grants only that alias a sender allowlist exception,
+                  subject to normal DMARC, exact DKIM and any runtime alias binding.
+                  Does not enable mailbox-wide domain allowlisting.
+                '';
+              };
               passwordFile = mkOption {
                 type = types.nullOr types.str;
                 default = null;
@@ -525,6 +537,25 @@ in
               lib.attrValues cfg.remoteMailboxes
             );
             message = "services.hyperhermes.mail.remoteMailboxes: a mailbox with allowDomains = false lists a whole domain (`@...`) in its allowlist.";
+          }
+          {
+            assertion = lib.all lib.id (
+              lib.mapAttrsToList (
+                name: m:
+                let
+                  prefix = "${name}+";
+                  suffix = "@${cfg.domain}";
+                in
+                lib.all (
+                  addr:
+                  lib.hasPrefix prefix addr
+                  && lib.hasSuffix suffix addr
+                  && builtins.match "[a-z0-9][a-z0-9._-]{0,31}" (lib.removePrefix prefix (lib.removeSuffix suffix addr)) != null
+                  && builtins.stringLength m.trustedAliasDomains.${addr} <= 253
+                ) (lib.attrNames m.trustedAliasDomains)
+              ) cfg.remoteMailboxes
+            );
+            message = "services.hyperhermes.mail.remoteMailboxes.*.trustedAliasDomains must key a tagged alias of that mailbox on mail.domain and use a From domain of at most 253 characters.";
           }
           {
             assertion = exposure.enable && exposure.mode == "public";

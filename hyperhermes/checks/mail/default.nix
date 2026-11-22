@@ -51,10 +51,13 @@ let
       -keyout $out/key.pem -out $out/cert.pem 2>/dev/null
   '';
 
-  sanitizeTests = pkgs.runCommand "sanitize-tests" { } ''
+  mailTests = pkgs.runCommand "mail-tests" { } ''
     mkdir $out
     cp ${../../modules/mail/sanitize.py} $out/sanitize.py
     cp ${../../modules/mail/sanitize_test.py} $out/sanitize_test.py
+    cp ${../../modules/mail/analyze.py} $out/analyze.py
+    cp ${../../modules/mail/mailgate.py} $out/mailgate.py
+    cp ${../../modules/mail/mailgate_test.py} $out/mailgate_test.py
   '';
   # mailgate's own Python (css-inline) runs the unit tests.
   mailPython = import ../../modules/mail/python.nix pkgs;
@@ -814,8 +817,8 @@ pkgs.testers.runNixOSTest {
         return [json.loads(l) for l in server.succeed(f"cat /tmp/echo-{port}.log").splitlines()]
 
 
-    with subtest("sanitize.py unit tests (F1, F3, F5, F6, F8, G1, G3, G5)"):
-        server.succeed("cd ${sanitizeTests} && ${mailPython}/bin/python3 -m unittest -v sanitize_test 2>&1")
+    with subtest("offline Mailgate and sanitizer tests (F1, F3, F5, F6, F8, G1, G3, G5)"):
+        server.succeed("cd ${mailTests} && PYTHONDONTWRITEBYTECODE=1 ${mailPython}/bin/python3 -m unittest -v sanitize_test mailgate_test 2>&1")
 
     with subtest("listeners: MX on IPv4 only, IMAP on loopback, nothing else"):
         listen = server.succeed("ss -Hltn | awk '{print $4}'").split()

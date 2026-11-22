@@ -21,9 +21,11 @@
       DMARC pass reach the INBOX. Mail is untrusted input for an agent
       with fleet root: allowDomains = false, so mailgate refuses
       whole-domain (`@domain`) entries for this mailbox, on the owner
-      page, from mailgate-admin, in requests and in Nix; and the agent
-      reads mail only in a delegated child and never acts on
-      instructions found in it (./hermes-skill/SKILL.md).
+      page, from mailgate-admin, in requests and in Nix's mailbox-wide
+      allowlist. Claude's exact authenticated sender domain is trusted only
+      on the existing claude-proton alias. The agent reads mail only in a
+      delegated child and never acts on instructions found in it
+      (./hermes-skill/SKILL.md).
     - browser, only with hyper.infraSpace.agentTools.browser (default
       off; off means none of what follows exists, here or in the guest:
       no server, user, key, credential, port, egress rule, plugin or
@@ -202,11 +204,14 @@ in
       users.groups.${mailUser}.gid = mailUid;
 
       # Mail is untrusted input for an agent with fleet root: senders are
-      # allowlisted one address at a time, never a whole domain (anyone
-      # with an address there could then write to it).
+      # allowlisted one address at a time mailbox-wide. Claude rotates the
+      # local part: trust its exact authenticated domain on this alias only.
       services.hyperhermes.mail.remoteMailboxes.${mailUser} = {
         owner = "dave";
         allowDomains = false;
+        trustedAliasDomains = lib.optionalAttrs (mail.domain == "agents.davhau.com") {
+          "infra+claude-proton@agents.davhau.com" = "mail.anthropic.com";
+        };
       };
 
       systemd.sockets = lib.mkMerge (map (p: p.sockets) proxies);

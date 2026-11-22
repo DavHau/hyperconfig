@@ -530,6 +530,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyperhermes/modules/mail/client.py — - <- hyperhermes/modules/mail/default.nix
 - hyperhermes/modules/mail/default.nix — Receive-only email for the agents (services.hyperhermes.agents):
 - hyperhermes/modules/mail/mailgate.py — - <- hyperhermes/modules/mail/default.nix
+- hyperhermes/modules/mail/mailgate_test.py — -
 - hyperhermes/modules/mail/owner-page.nix — The owner page, https://<ownerPage.host>/: <- hyperhermes/modules/mail/default.nix
 - hyperhermes/modules/mail/python.nix — The Python that runs sanitize.py: <- hyperhermes/modules/mail/default.nix
 - hyperhermes/modules/mail/sanitize.py — - <- hyperhermes/modules/mail/default.nix

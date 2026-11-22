@@ -55,6 +55,8 @@ import sys
 import time
 import urllib.parse
 import uuid
+from collections.abc import Callable
+from weakref import WeakValueDictionary
 
 from aiohttp import ClientSession, ClientTimeout, web
 
@@ -62,7 +64,8 @@ import sanitize
 
 log = logging.getLogger("mailgate")
 
-CFG = json.load(open(os.environ["MAILGATE_CONFIG"], encoding="utf-8"))
+with open(os.environ["MAILGATE_CONFIG"], encoding="utf-8") as config_file:
+    CFG = json.load(config_file)
 DOMAIN = CFG["domain"]
 HOSTNAME = CFG["hostname"]
 AGENTS: dict[str, dict] = CFG["agents"]
@@ -209,6 +212,14 @@ def drop_messages(rows) -> None:
 # ------------------------------------------------------------------ recipients
 
 
+RECIPIENT_LOCKS: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
+
+
+def recipient_lock(address: str) -> asyncio.Lock:
+    # Holders and waiters keep this alive; idle aliases consume no locks.
+    return RECIPIENT_LOCKS.setdefault(address.strip().strip("<>").lower(), asyncio.Lock())
+
+
 def resolve(address: str):
     """(agent, alias row or None) for a deliverable address, else None."""
     addr = address.strip().strip("<>").lower()
@@ -247,6 +258,10 @@ def under(domain: str | None, parent: str) -> bool:
     return bool(domain) and (domain == parent or domain.endswith("." + parent))
 
 
+def trusted_alias_domains(agent: str) -> dict[str, str]:
+    return AGENTS[agent].get("trustedAliasDomains", {})
+
+
 def decide(agent: str, alias, v: dict) -> list[str]:
     """Why a message from verdict `v` may NOT go to the INBOX; [] = INBOX."""
     reasons = []
@@ -258,10 +273,15 @@ def decide(agent: str, alias, v: dict) -> list[str]:
         # DMARC also passes on SPF alone (every tenant of an ESP the domain
         # includes) and on a subdomain's signature; neither is the domain.
         reasons.append("no-dkim-for-from-domain")
-    if v["from"] and not allowed(agent, v["from"]):
+    trusted = trusted_alias_domains(agent).get(alias["address"]) if alias is not None else None
+    exact_match = trusted is not None and v["from_domain"] == trusted
+    if v["from"] and not (exact_match or allowed(agent, v["from"])):
         reasons.append("not-allowlisted")
-    if alias is not None and alias["bound_domain"] and not (
-        v["aligned"] and under(v["from_domain"], alias["bound_domain"])
+    bound = alias["bound_domain"] if alias is not None else None
+    # A declared alias trust also binds the alias to that exact domain.
+    # Its existing runtime binding can still veto, never broaden, the rule.
+    if (trusted and not (v["aligned"] and exact_match)) or (
+        bound and not (v["aligned"] and under(v["from_domain"], bound))
     ):
         reasons.append("alias-domain-mismatch")
     return reasons
@@ -448,7 +468,20 @@ async def to_inbox(agent: str, rcpt: str, mid: str, sha: str, size: int, a: dict
     """APPEND the sanitized copy and record the message as INBOX mail.
     `released`: the owner released it despite these reasons."""
     v = a["_verdict"]
-    await asyncio.to_thread(imap_append, agent, sanitized_copy(mid, rcpt, a, released))
+    copy = sanitized_copy(mid, rcpt, a, released)
+    cancelled = False
+    if released is not None:
+        await asyncio.to_thread(imap_append, agent, copy)
+    else:
+        # Cancelling an await does not stop its IMAP thread. Keep the
+        # recipient lock until APPEND finishes and the row is recorded.
+        append = asyncio.get_running_loop().run_in_executor(None, imap_append, agent, copy)
+        while True:
+            try:
+                await asyncio.shield(append)
+                break
+            except asyncio.CancelledError:
+                cancelled = True
     view = {
         "from": v["from"] if v["from"] and (released is None or v["dkim_aligned"]) else
         ("unaligned:" + v["from"] if v["from"] else "unknown"),
@@ -462,21 +495,40 @@ async def to_inbox(agent: str, rcpt: str, mid: str, sha: str, size: int, a: dict
         " VALUES (?,?,?,?,?,?,?,?,?)",
         (mid, agent, rcpt, "inbox", now(), sha, size, json.dumps(v), json.dumps(view)),
     )
+    if cancelled:
+        raise asyncio.CancelledError
 
 
-async def file_message(agent: str, alias, rcpt: str, sha: str, size: int, a: dict | None,
-                       sticky: list[str], raw: bytes | None, mid: str | None = None) -> bool:
-    """File one stored original for one recipient; True when it went to the
-    INBOX. `a` is the worker's analysis (None: it failed), `sticky` the
-    content reasons that keep it in quarantine whatever the allowlist says,
+async def file_message(rcpt: str, sha: str, size: int, a: dict | None,
+                       sticky: list[str], raw: bytes | None, *, promotion: sqlite3.Row | None = None,
+                       check_connected: Callable[[], None] | None = None) -> bool | None:
+    """File one stored original: True for INBOX, False for quarantine (or a
+    skipped promotion), None if the address no longer resolves. `a` is the
+    worker's analysis (None: it failed), `sticky` the content reasons that
+    keep it in quarantine whatever the allowlist says, and
     `raw` the original (to cut a big one down for the quarantine)."""
-    mid = mid or uuid.uuid4().hex[:20]
     v = a["_verdict"] if a else NO_VERDICT
-    reasons = list(sticky) + decide(agent, alias, v)
-    if not reasons:
-        await to_inbox(agent, rcpt, mid, sha, size, a)
-        log.info("%s: %s from %s -> INBOX", agent, mid, v["from"])
-        return True
+    async with recipient_lock(rcpt):
+        if check_connected is not None:
+            check_connected()  # LMTP may have disconnected while queued for the lock.
+        # Re-resolve under the same lock as revocation, after any analysis
+        # or lock wait, and hold it through the automatic INBOX write.
+        target = resolve(rcpt)
+        if target is None:
+            return None
+        agent, alias = target
+        reasons = list(sticky) + decide(agent, alias, v)
+        if promotion is not None:
+            mid = promotion["id"]
+            if agent != promotion["agent"] or reasons or not still_quarantined(mid):
+                return False  # never rewrite a promotion that no longer qualifies
+        else:
+            mid = uuid.uuid4().hex[:20]
+        if not reasons:
+            assert a is not None  # missing analysis always adds a reason
+            await to_inbox(agent, rcpt, mid, sha, size, a)
+            log.info("%s: %s from %s -> INBOX", agent, mid, v["from"])
+            return True
     # The view is already computed from the whole message; past this size
     # the quarantine keeps only the headers and the start of the body, for
     # root to look at. Such an entry never moves to the INBOX (sticky), so a
@@ -547,35 +599,52 @@ def enforce_quarantine_caps(agent: str) -> None:
         drop_messages(evict)
 
 
-async def release(agent: str) -> int:
+async def release(agent: str, rcpt: str | None = None) -> int:
     """Re-file the agent's quarantined mail that now qualifies for the INBOX
-    (after an allowlist confirmation)."""
+    (after an allowlist confirmation, or for one declared alias at startup)."""
     moved = 0
-    for row in q("SELECT * FROM messages WHERE agent = ? AND folder = 'quarantine'", agent):
+    sql = "SELECT * FROM messages WHERE agent = ? AND folder = 'quarantine'"
+    rows = q(sql, agent) if rcpt is None else q(
+        sql + " AND rcpt = ? AND received_at >= ?", agent, rcpt, now() - LIMITS["quarantineDays"] * DAY
+    )
+    for row in rows:
         if row["id"] in RELEASING:
             continue  # the owner is releasing it right now
-        alias = one("SELECT * FROM aliases WHERE address = ?", row["rcpt"])
+        target = resolve(row["rcpt"])
         view = json.loads(row["view"])
-        if any(r in STICKY for r in view["reasons"]) or decide(agent, alias, json.loads(row["verdict"])):
+        if target is None or target[0] != agent or any(r in STICKY for r in view["reasons"]) or (
+            decide(*target, json.loads(row["verdict"]))
+        ):
             continue
         RELEASING.add(row["id"])
         try:
-            if await refile(agent, alias, row):
+            if await refile(row):
                 moved += 1
         finally:
             RELEASING.discard(row["id"])
     return moved
 
 
-async def refile(agent: str, alias, row) -> bool:
+async def release_trusted_aliases() -> None:
+    for agent in AGENTS:
+        for rcpt in trusted_alias_domains(agent):
+            try:
+                moved = await release(agent, rcpt)
+                if moved:
+                    log.info("%s: promoted %d quarantined messages for %s", agent, moved, rcpt)
+            except Exception:  # noqa: BLE001 - IMAP failure leaves the originals in quarantine
+                log.exception("%s: quarantine promotion for %s failed", agent, rcpt)
+
+
+async def refile(row) -> bool:
     try:
         raw = read_raw(row["sha"])
     except FileNotFoundError:
         return False
     a = await analyze(raw)
-    if a is None or not still_quarantined(row["id"]):
+    if a is None or a["too_large"]:
         return False
-    return await file_message(agent, alias, row["rcpt"], row["sha"], row["size"], a, [], raw, mid=row["id"])
+    return await file_message(row["rcpt"], row["sha"], row["size"], a, [], raw, promotion=row) is True
 
 
 def still_quarantined(mid: str) -> bool:
@@ -660,6 +729,10 @@ async def read_data(reader: asyncio.StreamReader, cap: int) -> tuple[bytes, int]
         buf = buf[pos:]
 
 
+class LmtpDisconnected(Exception):
+    """The relay disconnected before the current recipient was filed."""
+
+
 class Lmtp:
     """The minimal LMTP server Stalwart's relay route delivers to. AUTH PLAIN
     with the shared secret is required before MAIL."""
@@ -670,6 +743,10 @@ class Lmtp:
     async def send(self, line: str) -> None:
         self.w.write(line.encode() + b"\r\n")
         await self.w.drain()
+
+    def check_connected(self) -> None:
+        if self.w.is_closing() or self.r.at_eof():
+            raise LmtpDisconnected
 
     async def run(self) -> None:
         await self.send(f"220 {HOSTNAME} LMTP mailgate")
@@ -715,7 +792,7 @@ class Lmtp:
                 if target is None:
                     await self.send("550 5.1.1 No such mailbox")
                 else:
-                    rcpts.append((addr, *target))
+                    rcpts.append(addr)
                     await self.send("250 2.1.5 OK")
             elif up == "DATA":
                 if not rcpts:
@@ -733,18 +810,17 @@ class Lmtp:
                     sticky.append("unparseable")
                 elif a["too_large"]:
                     sticky.append("too-large-to-render")
-                for addr, agent, alias in rcpts:
-                    # Stalwart gave up on this session (its LMTP timeout)
-                    # while the analysis waited for a worker; it delivers the
-                    # message again, so filing it now would make a duplicate.
-                    # The stored original stays for prune(): that redelivery
-                    # may be storing the same file right now.
-                    if self.w.is_closing() or self.r.at_eof():
+                for addr in rcpts:
+                    try:
+                        self.check_connected()
+                        filed = await file_message(addr, sha, len(raw), a, sticky, raw,
+                                                   check_connected=self.check_connected)
+                        await self.send("550 5.1.1 No such mailbox" if filed is None else "250 2.0.0 Delivered")
+                    except LmtpDisconnected:
+                        # Stalwart retries, so leave the stored original for
+                        # prune(): the retry may be storing the same file.
                         log.warning("LMTP session closed before filing; Stalwart retries")
                         return
-                    try:
-                        await file_message(agent, alias, addr, sha, len(raw), a, sticky, raw)
-                        await self.send("250 2.0.0 Delivered")
                     except Exception:  # noqa: BLE001 - Stalwart retries a 451
                         log.exception("delivery to %s failed", addr)
                         await self.send("451 4.3.0 Temporary delivery failure")
@@ -881,6 +957,10 @@ async def decide_request(rid: int, approve: bool, actor: str, agents: list[str] 
         raise ApiError("no such request")
     if row["state"] != "pending":
         raise ApiError(f"request is already {row['state']}")
+    if approve:
+        # A legacy pending @domain request may predate allowDomains=false.
+        # Refuse without marking it confirmed; the owner can still deny it.
+        norm_entry(row["entry"], row["agent"])
     DB.execute(
         "UPDATE requests SET state = ?, decided_by = ?, decided_at = ? WHERE id = ?",
         ("confirmed" if approve else "denied", actor, now(), rid),
@@ -960,15 +1040,18 @@ def alias_create(agent: str, tag: str | None, random: bool, domain: str | None, 
     return {"address": address, "bound_domain": bound}
 
 
-def alias_revoke(agents: list[str] | None, address: str, actor: str) -> dict:
+async def alias_revoke(agents: list[str] | None, address: str, actor: str) -> dict:
     address = (address or "").strip().lower()
     row = one("SELECT * FROM aliases WHERE address = ?", address)
     if row is None or (agents is not None and row["agent"] not in agents):
         raise ApiError("no such alias")
-    if row["revoked_at"] is not None:
-        return {"address": address, "revoked": True}
-    DB.execute("UPDATE aliases SET revoked_at = ?, revoked_by = ? WHERE address = ?", (now(), actor, address))
-    log.info("%s: alias %s revoked by %s", row["agent"], address, actor)
+    async with recipient_lock(address):
+        changed = DB.execute(
+            "UPDATE aliases SET revoked_at = ?, revoked_by = ? WHERE address = ? AND revoked_at IS NULL",
+            (now(), actor, address),
+        ).rowcount
+        if changed:
+            log.info("%s: alias %s revoked by %s", row["agent"], address, actor)
     return {"address": address, "revoked": True}
 
 
@@ -978,6 +1061,7 @@ def aliases(agent: str) -> list[dict]:
             "address": r["address"],
             "kind": r["kind"],
             "bound_domain": r["bound_domain"],
+            "trusted_exact_domain": trusted_alias_domains(agent).get(r["address"]),
             "note": r["note"],
             "created_by": r["created_by"],
             "revoked": r["revoked_at"] is not None,
@@ -1323,7 +1407,7 @@ async def agent_op(agent: str, req: dict):
     if op == "alias.create":
         return alias_create(agent, req.get("tag"), bool(req.get("random")), req.get("domain"), req.get("note", ""), "agent")
     if op == "alias.revoke":
-        return alias_revoke([agent], req.get("address", ""), "agent")
+        return await alias_revoke([agent], req.get("address", ""), "agent")
     if op == "attachments":
         row = one("SELECT view FROM messages WHERE agent = ? AND folder = 'inbox' AND id = ?", agent, str(req.get("id", "")))
         if row is None:
@@ -1364,7 +1448,7 @@ async def admin_op(req: dict):
             raise ApiError("no such agent")
         return alias_create(req["agent"], req.get("tag"), bool(req.get("random")), req.get("domain"), req.get("note", ""), "admin")
     if op == "alias-revoke":
-        return alias_revoke(None, req.get("address", ""), "admin")
+        return await alias_revoke(None, req.get("address", ""), "admin")
     raise ApiError(f"unknown op {op!r}")
 
 
@@ -1481,19 +1565,24 @@ async def owner_page(request: web.Request) -> web.Response:
     for agent in agents:
         out.append(f"<h2>{e(agent)} &lt;{e(agent)}@{e(DOMAIN)}&gt;</h2><h3>Pending allowlist requests</h3><table>")
         pending = requests_of([agent])
+        confirmable = []
         for r in pending:
+            can_confirm = domains_allowed(agent) or not r["entry"].startswith("@")
+            if can_confirm:
+                confirmable.append(r["request"])
             out.append(
                 f"<tr><td>#{r['request']}</td><td><b>{e(r['entry'])}</b></td><td>{e(r['reason'])}</td><td>"
-                + form(token, agent, "confirm", "Confirm", id=r["request"])
+                + (form(token, agent, "confirm", "Confirm", id=r["request"])
+                   if can_confirm else "(Mailbox-wide domain entries disabled) ")
                 + form(token, agent, "deny", "Deny", id=r["request"])
                 + "</td></tr>"
             )
         out.append("</table>")
-        if len(pending) > 1:
+        if len(confirmable) > 1:
             # The ids shown here, not "whatever is pending at submit time":
             # a request filed after the page loaded needs its own look.
-            ids = ",".join(str(r["request"]) for r in pending)
-            out.append(form(token, agent, "confirm-all", f"Confirm all {len(pending)} shown", ids=ids))
+            ids = ",".join(map(str, confirmable))
+            out.append(form(token, agent, "confirm-all", f"Confirm {len(confirmable)} eligible requests", ids=ids))
         out.append("<h3>Allowlist</h3><table>")
         for a in allowlist(agent):
             btn = form(token, agent, "remove", "Remove", entry=a["entry"]) if a["removable"] else "(Nix)"
@@ -1504,11 +1593,14 @@ async def owner_page(request: web.Request) -> web.Response:
             f'<input type="hidden" name="agent" value="{e(agent)}"><input type="hidden" name="op" value="allow">'
             '<input name="entry" placeholder="user@example.com or @example.com" size="40"> '
             "<button>Add to allowlist</button></form><h3>Aliases</h3><table>"
+            "<tr><th>Address</th><th>Domain binding</th><th>Trusted exact From domain (Nix)</th>"
+            "<th>Note</th><th>Created by</th><th></th></tr>"
         )
         for a in aliases(agent):
             btn = "revoked" if a["revoked"] else form(token, agent, "revoke", "Revoke", address=a["address"])
             out.append(
                 f"<tr><td>{e(a['address'])}</td><td>{e(a['bound_domain'] or '')}</td>"
+                f"<td>{e(a['trusted_exact_domain'] or '')}</td>"
                 f"<td>{e(a['note'])}</td><td>{e(a['created_by'])}</td><td>{btn}</td></tr>"
             )
         out.append(
@@ -1789,7 +1881,7 @@ async def owner_action(request: web.Request) -> web.Response:
         elif op == "remove":
             allow_remove(agent, data.get("entry", ""))
         elif op == "revoke":
-            alias_revoke([agent], data.get("address", ""), actor)
+            await alias_revoke([agent], data.get("address", ""), actor)
         elif op == "release-one":
             await release_one(agent, data.get("id", ""), actor)
         elif op == "alias":
@@ -1847,7 +1939,7 @@ async def main() -> None:
     for r in q("SELECT id FROM messages WHERE folder = 'quarantine' AND summary_state IN ('none', 'queue-full')"):
         if not queue_summary(r["id"], False):
             break
-    await asyncio.gather(summary_worker(), prune())
+    await asyncio.gather(summary_worker(), prune(), release_trusted_aliases())
 
 
 if __name__ == "__main__":
