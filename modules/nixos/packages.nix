@@ -29,7 +29,7 @@
     # cloud stuff
     google-cloud-sdk
     # penetration tools
-    aircrack-ng metasploit
+    aircrack-ng
     # i3 dependencies
     brightnessctl playerctl
     # other utils
@@ -66,7 +66,6 @@
     httpie  # make http requests
     flameshot  # screen shot + recording
     # psensor  # watch Sensors
-    libreoffice  # office
     gparted  # partitioning
     # sqlitebrowser  # browser for sqlite
     pavucontrol  # audio settings
