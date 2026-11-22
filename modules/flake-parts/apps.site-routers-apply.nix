@@ -6,8 +6,12 @@
 { lib, ... }:
 let
   homeNetworks = import ../../home-networks { inherit lib; };
-  # Dave's keys, root on every clan machine (../admin-ssh-keys.nix).
-  adminKeys = lib.attrValues (import ../admin-ssh-keys.nix);
+  # Dave's keys, root on every clan machine (../admin-ssh-keys.nix), first;
+  # then infra-space's (shared clan var infra-space-ssh, root on every clan
+  # machine too: ../nixos/infra-space/fleet-access.nix).
+  adminKeys = lib.attrValues (import ../admin-ssh-keys.nix) ++ [
+    (lib.trim (builtins.readFile ../../vars/shared/infra-space-ssh/id_ed25519.pub/value))
+  ];
   states = lib.mapAttrs (_: homeNetworks.routerState adminKeys) homeNetworks.sites;
 in
 {

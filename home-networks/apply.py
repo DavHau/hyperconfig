@@ -5,7 +5,8 @@ the zt-eu bridge, over ssh + uci. Idempotent: what already matches is left
 alone, so a second run reports no changes and reloads nothing.
 
 Per router, in this order:
-  1. Dave's admin keys (the clan sshd instance's) in dropbear's
+  1. The admin keys (Dave's, then infra-space's:
+     ../modules/flake-parts/apps.site-routers-apply.nix) in dropbear's
      authorized_keys; keys already there stay, others are added.
   2. zt-eu joined, persistently (the zerotier uci section's `join` list,
      the old network kept) and live (`zerotier-cli join`, no restart);

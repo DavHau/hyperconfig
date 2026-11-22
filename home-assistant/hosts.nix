@@ -16,6 +16,12 @@ let
   romanAgentKey = lib.trim (
     builtins.readFile ../vars/per-machine/som/hermes-agent-ssh-roman/key.pub/value
   );
+  # infra-space, the fleet-admin agent (shared clan var infra-space-ssh):
+  # root on every clan machine (../modules/nixos/infra-space/fleet-access.nix)
+  # and, like Dave, here.
+  infraSpaceKey = lib.trim (
+    builtins.readFile ../vars/shared/infra-space-ssh/id_ed25519.pub/value
+  );
 
   instance = name: {
     # Core as seen from inside the add-on (login flow, the user's own
@@ -36,7 +42,10 @@ let
           ssh = {
             username = "root";
             password = "";
-            authorized_keys = adminKeys ++ [ romanAgentKey ];
+            authorized_keys = adminKeys ++ [
+              infraSpaceKey
+              romanAgentKey
+            ];
             sftp = false;
             compatibility_mode = false;
             allow_agent_forwarding = false;

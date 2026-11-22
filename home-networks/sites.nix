@@ -44,8 +44,9 @@
         ztIpv4 = "10.194.0.4";
         # GL.iNet 4.11 (OpenWrt 21.02, fw3)
         zerotierSection = "gl";
-        # Dave's admin keys are installed; the password from this var is
-        # only the fallback should key login ever be refused.
+        # The admin keys (Dave's, infra-space's) are installed; the
+        # password from this var is only the fallback should key login
+        # ever be refused.
         passwordVar = "router-cm-beryl/password";
       };
       # Static DHCP leases on the Beryl, set by hand (uci dhcp host +
