@@ -412,6 +412,8 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/users/stefan-keys.nix — stefan's ssh public keys, the one registry for them. <- machines/som/stefan-pq.nix, m/users/stefan.nix
 - modules/nixos/users/stefan-vault.nix — stefan on the wg-vault client machines (som, vit): <- vit, machines/som/hermes-agents.nix
 - modules/nixos/users/stefan.nix — - <- machines/nas/users.nix, m/users/stefan-vault.nix
+- modules/nixos/v6-fallback/default.nix — Global IPv6 for a roaming client (amy) on IPv4-only networks, through a gateway with native IPv6 (som), carried over yg… <- amy, machines/som/v6-fallback.nix, m/cloudflare-warp/default.nix, m/v6-fallback/test.nix
+- modules/nixos/v6-fallback/test.nix — ./default.nix in a VM: `client` (v4-only, like amy on a hotel Wi-Fi) gets global IPv6 through `gw` (som's role) over yg… <- flake.nix
 - modules/nixos/voice-gateway/cm-pi.nix — cm-pi's part of ./default.nix: <- cm-pi, m/voice-gateway/default.nix
 - modules/nixos/voice-gateway/default.nix — voice-gateway (som): Home Assistant's Voice PE talks to hermes. <- som, m/infra-space/agent-tools.nix, m/infra-space/default.nix, m/infra-space/voice-api.nix
 - modules/nixos/voice-gateway/edi.nix — edi's part of ./default.nix: <- edi, m/voice-gateway/default.nix

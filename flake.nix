@@ -272,6 +272,11 @@
           import ./modules/nixos/residential-proxy/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
+        # amy's IPv6 through som over yggdrasil on v4-only networks.
+        v6-fallback =
+          import ./modules/nixos/v6-fallback/test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          };
         # som's agents kept off Roman's site LANs.
         zt-eu-lan-guard =
           import ./modules/nixos/zt-eu-lan-guard/test.nix {

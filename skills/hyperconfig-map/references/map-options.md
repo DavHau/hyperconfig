@@ -83,6 +83,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.teamclaudeGateway.upstreamAccounts: modules/nixos/teamclaude-gateway/default.nix
 - hyper.toolchainCacheDirs: modules/nixos/toolchain-cache-dirs/default.nix
 - hyper.unlockTarget: modules/nixos/unlock-target.nix
+- hyper.v6Fallback: modules/nixos/v6-fallback/default.nix
 - hyper.vaultIds.deniedUsers: modules/nixos/vault-ids.nix
 - hyper.voiceGateway: modules/nixos/voice-gateway/default.nix
 - hyper.voxtypeArchive: modules/nixos/voxtype-archive.nix

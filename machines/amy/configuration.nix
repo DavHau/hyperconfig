@@ -34,6 +34,8 @@
     ../../modules/nixos/disk-hygiene
     ../../modules/nixos/rust-build-cache.nix
     ../../modules/nixos/cloudflare-warp
+    # IPv6 through som over yggdrasil on v4-only networks (WARP wins while on).
+    ../../modules/nixos/v6-fallback
     ../../modules/nixos/houses-grmpf.nix
     # nix-housing needs Landlock ABI 9 (Linux >= 7.1); 6.18 LTS only has ABI 7.
     ../../modules/nixos/kernel-latest-zfs.nix
@@ -70,6 +72,7 @@
   hyper.daveDesktop.user = "grmpf";
   # Roams and goes offline on purpose (docs/self-heal.md, per-machine policy).
   hyper.selfHeal.roaming = true;
+  hyper.v6Fallback = { enable = true; role = "client"; };
   # amy forwards on purpose (infra-space's NAT, docker), not only for the
   # isolated hermes apps.
   hyper.daveDesktop.restrictForwarding = false;

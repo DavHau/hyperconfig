@@ -28,6 +28,7 @@ in
     ../../modules/nixos/tang-server.nix
     ./disko.nix
     ./self-heal.nix
+    ./v6-fallback.nix
     ../../modules/nixos/vault-nfs-client.nix
     ../../modules/nixos/users/hsjobeki-vault.nix
     ./hermes-agents.nix
