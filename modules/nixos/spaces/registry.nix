@@ -15,7 +15,8 @@
 #             The isolated hermes desktops have their own ladder in
 #             10.235.1 (index in ../dave-desktop/apps.nix).
 #   sshPort   2222 is the unlock initrd's sshd, 2223 infra-space's
-#             (../infra-space/members.nix).
+#             (../infra-space/members.nix), 2227 the asof-agents slot's
+#             (./slots.nix); next free 2228.
 #   owners    pocket-id accounts that open the space's published apps
 #             (https://<port>.<name>.davhau.fyi/, ./publish.nix): the clan
 #             inventory puts them in the group space-<name>; default dave.

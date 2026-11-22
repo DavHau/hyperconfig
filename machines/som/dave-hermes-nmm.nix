@@ -31,11 +31,10 @@ let
   address = "${slot.ipv6Prefix}::5107:${lib.toLower (lib.toHexString slot.slots.asof-agents.id)}";
   somAddress = "${slot.ipv6Prefix}${config.networking.publicIPv6.token}";
   key = config.clan.core.vars.generators.dave-hermes-nmm-ssh.files.key.path;
-  # The guest's ed25519 host key: its /etc/ssh/ssh_host_ed25519_key.pub,
-  # which ssh-keyscan of its address also returns (2026-11-21). If the
-  # guest's key changes, the login fails closed until this is updated.
+  # The guest's ed25519 host key, pinned in ../../modules/nixos/spaces/slots.nix
+  # (also for Dave's desktops). If it changes, the login fails closed.
   knownHosts = pkgs.writeText "asof-agents-known-hosts" ''
-    asof-agents ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAhfUS9DBVDIF2DWfJEGYdcLOGqhcYdB9wlrxZCfRF0t
+    asof-agents ${(import ../../modules/nixos/spaces/slots.nix).asof-agents.hostKey}
   '';
   hermesHome = "/var/lib/hermes/${agent}/state/.hermes";
   profile = "${hermesHome}/profiles/nmm";

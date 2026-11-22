@@ -1,6 +1,8 @@
 # Every space-like container Dave reaches from his desktops, one entry per
-# copy: each space of ./registry.nix on each of its machines, and
-# infra-space on each of its members (../infra-space/public-members.nix).
+# copy: each space of ./registry.nix on each of its machines, infra-space
+# on each of its members (../infra-space/public-members.nix), and the
+# container slots of ./slots.nix (sshd forwarded by ./slot-forwards.nix,
+# host key pinned in ./slots.nix itself, no herdrId rename history).
 # Mesh address and the guest's pinned host key come from the public clan
 # vars (read from the flake directory, not from the machines' evaluated
 # configs). Used by ./client.nix (Dave's desktops).
@@ -61,5 +63,16 @@ let
       user = "infra";
     }
   ) (import ../infra-space/public-members.nix { inherit lib clanLib flake; });
+
+  slots = lib.mapAttrs' (
+    name: s:
+    lib.nameValuePair "${name}-${s.machine}" {
+      inherit (s) machine sshPort user hostKey;
+      space = name;
+      address = publicValue s.machine "yggdrasil" "address";
+      session = s.session or "default";
+      launcher = false;
+    }
+  ) (import ./slots.nix);
 in
-infraSpace // lib.filterAttrs (_: s: s.address != null && s.hostKey != null) spaces
+infraSpace // lib.filterAttrs (_: s: s.address != null && s.hostKey != null) (slots // spaces)

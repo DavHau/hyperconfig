@@ -12,7 +12,7 @@ sshkey modules/nixos/spaces/forge-host-keys.nix     # host key registry (forges)
 sshkey home-assistant/host-keys.nix                 # host key registry (Roman's HA Pis' SSH add-on)
 sshkey modules/nixos/spaces/geninf-space.nix        # geninf's CA and its own deploy keys (another clan)
 sshkey modules/nixos/storagebox.nix                 # Hetzner Storage Box host key
-sshkey machines/som/dave-hermes-nmm.nix            # asof-agents guest host key, pinned for dave-hermes' ssh
+sshkey modules/nixos/spaces/slots.nix               # container slots' host keys (asof-agents), pinned for Dave's desktops and dave-hermes
 sshkey machines/nas/users.nix                       # nas' own root and the old grmpf-nix backup client
 sshkey hyperhermes/checks/*                         # test keys
 sshkey *-test.nix                                   # test keys

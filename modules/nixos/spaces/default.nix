@@ -164,6 +164,8 @@ in
     ./geninf-space.nix
     ./agave-host.nix
     ./usb-ports.nix
+    # the mesh ssh forwards of ./slots.nix's container slots
+    ./slot-forwards.nix
   ];
   # The host's front of the published apps (nginx, login, TLS) is
   # ./publish.nix, imported where hyperhermes' publish runs (som).

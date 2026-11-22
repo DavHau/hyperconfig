@@ -1,7 +1,8 @@
 /*
   Dave's way into every space-like container, on his desktops
   (../dave-desktop): the named spaces (./default.nix) on each of their
-  machines and infra-space (../infra-space) on each member, one entry per
+  machines, infra-space (../infra-space) on each member and the container
+  slots of ./slots.nix (hyperhermes' container-slots), one entry per
   copy of ./public.nix, all named alike:
 
     - the guest's host key pinned for `[address]:port` (so it never stands
@@ -10,9 +11,10 @@
       port, user); `ssh infra-space-som` works as from inside infra-space;
     - a launcher "<space> (<machine>)", ghostty with an ssh login through
       the alias, attached to tmux session `main` (a closed window leaves
-      the shell and any afk session running);
+      the shell and any afk session running; not for the slots, which
+      may have no tmux);
     - with `hyper.spacesClient.herdrUser` set, a saved herdr SSH machine
-      labelled "<space> (<machine>)", target the alias, session `default`,
+      labelled "<space> (<machine>)", target the alias, its `session`,
       in that user's herdr (herdr-space-machines.py, run by the user's
       nixos-activation.service, i.e. at every switch and login). Open herdr
       clients pick it up within a second. herdr starts the guest's herdr
@@ -58,7 +60,7 @@ let
         id = s.herdrId;
         label = label s;
         target = alias;
-        session = "default";
+        inherit (s) session;
       }) spaces
     )
   );
@@ -86,6 +88,16 @@ in
               address = lib.mkOption { type = lib.types.str; };
               sshPort = lib.mkOption { type = lib.types.port; };
               hostKey = lib.mkOption { type = lib.types.str; };
+              session = lib.mkOption {
+                type = lib.types.str;
+                default = "default";
+                description = "herdr session of the herdr machine.";
+              };
+              launcher = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = "Add the ghostty launcher (needs tmux in the guest).";
+              };
               herdrId = lib.mkOption {
                 type = lib.types.str;
                 default = name;
@@ -106,7 +118,7 @@ in
   };
 
   config = {
-    environment.systemPackages = lib.mapAttrsToList entry spaces;
+    environment.systemPackages = lib.mapAttrsToList entry (lib.filterAttrs (_: s: s.launcher) spaces);
 
     programs.ssh.knownHosts = lib.mapAttrs (alias: s: {
       hostNames = [ "[${s.address}]:${toString s.sshPort}" ];

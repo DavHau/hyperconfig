@@ -370,7 +370,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/spaces/afk.nix — afk in a space's guest, for Dave's interactive sessions: <- m/spaces/instance.nix
 - modules/nixos/spaces/agave-host.nix — The agave-host space: Dave's self-hosted Agave (docs/agave-self-hosted.md, H5-H8), agave's server (`services.agave`, th… <- m/agave-tunnel.nix, m/infra-space/default.nix, m/spaces/default.nix
 - modules/nixos/spaces/blocked-destinations.nix — What a confined space's guest may not reach (./host.nix `confine`): <- m/dave-desktop/isolated-apps.nix, m/spaces/default.nix
-- modules/nixos/spaces/client.nix — Dave's way into every space-like container, on his desktops (../dave-desktop): <- m/dave-desktop/default.nix, m/spaces/default.nix, m/spaces/instance.nix, m/spaces/test.nix
+- modules/nixos/spaces/client.nix — Dave's way into every space-like container, on his desktops (../dave-desktop): <- m/dave-desktop/default.nix, m/spaces/default.nix, m/spaces/instance.nix, m/spaces/slot-forwards.nix, m/spaces/test.nix
 - modules/nixos/spaces/default.nix — Named agent spaces: NixOS containers like infra-space (../infra-space), each for one job, none of them a fleet admin bu… <- amy, som, m/spaces/agave-host.nix, m/spaces/client.nix, m/spaces/forges.nix, m/spaces/geninf-space.nix, m/spaces/guest.nix, m/spaces/host.nix, +4
 - modules/nixos/spaces/forge-check.sh — Post-deploy check of a space's forge logins (./forges.nix), run in the space as its user: <- m/spaces/forges.nix
 - modules/nixos/spaces/forge-cli-config.sh — Writes tea's config for the space's user: <- m/spaces/forges.nix
@@ -380,13 +380,15 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/spaces/guest-base.nix — The base of every space's guest system (infra-space's ../infra-space/guest.nix and the named spaces' ./guest.nix import… <- m/spaces/agave-host.nix, m/spaces/default.nix, m/spaces/guest.nix, m/spaces/instance.nix, m/spaces/publish-guest.nix, m/spaces/publish.nix
 - modules/nixos/spaces/guest.nix — What a named space's guest has beyond the core every space shares (./instance.nix: <- m/spaces/client.nix, m/spaces/default.nix, m/spaces/geninf-space.nix, m/spaces/guest-base.nix
 - modules/nixos/spaces/herdr-space-machines.py — - <- m/spaces/client.nix
-- modules/nixos/spaces/host.nix — The host side of one space container: <- m/dave-desktop/isolated-apps.nix, m/dave-desktop/mesh-dashboards.nix, m/infra-space/default.nix, m/space-gui/default.nix, m/space-gui/test.nix, m/spaces/agave-host.nix, m/spaces/default.nix, m/spaces/guest-base.nix, +4
+- modules/nixos/spaces/host.nix — The host side of one space container: <- m/dave-desktop/isolated-apps.nix, m/dave-desktop/mesh-dashboards.nix, m/infra-space/default.nix, m/space-gui/default.nix, m/space-gui/test.nix, m/spaces/agave-host.nix, m/spaces/default.nix, m/spaces/guest-base.nix, +5
 - modules/nixos/spaces/immutable-helper.py — One request of a space guest's root (./host.nix, immutableHelper): <- m/spaces/host.nix
 - modules/nixos/spaces/instance.nix — One space-like container on this host, everything infra-space (../infra-space) and the named spaces (./default.nix) sha… <- m/infra-space/default.nix, m/spaces/afk.nix, m/spaces/agave-host.nix, m/spaces/default.nix, m/spaces/guest.nix
 - modules/nixos/spaces/public.nix — Every space-like container Dave reaches from his desktops, one entry per copy: <- m/agave-tunnel.nix, m/spaces/client.nix, m/spaces/default.nix
 - modules/nixos/spaces/publish-guest.nix — A space's published web apps, the guest's side (./publish.nix has the host's, ./default.nix wires both from hyper.space… <- m/spaces/default.nix, m/spaces/guest.nix, m/spaces/publish.nix
 - modules/nixos/spaces/publish.nix — The spaces' published web apps, the host's front (som: <- som, m/spaces/default.nix, m/spaces/publish-guest.nix
 - modules/nixos/spaces/registry.nix — The named agent spaces (./default.nix): <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/default.nix, m/spaces/agave-host.nix, m/spaces/client.nix, m/spaces/default.nix, m/spaces/geninf-space.nix, m/spaces/public.nix, m/spaces/publish.nix, +2
+- modules/nixos/spaces/slot-forwards.nix — The mesh way into the container slots of ./slots.nix on this machine: <- m/spaces/default.nix
+- modules/nixos/spaces/slots.nix — Container slots (hyperhermes' container-slots, deployed from other repos) that Dave reaches from his desktops like a sp… <- machines/som/dave-hermes-nmm.nix, m/spaces/client.nix, m/spaces/public.nix, m/spaces/slot-forwards.nix
 - modules/nixos/spaces/test-daemon.nix — Shared by the `spaces`, `infra-space` and `infra-space-agent-tools` VM tests (./test.nix, ../infra-space/test.nix, ../i… <- m/infra-space/agent-tools-test.nix, m/infra-space/test.nix, m/space-gui/test.nix, m/spaces/test.nix
 - modules/nixos/spaces/test.nix — The named spaces (./default.nix) on one host beside infra-space, and Dave's side of them (./client.nix) on the same hos… <- flake.nix
 - modules/nixos/spaces/usb-ports.nix — USB ports of this host handed to a space container (hyper.spaces.<name>.usbPorts): <- m/spaces/default.nix
@@ -433,7 +435,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/zfs-remote-unlock/ask-key.sh — Unlock an encrypted ZFS root in the initrd. <- m/zfs-remote-unlock/default.nix
 - modules/nixos/zfs-remote-unlock/default.nix — Encrypted ZFS root, unlockable three ways, key held by clan. <- som
 - modules/nixos/zfs-remote-unlock/vars.nix — The clan vars generators of a ZFS passphrase and its clevis JWE, shared by som (./default.nix) and nas (machines/nas/au… <- machines/nas/automount/default.nix, machines/nas/automount/tang-bind.nix, m/zfs-remote-unlock/default.nix
-- modules/nixos/zt-eu-lan-guard/default.nix — Keeps listed users off the zt-eu sites' routed LANs (Roman's playa and casa, ../../../home-networks/sites.nix). <- som, m/hermes-agents-gpu-host.nix, m/zt-eu-lan-guard/test.nix
+- modules/nixos/zt-eu-lan-guard/default.nix — Keeps listed users off the zt-eu sites' routed LANs (Roman's playa and casa, ../../../home-networks/sites.nix). <- som, m/hermes-agents-gpu-host.nix, m/spaces/slot-forwards.nix, m/zt-eu-lan-guard/test.nix
 - modules/nixos/zt-eu-lan-guard/test.nix — ./default.nix: `site` plays a routed site LAN (playa's 192.168.10.0/24 and fd2a:8abf:35da::/48, from home-networks) beh… <- flake.nix
 ### modules/clan
 - modules/clan/cctl/default.nix — - <- modules/flake-parts/nixosConfigurations.nix
