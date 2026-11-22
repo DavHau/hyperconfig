@@ -2,9 +2,10 @@
 # names with an A and an AAAA each, the AAAA from eth1's /64 at sync time
 # (ipv6OnLink). Covered: the first run creates all four, a second run makes
 # no write, re-addressing eth1 edits only the AAAAs (with a warning), an
-# ambiguous prefix or a failing API answer fails the unit without a write,
-# and dropping a name (the `nobob` specialisation) deletes exactly its
-# records while an unmanaged record in the zone stays.
+# ambiguous prefix or a failing lookup fails the unit without a write (also
+# the sync a deploy dropping a name starts, porkbun-records-on-change), and
+# dropping a name (the `nobob` specialisation) deletes exactly its records
+# while an unmanaged record in the zone stays.
 { pkgs }:
 let
   inherit (pkgs) lib;
@@ -143,7 +144,14 @@ pkgs.testers.runNixOSTest {
         som.succeed("ip -6 addr del 2001:db8:7:7::2/64 dev eth1")
 
     with subtest("a bad API answer fails the unit and deletes nothing"):
-        som.succeed("/run/booted-system/specialisation/nobob/bin/switch-to-configuration test")
+        # The API fails before the switch: the switch itself starts a sync
+        # (porkbun-records-on-change), which must delete nothing either.
+        som.succeed("curl -sf ${api}/_fail/error")
+        som.succeed("systemctl reset-failed porkbun-records")
+        # 4: the switch saw that sync fail (it may also finish after it: 0)
+        rc, out = som.execute("/run/booted-system/specialisation/nobob/bin/switch-to-configuration test")
+        assert rc in (0, 4), (rc, out)
+        som.wait_until_succeeds("systemctl is-failed porkbun-records", timeout=30)
         for mode, logged in [("error", "stub says no"), ("garbage", "maintenance")]:
             som.succeed(f"curl -sf ${api}/_fail/{mode}")
             som.fail("systemctl start porkbun-records")

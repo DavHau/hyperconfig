@@ -84,7 +84,9 @@ contents() {
 # --- plan: lookups only --------------------------------------------------
 failed=0
 plan=()
-mapfile -t declared < <(jq -c '.records[] | {name, type}' "$config")
+# a plain assignment: errexit sees a failure here (an empty list from a
+# failed process substitution would plan every managed record's deletion)
+declared_json=$(jq -c '[.records[] | {name, type}] | unique' "$config")
 count=$(jq '.records | length' "$config")
 for ((i = 0; i < count; i++)); do
   rec=$(jq -c ".records[$i]" "$config")
@@ -110,7 +112,6 @@ for ((i = 0; i < count; i++)); do
   fi
 done
 
-declared_json=$(printf '%s\n' "${declared[@]}" | jq -cs 'unique')
 managed='[]'
 if [ -e "$state" ]; then
   managed=$(jq -ce 'if type == "array" then . else error("not a list") end' "$state") \
