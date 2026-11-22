@@ -146,7 +146,11 @@ in
     "@owntracks_login".return = "302 /login?redirectTo=%2Fowntracks%2F";
     "= /owntracks".return = "301 /owntracks/";
     "= /owntracks/" = {
-      alias = gen.files."page.html".path;
+      # Not `alias` on a file: for a URI ending in "/" nginx appends the
+      # index name to it (".../page.htmlindex.html is not a directory": 500).
+      # try_files with the absolute path serves the file itself.
+      root = "/";
+      tryFiles = "${gen.files."page.html".path} =404";
       extraConfig = ''
         auth_request /_owntracks_auth;
         error_page 401 = @owntracks_login;
