@@ -15,7 +15,16 @@ let
   # SSH_ASKPASS handler for graphical prompts. The agent runs as a TTY-less user
   # service, so GUI prompts go through here; it resolves the wayland/X display at
   # prompt time because the socket-activated agent may start before the
-  # compositor exported its environment (or survive a compositor restart).
+  # compositor exported its environment (or survive a compositor restart):
+  # first the user manager's environment, then, when its WAYLAND_DISPLAY is
+  # unset or names no socket (niri never imported it, or restarted), the
+  # compositor's socket itself, $XDG_RUNTIME_DIR/wayland-<n>. So an agent
+  # activated before the graphical session never stays without a dialog.
+  #
+  # The agent holds one lock for the whole prompt: an unanswered dialog
+  # (opened behind the lock screen, on another output) would hold every
+  # later signature, ssh and herdr alike. `timeout` bounds each prompt;
+  # a killed dialog prints nothing, which the agent treats as a denial.
   #
   # Modes (selected by the agent via SSH_ASKPASS_PROMPT):
   #   choice  -> grant dialog. The agent passes the peer's ancestry in
@@ -27,20 +36,38 @@ let
   #   (unset) -> TPM PIN passphrase entry via seahorse.
   # Headless requests never reach this script: the agent prompts for the PIN on
   # the requester's own terminal via systemd-ask-password (SSH/tmux friendly).
+  # Headless means an ssh login session (SSH_CONNECTION, no display) or no
+  # compositor running here; a local requester without a display of its own
+  # (a user service started before niri exported its environment, an ssh
+  # ControlMaster) gets the dialog, since no terminal would ever answer it.
+  promptTimeout = "60s";
   askpass = pkgs.writeShellScript "ssh-tpm-askpass" ''
     eval "$(${pkgs.systemd}/bin/systemctl --user show-environment \
       | ${pkgs.gnugrep}/bin/grep -E '^(WAYLAND_DISPLAY|DISPLAY|XAUTHORITY)=' \
       | ${pkgs.gnused}/bin/sed 's/^/export /')"
+    case "''${WAYLAND_DISPLAY:-}" in
+      /*) display="$WAYLAND_DISPLAY" ;;
+      "") display="" ;;
+      *) display="''${XDG_RUNTIME_DIR:-}/$WAYLAND_DISPLAY" ;;
+    esac
+    if [ -n "''${XDG_RUNTIME_DIR:-}" ] && ! [ -S "$display" ]; then
+      for s in "$XDG_RUNTIME_DIR"/wayland-[0-9]*; do
+        if [ -S "$s" ]; then
+          export WAYLAND_DISPLAY="''${s##*/}"
+          break
+        fi
+      done
+    fi
 
     if [ "$SSH_ASKPASS_PROMPT" = choice ]; then
       # The dialog prints the agent's grant protocol on stdout and always
-      # exits 0; a crashed dialog (no output) is treated as a denial.
-      answer="$(${confirmDialog}/bin/ssh-tpm-confirm-dialog "$1")"
+      # exits 0; a crashed or timed-out dialog (no output) is a denial.
+      answer="$(${pkgs.coreutils}/bin/timeout --kill-after=5s ${promptTimeout} ${confirmDialog}/bin/ssh-tpm-confirm-dialog "$1")"
       echo "''${answer:-deny}"
       exit 0
     fi
 
-    exec ${pkgs.seahorse}/libexec/seahorse/ssh-askpass "$@"
+    exec ${pkgs.coreutils}/bin/timeout --kill-after=5s ${promptTimeout} ${pkgs.seahorse}/libexec/seahorse/ssh-askpass "$@"
   '';
 in
 {

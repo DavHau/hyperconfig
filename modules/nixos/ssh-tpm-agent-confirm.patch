@@ -416,10 +416,10 @@ index 0000000..280964b
 +}
 diff --git a/internal/peerid/peerid.go b/internal/peerid/peerid.go
 new file mode 100644
-index 0000000..19783db
+index 0000000..78635e8
 --- /dev/null
 +++ b/internal/peerid/peerid.go
-@@ -0,0 +1,198 @@
+@@ -0,0 +1,237 @@
 +// Package peerid identifies the process connected to the agent socket by its
 +// process ancestry and caches user-issued confirmation grants.
 +//
@@ -438,6 +438,7 @@ index 0000000..19783db
 +	"fmt"
 +	"net"
 +	"os"
++	"path/filepath"
 +	"strconv"
 +	"strings"
 +
@@ -587,8 +588,8 @@ index 0000000..19783db
 +	if len(fields) < 20 {
 +		return procStat{}, false
 +	}
-+	ppid, _ := strconv.Atoi(fields[1])                     // field 4
-+	start, _ := strconv.ParseUint(fields[19], 10, 64)      // field 22
++	ppid, _ := strconv.Atoi(fields[1])                // field 4
++	start, _ := strconv.ParseUint(fields[19], 10, 64) // field 22
 +	return procStat{name: string(b[open+1 : close]), ppid: ppid, start: start}, true
 +}
 +
@@ -600,35 +601,74 @@ index 0000000..19783db
 +		// path.
 +		return false
 +	}
-+	return headlessFromEnviron(b)
++	return headlessFor(b, graphicalSession())
 +}
 +
-+// headlessFromEnviron reports whether a NUL-separated environment block lacks
-+// a usable graphical display.
-+func headlessFromEnviron(b []byte) bool {
++// headlessFor decides the prompt channel from the requester's environment.
++// A requester with a display gets the dialog. One without a display gets the
++// terminal PIN prompt only when it is an ssh login session (SSH_CONNECTION)
++// or no graphical session runs here: local processes without a display of
++// their own (user services started before the compositor exported its
++// environment, ssh ControlMaster processes whose setproctitle overwrote
++// their environ) have no terminal anyone answers either, so they get the
++// dialog on the running session instead.
++func headlessFor(environ []byte, graphical bool) bool {
++	display, remote := scanEnviron(environ)
++	switch {
++	case display:
++		return false
++	case remote:
++		return true
++	default:
++		return !graphical
++	}
++}
++
++// scanEnviron reports whether a NUL-separated environment block carries a
++// usable graphical display, and whether it belongs to an ssh login session.
++func scanEnviron(b []byte) (display, remote bool) {
 +	for _, kv := range bytes.Split(b, []byte{0}) {
 +		eq := bytes.IndexByte(kv, '=')
-+		if eq < 0 {
++		if eq < 0 || eq+1 >= len(kv) {
 +			continue
 +		}
-+		k := string(kv[:eq])
-+		if (k == "WAYLAND_DISPLAY" || k == "DISPLAY") && eq+1 < len(kv) {
-+			return false
++		switch string(kv[:eq]) {
++		case "WAYLAND_DISPLAY", "DISPLAY":
++			display = true
++		case "SSH_CONNECTION":
++			remote = true
 +		}
 +	}
-+	return true
++	return display, remote
++}
++
++// graphicalSession reports whether a wayland compositor's socket exists in
++// this (the agent's own user's) runtime directory.
++func graphicalSession() bool {
++	dir := os.Getenv("XDG_RUNTIME_DIR")
++	if dir == "" {
++		return false
++	}
++	matches, _ := filepath.Glob(filepath.Join(dir, "wayland-[0-9]*"))
++	for _, m := range matches {
++		if fi, err := os.Stat(m); err == nil && fi.Mode()&os.ModeSocket != 0 {
++			return true
++		}
++	}
++	return false
 +}
 diff --git a/internal/peerid/peerid_test.go b/internal/peerid/peerid_test.go
 new file mode 100644
-index 0000000..8256a17
+index 0000000..777ac14
 --- /dev/null
 +++ b/internal/peerid/peerid_test.go
-@@ -0,0 +1,258 @@
+@@ -0,0 +1,290 @@
 +package peerid
 +
 +import (
 +	"net"
 +	"os"
++	"path/filepath"
 +	"testing"
 +	"time"
 +)
@@ -824,24 +864,55 @@ index 0000000..8256a17
 +	}
 +}
 +
-+func TestHeadlessFromEnviron(t *testing.T) {
++func TestHeadlessFor(t *testing.T) {
 +	cases := []struct {
-+		name string
-+		env  []byte
-+		want bool
++		name      string
++		env       []byte
++		graphical bool
++		want      bool
 +	}{
-+		{"wayland present", []byte("PATH=/bin\x00WAYLAND_DISPLAY=wayland-1\x00"), false},
-+		{"x11 present", []byte("DISPLAY=:0\x00HOME=/h\x00"), false},
-+		{"no display", []byte("PATH=/bin\x00SSH_CONNECTION=a b c d\x00"), true},
-+		{"empty display value is headless", []byte("WAYLAND_DISPLAY=\x00"), true},
-+		{"empty environ", []byte{}, true},
++		{"wayland present", []byte("PATH=/bin\x00WAYLAND_DISPLAY=wayland-1\x00"), false, false},
++		{"x11 present", []byte("DISPLAY=:0\x00HOME=/h\x00"), false, false},
++		{"ssh login, no display", []byte("PATH=/bin\x00SSH_CONNECTION=a b c d\x00"), true, true},
++		{"ssh login with forwarded display", []byte("SSH_CONNECTION=a b c d\x00DISPLAY=localhost:10\x00"), true, false},
++		{"local, no display, session running", []byte("PATH=/bin\x00"), true, false},
++		{"local, no display, no session", []byte("PATH=/bin\x00"), false, true},
++		{"empty display value, session running", []byte("WAYLAND_DISPLAY=\x00"), true, false},
++		{"empty display value, no session", []byte("WAYLAND_DISPLAY=\x00"), false, true},
++		{"clobbered environ (setproctitle), session running", make([]byte, 64), true, false},
++		{"empty environ, no session", []byte{}, false, true},
 +	}
 +	for _, c := range cases {
 +		t.Run(c.name, func(t *testing.T) {
-+			if got := headlessFromEnviron(c.env); got != c.want {
-+				t.Errorf("headlessFromEnviron = %v, want %v", got, c.want)
++			if got := headlessFor(c.env, c.graphical); got != c.want {
++				t.Errorf("headlessFor = %v, want %v", got, c.want)
 +			}
 +		})
++	}
++}
++
++func TestGraphicalSession(t *testing.T) {
++	dir := t.TempDir()
++	t.Setenv("XDG_RUNTIME_DIR", dir)
++	if graphicalSession() {
++		t.Fatal("empty runtime dir reported a graphical session")
++	}
++	if err := os.WriteFile(filepath.Join(dir, "wayland-1.lock"), nil, 0o600); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.WriteFile(filepath.Join(dir, "wayland-0"), nil, 0o600); err != nil {
++		t.Fatal(err)
++	}
++	if graphicalSession() {
++		t.Fatal("a lock file or a regular file counted as a compositor socket")
++	}
++	l, err := net.Listen("unix", filepath.Join(dir, "wayland-1"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer l.Close()
++	if !graphicalSession() {
++		t.Fatal("wayland-1 socket not detected")
 +	}
 +}
 +
