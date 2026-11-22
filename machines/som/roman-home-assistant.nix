@@ -63,4 +63,29 @@ in
       }
     ) instances;
   };
+
+  # ssh root into each instance's SSH add-on (../../home-assistant/hosts.nix
+  # authorizes roman's own agent key there): `ssh playa-pi`, `ssh casa-pi`.
+  # Host keys pinned (keyscanned 2026-11-22 over zt-eu from roman's uid).
+  programs.ssh.knownHosts = {
+    playa-pi = {
+      hostNames = [ "192.168.10.3" ];
+      publicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFaRsSdEGa2fixL8ZRZz0lUwu0g2Ti0NLWq4OGyOlTB7";
+    };
+    casa-pi = {
+      hostNames = [ "192.168.20.3" ];
+      publicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEjU/6hLZjt1tfCLGT0xiTmip4xQrGa18p3geGrehQq/";
+    };
+  };
+  programs.ssh.extraConfig = ''
+    Match localuser ${agent} host playa-pi,casa-pi,192.168.10.3,192.168.20.3
+      User root
+      IdentityFile ${config.services.hyperhermes.agents.${agent}.sshKeyFile}
+      IdentitiesOnly yes
+      StrictHostKeyChecking yes
+    Host playa-pi
+      HostName 192.168.10.3
+    Host casa-pi
+      HostName 192.168.20.3
+  '';
 }

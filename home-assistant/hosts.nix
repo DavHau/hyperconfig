@@ -10,6 +10,12 @@
 let
   # Dave's keys, root on every clan machine (../modules/admin-ssh-keys.nix).
   adminKeys = lib.attrValues (import ../modules/admin-ssh-keys.nix);
+  # Roman's hermes agent `roman` on som (its own key, clan var
+  # hermes-agent-ssh-roman): root in the SSH add-on, so it can work on the
+  # Pi (USB sticks, network tools) as Dave decided (2026-11-22).
+  romanAgentKey = lib.trim (
+    builtins.readFile ../vars/per-machine/som/hermes-agent-ssh-roman/key.pub/value
+  );
 
   instance = name: {
     # Core as seen from inside the add-on (login flow, the user's own
@@ -30,7 +36,7 @@ let
           ssh = {
             username = "root";
             password = "";
-            authorized_keys = adminKeys;
+            authorized_keys = adminKeys ++ [ romanAgentKey ];
             sftp = false;
             compatibility_mode = false;
             allow_agent_forwarding = false;
