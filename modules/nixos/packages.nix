@@ -97,8 +97,6 @@
     quickemu
     # edit PDF files
     xournalpp
-    # games
-    xonotic
   ];
 
   # programs.nix-ld.enable = true;
