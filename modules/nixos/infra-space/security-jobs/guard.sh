@@ -31,7 +31,7 @@
 #   - never locking Dave out (policy rule 2), on added AND removed lines
 #     alike (removing a firewall line is no exemption):
 #       * lines naming sshd/openssh, the mesh (zerotier, yggdrasil,
-#         wireguard, tailscale, tinc/retiolum, hyprspace), pocket-id/oidc,
+#         wireguard, tailscale, hyprspace), pocket-id/oidc,
 #         id.davhau.com, infra-space, port 22, DNS (nameservers, resolved,
 #         dnscrypt), DHCP and routes (useDHCP, defaultGateway, interfaces,
 #         systemd.network), the firewall itself (enable, interfaces,
@@ -235,7 +235,7 @@ fi
 # mesh, the login path, port 22, or what they depend on (firewall, DNS,
 # DHCP/routes, boot, users, certificates, the takedown allowlist)
 # (port 22 only as a list item or a port setting, not inside versions)
-lockout='openssh|\bsshd?\b|zerotier|yggdrasil|wireguard|\bwg[0-9-]|tailscale|retiolum|\btinc\b|hyprspace|pocket-?id|\boidc\b|id\.davhau\.com|infra-space|extraCommands|extraStopCommands|extraInputRules|extraForwardRules|nftables\.(ruleset|tables|enable)|firewall\.(enable|interfaces|allowed|trusted|extra|filterForward|checkReversePath)|networking\.(interfaces|nameservers|useDHCP|useNetworkd|defaultGateway|hosts|resolvconf)|nameservers|useDHCP|defaultGateway|systemd\.network|services\.resolved|dnscrypt|boot\.initrd|initrd\.|kernelParams|users\.users|\bwheel\b|extraGroups|hashedPassword|initialPassword|\bpassword(File)?\b|authorizedKeys|authorized_keys|security\.acme|takedown\.eligible'
+lockout='openssh|\bsshd?\b|zerotier|yggdrasil|wireguard|\bwg[0-9-]|tailscale|hyprspace|pocket-?id|\boidc\b|id\.davhau\.com|infra-space|extraCommands|extraStopCommands|extraInputRules|extraForwardRules|nftables\.(ruleset|tables|enable)|firewall\.(enable|interfaces|allowed|trusted|extra|filterForward|checkReversePath)|networking\.(interfaces|nameservers|useDHCP|useNetworkd|defaultGateway|hosts|resolvconf)|nameservers|useDHCP|defaultGateway|systemd\.network|services\.resolved|dnscrypt|boot\.initrd|initrd\.|kernelParams|users\.users|\bwheel\b|extraGroups|hashedPassword|initialPassword|\bpassword(File)?\b|authorizedKeys|authorized_keys|security\.acme|takedown\.eligible'
 port22='^[+-][[:space:]]*"?22"?[[:space:]]*;?$|ports?[^=]*=.*[^.0-9]22([^.0-9]|$)|port[[:space:]]*=[[:space:]]*"?22\b'
 while IFS= read -r line; do
   [ -n "$line" ] || continue

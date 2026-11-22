@@ -49,9 +49,9 @@ let
 
   # Destinations plaintext DNS may still go to: never routed to the
   # internet. ULA (zerotier, hyprspace, wireguard, tailscale, Mullvad),
-  # link-local, yggdrasil, retiolum.
+  # link-local, yggdrasil.
   private4 = "10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10";
-  private6 = "fc00::/7, fe80::/10, 200::/7, 42::/16";
+  private6 = "fc00::/7, fe80::/10, 200::/7";
   privateSets = ''
     set private4 {
       type ipv4_addr
@@ -199,7 +199,6 @@ in
             overlayInterfaces = [
               "zt*" # zerotier
               "ygg" # yggdrasil
-              "tinc.retiolum" # retiolum
               "wg-*" # clan wireguard (wg-edi, wg-vault, ...), mullvad-egress's wg-mullvad (10.64.0.1)
               "wg0-mullvad" # Mullvad app: its in-tunnel resolver 10.64.0.1 / fc00:bbbb:bbbb:bb01::1
               "hyprspace" # its resolver itself listens on loopback (127.43.104.80:11355)

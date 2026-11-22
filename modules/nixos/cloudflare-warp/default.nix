@@ -11,7 +11,7 @@
 # `warp-toggle toggle` on click.
 #
 # Coexisting with the overlay VPNs (zerotier, yggdrasil, wireguard,
-# retiolum, hyprspace, tailscale):
+# hyprspace, tailscale):
 # - Overlay address ranges WARP doesn't exclude by default (its defaults
 #   already cover RFC1918, 100.64/10, fc00::/7, ...) are added to the
 #   split-tunnel exclude list by cloudflare-warp-excludes, so overlay
@@ -69,9 +69,7 @@ let
   };
 
   # Overlay ranges outside WARP's default exclude list.
-  excludedRanges =
-    lib.optional config.services.yggdrasil.enable "200::/7"
-    ++ lib.optional (config.services.tinc.networks ? retiolum) "42::/16";
+  excludedRanges = lib.optional config.services.yggdrasil.enable "200::/7";
 in
 {
   services.cloudflare-warp.enable = true;

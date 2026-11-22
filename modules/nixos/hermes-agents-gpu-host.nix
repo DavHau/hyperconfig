@@ -18,7 +18,7 @@
 # agent, tunnels; stefan's, also Stefan's own login, excepted). An agent marked `lan = false` in the data file also gets
 # the same uid guard as on som (./zt-eu-lan-guard, `noLan`): its jobs here
 # reach the internet and vit's own addresses (its GPU work is local), no
-# LAN, yggdrasil or retiolum; replies to som's ssh are established traffic.
+# LAN or yggdrasil; replies to som's ssh are established traffic.
 # vit's nix-daemon builds for no agent (trusted-users root, dave, wheel;
 # remote building is som's), so no build user carries their traffic.
 {

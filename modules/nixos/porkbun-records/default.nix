@@ -228,9 +228,8 @@ in
           "172.16.0.0/12"
           "192.168.0.0/16"
           "fc00::/7"
-          # yggdrasil, retiolum (as in ../mullvad-egress/egress.nix)
+          # yggdrasil (as in ../mullvad-egress/egress.nix)
           "200::/7"
-          "42::/16"
         ];
       };
     };

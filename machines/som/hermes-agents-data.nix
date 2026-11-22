@@ -11,7 +11,7 @@
 # values here must match.
 #
 # `wallet = false` / `rea = false` leave those off on som (default on).
-# `lan = false` refuses the agent's uid every LAN, yggdrasil and retiolum
+# `lan = false` refuses the agent's uid every LAN and yggdrasil
 # destination on som and vit (hyper.ztEuLanGuard.noLan: ./hermes-agents.nix,
 # ../../modules/nixos/hermes-agents-gpu-host.nix; default: LAN reachable).
 #

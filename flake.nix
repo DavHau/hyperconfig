@@ -50,7 +50,6 @@
     # nix-lazy stays on its own nixpkgs: nix 2.30pre (2025-05) no longer
     # builds against current nixpkgs (mdbook-linkcheck was removed).
     nix-lazy.url = "github:nixos/nix/lazy-trees-v2";
-    retiolum.url = "github:mic92/retiolum";
 
     # Hotfix for #8245 (switch survives an SSH drop); back to main once merged.
     clan-core.url = "git+https://git.clan.lol/clan/clan-core?ref=hotfix/8245-ssh-drop-switch";

@@ -2078,21 +2078,6 @@
         "type": "github"
       }
     },
-    "retiolum": {
-      "locked": {
-        "lastModified": 1751224387,
-        "narHash": "sha256-fcbWK7Yuovn1ilj4BOK0cya8wJAF/OgbO4OmO53OO+0=",
-        "owner": "mic92",
-        "repo": "retiolum",
-        "rev": "596f6edd3750e7a23f53babd8e78b99486db2345",
-        "type": "github"
-      },
-      "original": {
-        "owner": "mic92",
-        "repo": "retiolum",
-        "type": "github"
-      }
-    },
     "root": {
       "inputs": {
         "afk": "afk",
@@ -2133,7 +2118,6 @@
         "nixvim": "nixvim",
         "nixvirt": "nixvirt",
         "ntop": "ntop",
-        "retiolum": "retiolum",
         "sbox": "sbox",
         "searxng": "searxng",
         "spaces": "spaces",

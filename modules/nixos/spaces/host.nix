@@ -17,8 +17,8 @@
       the guest.
     - `confine` (the named spaces, not infra-space): the guest is no fleet
       member. Its forwarded traffic to private and mesh ranges
-      (`blockedDestinations`: yggdrasil, ULA, RFC 1918, CGNAT, link-local,
-      retiolum) is dropped, so it reaches the internet but neither the
+      (`blockedDestinations`: yggdrasil, ULA, RFC 1918, CGNAT, link-local)
+      is dropped, so it reaches the internet but neither the
       fleet over this host's mesh address nor the LANs this host is on;
       and of this host it reaches DNS on hostAddress only (no sshd, no
       other space's or infra-space's ssh proxy, no other host service).

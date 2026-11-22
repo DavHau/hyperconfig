@@ -11,8 +11,8 @@
 #
 # `noLan` goes further for its users: no LAN at all, the host's own one
 # included. Refused: every private, CGNAT, ULA and link-local range, the
-# overlays (yggdrasil 200::/7, retiolum 42::/16: every fleet machine's open
-# ports), multicast and broadcast, the home LAN's public v6 and its
+# yggdrasil overlay (200::/7: every fleet machine's open ports),
+# multicast and broadcast, the home LAN's public v6 and its
 # router's WAN link (home-networks' publicLanPrefixes) and
 # `noLan.prefixes`. Passed: this host's own addresses (its services),
 # replies on connections opened from outside (`ct state established`), the
@@ -53,8 +53,6 @@ let
       "ff00::/8"
       # yggdrasil
       "200::/7"
-      # tinc retiolum
-      "42::/16"
     ]
     ++ lib.filter isV6 extra
   );
@@ -82,7 +80,7 @@ in
         default = [ ];
         description = ''
           Users (static uid required) refused every private, CGNAT, ULA,
-          link-local, multicast, yggdrasil and retiolum destination, the
+          link-local, multicast and yggdrasil destination, the
           home LAN's public v6 and `prefixes`, except this host's own
           addresses and their `allow` entries; no sshd forwarding.
         '';

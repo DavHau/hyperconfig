@@ -92,7 +92,7 @@ let
   };
 
   # Never the browser's: what mullvad-egress lets its users reach off the
-  # tunnel (private, link-local, multicast, yggdrasil, retiolum) and its
+  # tunnel (private, link-local, multicast, yggdrasil) and its
   # directPrefixes (the LAN's public /64).
   private4 = [
     "10.0.0.0/8"
@@ -110,7 +110,6 @@ let
     "fe80::/10"
     "ff00::/8"
     "200::/7"
-    "42::/16"
   ];
   directPrefixes = config.hyper.mullvadEgress.directPrefixes;
   direct4 = lib.filter (p: !lib.hasInfix ":" p) directPrefixes;

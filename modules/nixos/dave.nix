@@ -16,7 +16,6 @@ in
 
   imports = [
     inputs.home-manager.nixosModules.default
-    inputs.retiolum.nixosModules.retiolum
     inputs.spaces.nixosModules.spaces
     ./pi-chat-openrouter.nix
     ./common.nix

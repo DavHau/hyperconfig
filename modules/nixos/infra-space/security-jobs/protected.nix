@@ -29,7 +29,7 @@ let
   protectedUnit =
     n:
     builtins.match (
-      "(sshd|sshd@.*|sshd-.*|zerotierone|zerotier.*|wireguard.*|wg-.*|wg-quick-.*|tinc.*|hyprspace.*"
+      "(sshd|sshd@.*|sshd-.*|zerotierone|zerotier.*|wireguard.*|wg-.*|wg-quick-.*|hyprspace.*"
       + "|pocket-id.*|nginx|container@infra-space|dnscrypt.*|systemd-resolved|systemd-networkd.*"
       + "|alloy|acme-.*|display-manager|greetd|user@|user@.*|nix-daemon|borgbackup.*)"
       + "\\.(service|socket|timer|target|path)"

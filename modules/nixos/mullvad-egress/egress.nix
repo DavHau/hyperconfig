@@ -49,7 +49,7 @@ let
 
   # Destinations a listed user may still reach off the tunnel: what is never
   # routed to the internet anyway, plus directPrefixes. 200::/7 is
-  # yggdrasil, 42::/16 retiolum.
+  # yggdrasil.
   direct4 = [
     "10.0.0.0/8"
     "100.64.0.0/10"
@@ -67,7 +67,6 @@ let
     "fe80::/10"
     "ff00::/8"
     "200::/7"
-    "42::/16"
   ]
   ++ ipv6Prefixes;
 

@@ -4,10 +4,10 @@
 # unlisted user (roman on som) and root still get through, and the refused
 # user still reaches the same host outside those prefixes. A noLan user
 # (`nolan`) reaches no LAN address at all (v4, ULA, the "public" /64, the
-# home LAN's public prefixes from home-networks), no yggdrasil or
-# retiolum address but its allowed one (vit's, on som), no multicast or
-# broadcast; only the client's own addresses and its allow entries. sshd
-# gives it no forwarding, even to a destination its uid may reach.
+# home LAN's public prefixes from home-networks), no yggdrasil address
+# but its allowed one (vit's, on som), no multicast or broadcast; only the
+# client's own addresses and its allow entries. sshd gives it no
+# forwarding, even to a destination its uid may reach.
 { pkgs }:
 let
   snakeOil = import "${pkgs.path}/nixos/tests/ssh-keys.nix" pkgs;
@@ -39,11 +39,6 @@ pkgs.testers.runNixOSTest {
       }
       {
         address = "202::5";
-        prefixLength = 64;
-      }
-      # retiolum
-      {
-        address = "42::5";
         prefixLength = 64;
       }
       # the home LAN's router WAN link (home-networks' publicLanPrefixes)
@@ -85,7 +80,6 @@ pkgs.testers.runNixOSTest {
             "fd2a:8abf:35da::"
             "201::"
             "202::"
-            "42::"
             "2405:9800:b014::"
           ];
       users.users.agent = {
@@ -201,16 +195,16 @@ pkgs.testers.runNixOSTest {
         rc, out = curl("nolan", "http://192.168.10.5/")
         assert rc == 0 and out.strip() == "lan", f"nolan allow: {rc} {out}"
 
-    with subtest("noLan: yggdrasil only to the allowed address, no retiolum, no router WAN"):
+    with subtest("noLan: yggdrasil only to the allowed address, no router WAN"):
         rc, out = curl("nolan", "http://[201::5]/")
         assert rc == 0 and out.strip() == "lan", f"nolan ygg allow: {rc} {out}"
-        for url in ["http://[202::5]/", "http://[42::5]/", "http://[2405:9800:b014::5]/"]:
+        for url in ["http://[202::5]/", "http://[2405:9800:b014::5]/"]:
             rc, out = curl("nolan", url)
             assert rc == 7, f"nolan {url}: curl exited {rc}: {out}"
             rc, out = curl("roman", url)
             assert rc == 0 and out.strip() == "lan", f"roman {url}: {rc} {out}"
         rules = client.succeed("nft list chain inet zt-eu-lan-guard nolan_1302")
-        for p in ["200::/7", "42::/16", "ff00::/8", "224.0.0.0/4", "255.255.255.255", "2405:9800:b014::/64", "2405:9800:b901:94e3::/64", "ct state established"]:
+        for p in ["200::/7", "ff00::/8", "224.0.0.0/4", "255.255.255.255", "2405:9800:b014::/64", "2405:9800:b901:94e3::/64", "ct state established"]:
             assert p in rules, f"{p} missing:\n{rules}"
 
     with subtest("noLan: multicast and broadcast refused (sendto fails), others still send"):

@@ -599,7 +599,7 @@ in
   # all (../../modules/nixos/zt-eu-lan-guard, imported by
   # ./configuration.nix): no private/ULA/link-local/multicast range, no home
   # LAN /64 or router WAN link (other slots, bam, the routers), no
-  # yggdrasil or retiolum (every fleet machine's open ports). What they
+  # yggdrasil (every fleet machine's open ports). What they
   # need stays: som's own addresses (TeamClaude, the dashboards, the
   # wallet, loopback services; /vault is som's NFS mount over wg-vault,
   # opened by the kernel, not their sockets), vit over yggdrasil on ssh

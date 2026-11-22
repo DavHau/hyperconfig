@@ -52,7 +52,6 @@ let
     ".*wireguard.*"
     "wg-.*"
     ".*yggdrasil.*"
-    ".*tinc.*"
     ".*hyprspace.*"
     ".*mycelium.*"
     ".*cloudflare.*"
