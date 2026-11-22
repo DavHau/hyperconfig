@@ -40,15 +40,9 @@ let
       unwrapped = patchedUnwrapped;
     };
   });
-  # The CPU parakeet build spaces-os' voxtype-tuner shells out to, built
-  # the same way (unpatched: the tuner only transcribes).
-  parakeet = voxtypePackages.parakeet.overrideAttrs (old: {
-    paths = [ (bundledLibs voxtypePackages.voxtype-parakeet-unwrapped) ];
-  });
 in
 {
   voxtype = patched;
-  inherit parakeet;
   tool = writeShellApplication {
     name = "voxtype-archive";
     runtimeInputs = [

@@ -25,9 +25,7 @@
     # fs tools
     sshfs-fuse ranger mc
     # virtualisation
-    podman-compose arion qemu docker-compose
-    # cloud stuff
-    google-cloud-sdk
+    podman-compose arion docker-compose
     # penetration tools
     aircrack-ng
     # i3 dependencies
@@ -36,8 +34,6 @@
     udiskie  # automatically mount stuff
     # formatters
     alejandra
-    # rust
-    cargo rustc gcc
     # appimage
     appimage-run
     # clan
@@ -69,7 +65,6 @@
     gparted  # partitioning
     # sqlitebrowser  # browser for sqlite
     pavucontrol  # audio settings
-    wireshark
     # editors
     # file manager
     filezilla nautilus eog
@@ -78,7 +73,6 @@
     # media viewer
     vlc freetube
     # graphical tools
-    inkscape
     # darktable
     # 3d tools
     # freecad
@@ -92,8 +86,6 @@
     mullvad-vpn proton-vpn
     # wallets
     ledger-live-desktop
-    # VMs
-    quickemu
     # edit PDF files
     xournalpp
   ];
@@ -102,7 +94,6 @@
   programs.vim.enable = true;
   programs.vim.defaultEditor = true;
   programs.steam.enable = true;
-  programs.wireshark.enable = true;
   # AirDrop-alike file transfer; opens tcp+udp 53317 for discovery/receiving
   programs.localsend.enable = true;
   hardware.ledger.enable = true;

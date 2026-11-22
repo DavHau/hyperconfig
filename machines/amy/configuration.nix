@@ -15,10 +15,7 @@
     ../../modules/nixos/home-printer.nix
     ../../modules/nixos/amdgpu.nix
     ../../modules/nixos/llama-swap.nix
-    ../../modules/nixos/llama-swap-maple.nix
     ../../modules/nixos/llama-swap-qwen36-amy.nix
-    ../../modules/nixos/llama-swap-nanbeige42-amy.nix
-    ../../modules/nixos/llama-swap-ling30-tiny-amy.nix
     ../../modules/nixos/llama-swap-k2-horizon-amy.nix
     ../../modules/nixos/bluetooth-resume-fix.nix
     ../../modules/nixos/noctalia-anthropic-usage
@@ -73,8 +70,8 @@
   # Roams and goes offline on purpose (docs/self-heal.md, per-machine policy).
   hyper.selfHeal.roaming = true;
   hyper.v6Fallback = { enable = true; role = "client"; };
-  # amy forwards on purpose (infra-space's NAT, docker), not only for the
-  # isolated hermes apps.
+  # amy forwards on purpose (infra-space's NAT), not only for the isolated
+  # hermes apps.
   hyper.daveDesktop.restrictForwarding = false;
 
   networking.extraHosts = "10.0.0.1 127.0.0.0";
@@ -115,9 +112,12 @@
   # on; its state vault under /var/lib/hermes-microvm stays on disk.
   services.hermes-microvm.enable = false;
 
-  # No podman here (dave.nix's virtualisation.nix turns it on for som and
-  # vit); rootless docker is the only container runtime.
+  # No podman or docker here (dave.nix's virtualisation.nix turns them on
+  # for som and vit): nothing declared on amy runs containers, and both
+  # weigh on the closure amy fetches over hotel Wi-Fi. grmpf's old docker
+  # state stays on its dataset (./disko.nix).
   virtualisation.podman.enable = lib.mkForce false;
+  virtualisation.docker.rootless.enable = lib.mkForce false;
 
   # dave (clan users role) has no declared uid and on-disk got 1001 (grmpf
   # took 1000 first). Pin both so any tool that rebuilds the user DB from the

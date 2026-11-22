@@ -86,7 +86,6 @@ in
     ./ollama.nix
     ./fonts.nix
     ./gocr.nix
-    ./ocr
     ./udev.nix
     ./packages.nix
     # exec tracing + `infra-unused`: which installed programs get used.

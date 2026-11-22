@@ -37,24 +37,6 @@ let
     inherit (config.spaces.voxtype) variant;
   };
   dir = "%h/.local/share/voxtype-archive";
-  # spaces-os' voxtype-tuner, pointed at our parakeet build
-  # (pkgs/voxtype-archive: voxtype's own no longer builds with nixpkgs'
-  # cargoSetupHook). It replaces the
-  # module's own tuner below (spaces.voxtype.tuner.enable forced off).
-  tuner =
-    inputs.spaces.packages.${pkgs.stdenv.hostPlatform.system}.voxtype-tuner.override
-      (old: {
-        inputs = old.inputs // {
-          voxtype = old.inputs.voxtype // {
-            packages = old.inputs.voxtype.packages // {
-              ${pkgs.stdenv.hostPlatform.system} =
-                old.inputs.voxtype.packages.${pkgs.stdenv.hostPlatform.system} // {
-                  inherit (archive) parakeet;
-                };
-            };
-          };
-        };
-      });
 in
 {
   options.hyper.voxtypeArchive = {
@@ -69,10 +51,9 @@ in
 
   config = lib.mkIf cfg.enable {
     programs.voxtype.package = lib.mkForce archive.voxtype;
-    environment.systemPackages = [
-      archive.tool
-      tuner
-    ];
+    environment.systemPackages = [ archive.tool ];
+    # No voxtype-tuner on Dave's desktops (closure size); evaluations
+    # replay archived takes instead.
     spaces.voxtype.tuner.enable = lib.mkForce false;
 
     systemd.user.services.voxtype = {

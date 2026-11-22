@@ -17,10 +17,9 @@
     # Newer nixpkgs ONLY for llama-cpp: the fleet nixpkgs lags
     # the llama.cpp release train, and inference modules that need a recent
     # arch/spec-decode fix pull their engine from here instead of forcing a
-    # fleet-wide bump. Consumers: llama-swap-nanbeige42-amy.nix,
-    # llama-swap-ling30-tiny-amy.nix, llama-swap-qwen38-flash-vit.nix.
-    # Lock: llama-cpp 0.4.1 (b10964); ling needs >= 0.4.1 for its
-    # vendored parser patch.
+    # fleet-wide bump. No consumer at the moment (amy's nanbeige and ling
+    # models were dropped); kept for the next one. Lock: llama-cpp 0.4.1
+    # (b10964).
     nixpkgs-llama-cpp.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     # PHP ONLY for bam's Nextcloud: php2shell (CVE-2026-109618/109619,
     # unauthenticated RCE) is fixed in php84 8.4.27, which reached

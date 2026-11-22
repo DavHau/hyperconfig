@@ -73,9 +73,6 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/laptop.nix — Battery-only behaviour. Compose next to ./dave.nix on laptops. <- amy, vit
 - modules/nixos/linger-normal-users.nix — Lingering for every normal user: <- som
 - modules/nixos/llama-swap-k2-horizon-amy.nix — K2-Horizon-3.7B (MBZUAI IFM, 2026-09; <- amy
-- modules/nixos/llama-swap-ling30-tiny-amy.nix — Ling-3.0-tiny (inclusionAI; <- amy
-- modules/nixos/llama-swap-maple.nix — Maple-Preview 20B-A1B (ternary MoE) 2-bit pack for llama-swap. <- amy
-- modules/nixos/llama-swap-nanbeige42-amy.nix — Nanbeige4.2-3B (dense looped transformer, 3B non-embedding params, 256K native ctx) + DSpark speculative decoding for l… <- amy
 - modules/nixos/llama-swap-qwen36-amy.nix — Qwen3.6-35B-A3B (unsloth dynamic quants, MTP variant) for llama-swap, tuned for amy: <- amy
 - modules/nixos/llama-swap.nix — Extra llama-swap config for hyperconfig machines. <- amy
 - modules/nixos/locale.nix — Time zone, locale and console keymap for Dave's desktops. <- m/dave.nix
@@ -300,8 +297,6 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/noctalia-remote-build/default.nix — Noctalia bar icon toggling remote-builders.service (remote nix builds). <- modules/clan/remote-building/default.nix
 - modules/nixos/nrb/default.nix — - <- m/dave.nix
 - modules/nixos/nrb/nrb.py — - <- m/nrb/default.nix
-- modules/nixos/ocr/default.nix — - <- m/dave.nix
-- modules/nixos/ocr/ocr.py — - <- m/ocr/default.nix
 - modules/nixos/ocr-server/default.nix — Document OCR for the hermes agents on som: <- vit
 - modules/nixos/ocr-server/parse.py — - <- m/ocr-server/default.nix
 - modules/nixos/owntracks/agents.nix — som's part of ./default.nix: <- machines/som/hermes-agents.nix, m/owntracks/default.nix

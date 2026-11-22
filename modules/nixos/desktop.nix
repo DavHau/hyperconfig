@@ -7,6 +7,10 @@
 
   # X11
   services.libinput.enable = true;
+  # graphical-desktop.nix turns the speech-dispatcher service on by
+  # default; nothing here uses text-to-speech. (The library stays in the
+  # closure: electron links it.)
+  services.speechd.enable = false;
   services.libinput.mouse.clickMethod = "clickfinger";
   services.xserver.enable = true;
   services.xserver.xkb.layout = "us";
