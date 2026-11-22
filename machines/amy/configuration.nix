@@ -113,9 +113,9 @@
   services.hermes-microvm.enable = false;
 
   # No podman or docker here (dave.nix's virtualisation.nix turns them on
-  # for som and vit): nothing declared on amy runs containers, and both
-  # weigh on the closure amy fetches over hotel Wi-Fi. grmpf's old docker
-  # state stays on its dataset (./disko.nix).
+  # for vit, podman also for som): nothing declared on amy runs containers,
+  # and both weigh on the closure amy fetches over hotel Wi-Fi. Their
+  # compose tools and the `dco` alias follow these options.
   virtualisation.podman.enable = lib.mkForce false;
   virtualisation.docker.rootless.enable = lib.mkForce false;
 

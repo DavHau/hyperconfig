@@ -52,7 +52,7 @@
   forward chain of its own that passes only traffic from or to these
   containers' veths (and waydroid's and podman's bridges where enabled)
   and replies, and drops every other forwarded packet.
-  amy and som forward on purpose (infra-space, docker, container slots,
+  amy and som forward on purpose (infra-space, container slots,
   spaces, mullvad egress) and set it to false.
 */
 {

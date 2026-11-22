@@ -98,11 +98,6 @@
             };
             mountpoint = "/home/grmpf/.cache";
           };
-          "root/nobackup/docker" = {
-            type = "zfs_fs";
-            options.mountpoint = "/home/grmpf/.local/share/docker";
-            mountpoint = "/home/grmpf/.local/share/docker";
-          };
           "root/nobackup/steam" = {
             type = "zfs_fs";
             options.mountpoint = "/home/grmpf/.local/share/Steam";

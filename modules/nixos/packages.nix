@@ -1,7 +1,11 @@
 # Dave's desktop package set (./dave.nix): CLI and GUI tools, the patched
 # no-tabs Firefox (../../pkgs/firefox-no-tabs). Use `infra-unused`
 # (./exec-usage) before adding to or pruning this list.
-{ pkgs, inputs, ... }:
+{ config, lib, pkgs, inputs, ... }:
+let
+  docker = config.virtualisation.docker.enable || config.virtualisation.docker.rootless.enable;
+  podman = config.virtualisation.podman.enable;
+in
 {
   environment.systemPackages = with pkgs; [
     signal-desktop
@@ -24,8 +28,6 @@
     inputs.nil.packages.x86_64-linux.nil nix-init nix-fast-build
     # fs tools
     sshfs-fuse ranger mc
-    # virtualisation
-    podman-compose arion docker-compose
     # penetration tools
     aircrack-ng
     # i3 dependencies
@@ -88,7 +90,11 @@
     ledger-live-desktop
     # edit PDF files
     xournalpp
-  ];
+  ]
+  # Compose tools only where their runtime is on (amy has neither).
+  ++ lib.optional docker docker-compose
+  ++ lib.optional podman podman-compose
+  ++ lib.optional (docker || podman) arion;
 
   # programs.nix-ld.enable = true;
   programs.vim.enable = true;
