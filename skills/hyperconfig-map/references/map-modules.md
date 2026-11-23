@@ -170,6 +170,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/wdisplays.nix — wdisplays + niri-display persistence. <- m/dave.nix
 - modules/nixos/web-bench-mullvad.nix — The fixed identity of `web-bench launch --egress mullvad` (tools/web-bench): <- som
 - modules/nixos/wired-link-local.nix — Keep wired interfaces usable on a peer-to-peer cable (laptop <-> laptop). <- m/networking-desktop.nix
+- modules/nixos/yggdrasil-topology.nix — Keeps roaming laptops off other machines' yggdrasil paths by making them leaves of som (peering topology). <- modules/flake-parts/nixosConfigurations.nix
 - modules/nixos/zfs-arc-max.nix — Cap the ZFS ARC. Unbounded it grows to nearly all of RAM and gives it back only under pressure, which shows up as "used… <- som
 - modules/nixos/zfs-ephemeral-tmp.nix — /tmp on a ZFS dataset instead of tmpfs: <- som, m/per-user-tmp/test.nix
 - modules/nixos/zt-eu-sites.nix — zt-eu's controller side of the bridged home LANs (../../home-networks): <- modules/flake-parts/nixosConfigurations.nix
