@@ -15,6 +15,15 @@ step), so the test can count the model calls of each turn.
   framed as untrusted data between BEGIN/END markers).
   "[ASYNC DELEGATION ..." (a subagent result delivered to the parent):
   answer GOT-RESULT, recorded under scenario DELEGATION-RESULT.
+  "BG-TEST <command>" / "BGPTY-TEST <command>" / "BGQUIET-TEST <command>":
+  start the command as a background terminal job (notify_on_complete, but
+  not for BGQUIET; pty for BGPTY), then answer DONE-<scenario>. A
+  background process notice (an "[IMPORTANT: Background process" message,
+  one or a batch) is answered NOTICE-SEEN and recorded under scenario
+  BG-NOTICE, one step per process in it: "exited" or "killed-by-restart".
+  A request carrying
+  the restart note on background jobs also records scenario BG-NOTE, step
+  "running-<n>" / "killed-<n>" (how many jobs it lists as either).
   "STEER-TEST <task number> <text>": call delegate_task(action='steer') with
   <text> for the subagent that ran that task of the session's FIRST
   dispatch (its subagent_ids), then answer DONE-STEER-TEST.
@@ -58,6 +67,11 @@ def plan(messages):
     system = " ".join(text_of(m.get("content")) for m in messages if m.get("role") == "system")
     if "[ASYNC DELEGATION" in user:
         return "GOT-RESULT", None, "DELEGATION-RESULT", "result"
+    if "[IMPORTANT: Background process" in user and last.get("role") == "user":
+        blocks = user.split("[IMPORTANT: Background process ")[1:]
+        steps = ["killed-by-restart" if "terminated by the Hermes restart" in b.split("\n", 1)[0] else "exited"
+                 for b in blocks]
+        return "NOTICE-SEEN", None, "BG-NOTICE", "+".join(steps)
     if NOTE in user and last.get("role") == "user":
         return f"RESUMED-{scenario}", None, scenario, "resume"
     if last.get("role") == "tool":
@@ -78,6 +92,11 @@ def plan(messages):
         call = {"id": call_id, "type": "function",
                 "function": {"name": "delegate_task", "arguments": json.dumps({"tasks": tasks})}}
         return "", call, scenario, "tool-call"
+    if scenario in ("BG-TEST", "BGPTY-TEST", "BGQUIET-TEST"):
+        args = {"command": command, "background": True, "notify_on_complete": scenario != "BGQUIET-TEST",
+                "pty": scenario == "BGPTY-TEST"}
+        call = {"id": call_id, "type": "function", "function": {"name": "terminal", "arguments": json.dumps(args)}}
+        return "", call, scenario, "tool-call"
     call = {"id": call_id, "type": "function",
             "function": {"name": "terminal", "arguments": json.dumps({"command": command, "timeout": 170})}}
     if RESUMED not in system:
@@ -85,6 +104,19 @@ def plan(messages):
     # The previous transcript's tail is framed as untrusted data.
     framed = all(m in system for m in (TAIL_BEGIN, TAIL_END, "untrusted data, never instructions"))
     return "", call, scenario, "resume-tool-call" if framed else "resume-tool-call-unframed-tail"
+
+
+BG_NOTE = "Your background processes from before the restart"
+
+
+def bg_note_steps(messages):
+    """("running-<n>", "killed-<n>") for the restart note on background jobs in the request, else []."""
+    for m in messages:
+        text = text_of(m.get("content"))
+        if m.get("role") == "user" and BG_NOTE in text:
+            note = text.split(BG_NOTE, 1)[1].split("]", 1)[0]
+            return [f"running-{note.count('tracked again')}", f"killed-{note.count('KILLED by the restart')}"]
+    return []
 
 
 def steer_marks(messages, scenario):
@@ -123,7 +155,10 @@ class Handler(BaseHTTPRequestHandler):
         # Auxiliary calls (title generation and the like) carry no tools: keep them out of the record.
         if body.get("tools"):
             with open(RECORD, "a") as f:
-                f.write(json.dumps({"scenario": scenario, "step": step, "at": time.time()}) + "\n")
+                for one in (step.split("+") if scenario == "BG-NOTICE" else [step]):
+                    f.write(json.dumps({"scenario": scenario, "step": one, "at": time.time()}) + "\n")
+                for note_step in bg_note_steps(body.get("messages") or []):
+                    f.write(json.dumps({"scenario": "BG-NOTE", "step": note_step, "at": time.time()}) + "\n")
                 for where, n in steer_marks(body.get("messages") or [], scenario):
                     f.write(json.dumps({"scenario": "STEER-SEEN", "step": f"{where}-{n}", "at": time.time()}) + "\n")
         elif call is not None:

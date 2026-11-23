@@ -509,13 +509,14 @@ let
             # (patches/hermes-dashboard-resume-after-restart.patch). With
             # control-group the TERM reached the tool's command at once.
             # What is left in the cgroup once the dashboard exited gets
-            # SIGKILL: background processes the agent started (terminal
-            # background=true) die with the dashboard as before. Leaving
-            # them running (KillMode=process) would not help: unlike the
-            # gateway, the dashboard never re-adopts a predecessor's
-            # processes (process_registry.recover_from_checkpoint runs in
-            # the gateway only), so they would run on unsupervised, their
-            # completion never reported, and pile up across restarts.
+            # SIGKILL. Background processes the agent started (terminal
+            # background=true) are not in it: each runs in a user scope of
+            # its own and the next start re-adopts it
+            # (terminal.background_restart_safe, ./options.nix,
+            # patches/hermes-background-jobs-survive-restart.patch); only
+            # PTY ones still die here, and are reported as killed. Not
+            # KillMode=process: that would leave every tool child of the
+            # old process running unsupervised.
             KillMode = "mixed";
             # Above the drain (60s) plus the exit flush (5s) and teardown.
             TimeoutStopSec = 120;

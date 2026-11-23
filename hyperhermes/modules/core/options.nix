@@ -435,6 +435,15 @@ in
           resume_after_restart = lib.mkDefault true;
           resume_max_attempts = lib.mkDefault 3;
         };
+        # Background processes (terminal background=true) of a dashboard
+        # chat ran in the dashboard's cgroup and died with it on every
+        # restart, unreported. With background_restart_safe each non-PTY
+        # one runs in a user scope of its own (hermes-bg-<id>.scope, under
+        # the agent's lingering user manager), writes to a log, and the
+        # next start re-adopts it; whatever a restart did kill is reported
+        # as a completion notice and a note on the session's next turn
+        # (patches/hermes-background-jobs-survive-restart.patch).
+        terminal.background_restart_safe = lib.mkDefault true;
 
         # The OpenRouter model picker (desktop app, dashboard, TUI, /model)
         # lists every OpenRouter model that supports tool calling, after

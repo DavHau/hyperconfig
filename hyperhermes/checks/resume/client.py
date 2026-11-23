@@ -2,6 +2,7 @@
 
   client.py <base-url> start <SCENARIO> <command>  -> prints the stored session id
   client.py <base-url> stop <stored session id>    -> resume + session.interrupt (a user Stop)
+  client.py <base-url> close <stored session id>   -> resume + session.close (the session's agent is closed)
   client.py <base-url> send <stored session id> <SCENARIO> <command> -> resume + prompt.submit in that session
 
 `start` creates a session, submits "<SCENARIO> <command>" and returns once
@@ -71,6 +72,10 @@ async def main():
             await rpc.call("prompt.submit", {"session_id": resumed["session_id"], "text": f"{sys.argv[4]} {sys.argv[5]}"})
             await rpc.wait_event("message.start")
             print(sys.argv[3])
+        elif cmd == "close":
+            resumed = await rpc.call("session.resume", {"session_id": sys.argv[3]})
+            closed = await rpc.call("session.close", {"session_id": resumed["session_id"]})
+            print(json.dumps({"closed": closed.get("closed")}))
         elif cmd == "stop":
             resumed = await rpc.call("session.resume", {"session_id": sys.argv[3]})
             await rpc.call("session.interrupt", {"session_id": resumed["session_id"]})

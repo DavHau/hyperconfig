@@ -18,6 +18,11 @@
 #    a steer the parent sent before the restart reaches the re-dispatched
 #    child, and a steer to the killed child's id after it reaches its
 #    successor (modules/core/patches/hermes-subagents-resume-every-turn.patch).
+#  - background jobs (modules/core/patches/hermes-background-jobs-survive-restart.patch):
+#    a terminal(background=true) job keeps running through a restart in a
+#    user scope of its own and reports its exit to the next process; a PTY
+#    job dies and is reported killed; the session is told about both
+#    without a client.
 { pkgs, self }:
 let
   hlib = self.lib;
@@ -335,6 +340,54 @@ pkgs.testers.runNixOSTest {
             assert delivered.count(part) == 1, (part, delivered)
         assert "outcome unknown" not in delivered and "TASK FAILED" not in delivered, delivered
         machine.succeed("test $(grep -c 'subagent re-dispatch: .* resumed as' ${hermesHome2}/logs/agent.log) -eq 2")
+
+    with subtest("background jobs survive a restart and report back; a PTY one is reported killed"):
+        # modules/core/patches/hermes-background-jobs-survive-restart.patch
+        wait_dashboard()
+        ws = "${workspace}"
+        db = "sqlite3 -readonly 'file:${hermesHome}/state.db?mode=ro' "
+        sid = client("start", "BG-TEST", f"sleep 90; echo bg >> {ws}/bg.count")
+        wait_step("BG-TEST", "after-tool")
+        # No completion notice asked for: nothing keeps the reopened session open, and closing it must not kill it.
+        client("send", sid, "BGQUIET-TEST", f"sleep 150; echo quiet >> {ws}/quiet.count")
+        wait_step("BGQUIET-TEST", "after-tool")
+        client("send", sid, "BGPTY-TEST", "sleep 600")
+        wait_step("BGPTY-TEST", "after-tool")
+        bg = machine.wait_until_succeeds("pgrep -u ${user} -xf 'sleep 90'").split()[0]
+        quiet = machine.wait_until_succeeds("pgrep -u ${user} -xf 'sleep 150'").split()[0]
+        cgroup = machine.succeed(f"cat /proc/{bg}/cgroup")
+        assert "/user@${toString uid}.service/" in cgroup and "hermes-bg-" in cgroup, cgroup
+        machine.wait_until_succeeds("pgrep -u ${user} -xf 'sleep 600'")
+        machine.succeed(f"systemctl restart {unit}")
+        # The plain jobs outlive the dashboard, the PTY one does not.
+        machine.succeed(f"kill -0 {bg} {quiet}")
+        machine.fail("pgrep -u ${user} -xf 'sleep 600'")
+        wait_dashboard()
+        machine.wait_until_succeeds(
+            "grep -q 'restart-safe background jobs: 2 re-adopted, 1 killed' ${hermesHome}/logs/agent.log")
+        # Nobody reopens the session: the agent hears of the killed one, and of all three in one note, on its own.
+        wait_step("BG-NOTICE", "killed-by-restart", timeout=120)
+        notes = record("BG-NOTE")
+        assert "running-2" in notes and "killed-1" in notes, notes
+        wait_step("BG-NOTICE", "exited", timeout=180)
+        assert machine.succeed(f"cat {ws}/bg.count").split() == ["bg"]
+        # Closing the session (agent.close: what the reaper does to the reopened, unattached session once nothing
+        # more is on its way to it) must not kill the re-adopted quiet job.
+        print(client("close", sid))
+        machine.sleep(2)
+        machine.succeed(f"kill -0 {quiet}")
+        machine.wait_until_succeeds(f"test -e {ws}/quiet.count", timeout=180)
+        assert machine.succeed(f"cat {ws}/quiet.count").split() == ["quiet"]
+        assert record("BG-NOTICE").count("exited") == 1, record("BG-NOTICE")
+        assert record("BG-NOTICE").count("killed-by-restart") == 1, record("BG-NOTICE")
+        assert record("BG-TEST") == ["tool-call", "after-tool"], record("BG-TEST")
+        notices = machine.succeed(
+            db + f"\"select content from messages where session_id='{sid}' and content like '%Background process%'\"")
+        print(notices)
+        assert "terminated by the Hermes restart" in notices and "completed normally" in notices, notices
+        # The scopes are collected once their jobs ended.
+        machine.wait_until_succeeds(
+            "test -z \"$(systemctl --user -M ${user}@ list-units --plain --no-legend 'hermes-bg-*')\"", timeout=30)
 
     print(machine.succeed(
         "grep -i 'drain\\|startup resume\\|auto-continue\\|turn finished\\|Interrupt requested\\|re-dispatch\\|async delegation' ${hermesHome}/logs/agent.log || true"

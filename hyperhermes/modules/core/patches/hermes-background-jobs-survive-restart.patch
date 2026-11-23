@@ -1,0 +1,658 @@
+hermes v0.23.0 (on top of every patch before it in package.nix):
+background processes of the dashboard survive its restart, and the agent
+is told which ones a restart killed.
+
+The dashboard (desktop/web chat backend) ran terminal(background=true)
+jobs as plain children, and every dashboard restart (each deploy that
+touches the agent's environment) killed them five ways at once: they sat
+in the service's cgroup (KillMode=mixed SIGKILLs what is left), the
+owner-death supervisor (hermes_cli/process_supervisor.sh) TERMed their
+process groups when the backend exited, agent.close killed its session's
+jobs on the way out (persist_on_release only spares them for agent
+lifecycle sweeps of a live backend), their output went to a pipe the
+backend held, and their checkpoint (processes.json) is re-read only by
+the messaging gateway (recover_from_checkpoint, gateway/run_startup.py),
+which rewrites it from its own empty table at every boot. Nothing
+reported the loss: no completion notice, process_manage said "No process
+with ID", and the agent learned of it only when someone asked.
+
+New, opt-in `terminal.background_restart_safe` (default false): the
+dashboard (web_server.py _on_server_started) turns it on for itself, and
+then runs every non-PTY local background job
+
+- in a transient user scope of its own (systemd-run --user --scope
+  --unit hermes-bg-<id> --collect, MemoryAccounting only), outside the
+  backend's cgroup, not registered with the owner-death supervisor,
+- with its output in $HERMES_HOME/logs/process-output/<id>.log and its
+  exit status recorded beside it (the managed-worker contract of
+  tools/process_registry_output_log.py), so nothing depends on a pipe,
+- checkpointed in processes-dashboard.json (the gateway keeps
+  processes.json), and spared by agent.close once the backend's SIGTERM
+  path started (session_reaper._stop_turns_before_exit, the drain).
+
+A job that ends while the backend shuts down stays in that checkpoint
+with its outcome, and this process queues no notice for it (a turn it
+started would be cut short too, and the next process reports it). A job
+re-adopted from the predecessor is also spared by agent.close later on:
+the startup resume reopens its session unattached, and the reaper's close
+of that session must not kill the job that just survived the restart
+(process_manage kill still stops it). At the next start,
+before the startup resume, tools/process_registry_restart.py recover():
+
+- re-adopts every job that still runs or finished meanwhile (the log
+  reader collects its recorded exit and sends the normal completion
+  notice), through the upstream recover_from_checkpoint,
+- marks every other one (a PTY job, a job from before this patch, one
+  whose log is gone or that died without recording its exit) finished as
+  "terminated by the Hermes restart" with a completion notice (one that
+  exited on its own during the shutdown: its real exit), and keeps its
+  result for process_manage poll/log,
+- remembers both lists per owning session: the startup resume reopens
+  the sessions a notice is on its way to, and the first turn of each gets
+  one system note listing which jobs kept running and which the restart
+  killed ("check what it already did before running it again").
+
+Without the option nothing changes. A PTY job (pty=true) still dies
+with the backend; it is reported. The scratch pruner counts the new
+checkpoint's PIDs as Hermes-owned, and profile clone/backup skip the file
+as they skip processes.json.
+diff --git a/agent/client_lifecycle.py b/agent/client_lifecycle.py
+index dae0aec3..c00fafe3 100644
+--- a/agent/client_lifecycle.py
++++ b/agent/client_lifecycle.py
+@@ -116,6 +116,10 @@ class ClientLifecycleMixin:
+                     # user can still stop it on purpose via process_manage kill.
+                     if process.get("persist_on_release"):
+                         continue
++                    # A restart-safe job outlives the backend's exit; the next process re-adopts it (hyperhermes).
++                    from tools.process_registry_restart import survives_host_exit
++                    if survives_host_exit(process_registry, process):
++                        continue
+                     process_registry.kill_process(
+                         process["session_id"], source="agent_close", consume_output=True,
+                     )
+diff --git a/hermes_cli/backup.py b/hermes_cli/backup.py
+index ed6d22db..9ce4839f 100644
+--- a/hermes_cli/backup.py
++++ b/hermes_cli/backup.py
+@@ -149,7 +149,7 @@ _EXCLUDED_PREFIXES = (
+ # disconnected from the Nous portal); PID/lock/registry files reference source PIDs. Mirrors
+ # ``container_boot._STALE_RUNTIME_FILES``; import filters too because older backups predate the
+ # backup-side exclusions.
+-_IMPORT_SKIP_NAMES = {"gateway_state.json", "gateway.pid", "cron.pid", "gateway.lock", "processes.json"}
++_IMPORT_SKIP_NAMES = {"gateway_state.json", "gateway.pid", "cron.pid", "gateway.lock", "processes.json", "processes-dashboard.json"}
+ 
+ try:  # zipfile already imports lzma (free); it is absent only from Pythons built without liblzma
+     import lzma
+@@ -1105,7 +1105,7 @@ def _revive_gateway_after_import(hermes_root: Path) -> None:
+ # outside state.db, so it is listed explicitly — ``hermes update`` snapshots this set (#15733).
+ _QUICK_STATE_FILES = (
+     "state.db", "config.yaml", ".env", "auth.json", "cron/jobs.json", "cron/executions.db",
+-    "gateway_state.json", "channel_directory.json", "channel_aliases.json", "processes.json",
++    "gateway_state.json", "channel_directory.json", "channel_aliases.json", "processes.json", "processes-dashboard.json",
+     "gateway/discord_message_recovery.db",  # Discord reconnect replay ledger
+     # Per-profile user stores, destroyed if the update flow replaces the file and the post-update
+     # schema-init re-creates an empty one (#52889). Skipped when outside HERMES_HOME.
+diff --git a/hermes_cli/container_boot.py b/hermes_cli/container_boot.py
+index 4fbd7d2a..f57ce1d4 100644
+--- a/hermes_cli/container_boot.py
++++ b/hermes_cli/container_boot.py
+@@ -39,7 +39,7 @@ log = logging.getLogger(__name__)
+ # gateway down — extended here to the case where the gateway died before it could persist anything at all.
+ _TRANSIENT_RUNNING_STATES = frozenset({"draining", "degraded"})
+ # Container-namespaced state is garbage post-restart (an equal PID is a different process).
+-_STALE_RUNTIME_FILES = ("gateway.pid", "processes.json")
++_STALE_RUNTIME_FILES = ("gateway.pid", "processes.json", "processes-dashboard.json")
+ 
+ ReconcileActionLabel = Literal["started", "registered", "skipped"]
+ 
+diff --git a/hermes_cli/profiles.py b/hermes_cli/profiles.py
+index 622077d5..690dfa88 100644
+--- a/hermes_cli/profiles.py
++++ b/hermes_cli/profiles.py
+@@ -48,7 +48,7 @@ _CLONE_SUBDIR_FILES = ["memories/MEMORY.md", "memories/USER.md"]
+ # Runtime files stripped after --clone-all. A post-copy step rather than an ignore filter
+ # because they are created dynamically and may be absent at copy time.
+ _CLONE_ALL_STRIP: list[str] = [
+-    "gateway.pid", "gateway_state.json", "processes.json",
++    "gateway.pid", "gateway_state.json", "processes.json", "processes-dashboard.json",
+     # Bot Desktop runtime identity: pid + create_time of the SOURCE's launcher, its DISPLAY/XAUTHORITY and
+     # lease. Copied verbatim, `screen stop` on the clone would kill the source's X server. Browser user data
+     # stays, but Chromium's process markers must not let the clone attach to the source's live browser.
+@@ -237,7 +237,7 @@ _DEFAULT_EXPORT_EXCLUDE_ROOT = DEFAULT_EXPORT_EXCLUDE_ROOT = frozenset({
+     "state.db", "state.db-shm", "state.db-wal",
+     "hermes_state.db",
+     "response_store.db", "response_store.db-shm", "response_store.db-wal",
+-    "gateway.pid", "gateway_state.json", "processes.json",
++    "gateway.pid", "gateway_state.json", "processes.json", "processes-dashboard.json",
+     "auth.json",            # API keys, OAuth tokens, credential pools
+     ".env",                 # API keys (dotenv)
+     "auth.lock", "active_profile", ".update_check", "source-checks",
+diff --git a/hermes_cli/web_server.py b/hermes_cli/web_server.py
+index 5c2b3ea3..46f5e183 100644
+--- a/hermes_cli/web_server.py
++++ b/hermes_cli/web_server.py
+@@ -1132,6 +1132,12 @@ def _install_shutdown_drain(server, dash_cfg: dict) -> None:
+ 
+     def handle_exit(sig, frame):
+         if sig == _signal.SIGTERM:
++            try:
++                from tools.process_registry import process_registry
++                from tools.process_registry_restart import begin_host_shutdown
++                begin_host_shutdown(process_registry)
++            except Exception:
++                pass
+             # From here on a subagent cut short is re-dispatched by the next process, not reported interrupted
+             # (delegation.resume_after_restart); one that finishes during the drain still delivers.
+             try:
+@@ -1369,6 +1375,27 @@ def _on_server_started(
+ 
+     # Finish what the previous process left unfinished (desktop.auto_continue.on_startup): turns a
+     # restart interrupted, and subagent results nobody received, without waiting for a client.
++    # Background jobs of the previous process (terminal.background_restart_safe, hyperhermes): re-adopt the
++    # ones that survived it, report the ones it killed. Before the startup resume, which reopens their sessions.
++    def _restart_safe_jobs() -> None:
++        from tools.process_registry import process_registry
++        from tools.process_registry_restart import enable, recover
++        from tui_gateway.server import _startup_resume_homes
++        from hermes_constants import reset_hermes_home_override, set_hermes_home_override
++
++        if not enable(process_registry):
++            return
++        for _profile, home in _startup_resume_homes():
++            token = set_hermes_home_override(str(home))
++            try:
++                recover(process_registry)
++            except Exception:
++                _log.warning("background job recovery failed for %s", home, exc_info=True)
++            finally:
++                reset_hermes_home_override(token)
++
++    _best_effort("restart-safe background jobs", _restart_safe_jobs)
++
+     def _startup_resume() -> None:
+         from tui_gateway.server import _schedule_startup_auto_continue
+ 
+diff --git a/hermes_constants_scratch.py b/hermes_constants_scratch.py
+index 32d1879f..58596a57 100644
+--- a/hermes_constants_scratch.py
++++ b/hermes_constants_scratch.py
+@@ -250,7 +250,8 @@ def _registered_live_pids(home: Path) -> set[int]:
+ 
+     root = get_default_hermes_root(home=home)
+     sources = [(root / "spawn-ledger.json", "create_time")]
+-    sources += [(base / "processes.json", "host_start_time") for base in {home, root}]
++    sources += [(base / name, "host_start_time") for base in {home, root}
++                for name in ("processes.json", "processes-dashboard.json")]
+     pids: set[int] = set()
+     for path, stamp_key in sources:
+         try:
+diff --git a/tools/process_registry.py b/tools/process_registry.py
+index 1e14aa0e..c5754535 100644
+--- a/tools/process_registry.py
++++ b/tools/process_registry.py
+@@ -47,6 +47,9 @@ logger = logging.getLogger(__name__)
+ # Crash-recovery checkpoint (gateway only)
+ CHECKPOINT_PATH = get_hermes_home() / "processes.json"
+ _CHECKPOINT_PATH_AT_IMPORT = CHECKPOINT_PATH
++# The dashboard keeps its own file (hyperhermes, tools/process_registry_restart.py): the messaging gateway in the
++# same home rewrites processes.json from its own table at every boot.
++_CHECKPOINT_NAME = "processes.json"
+ 
+ 
+ def _checkpoint_path() -> Path:
+@@ -54,7 +57,7 @@ def _checkpoint_path() -> Path:
+     changed it, else live profile-scoped HERMES_HOME — the multiplexed gateway serves every
+     profile from one process, so the import-time constant would pin every profile's process
+     checkpoint to the launch home."""
+-    return CHECKPOINT_PATH if CHECKPOINT_PATH != _CHECKPOINT_PATH_AT_IMPORT else get_hermes_home() / "processes.json"
++    return CHECKPOINT_PATH if CHECKPOINT_PATH != _CHECKPOINT_PATH_AT_IMPORT else get_hermes_home() / _CHECKPOINT_NAME
+ 
+ MAX_OUTPUT_CHARS = 200_000      # rolling output buffer
+ # Tail of the output a completion notification carries. Right for a build log; a spawner whose
+@@ -571,6 +574,7 @@ class ProcessSession:
+     persist_on_release: bool = False           # opt out of agent-lifecycle cleanup (release()/turn-abandon kill
+                                                 # sweeps), per terminal(background=true, persist_on_release=true) (#41225)
+     output_log: str = ""                        # file the process writes to (worker spawns; no pipe to lose)
++    restart_safe: bool = False                  # runs in its own user scope and outlives the backend (hyperhermes)
+     pty_fallback: str = ""                      # why a pty=true local spawn runs in pipe mode instead
+     # Watcher/notification routing (persisted for crash recovery)
+     watcher_platform: str = ""
+@@ -659,7 +663,7 @@ _CHECKPOINT_FIELDS = (
+     "started_at", "task_id", "owner_task_id", "session_key",
+     *(f"watcher_{k}" for k in _WATCHER_ROUTE_KEYS), "watcher_interval",
+     "parent_session_id", "notify_on_complete", "completion_output_chars", "watch_patterns",
+-    "heartbeat_seconds", "persist_on_release", "output_log")
++    "heartbeat_seconds", "persist_on_release", "output_log", "restart_safe")
+ _CHECKPOINT_DEFAULTS = {
+     f.name: ([] if f.name == "watch_patterns" else f.default)
+     for f in ProcessSession.__dataclass_fields__.values()
+@@ -722,6 +726,10 @@ class ProcessRegistry(ProcessTerminationMixin, ProcessCheckpointMixin, ProcessOu
+         # a read-only terminal tab without killing the process.
+         self.on_output = None
+         self.on_close = None
++        # Restart-safe background jobs (hyperhermes, tools/process_registry_restart.py).
++        self._restart_safe_host = False
++        self._host_shutting_down = False
++        self._shutdown_casualties: dict[str, dict[str, Any]] = {}
+         self._heartbeat_thread: Optional[threading.Thread] = None
+ 
+     # ── heartbeat ───────────────────────────────────────────────────────────
+@@ -1115,6 +1123,9 @@ class ProcessRegistry(ProcessTerminationMixin, ProcessCheckpointMixin, ProcessOu
+         the supervised gateway (own cgroup: an OOM kills only the worker, not the
+         gateway and its messaging control plane)."""
+         argv = [_find_shell(), "-lic", f"set +m; {safe_command}"]
++        if session.restart_safe:
++            from tools.process_registry_restart import scope_argv
++            return scope_argv(session, argv)
+         # This applies to both pipe mode and the PTY path above. See #70716.
+         in_supervised_gateway = _IS_LINUX and _is_supervised_gateway_process()
+         if in_supervised_gateway and _systemd_run_user_scope_available():
+@@ -1192,7 +1203,10 @@ class ProcessRegistry(ProcessTerminationMixin, ProcessCheckpointMixin, ProcessOu
+                                     persist_on_release=persist_on_release)
+         pty_scope_attempted = False
+         # A worker's pipe or PTY dies with the worker (the child's next write is SIGPIPE): write to a log.
+-        log = worker_output_log(session.id)
++        # So does a restart-safe job's with the backend (hyperhermes): its own scope, a log, no PTY.
++        from tools.process_registry_restart import spawn_is_restart_safe
++        session.restart_safe = spawn_is_restart_safe(self, use_pty)
++        log = worker_output_log(session.id, force=session.restart_safe)
+         if use_pty and log is None:
+             try:
+                 return self._spawn_local_pty(session, safe_command, env_vars)
+@@ -1226,7 +1240,7 @@ class ProcessRegistry(ProcessTerminationMixin, ProcessCheckpointMixin, ProcessOu
+         output = open_output_log(log) if log else subprocess.PIPE
+         try:
+             proc = self._spawn_job(
+-                session, spawn_argv, persist_on_release, text=True, cwd=session.cwd, env=spawn_env,
++                session, spawn_argv, persist_on_release or session.restart_safe, text=True, cwd=session.cwd, env=spawn_env,
+                 encoding="utf-8", errors="replace", stdout=output, stderr=subprocess.STDOUT,
+                 stdin=subprocess.DEVNULL, **_popen_kwargs)
+         finally:
+@@ -1583,8 +1597,12 @@ class ProcessRegistry(ProcessTerminationMixin, ProcessCheckpointMixin, ProcessOu
+ 
+     def _publish_finished(self, session: ProcessSession, was_running: bool) -> None:
+         self._release_finished_handles(session)
++        kept_for_next = False
++        if was_running:
++            from tools.process_registry_restart import record_casualty
++            kept_for_next = record_casualty(self, session)
+         self._write_checkpoint()
+-        if was_running and session.notify_on_complete:
++        if was_running and session.notify_on_complete and not kept_for_next:
+             notification = {
+                 "type": "completion",
+                 "session_id": session.id,
+@@ -2410,6 +2428,8 @@ class ProcessRegistry(ProcessTerminationMixin, ProcessCheckpointMixin, ProcessOu
+                 entry["notify_on_complete"] = True
+             if s.persist_on_release:
+                 entry["persist_on_release"] = True
++            if s.restart_safe:
++                entry["restart_safe"] = True
+             if s.exited:
+                 entry["exit_code"] = s.exit_code
+                 entry["exited_at"] = s.exited_at
+diff --git a/tools/process_registry_checkpoint.py b/tools/process_registry_checkpoint.py
+index 176f0c3d..7762da01 100644
+--- a/tools/process_registry_checkpoint.py
++++ b/tools/process_registry_checkpoint.py
+@@ -39,6 +39,8 @@ class ProcessCheckpointMixin:
+                     entry["command"] = redact_sensitive_text(s.command, code_file=True)
+                     entry["owner_task_id"] = s.owner_task_id or s.task_id
+                     entries.append(entry)
++                # Jobs that ended while the backend shuts down: the next process reports them (hyperhermes).
++                extra_entries = [*(extra_entries or ()), *getattr(self, "_shutdown_casualties", {}).values()]
+                 if extra_entries:
+                     tracked_ids = {item.get("session_id") for item in entries}
+                     entries.extend(item for item in extra_entries if item.get("session_id") not in tracked_ids)
+diff --git a/tools/process_registry_output_log.py b/tools/process_registry_output_log.py
+index 8b88bddd..ba9c16b7 100644
+--- a/tools/process_registry_output_log.py
++++ b/tools/process_registry_output_log.py
+@@ -29,10 +29,11 @@ def output_dir() -> Path:
+     return get_hermes_home() / "logs" / "process-output"
+ 
+ 
+-def worker_output_log(session_id: str) -> Optional[Path]:
+-    """The log a worker-spawned process writes to; None outside a registered worker."""
++def worker_output_log(session_id: str, force: bool = False) -> Optional[Path]:
++    """The log a worker-spawned process writes to; None outside a registered worker. ``force``: a
++    restart-safe job's log (hyperhermes, process_registry_restart.py), wherever it is spawned."""
+     from agent.runtime_session_store import is_worker_process
+-    if not is_worker_process():
++    if not (force or is_worker_process()):
+         return None
+     directory = output_dir()
+     make_user_dir(directory, mode=0o700, parents=True, exist_ok=True)
+diff --git a/tools/process_registry_restart.py b/tools/process_registry_restart.py
+new file mode 100644
+index 00000000..683fda3c
+--- /dev/null
++++ b/tools/process_registry_restart.py
+@@ -0,0 +1,263 @@
++"""Background processes that survive a restart of the backend that started them (hyperhermes).
++
++The dashboard (desktop/web chat backend) ran ``terminal(background=true)`` jobs as plain children: in its
++service cgroup (a systemd stop SIGKILLs what is left there), registered with the owner-death supervisor
++(``process_supervisor.sh`` TERMs them when the backend exits), killed by ``agent.close`` on the way out, their
++output on a pipe the backend held, and their checkpoint in ``processes.json``, which only the messaging gateway
++ever re-reads (``recover_from_checkpoint``) and which it rewrites from its own table at boot. So every restart
++killed the dashboard's jobs, nothing told the agent, and ``process_manage`` said "No process with ID".
++
++With ``terminal.background_restart_safe`` the dashboard instead runs a non-PTY local background job:
++
++- in a transient ``systemd-run --user --scope`` of its own (``hermes-bg-<id>.scope``, under the user manager,
++  outside the backend's cgroup; no MemoryMax, as it had none in the backend's cgroup either),
++- not registered with the owner-death supervisor, and spared by ``agent.close`` while the backend shuts down
++  (and, once re-adopted by the next process, for good: see ``survives_host_exit``),
++- writing to a log file with its exit status recorded beside it (the managed-worker contract,
++  ``process_registry_output_log``), so no pipe dies with the backend,
++- checkpointed in ``processes-dashboard.json`` (the gateway keeps ``processes.json``).
++
++At the next start the dashboard re-adopts what still runs (or finished meanwhile: the recorded exit), and
++reports what the restart killed: a completion notice per job that asked for one (``notify_on_complete``), a
++retained result for ``process_manage poll``, and a note on the owning session's next turn listing both kinds.
++A PTY job keeps its terminal and so still dies with the backend: it is reported as killed by the restart.
++"""
++
++from __future__ import annotations
++
++import json
++import logging
++import threading
++import time
++from contextlib import suppress
++from pathlib import Path
++from typing import Any
++
++logger = logging.getLogger("tools.process_registry")
++
++DASHBOARD_CHECKPOINT = "processes-dashboard.json"
++RESTART_SOURCE = "the Hermes restart"
++_report_lock = threading.Lock()
++# One entry per job the previous process left: {"id", "command", "state": "running"|"killed", "keys": set}.
++_report: list[dict[str, Any]] = []
++
++
++def enabled_in_config() -> bool:
++    try:
++        from hermes_cli.config import cfg_get, load_config
++        from utils import is_truthy_value
++        return is_truthy_value(cfg_get(load_config(), "terminal", "background_restart_safe"), default=False)
++    except Exception:
++        return False
++
++
++def enable(registry) -> bool:
++    """Called once by the dashboard after it serves. True when restart-safe jobs are on in this process."""
++    import tools.process_registry as pr
++    if not (pr._IS_LINUX and enabled_in_config()):
++        return False
++    pr._CHECKPOINT_NAME = DASHBOARD_CHECKPOINT
++    registry._restart_safe_host = True
++    return True
++
++
++def spawn_is_restart_safe(registry, use_pty: bool) -> bool:
++    import tools.process_registry as pr
++    return (bool(getattr(registry, "_restart_safe_host", False)) and not use_pty
++            and pr._systemd_run_user_scope_available())
++
++
++def scope_argv(session, argv: list[str]) -> list[str]:
++    """``systemd-run --user --scope`` around a job's shell; sets ``session.systemd_unit``."""
++    import shutil
++    import tools.process_registry as pr
++    binary = shutil.which("systemd-run")
++    if binary is None:
++        logger.warning("systemd-run vanished: background job %s runs in the backend's cgroup and dies with it",
++                       session.id)
++        session.restart_safe = False
++        return argv
++    unit = f"hermes-bg-{session.id.removeprefix('proc_')}"
++    session.systemd_unit = f"{unit}.scope"
++    no_expand = ["--expand-environment=no"] if pr._SYSTEMD_RUN_NO_EXPAND else []
++    return [binary, "--user", "--scope", "--quiet", *no_expand, "--unit", unit, "--collect",
++            "--property", "MemoryAccounting=yes", "--", *argv]
++
++
++def begin_host_shutdown(registry) -> None:
++    """The backend is exiting: restart-safe jobs stay, and every job that still finishes from here on is kept in
++    the checkpoint so the next process can report it."""
++    if getattr(registry, "_restart_safe_host", False):
++        registry._host_shutting_down = True
++
++
++def survives_host_exit(registry, process: dict) -> bool:
++    """Whether ``agent.close`` spares this job: every restart-safe job once the backend shuts down, and one this
++    process re-adopted from its predecessor at any time (closing the session the startup resume reopened must not
++    kill the job that just survived the restart; ``process_manage kill`` still stops it)."""
++    if not process.get("restart_safe"):
++        return False
++    return bool(getattr(registry, "_host_shutting_down", False) or process.get("detached"))
++
++
++def record_casualty(registry, session) -> bool:
++    """A job ended while the backend shuts down. Its notice is not queued here (a turn it started would be cut
++    short by the same shutdown, and the next process would report it again): the job stays in the checkpoint
++    for the next process instead. A restart-safe job as it is (the next process reads its recorded exit from
++    the log); any other one with its outcome (``lost_in_shutdown``, ``shutdown_killed`` when it was stopped
++    rather than exiting on its own). True when it was kept, i.e. this process must not notify."""
++    if not getattr(registry, "_host_shutting_down", False):
++        return False
++    # Stopped on purpose (process_manage kill, /stop) during the drain: an ordinary result, not a restart casualty.
++    if session.termination_source and session.termination_source not in registry._LIFECYCLE_KILL_SOURCES:
++        return False
++    from agent.redact import redact_sensitive_text
++    from tools.process_registry import _CHECKPOINT_FIELDS
++    entry = {"session_id": session.id, **{f: getattr(session, f) for f in _CHECKPOINT_FIELDS}}
++    entry["command"] = redact_sensitive_text(session.command, code_file=True)
++    entry["owner_task_id"] = session.owner_task_id or session.task_id
++    if not session.restart_safe:
++        entry.update(lost_in_shutdown=True, exit_code=session.exit_code,
++                     shutdown_killed=session.completion_reason == "killed")
++    with registry._lock:
++        registry._shutdown_casualties[session.id] = entry
++    return True
++
++
++def _retained_output(session_id: str) -> str:
++    from hermes_constants import get_hermes_home
++    with suppress(OSError, ValueError, TypeError):
++        record = json.loads((get_hermes_home() / "logs" / "process-results" / f"{session_id}.json")
++                            .read_text(encoding="utf-8-sig"))
++        return str(record.get("output") or "")
++    return ""
++
++
++def _keys(entry: dict) -> set:
++    return {str(entry.get(k) or "") for k in ("session_key", "parent_session_id", "owner_task_id")} - {""}
++
++
++def recover(registry) -> tuple[int, int]:
++    """Re-adopt and report the previous process's jobs from the current scope's checkpoint.
++    Returns ``(re-adopted, killed)``."""
++    from tools.process_registry import (
++        ProcessSession, _CHECKPOINT_DEFAULTS, _CHECKPOINT_FIELDS, _checkpoint_path, _stop_systemd_unit)
++    from hermes_cli.active_sessions import _FileLock
++    from utils import atomic_json_write
++    from tools.process_registry_output_log import _exit_path, adoptable_log
++    path = _checkpoint_path()
++    try:
++        entries = json.loads(path.read_text(encoding="utf-8-sig"))
++    except (OSError, ValueError):
++        return 0, 0
++    entries = [e for e in entries if isinstance(e, dict) and e.get("session_id")] if isinstance(entries, list) else []
++    with registry._lock:
++        tracked = set(registry._running) | set(registry._finished)
++    adoptable, killed, finished = [], [], set()
++    for entry in entries:
++        if entry["session_id"] in tracked or entry.get("pid_scope", "host") != "host":
++            continue
++        if entry.get("lost_in_shutdown"):
++            killed.append(entry)
++            continue
++        # The same verdicts recover_from_checkpoint reaches: a log-backed job is adopted with its log (alive, or
++        # its exit recorded beside it), any other one only while its PID is still ours.
++        log = adoptable_log(entry.get("output_log"))
++        fate = registry._detached_host_fate(entry.get("pid"), entry.get("host_start_time"))
++        if log:
++            # No recorded exit and no process: it died without its shell's EXIT trap (SIGKILL, a user manager
++            # restart). Report it killed rather than "kept running".
++            if _exit_path(log).exists():
++                finished.add(entry["session_id"])
++            alive = entry["session_id"] in finished or fate == "running"
++            (adoptable if Path(log).exists() and alive else killed).append(entry)
++        elif fate == "running":
++            adoptable.append(entry)
++        elif fate == "gone":
++            killed.append(entry)
++    # The upstream recovery adopts the live (or meanwhile finished) log-backed jobs; the ones reported killed
++    # below leave the file first, so it never adopts or signals them. It must not flag every later job of this
++    # process as outliving it (PTY jobs keep their owner-death supervisor).
++    if killed:
++        # What a killed job's shell left behind in its scope goes with it (upstream stops a dead wrapper's
++        # scope in recover_from_checkpoint, which never sees these entries).
++        for entry in killed:
++            if entry.get("systemd_unit") and not _stop_systemd_unit(entry["systemd_unit"]):
++                logger.warning("could not stop scope %s of killed background job %s",
++                               entry["systemd_unit"], entry["session_id"])
++        gone = {e["session_id"] for e in killed}
++        with _FileLock(path.with_name(path.name + ".lock")):
++            atomic_json_write(path, [e for e in entries if e["session_id"] not in gone])
++    outlive = registry._jobs_outlive_host
++    try:
++        adopted = registry.recover_from_checkpoint()
++    finally:
++        registry._jobs_outlive_host = outlive
++    with registry._lock:
++        tracked = set(registry._running) | set(registry._finished)
++    killed = [e for e in killed if e["session_id"] not in tracked]
++    for entry in killed:
++        fields = {f: entry.get(f, _CHECKPOINT_DEFAULTS[f]) for f in _CHECKPOINT_FIELDS}
++        # notify_on_complete: a job the restart killed always reports back, so the agent learns of it at once.
++        fields.update(command=entry.get("command", "unknown"), output_log="", notify_on_complete=True,
++                      owner_task_id=entry.get("owner_task_id", "") or entry.get("task_id", ""),
++                      started_at=entry.get("started_at", time.time()))
++        session = ProcessSession(id=entry["session_id"], detached=True, **fields)
++        session.output_buffer = _retained_output(session.id)
++        with registry._lock:
++            registry._running[session.id] = session
++        code = entry.get("exit_code")
++        code = code if isinstance(code, int) else -1
++        if entry.get("lost_in_shutdown") and not entry.get("shutdown_killed"):
++            registry._finish_exited(session, code)  # it exited on its own while the backend shut down
++            finished.add(entry["session_id"])
++        else:
++            registry._finish_exited(session, code, reason="killed", source=RESTART_SOURCE)
++    with _report_lock:
++        for entry in adoptable:
++            state = "finished" if entry["session_id"] in finished else "running"
++            _report.append({"id": entry["session_id"], "command": entry.get("command", ""), "state": state,
++                            "notify": bool(entry.get("notify_on_complete")), "keys": _keys(entry)})
++        for entry in killed:
++            state = "finished" if entry["session_id"] in finished else "killed"
++            _report.append({"id": entry["session_id"], "command": entry.get("command", ""), "state": state,
++                            "notify": bool(entry.get("notify_on_complete")), "keys": _keys(entry)})
++    if adoptable or killed:
++        logger.info("restart-safe background jobs: %d re-adopted, %d killed by the restart (%s)",
++                    len(adoptable), len(killed), path)
++    return adopted, len(killed)
++
++
++def owner_keys() -> set:
++    """Session keys that own a reported job with a notice on its way (the startup resume reopens them so the
++    notices reach them). Every killed job notifies; a running one only when it asked to."""
++    with _report_lock:
++        return set().union(*(e["keys"] for e in _report if e["state"] != "running" or e["notify"]))
++
++
++def _short(command: str) -> str:
++    text = " ".join(str(command or "").split())
++    return text[:117] + "..." if len(text) > 120 else text
++
++
++def take_note(keys: set) -> str:
++    """The one-time note for the first turn of a session that owns reported jobs."""
++    keys = {k for k in keys if k}
++    if not keys:
++        return ""
++    with _report_lock:
++        mine = [e for e in _report if e["keys"] & keys]
++        _report[:] = [e for e in _report if not e["keys"] & keys]
++    if not mine:
++        return ""
++    lines = []
++    for e in mine:
++        if e["state"] in ("running", "finished"):
++            tail = "you will be notified when it exits" if e["notify"] else "check it with process_manage poll"
++            what = "kept running through the restart" if e["state"] == "running" else "finished during the restart"
++            lines.append(f"- {e['id']} {what} and is tracked again ({tail}): {_short(e['command'])}")
++        else:
++            lines.append(f"- {e['id']} was KILLED by the restart and did not finish; check what it already did "
++                         f"before running it again: {_short(e['command'])}")
++    return ("[System note: Hermes restarted. Your background processes from before the restart:\n"
++            + "\n".join(lines) + "]")
+diff --git a/tui_gateway/prompt_turn.py b/tui_gateway/prompt_turn.py
+index 62e8c16e..d1ab034b 100644
+--- a/tui_gateway/prompt_turn.py
++++ b/tui_gateway/prompt_turn.py
+@@ -748,6 +748,8 @@ def _prepare_turn_input(sid: str, session: dict, st: _TurnRun, text: Any, images
+     run_message = _prepend_note(run_message, _pending_reaction_notes(session))
+     # Subagents a restart killed run again before this turn's model call, and the model is told so (hyperhermes).
+     run_message = _prepend_note(run_message, _resume_delegations_for_turn(sid, session))
++    # Background processes from before a restart: which run on, which it killed (hyperhermes).
++    run_message = _prepend_note(run_message, _restart_jobs_note(session))
+     agent._voice_turn_pending = bool(session.pop("voice_turn", False))  # auxiliary.voice_chat route
+     return prompt, _prepend_note(run_message, _hud_surface_note(session)), cols, streamer
+ 
+diff --git a/tui_gateway/session_auto_continue.py b/tui_gateway/session_auto_continue.py
+index b57a7840..707cbd3c 100644
+--- a/tui_gateway/session_auto_continue.py
++++ b/tui_gateway/session_auto_continue.py
+@@ -273,6 +273,16 @@ def _forward_late_steers(old_id: str, new_id: str, meta: dict) -> None:
+         _notif_log_failure("late steer forwarding failed", exc)
+ 
+ 
++def _restart_jobs_note(session: dict) -> str:
++    """Once per session after a restart: its background processes the restart killed or left running."""
++    try:
++        from tools.process_registry_restart import take_note
++        return take_note(_session_process_owners(session) | {str(session.get("session_key") or "")})
++    except Exception as exc:
++        _notif_log_failure("restart job note failed", exc)
++        return ""
++
++
+ def _resumed_delegations_note(session: dict) -> str:
+     done = session.pop("_resumed_delegations", None) or []
+     if not done:
+@@ -347,6 +357,11 @@ def _startup_resume_targets(home) -> list:
+             # Background subagents the restart killed, waiting for their session to re-dispatch them.
+             rows = conn.execute("SELECT DISTINCT origin_session FROM async_delegations WHERE state='resuming'").fetchall()
+             targets += [r[0] for r in rows if r[0]]
++    # Sessions whose background jobs the restart killed or left running (hyperhermes): their notices and note
++    # reach them only once they are open. A key that is not this home's session is skipped by the caller.
++    with contextlib.suppress(Exception):
++        from tools.process_registry_restart import owner_keys
++        targets += sorted(owner_keys())
+     return list(dict.fromkeys(targets))
+ 
+ 
+diff --git a/tui_gateway/session_reaper.py b/tui_gateway/session_reaper.py
+index 9810db4e..35944096 100644
+--- a/tui_gateway/session_reaper.py
++++ b/tui_gateway/session_reaper.py
+@@ -123,6 +123,12 @@ def _stop_turns_before_exit(budget_s: float | None = None) -> None:
+     group and would outlive the gateway, reparented to init. One still alive halfway through the budget
+     ignored the interrupt's SIGTERM: SIGKILL it then, early enough for its result to land as well (the
+     interrupt's own TERM, 1s, KILL outlasts the SIGTERM path's ~1s grace)."""
++    # Restart-safe background jobs stay running from here on, and the ones that end are kept for the next process
++    # (hyperhermes, tools/process_registry_restart.py).
++    with contextlib.suppress(Exception):
++        from tools.process_registry import process_registry
++        from tools.process_registry_restart import begin_host_shutdown
++        begin_host_shutdown(process_registry)
+     # Background subagents cut short from here on are re-dispatched by the next process instead of reporting
+     # "interrupted" (delegation.resume_after_restart, tools/async_delegation.py begin_shutdown).
+     with contextlib.suppress(Exception):

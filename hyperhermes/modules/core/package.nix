@@ -68,6 +68,9 @@ let
     # The vault through the host's vault broker (vault-broker.nix): the
     # agent's uid cannot read it.
     ./patches/hermes-vault-broker-client.patch
+    # Last: extends the resume patches' shutdown drain, startup resume and
+    # per-turn notes, and the busy-yield and notice patches' registry code.
+    ./patches/hermes-background-jobs-survive-restart.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {
