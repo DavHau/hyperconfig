@@ -43,7 +43,11 @@ in
       systemd.services."slot-${name}-ssh" = {
         description = "Forward to the ${name} slot's sshd";
         serviceConfig = {
-          ExecStart = "${config.systemd.package}/lib/systemd/systemd-socket-proxyd [${slotAddress name}]:22";
+          # Unbracketed: systemd-socket-proxyd resolves the target with
+          # getaddrinfo on the part before the last colon, so `[v6]:22`
+          # fails ("Failed to resolve host") and `v6:22` works (tested
+          # with systemd 262 on som).
+          ExecStart = "${config.systemd.package}/lib/systemd/systemd-socket-proxyd ${slotAddress name}:22";
           DynamicUser = true;
           PrivateTmp = true;
         };
