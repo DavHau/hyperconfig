@@ -8,7 +8,7 @@
 # `herdr server reload-config`, which applies it live.
 { lib, pkgs, inputs, ... }:
 let
-  herdr = inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.herdr;
+  herdr = import ../herdr-package.nix { inherit pkgs inputs; };
 
   toggle = pkgs.writers.writePython3Bin "herdr-sound-toggle" {
     libraries = [ pkgs.python3Packages.tomlkit ];

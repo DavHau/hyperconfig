@@ -8,7 +8,14 @@
     # AddKeysToAgent yes
 
     Host *
-      ServerAliveInterval 240
+      # Keepalive every 15 s, give up after 4 unanswered (~1 min): a
+      # ControlMaster whose link died with a network switch (hotel Wi-Fi ->
+      # hotspot) exits within a minute instead of 12 (240 s x 3), so the
+      # next ssh through ~/.ssh/control/%C makes a fresh one instead of
+      # hanging on the dead socket. Cheap on 4G; herdr's own masters get
+      # the same values from herdr itself (./herdr-package.nix).
+      ServerAliveInterval 15
+      ServerAliveCountMax 4
       ControlMaster auto
       ControlPath ~/.ssh/control/%C
       ControlPersist 600

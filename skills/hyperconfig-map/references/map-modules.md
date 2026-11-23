@@ -55,6 +55,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/greetd-idle-restart.sh — shellcheck shell=bash Restart greetd when the running greetd is definitely an old one and seat0 is idle: <- m/greetd-idle-restart-test.nix, m/greetd.nix
 - modules/nixos/greetd.nix — - <- m/dave.nix
 - modules/nixos/herdr-jj.nix — jj workspace support for herdr via the community herdr-jj plugin (OliverGilan/herdr-jj, MIT): <- m/dave.nix, m/spaces/instance.nix, m/spaces/test.nix
+- modules/nixos/herdr-package.nix — herdr (from llm-agents), with its remote-connection timeouts sized for Dave's laptop on hotel Wi-Fi / phone hotspot / 4… <- m/herdr-jj.nix, m/noctalia-herdr-sound/default.nix
 - modules/nixos/herdr-pin-config.py — - <- m/herdr-jj.nix
 - modules/nixos/hermes-agents-gpu-host.nix — GPU host for som's hermes agents: <- vit
 - modules/nixos/home-manager.nix — home-manager as a NixOS module on Dave's desktops (shared settings for every home-manager user; <- m/dave.nix
@@ -214,7 +215,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/infra-space/agent-tools-toolsets.py — - <- m/infra-space/agent-tools-test.nix
 - modules/nixos/infra-space/agent-tools.nix — The infra agent's tools for web signups (som only, ./agent-tools-guest.nix in the guest): <- machines/som/hermes-agents.nix, m/infra-space/agent-tools-guest.nix, m/infra-space/agent-tools-test.nix, m/infra-space/default.nix, m/infra-space/hermes.nix
 - modules/nixos/infra-space/dashboard-account.nix — Who signs in to the infra-space dashboard (./dashboard.nix, on som), as plain data for the two evaluations that need it: <- som, modules/flake-parts/nixosConfigurations.nix, m/dave-desktop/mesh-dashboards.nix, m/infra-space/dashboard.nix
-- modules/nixos/infra-space/dashboard.nix — The infra-space agent's hermes dashboard, published by this host's nginx (som only: <- m/infra-space/default.nix, m/infra-space/hermes.nix, m/infra-space/secret-prompt/default.nix
+- modules/nixos/infra-space/dashboard.nix — The infra-space agent's hermes dashboard, published by this host's nginx (som only: <- m/agent-upload/default.nix, m/infra-space/default.nix, m/infra-space/hermes.nix, m/infra-space/secret-prompt/default.nix
 - modules/nixos/infra-space/decisions.nix — The fleet's decision registry: <- m/infra-space/agent-job.nix, m/infra-space/hermes.nix, m/infra-space/security-jobs.nix, m/telegram-send/default.nix
 - modules/nixos/infra-space/default.nix — infra-space: a NixOS container on every member machine (./members.nix), identical on each, from which the fleet is mana… <- amy, som, m/infra-space/agent-tools-test.nix, m/infra-space/dashboard.nix, m/infra-space/fleet-access.nix, m/infra-space/gcroots.nix, m/infra-space/guest.nix, m/infra-space/hermes.nix, +10
 - modules/nixos/infra-space/fleet-access.nix — infra-space's root access on every clan machine (wired via the `sshd` instance's server extraModules in modules/flake-p… <- modules/flake-parts/nixosConfigurations.nix, m/agave-tunnel.nix, m/infra-space/default.nix, m/infra-space/test.nix, m/spaces/agave-host.nix, m/telegram-send/default.nix

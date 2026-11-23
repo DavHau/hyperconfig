@@ -13,7 +13,8 @@
 # writes the plugin registry directly, with a running server it updates live.
 let
   sys = pkgs.stdenv.hostPlatform.system;
-  herdr = inputs.llm-agents.packages.${sys}.herdr;
+  # llm-agents' herdr with timeouts for slow links (./herdr-package.nix).
+  herdr = import ./herdr-package.nix { inherit pkgs inputs; };
 
   herdr-jj = pkgs.rustPlatform.buildRustPackage {
     pname = "herdr-jj";
