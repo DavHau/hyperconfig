@@ -28,7 +28,8 @@
 
   Receiving side (`to`):
     - the key authorized for the agent's account as
-      `restrict,command=./dispatch.sh` (no pty, no forwarding of any kind;
+      `restrict,from=<sender's yggdrasil address>,command=./dispatch.sh`
+      (only from the sender's mesh address; no pty, no forwarding of any kind;
       the agent account never gets root): rrsync (rsync's restricted
       wrapper) write-only, without deletes, rooted in the uploads dir; or
       `agent-upload-status <name>`, which stores stdin as
@@ -36,7 +37,14 @@
       is authorized only once its var is generated (null public value:
       skipped, no eval failure).
     - the uploads dir (agent's, 0755) and the status dir (agent:nginx
-      2750, files 0640), for a progress page to read.
+      2750, files 0640);
+    - on the host with the infra-space dashboard (som), the progress page
+      https://<dashboard host>/uploads/ (./page.html, refreshing every
+      5 s) and its data under /uploads/status/ (nginx autoindex as JSON
+      plus the status files, served as inert JSON, no symlinks followed),
+      Dave only: the same auth subrequest to the dashboard's session as
+      clan-secret-prompt's page (../infra-space/dashboard.nix), else a
+      redirect to its sign-in.
 */
 {
   config,
@@ -86,6 +94,16 @@ let
       export STATUS_DIR=${stateRoot}/${agent}
       exec ${pkgs.bash}/bin/bash ${./dispatch.sh}
     '';
+
+  dashboardOn = lib.attrByPath [ "hyper" "infraSpace" "dashboard" "enable" ] false config;
+  auth = ''
+    auth_request /_infra_space_secret_auth;
+    error_page 401 = @agent_upload_login;
+    # (a location's add_header replaces the vhost's: its framing ones too)
+    add_header Cache-Control "no-store" always;
+    add_header X-Frame-Options DENY always;
+    add_header X-Content-Type-Options nosniff always;
+  '';
 
 in
 {
@@ -158,6 +176,23 @@ in
             ProtectHome = "read-only";
             PrivateTmp = true;
             NoNewPrivileges = true;
+            # root only to read Dave's files and its own key and state:
+            # nothing else if rsync or ssh ever mishandle the far end
+            CapabilityBoundingSet = [ "CAP_DAC_READ_SEARCH" ];
+            PrivateDevices = true;
+            ProtectKernelTunables = true;
+            ProtectKernelModules = true;
+            ProtectKernelLogs = true;
+            ProtectControlGroups = true;
+            ProtectClock = true;
+            RestrictAddressFamilies = [
+              "AF_UNIX"
+              "AF_INET"
+              "AF_INET6"
+            ];
+            RestrictNamespaces = true;
+            RestrictSUIDSGID = true;
+            LockPersonality = true;
           };
         }
       ) sending;
@@ -165,7 +200,7 @@ in
 
     (lib.mkIf (receivingAll != { }) {
       users.users = lib.mapAttrs (agent: t: {
-        openssh.authorizedKeys.keys = lib.optional (receiving ? ${agent}) ''restrict,command="${dispatchFor agent}" ${publicValue t.from (generatorOf agent) "key.pub"}'';
+        openssh.authorizedKeys.keys = lib.optional (receiving ? ${agent}) ''restrict,from="${publicValue t.from "yggdrasil" "address"}",command="${dispatchFor agent}" ${publicValue t.from (generatorOf agent) "key.pub"}'';
       }) receivingAll;
 
       systemd.tmpfiles.rules = [
@@ -179,5 +214,36 @@ in
       );
     })
 
+    (lib.mkIf (receivingAll != { } && dashboardOn) {
+      services.nginx.virtualHosts.infra-space-dashboard.locations = {
+        "= /uploads".extraConfig = "return 301 /uploads/;";
+        "= /uploads/" = {
+          root = "/";
+          tryFiles = "${./page.html} =404";
+          extraConfig = auth + ''
+            add_header Content-Security-Policy "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'" always;
+            default_type text/html;
+          '';
+        };
+        # ^~: no regex location of the vhost takes these over
+        "^~ /uploads/status/" = {
+          alias = "${stateRoot}/";
+          extraConfig = auth + ''
+            # the agent owns its status dir: never follow a link it plants,
+            # and whatever it drops there is inert JSON on this origin
+            # (an x.html there must not run in Dave's dashboard session)
+            disable_symlinks on;
+            types { }
+            default_type application/json;
+            add_header Content-Security-Policy "default-src 'none'; sandbox" always;
+            autoindex on;
+            autoindex_format json;
+          '';
+        };
+        "@agent_upload_login".extraConfig = ''
+          return 302 /login?next=/uploads/;
+        '';
+      };
+    })
   ];
 }
