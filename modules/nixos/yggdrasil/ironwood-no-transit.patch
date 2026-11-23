@@ -1,0 +1,57 @@
+diff -ru a/network/config.go b/network/config.go
+--- a/network/config.go
++++ b/network/config.go
+@@ -17,6 +17,7 @@
+ 	pathNotify         func(ed25519.PublicKey)
+ 	pathTimeout        time.Duration
+ 	pathThrottle       time.Duration
++	noTransit          bool
+ }
+ 
+ type Option func(*config)
+@@ -88,3 +89,16 @@
+ 		c.pathThrottle = duration
+ 	}
+ }
++
++// WithNoTransit makes this node refuse to carry other nodes' traffic: a
++// traffic packet received from a peer and not addressed to this node is
++// dropped instead of forwarded. Protocol messages (tree
++// announcements, sig requests/responses, bloom filters, path
++// lookups/notifies/broken) are still handled and forwarded, so the node
++// keeps its place in the tree and discovery through it keeps working.
++// (hyperconfig patch, modules/nixos/yggdrasil)
++func WithNoTransit(noTransit bool) Option {
++	return func(c *config) {
++		c.noTransit = noTransit
++	}
++}
+diff -ru a/network/router.go b/network/router.go
+--- a/network/router.go
++++ b/network/router.go
+@@ -601,8 +601,24 @@
+ }
+ 
+ func (r *router) handleTraffic(from phony.Actor, tr *traffic) {
++	// Received from a peer (peer._handleTraffic), not sent by us
++	// (pathfinder, from == nil). Decided by where it came from, not by
++	// tr.source, which the sending peer chooses.
++	_, fromPeer := from.(*peer)
+ 	r.Act(from, func() {
+-		if p := r._lookup(tr.path, &tr.watermark); p != nil {
++		if r.core.config.noTransit && fromPeer {
++			// No transit (WithNoTransit): deliver what is addressed to us,
++			// never forward another node's traffic.
++			if tr.dest == r.core.crypto.publicKey {
++				r.pathfinder._resetTimeout(tr.source)
++				r.core.pconn.handleTraffic(r, tr)
++			} else {
++				// Dropped silently: a pathBroken per packet would only
++				// spend this node's uplink, and the sender's next hop
++				// (greedy, by tree distance) would stay the same anyway.
++				freeTraffic(tr)
++			}
++		} else if p := r._lookup(tr.path, &tr.watermark); p != nil {
+ 			p.sendTraffic(r, tr)
+ 		} else if tr.dest == r.core.crypto.publicKey {
+ 			r.pathfinder._resetTimeout(tr.source)

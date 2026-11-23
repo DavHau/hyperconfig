@@ -170,7 +170,6 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/wdisplays.nix — wdisplays + niri-display persistence. <- m/dave.nix
 - modules/nixos/web-bench-mullvad.nix — The fixed identity of `web-bench launch --egress mullvad` (tools/web-bench): <- som
 - modules/nixos/wired-link-local.nix — Keep wired interfaces usable on a peer-to-peer cable (laptop <-> laptop). <- m/networking-desktop.nix
-- modules/nixos/yggdrasil-topology.nix — Keeps roaming laptops off other machines' yggdrasil paths by making them leaves of som (peering topology). <- modules/flake-parts/nixosConfigurations.nix
 - modules/nixos/zfs-arc-max.nix — Cap the ZFS ARC. Unbounded it grows to nearly all of RAM and gives it back only under pressure, which shows up as "used… <- som
 - modules/nixos/zfs-ephemeral-tmp.nix — /tmp on a ZFS dataset instead of tmpfs: <- som, m/per-user-tmp/test.nix
 - modules/nixos/zt-eu-sites.nix — zt-eu's controller side of the bridged home LANs (../../home-networks): <- modules/flake-parts/nixosConfigurations.nix
@@ -415,7 +414,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/users/stefan-keys.nix — stefan's ssh public keys, the one registry for them. <- machines/som/stefan-pq.nix, m/users/stefan.nix
 - modules/nixos/users/stefan-vault.nix — stefan on the wg-vault client machines (som, vit): <- vit, machines/som/hermes-agents.nix
 - modules/nixos/users/stefan.nix — - <- machines/nas/users.nix, m/users/stefan-vault.nix
-- modules/nixos/v6-fallback/default.nix — Global IPv6 for a roaming client (amy) on IPv4-only networks, through a gateway with native IPv6 (som), carried over yg… <- amy, machines/som/v6-fallback.nix, m/cloudflare-warp/default.nix, m/v6-fallback/test.nix
+- modules/nixos/v6-fallback/default.nix — Global IPv6 for a roaming client (amy) on IPv4-only networks, through a gateway with native IPv6 (som), carried over yg… <- amy, machines/som/v6-fallback.nix, m/cloudflare-warp/default.nix, m/v6-fallback/test.nix, m/yggdrasil/test.nix
 - modules/nixos/v6-fallback/test.nix — ./default.nix in a VM: `client` (v4-only, like amy on a hotel Wi-Fi) gets global IPv6 through `gw` (som's role) over yg… <- flake.nix
 - modules/nixos/voice-gateway/cm-pi.nix — cm-pi's part of ./default.nix: <- cm-pi, m/voice-gateway/default.nix
 - modules/nixos/voice-gateway/default.nix — voice-gateway (som): Home Assistant's Voice PE talks to hermes. <- som, m/infra-space/agent-tools.nix, m/infra-space/default.nix, m/infra-space/voice-api.nix
@@ -436,6 +435,9 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/wyoming-local-speech/translate.py — -
 - modules/nixos/wyoming-local-speech/tts.py — -
 - modules/nixos/wyoming-local-speech/voices-sso.nix — vit's TTS voice picker (./tts.py's HTTP API: <- edi
+- modules/nixos/yggdrasil/default.nix — yggdrasil with a no-transit switch (`hyper.yggdrasil.noTransit`): <- modules/flake-parts/nixosConfigurations.nix, m/yggdrasil/test.nix
+- modules/nixos/yggdrasil/multicast-interfaces.nix — The fleet's yggdrasil MulticastInterfaces (clan's yggdrasil service setting `multicastInterfaces`, set in modules/flake… <- modules/flake-parts/nixosConfigurations.nix
+- modules/nixos/yggdrasil/test.nix — ./default.nix (patched yggdrasil, `hyper.yggdrasil.noTransit`) in VMs: <- flake.nix
 - modules/nixos/zfs-keylocation-sync/default.nix — Keep a ZFS encryption root's `keylocation` pointing at its current key file. <- machines/bam/zfs.nix, m/zfs-keylocation-sync/test.nix
 - modules/nixos/zfs-keylocation-sync/test.nix — An encrypted pool whose keylocation names a key file that no longer exists (the key moved, as clan's vars did on bam) s… <- flake.nix
 - modules/nixos/zfs-remote-unlock/ask-key.sh — Unlock an encrypted ZFS root in the initrd. <- m/zfs-remote-unlock/default.nix

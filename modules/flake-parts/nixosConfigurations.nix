@@ -365,28 +365,16 @@ in {
             };
 
             # VPNs
-            # Overlay over the other VPNs. Peering topology (laptops as
-            # leaves of som, no transit through them):
-            # ../nixos/yggdrasil-topology.nix.
+            # The overlay over all the other VPNs: one address per machine,
+            # peered over every underlay. Patched for no-transit
+            # (`hyper.yggdrasil.noTransit`, on for the roaming laptops):
+            # ../nixos/yggdrasil.
             yggdrasil = {
               roles.default.tags = ["all"];
-              roles.default.extraModules = [ ../nixos/yggdrasil-topology.nix ];
-              # Multicast discovery only on physical LANs (direct links win
-              # there). Not on overlays: machines already peer statically
-              # over zt-eu and wg-edi; nor on container veths/bridges
-              # (ve-*, vb-*, docker0, vnet*, br-*), where beacons only fail.
-              roles.default.settings.multicastInterfaces = [
-                {
-                  Regex = "^(en|eth|end|wl).*|^br0$";
-                  Beacon = true;
-                  Listen = true;
-                  Port = 5400;
-                }
-              ];
-              # Leaves: no multicast at all (../nixos/yggdrasil-topology.nix).
-              roles.default.machines = lib.genAttrs [ "amy" "joy" ] (_: {
-                settings.multicastInterfaces = lib.mkForce [ ];
-              });
+              roles.default.extraModules = [ ../nixos/yggdrasil ];
+              # clan's default minus container/VM veths and bridges.
+              roles.default.settings.multicastInterfaces =
+                import ../nixos/yggdrasil/multicast-interfaces.nix { inherit lib; };
             };
             hyprspace = {
               module.input = "clan-community";

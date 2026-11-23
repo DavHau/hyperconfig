@@ -41,4 +41,7 @@
 
   # Roams and goes offline on purpose (docs/self-heal.md, per-machine policy).
   hyper.selfHeal.roaming = true;
+  # Roaming laptop: carries no other machine's yggdrasil traffic
+  # (../../modules/nixos/yggdrasil).
+  hyper.yggdrasil.noTransit = true;
 }

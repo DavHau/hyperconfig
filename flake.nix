@@ -276,6 +276,11 @@
           import ./modules/nixos/v6-fallback/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
+        # Patched yggdrasil: a no-transit node carries only its own traffic.
+        yggdrasil-no-transit =
+          import ./modules/nixos/yggdrasil/test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          };
         # som's agents kept off Roman's site LANs.
         zt-eu-lan-guard =
           import ./modules/nixos/zt-eu-lan-guard/test.nix {

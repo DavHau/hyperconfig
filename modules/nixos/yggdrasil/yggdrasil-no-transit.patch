@@ -1,0 +1,72 @@
+diff -ru a/cmd/yggdrasil/main.go b/cmd/yggdrasil/main.go
+--- a/cmd/yggdrasil/main.go
++++ b/cmd/yggdrasil/main.go
+@@ -201,6 +201,7 @@
+ 		options := []core.SetupOption{
+ 			core.NodeInfo(cfg.NodeInfo),
+ 			core.NodeInfoPrivacy(cfg.NodeInfoPrivacy),
++			core.NoTransit(cfg.NoTransit),
+ 			core.PeerFilter(func(ip net.IP) bool {
+ 				return !iprange.Contains(ip)
+ 			}),
+diff -ru a/src/config/config.go b/src/config/config.go
+--- a/src/config/config.go
++++ b/src/config/config.go
+@@ -53,6 +53,7 @@
+ 	IfName              string                     `comment:"Local network interface name for TUN adapter, or \"auto\" to select\nan interface automatically, or \"none\" to run without TUN."`
+ 	IfMTU               uint64                     `comment:"Maximum Transmission Unit (MTU) size for your local TUN interface.\nDefault is the largest supported size for your platform. The lowest\npossible value is 1280."`
+ 	LogLookups          bool                       `json:",omitempty"`
++	NoTransit           bool                       `json:",omitempty" comment:"Never forward other nodes' traffic (hyperconfig patch): only traffic\nthis node sends or receives itself is carried. Routing protocol\nmessages are still forwarded. A path that runs through this node is\ncut until the tree changes (ironwood does not route\naround a node that drops)."`
+ 	NodeInfoPrivacy     bool                       `comment:"By default, nodeinfo contains some defaults including the platform,\narchitecture and Yggdrasil version. These can help when surveying\nthe network and diagnosing network routing problems. Enabling\nnodeinfo privacy prevents this, so that only items specified in\n\"NodeInfo\" are sent back if specified."`
+ 	NodeInfo            map[string]any             `comment:"Optional nodeinfo. This must be a { \"key\": \"value\", ... } map\nor set as null. This is entirely optional but, if set, is visible\nto the whole network on request."`
+ }
+diff -ru a/src/core/core.go b/src/core/core.go
+--- a/src/core/core.go
++++ b/src/core/core.go
+@@ -41,6 +41,7 @@
+ 		peerFilter         func(ip net.IP) bool       // immutable after startup
+ 		nodeinfo           NodeInfo                   // immutable after startup
+ 		nodeinfoPrivacy    NodeInfoPrivacy            // immutable after startup
++		noTransit          NoTransit                  // immutable after startup
+ 		_allowedPublicKeys map[[32]byte]struct{}      // configurable after startup
+ 		groupPassword      string                     // immutable after startup
+ 	}
+@@ -101,9 +102,13 @@
+ 		iwn.WithBloomTransform(keyXform),
+ 		iwn.WithPeerMaxMessageSize(65535*2),
+ 		iwn.WithPathNotify(c.doPathNotify),
++		iwn.WithNoTransit(bool(c.config.noTransit)),
+ 	); err != nil {
+ 		return nil, fmt.Errorf("error creating encryption: %w", err)
+ 	}
++	if c.config.noTransit {
++		c.log.Infoln("No-transit mode: other nodes' traffic is not forwarded")
++	}
+ 	c.proto.init(c)
+ 	if err := c.links.init(c); err != nil {
+ 		return nil, fmt.Errorf("error initialising links: %w", err)
+diff -ru a/src/core/options.go b/src/core/options.go
+--- a/src/core/options.go
++++ b/src/core/options.go
+@@ -31,6 +31,8 @@
+ 		c.config.nodeinfo = v
+ 	case NodeInfoPrivacy:
+ 		c.config.nodeinfoPrivacy = v
++	case NoTransit:
++		c.config.noTransit = v
+ 	case AllowedPublicKey:
+ 		pk := [32]byte{}
+ 		copy(pk[:], v)
+@@ -55,6 +57,7 @@
+ type AllowedPublicKey ed25519.PublicKey
+ type PeerFilter func(net.IP) bool
+ type GroupPassword string
++type NoTransit bool
+ 
+ func (a ListenAddress) isSetupOption()    {}
+ func (a Peer) isSetupOption()             {}
+@@ -63,3 +66,4 @@
+ func (a AllowedPublicKey) isSetupOption() {}
+ func (a PeerFilter) isSetupOption()       {}
+ func (a GroupPassword) isSetupOption()    {}
++func (a NoTransit) isSetupOption()        {}
