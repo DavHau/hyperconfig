@@ -8,6 +8,8 @@
 #   - container traffic (a veth in a netns, NATed) goes through it too;
 #   - gw forwards only to global unicast outside its LAN prefixes, only
 #     the client's tunnel address, inbound replies only;
+#   - gw's own services: reachable at its public address as from the
+#     internet, closed at its other addresses;
 #   - native v6 wins once present, WARP's rule (5209) wins while there;
 #   - gateway gone: the route is withdrawn (fail fast), held down, and
 #     comes back.
@@ -123,6 +125,7 @@ pkgs.testers.runNixOSTest {
       localYggAddress = gwYgg;
       uplinkInterface = "eth1";
       blockedDestinations = [ "2001:db8:9::/64" ];
+      publicSuffixes = [ "::c0de:ba5e" ];
       clients.client = {
         index = 1;
         yggAddress = clientYgg;
@@ -245,7 +248,10 @@ pkgs.testers.runNixOSTest {
         assert out == "2001:db8:5::1", out
 
     with subtest("the gateway forwards to global unicast outside its LAN only"):
+        # refused at once (admin-prohibited), not left to time out
+        t0 = time.monotonic()
         client.fail(user("curl -sf -m 5 http://[2001:db8:9::9]/"))
+        assert time.monotonic() - t0 < 3, "the LAN should be refused, not dropped"
 
     with subtest("nothing new reaches the client through the tunnel"):
         client.wait_for_open_port(8080)
@@ -271,6 +277,42 @@ pkgs.testers.runNixOSTest {
         client.fail("curl -sf -m 5 http://[fd99:6fb:0:1::1]:8081/")
         out = gw.succeed("nft list chain ip6 v6-fallback input | grep 'iifname \"v6fb-\\*\" counter'")
         assert int(out.split("packets ")[1].split()[0]) > n, out
+
+    with subtest("the gateway's public address: what the internet reaches"):
+        # som's ::c0de:ba5e stand-in (deprecated: masquerade keeps ::1)
+        gw.succeed("ip -6 addr add 2001:db8:5::c0de:ba5e/64 dev eth1 nodad preferred_lft 0")
+        # its firewall's global ports: open to the client, as to inet
+        out = client.succeed(user("curl -sf -m 10 http://[2001:db8:5::c0de:ba5e]:8081/ -o /dev/null -w '%{http_code}'"))
+        assert out == "200", out
+        inet.succeed("curl -sf -m 10 http://[2001:db8:5::c0de:ba5e]:8081/ >/dev/null")
+        # a port the firewall opens only on another interface: closed
+        gw.succeed("systemd-run --unit=gwlisten2 ${pkgs.python3}/bin/python3 -m http.server --bind :: 8082")
+        gw.wait_for_open_port(8082)
+        gw.succeed("nft insert rule inet nixos-fw input-allow iifname eth2 tcp dport 8082 accept")
+        client.fail(user("curl -sf -m 5 http://[2001:db8:5::c0de:ba5e]:8082/"))
+        # its other uplink address: still closed, refused at once
+        t0 = time.monotonic()
+        client.fail(user("curl -sf -m 5 http://[2001:db8:5::1]:8081/"))
+        assert time.monotonic() - t0 < 3, "should be refused, not dropped"
+        # a spoofed inner source to it: dropped
+        client.succeed(
+            "ip -6 addr add fd99:6fb:0:1::3/64 dev v6fb nodad",
+            "ip -6 route add 2001:db8:5::c0de:ba5e/128 dev v6fb",
+        )
+        client.fail("curl -sf -m 5 --interface fd99:6fb:0:1::3 http://[2001:db8:5::c0de:ba5e]:8081/")
+        out = gw.succeed("nft list chain ip6 v6-fallback input | grep 'saddr != { fd99:6fb:0:1::2'")
+        assert "packets 0 " not in out, out
+        client.succeed(
+            "ip -6 route del 2001:db8:5::c0de:ba5e/128 dev v6fb",
+            "ip -6 addr del fd99:6fb:0:1::3/64 dev v6fb",
+        )
+        gw.succeed("ip -6 addr del 2001:db8:5::c0de:ba5e/64 dev eth1")
+        # the same suffix on a non-global (ULA) address: closed
+        gw.succeed("ip -6 addr add fd00:5::c0de:ba5e/64 dev eth2 nodad")
+        client.succeed("ip -6 route add fd00:5::c0de:ba5e/128 dev v6fb src fd99:6fb:0:1::2")
+        client.fail("curl -sf -m 5 http://[fd00:5::c0de:ba5e]:8081/")
+        client.succeed("ip -6 route del fd00:5::c0de:ba5e/128 dev v6fb")
+        gw.succeed("ip -6 addr del fd00:5::c0de:ba5e/64 dev eth2")
 
     with subtest("a spoofed inner source is dropped at the gateway"):
         client.succeed(

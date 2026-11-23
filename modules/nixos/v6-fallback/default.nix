@@ -35,8 +35,17 @@
 # Pinning: the encapsulated packets are accepted only from the yggdrasil
 # interface and the peer's address (raw prerouting, before conntrack);
 # inside the tunnel only replies come in, at both ends: the client takes
-# no new connections through it, the gateway's own services and tenants
-# neither accept nor open any.
+# no new connections through it, the gateway's tenants open none, and the
+# gateway's own services take new ones only at its public addresses
+# (`publicSuffixes`, e.g. som's ::c0de:ba5e: teamclaude, the slots' SNI
+# router), admitted there by the host firewall's interface-independent
+# rules as it admits a connection from the internet (an upstream router's
+# own filter not applied): the client sees what the internet sees of the
+# gateway, nothing more (not its tunnel address, not its LAN, nothing
+# opened only on br0/ygg/a veth). Refused destinations (the LAN, the
+# gateway's other addresses) are rejected, not dropped: the client's
+# connect fails at once instead of hanging in SYN-SENT (omp, herdr and
+# browsers don't fall back to IPv4 on a timeout).
 #
 # Health (client): v6-fallback.timer ticks every 10 s. A tick (re)creates
 # the tunnel if missing, pings the gateway's tunnel address through it,
@@ -315,6 +324,12 @@ in
       defaultText = lib.literalExpression "home-networks' publicLanPrefixes";
       description = "Gateway: global prefixes the clients may not reach through it (the gateway's own LAN).";
     };
+    publicSuffixes = lib.mkOption {
+      type = lib.types.listOf (lib.types.strMatching "::([0-9a-f]{1,4}:){0,3}[0-9a-f]{1,4}");
+      default = [ ];
+      example = [ "::c0de:ba5e" ];
+      description = "Gateway: interface ids (lower 64 bits, any global prefix: the RA's prefix may change) of this host's public addresses. The clients may open connections to them through the tunnel, which the host firewall then admits as from the internet; its other addresses stay closed to them.";
+    };
   };
 
   config = lib.mkIf cfg.enable (
@@ -444,20 +459,31 @@ in
           family = "ip6";
           content = ''
             ${rawPin (map (c: c.yggAddress) gwClients)}
-            # amy itself: only answers to its probe and replies, never new
-            # connections to this host's services through the tunnel.
+            # amy itself: answers to its probe and replies; new connections
+            # only to this host's public addresses, then decided by the
+            # host firewall (nixos-fw's input base chain, a later one; new
+            # packets there go through input-allow) as for the internet: an
+            # accept here only passes them on.
             chain input {
               type filter hook input priority filter - 5; policy accept;
+              ${lib.concatMapStrings (c: ''
+                iifname "${c.dev}" ip6 saddr != { ${prefixOf c.index}::2, fe80::/10 } counter drop
+              '') gwClients}
               iifname "v6fb-*" ct state established,related accept
               iifname "v6fb-*" icmpv6 type { echo-request, nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit, packet-too-big } accept
-              iifname "v6fb-*" counter drop
+              ${lib.concatMapStrings (sfx: ''
+                iifname "v6fb-*" ip6 daddr 2000::/3 ip6 daddr & ::ffff:ffff:ffff:ffff == ${sfx} accept
+              '') cfg.publicSuffixes}
+              iifname "v6fb-*" counter reject with icmpv6 admin-prohibited
             }
             # This host's own users (other tenants) never open anything
             # towards the client through the tunnel.
             chain output {
               type filter hook output priority filter - 5; policy accept;
               oifname "v6fb-*" ct state established,related accept
-              oifname "v6fb-*" icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, nd-router-advert, packet-too-big } accept
+              # destination-unreachable: the rejects of input and forward
+              # (their packet never made a conntrack entry to be related to)
+              oifname "v6fb-*" icmpv6 type { destination-unreachable, nd-neighbor-solicit, nd-neighbor-advert, nd-router-advert, packet-too-big } accept
               oifname "v6fb-*" counter drop
             }
             chain forward {
@@ -470,7 +496,7 @@ in
               iifname "v6fb-*" oifname != "${cfg.uplinkInterface}" counter drop
               iifname "v6fb-*" ip6 daddr != 2000::/3 counter drop
               ${lib.optionalString (cfg.blockedDestinations != [ ]) ''
-                iifname "v6fb-*" ip6 daddr { ${lib.concatStringsSep ", " cfg.blockedDestinations} } counter drop
+                iifname "v6fb-*" ip6 daddr { ${lib.concatStringsSep ", " cfg.blockedDestinations} } counter reject with icmpv6 admin-prohibited
               ''}
               iifname "v6fb-*" accept
               oifname "v6fb-*" ct state established,related accept
