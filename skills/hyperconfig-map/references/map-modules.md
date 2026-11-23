@@ -145,7 +145,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/ssh-tpm-confirm-dialog-test.nix — Sandboxed regression test + screenshot harness for the ssh-tpm-agent confirm dialog (see ssh-tpm-confirm-dialog.py). <- flake.nix
 - modules/nixos/ssh-tpm-confirm-dialog.nix — The ssh-tpm-agent confirmation dialog (see ssh-tpm-confirm-dialog.py). <- flake.nix, m/ssh-tpm-agent.nix, m/ssh-tpm-confirm-dialog-test.nix
 - modules/nixos/ssh-tpm-confirm-dialog.py — !/usr/bin/env python3 <- m/niri-float-rules.nix, m/ssh-tpm-confirm-dialog.nix
-- modules/nixos/ssh.nix — ssh client defaults on Dave's desktops: <- m/dave.nix
+- modules/nixos/ssh.nix — ssh client defaults on Dave's desktops: <- m/agent-upload/default.nix, m/dave.nix
 - modules/nixos/storagebox-readahead.sh — Tune a FUSE mount for a high-latency link. <- m/storagebox.nix
 - modules/nixos/storagebox-sync.nix — Daily pull of the storage box's depth archive into the vault's parquet dataset. <- bam
 - modules/nixos/storagebox-sync.sh — Pull the storage box's depth archive into the vault, newest hours first. <- m/storagebox-sync.nix
@@ -172,6 +172,10 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/zfs-arc-max.nix — Cap the ZFS ARC. Unbounded it grows to nearly all of RAM and gives it back only under pressure, which shows up as "used… <- som
 - modules/nixos/zfs-ephemeral-tmp.nix — /tmp on a ZFS dataset instead of tmpfs: <- som, m/per-user-tmp/test.nix
 - modules/nixos/zt-eu-sites.nix — zt-eu's controller side of the bridged home LANs (../../home-networks): <- modules/flake-parts/nixosConfigurations.nix
+- modules/nixos/agent-upload/default.nix — Uploads into a hermes agent's workspace from another fleet machine with plain rsync: <- amy, machines/som/hermes-agents.nix
+- modules/nixos/agent-upload/dispatch.sh — !/usr/bin/env bash The forced command of an agent-upload key on the agent's machine (./default.nix): <- m/agent-upload/default.nix
+- modules/nixos/agent-upload/targets.nix — Upload paths into som's hermes agents' workspaces (./default.nix), one entry per agent: <- m/agent-upload/default.nix
+- modules/nixos/agent-upload/upload.py — - <- m/agent-upload/default.nix
 - modules/nixos/atproto-pds/accounts.py — - <- m/atproto-pds/default.nix
 - modules/nixos/atproto-pds/default.nix — An atproto PDS (tranquil-pds, nixpkgs' services.tranquil-pds) for our own accounts: <- machines/som/atproto-pds.nix, m/atproto-pds/test.nix
 - modules/nixos/atproto-pds/test.nix — ./default.nix with som's names (../../../machines/som/atproto-pds.nix) in a NixOS container, nginx on plain http (no ce… <- flake.nix

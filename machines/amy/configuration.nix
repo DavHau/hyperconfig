@@ -28,6 +28,8 @@
     ../../modules/nixos/router-cm-beryl.nix
     ../../modules/nixos/router-playa-isp.nix
     ../../modules/nixos/esphome-secrets.nix
+    # rsync uploads into Wolfgang's hermes workspace on som
+    ../../modules/nixos/agent-upload
     ../../modules/nixos/disk-hygiene
     ../../modules/nixos/rust-build-cache.nix
     ../../modules/nixos/cloudflare-warp

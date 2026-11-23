@@ -98,6 +98,8 @@ in
     # address through a one-time link behind its dashboard's sign-in.
     inputs.hyperhermes.nixosModules.vault-request
     inputs.hyperhermes.nixosModules.clan
+    # rsync uploads from other machines into agents' workspaces
+    ../../modules/nixos/agent-upload
     ./hermes-inference.nix
     # dave-hermes's HA token for the TV rack plug.
     ./dave-hermes-ha.nix
