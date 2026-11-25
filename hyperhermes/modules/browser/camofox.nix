@@ -34,7 +34,8 @@
 #     once into a 0600 file in the agent's 0700 state dir,
 #   - the profile store (cookies and storage of hermes' stable per-agent
 #     userId, so a cleared Cloudflare or Akamai check carries over) lives
-#     next to it,
+#     next to it; subagents and cron runs browse in contexts of their own
+#     (task-contexts.patch of the plugin), bounded by browser.limits,
 #   - Camoufox draws on an Xvfb that camofox-browser starts with the
 #     browser and kills with it (5 idle minutes), so the display costs
 #     memory only while the agent browses. Its socket lives only in the
@@ -48,6 +49,7 @@
 let
   cfg = config.services.hyperhermes;
   hlib = import ../../lib/core.nix { inherit lib; };
+  lim = cfg.browser.limits;
 
   # The default build (pkgs/camoufox/browser.nix), as web-extract uses.
   # camofox-browser 1.18.1 downloads 152.0.4-beta.30 for itself
@@ -137,13 +139,21 @@ let
         CAMOFOX_PROFILE_DIR = "${dir}/profiles";
         CAMOFOX_CHALLENGE_WAIT_MS = toString (challengeWait * 1000);
         NAVIGATE_TIMEOUT_MS = toString (navigateTimeout * 1000);
-        # One agent: its persistent userId, plus the odd ephemeral one.
-        MAX_SESSIONS = "2";
-        MAX_TABS_PER_SESSION = "4";
-        MAX_TABS_GLOBAL = "6";
+        # Contexts (camofox userIds): the agent's persistent one plus one
+        # per browsing subagent or cron run and per residential task
+        # (pkgs/hermes-camofox-plugin/task-contexts.patch). Past the cap a
+        # new context is refused (503), never another task's taken.
+        MAX_SESSIONS = toString lim.maxContexts;
+        MAX_TABS_PER_SESSION = toString lim.maxTabsPerContext;
+        MAX_TABS_GLOBAL = toString lim.maxTabs;
+        # An idle context closes after 10 minutes (its storage is saved; a
+        # task's own is deleted at task end or by the task-contexts plugin).
+        SESSION_TIMEOUT_MS = "600000";
         # Firefox closes after 5 idle minutes; the server stays.
         BROWSER_IDLE_TIMEOUT_MS = "300000";
-        BROWSER_RSS_RESTART_THRESHOLD_MB = "1200";
+        # Restarting Firefox drops every task's pages: well under MemoryMax,
+        # but not before the contexts' working set fits.
+        BROWSER_RSS_RESTART_THRESHOLD_MB = toString (lim.memoryMaxMB * 4 / 5);
       }
       # hermes' browser_solve_captcha: the captcha plugin
       # (pkgs/camofox-browser) runs CaptchaKraken's engine, which reads
@@ -175,7 +185,7 @@ let
         KillMode = "mixed";
         Restart = "on-failure";
         RestartSec = 5;
-        MemoryMax = "1536M";
+        MemoryMax = "${toString lim.memoryMaxMB}M";
         TasksMax = 1024;
         CPUQuota = "200%";
         # Holds the Xvfb socket: other uids cannot reach the display.
@@ -188,6 +198,9 @@ let
         ProtectHome = true;
         ReadWritePaths = [ dir ];
         NoNewPrivileges = true;
+        # Every server in one slice, capped together (browser.limits).
+        # Not ProcSubset=pid: the residential plugin reads /proc/net/tcp.
+        Slice = "hermes-camofox.slice";
       };
     };
 in
@@ -228,6 +241,37 @@ in
         }
       )
     );
+  };
+
+  # Per server (one per agent): parallel subagents each browse in their own
+  # context, so these bound what N of them may hold at once.
+  options.services.hyperhermes.browser.limits = {
+    maxContexts = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 10;
+      description = "Browser contexts (separate cookies and storage) one agent's server holds at once: its shared profile plus one per browsing subagent, cron run or residential task. Past it a new one is refused (503).";
+    };
+    maxTabsPerContext = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 4;
+      description = "Tabs per context; past it a task recycles its own oldest tab first.";
+    };
+    maxTabs = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 24;
+      description = "Tabs of all contexts of one server; keep it at least 2 per context, or a new context finds no tab to recycle (429).";
+    };
+    totalMemoryMaxMB = lib.mkOption {
+      type = lib.types.nullOr lib.types.ints.positive;
+      default = null;
+      example = 24576;
+      description = "MemoryMax of the slice holding every agent's browser server (hermes-camofox.slice), so many agents browsing at once cannot take the host's memory; null: no shared cap.";
+    };
+    memoryMaxMB = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 2560;
+      description = "MemoryMax of one server (Firefox included), used only while the agent browses. At 80 % it restarts Firefox, which drops the pages of every context (every task) of that agent. All servers together are capped by the hermes-camofox slice (browser.limits.totalMemoryMaxMB).";
+    };
   };
 
   options.services.hyperhermes.browser.extraServers = lib.mkOption {
@@ -288,6 +332,14 @@ in
       portFor = hlib.camofoxPortFor;
       backendBase = hlib.camofoxBackendBase;
       enabledFor = user: cfg.agents.${user}.browser.enable;
+    };
+
+    # The dash nests it as hermes.slice/hermes-camofox.slice, outside system.slice.
+    systemd.slices.hermes-camofox = {
+      description = "Camofox browser servers of the hermes agents";
+      sliceConfig = lib.optionalAttrs (lim.totalMemoryMaxMB != null) {
+        MemoryMax = "${toString lim.totalMemoryMaxMB}M";
+      };
     };
 
     systemd.services = lib.mkMerge [

@@ -16,7 +16,9 @@
 # core's browser page backend seam plus the plugin's camofox_vault.py;
 # ./vault-frames.patch lets it reach the tab's hosted card-field iframes
 # (core: hermes-vault-payment-iframe-page-backend.patch; server:
-# ../camofox-browser/vault-frames-plugin).
+# ../camofox-browser/vault-frames-plugin). ./task-contexts.patch: subagents
+# and cron runs browse in a context of their own (cookies, storage), not the
+# agent's shared profile; browser_context switches explicitly.
 #
 # The plugin needs `requests` only, which the hermes venv has. hermes
 # imports it as a package from $HERMES_HOME/plugins/camofox (the browser
@@ -77,4 +79,5 @@ runCommand "hermes-camofox-plugin-1.1.0"
     patch -p1 < ${./register-extras.patch}
     patch -p1 < ${./native-vision.patch}
     patch -p1 < ${./vault-frames.patch}
+    patch -p1 < ${./task-contexts.patch}
   ''

@@ -11,8 +11,11 @@
 # browser_vault's hosted card-field fill, and every vault script, run only in
 # Camoufox's isolated world (pkgs/hermes-camofox-plugin/vault-frames.patch).
 # ./residential-plugin: a userId ending in `-residential-<cc>` browses through
-# the host's residential proxy (RESIDENTIAL_PROXY_URL), for hermes'
-# browser_residential.
+# the host's residential proxy (RESIDENTIAL_PROXY_URL) on a sticky exit of
+# its own, for hermes' browser_residential. ./task-contexts-plugin removes the
+# saved state of the per-task contexts hermes opens (children, cron runs,
+# residential) that their task never deleted. ./tab-recycle-own-group.patch:
+# at the tab cap a task recycles its own oldest tab before another task's.
 {
   lib,
   buildNpmPackage,
@@ -38,6 +41,7 @@ buildNpmPackage (finalAttrs: {
   patches = [
     ./challenge-wait.patch
     ./plugin-tab-access.patch
+    ./tab-recycle-own-group.patch
   ];
 
   # Crash reports go to a public relay unless opted out: off unless opted
@@ -57,11 +61,12 @@ buildNpmPackage (finalAttrs: {
     substituteInPlace camofox.config.json --replace-fail \
       '"youtube": { "enabled": true }' '"youtube": { "enabled": false }' \
       --replace-fail '"persistence": { "enabled": true },' \
-      '"persistence": { "enabled": true }, "captcha": { "enabled": true }, "vault-frames": { "enabled": true }, "residential": { "enabled": true },'
-    mkdir plugins/captcha plugins/vault-frames plugins/residential
+      '"persistence": { "enabled": true }, "captcha": { "enabled": true }, "vault-frames": { "enabled": true }, "residential": { "enabled": true }, "task-contexts": { "enabled": true },'
+    mkdir plugins/captcha plugins/vault-frames plugins/residential plugins/task-contexts
     cp ${./captcha-plugin/index.js} plugins/captcha/index.js
     cp ${./vault-frames-plugin/index.js} plugins/vault-frames/index.js
     cp ${./residential-plugin/index.js} plugins/residential/index.js
+    cp ${./task-contexts-plugin/index.js} plugins/task-contexts/index.js
     substituteInPlace server.js --replace-fail \
       "const args = super.xvfb_args;" \
       "const args = [...super.xvfb_args, '-nolisten', 'local'];"
@@ -72,7 +77,7 @@ buildNpmPackage (finalAttrs: {
       const p = JSON.parse(fs.readFileSync("package.json"));
       delete p.overrides;
       delete p.devDependencies;
-      p.files.push("plugins/captcha/index.js", "plugins/vault-frames/index.js", "plugins/residential/index.js");
+      p.files.push("plugins/captcha/index.js", "plugins/vault-frames/index.js", "plugins/residential/index.js", "plugins/task-contexts/index.js");
       fs.writeFileSync("package.json", JSON.stringify(p, null, 2));
       const l = JSON.parse(fs.readFileSync("package-lock.json"));
       delete l.packages[""].devDependencies;

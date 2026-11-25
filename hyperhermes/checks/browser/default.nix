@@ -46,6 +46,15 @@
 # browser goes direct by default and through the proxy (a stand-in that
 # marks the page with the proxy username) only after browser_residential,
 # with the chosen country, and direct again after `off`.
+#
+# Parallel subagents (./concurrency.py, task-contexts.patch of the plugin):
+# three children of one agent (delegate_task's child context, own task ids)
+# browse at once, with managed persistence on. Each gets a context of its
+# own (its cookie only, not the parent's or a sibling's), clicks a ref of its
+# own snapshot onto its own next page, and through the residential proxy an
+# exit session of its own, kept while a sibling switches off. A child joins
+# the parent's cookies only with browser_context(shared). At task end the
+# children's contexts are gone, saved state included; the profile's stays.
 { pkgs, self }:
 let
   inherit (pkgs) lib;
@@ -121,9 +130,7 @@ pkgs.testers.runNixOSTest {
         enable = false;
       })
       // {
-        # The downloads test opens two camofox userIds next to the "a" one
-        # the routes subtest left open.
-        hermes-camofox-alice.environment.MAX_SESSIONS = lib.mkForce "3";
+
         download-site = {
           wantedBy = [ "multi-user.target" ];
           serviceConfig = {
@@ -172,9 +179,12 @@ pkgs.testers.runNixOSTest {
       captchaDriver = driverOf ./captcha.py;
       vaultDriver = vaultDriverScript hermes ./vault.py;
       residentialDriver = driverOf ./residential.py;
+      concurrencyDriver = driverOf ./concurrency.py;
     in
     ''
+    import hashlib
     import json
+    import re
 
     machine.wait_for_unit("hermes-firewall.service")
     machine.wait_for_unit("hermes-camofox-fwd-alice.socket")
@@ -274,6 +284,24 @@ pkgs.testers.runNixOSTest {
         out = machine.succeed("${residentialDriver "alice" "residential http://residential-site.test:8768"}")
         print(out)
         assert "ALL PASSED" in out
+
+    with subtest("three parallel children: own contexts, own refs, own residential exits"):
+        out = machine.succeed("${concurrencyDriver "alice" "concurrency http://residential-site.test:8768"}")
+        print(out)
+        assert "ALL PASSED" in out
+        # Each child's context opened its own residential exit at the proxy.
+        rlog = machine.succeed("journalctl -u hermes-camofox-alice --no-pager -o cat | grep 'residential session' || true")
+        assert len(set(re.findall(r'exitSession":"([0-9a-f]{10})', rlog))) >= 3, rlog
+        # The children's saved state is gone; the profile's own is kept.
+        uids = json.loads(out.split("CHILD_UIDS: ", 1)[1].splitlines()[0])
+        profile_uid = out.split("PROFILE_UID: ", 1)[1].splitlines()[0]
+        for u in uids:
+            d = hashlib.sha256(u.encode()).hexdigest()[:32]
+            machine.fail(f"test -e ${dir}/profiles/{d}")
+        machine.succeed("systemctl restart hermes-camofox-alice.service")
+        d = hashlib.sha256(profile_uid.encode()).hexdigest()[:32]
+        machine.succeed(f"test -s ${dir}/profiles/{d}/storage-state.json")
+        machine.wait_until_succeeds("runuser -u alice -- curl -sf http://127.0.0.1:${port}/health", timeout=120)
 
     with subtest("bob reaches neither alice's port nor her backend"):
         machine.fail("runuser -u bob -- curl -s --max-time 10 http://127.0.0.1:${port}/health")

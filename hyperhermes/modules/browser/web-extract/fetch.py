@@ -45,15 +45,20 @@ THIN_TEXT = 300
 CAMOUFOX = "@camoufox@"
 
 # The residential exit of this run (main), or None for the direct one.
-RESIDENTIAL = None  # (proxy host, port, country)
+RESIDENTIAL = None  # (proxy host, port, proxy username)
 
 
-def residential_from(country):
+def residential_from(country, session=None):
+    """(proxy host, port, proxy username): the username is the country, or
+    `<cc>-session-<id>` for a sticky exit (the caller's task keeps its IP)."""
     url = os.environ.get("RESIDENTIAL_PROXY_URL", "")
     m = re.fullmatch(r"http://(127\.0\.0\.1):([0-9]+)", url)
     if not m or not re.fullmatch(r"[A-Za-z]{2}", country or ""):
         raise Failure("invalid_request", "No residential proxy on this host, or not a two-letter country code.")
-    return m.group(1), int(m.group(2)), country.lower()
+    if session is not None and not re.fullmatch(r"[A-Za-z0-9]{6,10}", session):
+        raise Failure("invalid_request", "Bad residential session id.")
+    user = country.lower() + (f"-session-{session}" if session else "")
+    return m.group(1), int(m.group(2)), user
 
 
 def residential_auth():
@@ -575,7 +580,7 @@ def main():
     fmt = sys.argv[2] if len(sys.argv) > 2 else "markdown"
     try:
         if len(sys.argv) > 3:
-            RESIDENTIAL = residential_from(sys.argv[3])
+            RESIDENTIAL = residential_from(sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else None)
         result = run(url, fmt)
     except Failure as exc:
         result = {"url": url, "error": str(exc), "kind": exc.kind, "status": exc.status}

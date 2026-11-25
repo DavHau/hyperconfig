@@ -1,0 +1,205 @@
+Per-task browser contexts (hyperhermes). With managed persistence every task
+of a profile drove ONE Camofox userId, i.e. one Firefox context: parallel
+delegate_task children and cron runs shared cookies, storage and logins with
+each other and with the agent's own sessions. A child or cron task now gets
+`<profile userId>-task-<digest>` (camofox_client.get_session), deleted with its
+persisted state when the task ends (a subagent's or cron run's turn end:
+cleanup_task(final=True) -> close_owned_contexts; a top-level session's own
+contexts are left to the server's idle close and stale-state sweep); the
+agent's own sessions keep the profile context (their logins), each with its
+own tabs. browser_context (./camofox_extras.py)
+switches a task explicitly ('shared' = the agent's logins, 'own'); the
+config key browser.camofox.task_contexts: shared turns it off. Tabs and refs
+were already per task (session key per task_id). Applies after
+register-extras.patch, native-vision.patch and vault-frames.patch; targets the
+official plugin at hermes v0.23.0's catalog pin.
+
+diff --git a/__init__.py b/__init__.py
+index 2f76acc..d077c77 100644
+--- a/__init__.py
++++ b/__init__.py
+@@ -75,6 +75,9 @@ def register(ctx) -> None:
+         ctx.register_tool(name=x.BROWSER_RESIDENTIAL["name"], toolset=TOOLSET, schema=x.BROWSER_RESIDENTIAL,
+                           handler=x.handle_residential,
+                           check_fn=lambda: t.check_camofox_configured() and x.residential_available(), emoji="🏠")
++    # hyperhermes (task-contexts.patch): a task's own browser context or the agent's shared one.
++    ctx.register_tool(name=x.BROWSER_CONTEXT["name"], toolset=TOOLSET, schema=x.BROWSER_CONTEXT,
++                      handler=x.handle_context, check_fn=t.check_camofox_configured, emoji="🗂️")
+     # Offered only with CAMOFOX_API_KEY set: the server's cookie route checks that bearer token.
+     ctx.register_tool(name=s.BROWSER_IMPORT_COOKIES["name"], toolset=TOOLSET, schema=s.BROWSER_IMPORT_COOKIES,
+                       handler=t.handle_import_cookies, check_fn=t.check_cookie_import_available, emoji="🍪")
+@@ -84,7 +87,10 @@ def register(ctx) -> None:
+     # /new) still gets one through on_session_finalize.
+     def _on_session_end(task_id=None, session_id=None, **_):
+         if (task_id or session_id) and not t.headed_mode():
+-            t.cleanup_task(task_id or session_id)
++            # hyperhermes (task-contexts.patch): fired after every turn; a subagent's or cron run's
++            # own contexts end with it, a top-level session's are left to the idle sweep.
++            from . import camofox_client as c
++            t.cleanup_task(task_id or session_id, final=c._isolated_by_default())
+ 
+     def _on_session_finalize(session_id=None, **_):
+         if session_id:
+diff --git a/camofox_client.py b/camofox_client.py
+index db2c513..bd037fd 100644
+--- a/camofox_client.py
++++ b/camofox_client.py
+@@ -15,6 +15,7 @@ from __future__ import annotations
+ 
+ import ipaddress
+ import logging
++import re
+ import threading
+ import uuid
+ from pathlib import Path
+@@ -291,10 +292,55 @@ def _adopt_existing_tab(session: dict[str, Any]) -> dict[str, Any]:
+     return session
+ 
+ 
++# hyperhermes (task-contexts.patch): a Camofox userId is one browser context (cookies, storage,
++# logins). The managed identity above is one per profile, so every delegate_task child and cron run
++# of an agent shared it with the agent's own sessions: they logged each other in and out and filled
++# each other's carts. Those tasks now get a context of their own, ``<profile userId>-task-<digest>``,
++# deleted with its persisted state when the task ends (the server's task-contexts plugin also drops
++# it if the task never says so); ``browser_context(context="shared")`` is the explicit opt-in to the
++# profile's persistent context (its logins), ``"own"`` the opt-out for any task.
++# ``browser.camofox.task_contexts: shared`` restores the old sharing for the whole profile.
++TASK_CONTEXT_MARK = "-task-"
++
++
++def task_contexts_enabled(camofox_cfg: Optional[dict[str, Any]] = None) -> bool:
++    cfg = get_camofox_config() if camofox_cfg is None else camofox_cfg
++    return str(cfg.get("task_contexts") or "isolated").strip().lower() != "shared"
++
++
++def _isolated_by_default() -> bool:
++    """A delegate_task child or a cron run: work that runs beside the agent's own sessions."""
++    try:
++        from agent.delegation_context import is_delegated_child_context
++        if is_delegated_child_context():
++            return True
++    except Exception:
++        pass
++    try:
++        from gateway.session_context import get_session_env
++        return str(get_session_env("HERMES_CRON_SESSION", "") or "").strip().lower() in {"1", "true", "yes"}
++    except Exception:
++        return False
++
++
++def task_user_id(profile_user_id: str, task_id: Optional[str]) -> str:
++    digest = uuid.uuid5(uuid.NAMESPACE_URL, f"camofox-task:{profile_user_id}:{task_id or 'default'}").hex[:12]
++    return f"{profile_user_id}{TASK_CONTEXT_MARK}{digest}"
++
++
++_OWNED = re.compile(r"-task-[0-9a-f]{12}(-residential-[a-z]{2})?$|-residential-[a-z]{2}$")
++
++
++def owned_context(user_id: str) -> bool:
++    """A context this task owns (its own or a residential one): deleted, never kept, at task end."""
++    return bool(_OWNED.search(user_id))
++
++
+ def get_session(task_id: Optional[str]) -> dict[str, Any]:
+     """Get or create the task's session. Identity precedence: external override
+     (``CAMOFOX_USER_ID`` / config) → profile-scoped identity when managed persistence is on →
+-    random ephemeral userId."""
++    random ephemeral userId. hyperhermes: a child or cron task on a managed identity gets its own
++    context (``task_user_id``) unless task contexts are off."""
+     key = _session_key(task_id)
+     with _sessions_lock:
+         session = _sessions.get(key)
+@@ -305,6 +351,7 @@ def get_session(task_id: Optional[str]) -> dict[str, Any]:
+             return _sessions[key]
+         camofox_cfg = get_camofox_config()
+         identity = _camofox_identity_override(key[1], camofox_cfg)
++        external = identity is not None
+         if identity is None and _managed_persistence_enabled(camofox_cfg):
+             identity = get_camofox_identity(key[1])
+         if identity is None:
+@@ -312,12 +359,46 @@ def get_session(task_id: Optional[str]) -> dict[str, Any]:
+             managed, adopt = False, False
+         else:
+             managed, adopt = True, _flag("CAMOFOX_ADOPT_EXISTING_TAB", camofox_cfg, "adopt_existing_tab")
+-        session = {"user_id": identity["user_id"], "tab_id": None, "session_key": identity["session_key"],
+-                   "managed": managed, "adopt_existing_tab": adopt}
++        profile_user_id = identity["user_id"]
++        user_id = profile_user_id
++        if managed and not external and task_contexts_enabled(camofox_cfg) and _isolated_by_default():
++            user_id = task_user_id(profile_user_id, key[1])
++        session = {"user_id": user_id, "tab_id": None, "session_key": identity["session_key"],
++                   "managed": managed, "adopt_existing_tab": adopt, "profile_user_id": profile_user_id}
+         _sessions[key] = session
+     return _adopt_existing_tab(session)
+ 
+ 
++def peek_session(task_id: Optional[str]) -> Optional[dict[str, Any]]:
++    """The task's session if one exists; never creates one."""
++    with _sessions_lock:
++        return _sessions.get(_session_key(task_id))
++
++
++def delete_context(user_id: str) -> None:
++    """Close a context this task owns and remove its persisted storage (the persistence plugin's
++    storage_state route); a server without that route gets the plain session delete."""
++    try:
++        delete(f"/sessions/{user_id}/storage_state")
++    except requests.HTTPError as exc:
++        if exc.response is None or exc.response.status_code != 404:
++            raise
++        delete(f"/sessions/{user_id}")
++
++
++def close_owned_contexts(session: dict[str, Any]) -> Optional[str]:
++    """Delete every context the session owns (its task context, a residential one); returns a
++    warning string on failure."""
++    warning = None
++    for uid in dict.fromkeys((session.get("user_id"), session.get("direct_user_id"))):
++        if uid and owned_context(uid):
++            try:
++                delete_context(uid)
++            except Exception as exc:
++                warning = str(exc)
++    return warning
++
++
+ def resync_tab(session: dict[str, Any]) -> bool:
+     """After the server answered 404/410 for the cached tab: True when a live tab is tracked again.
+ 
+diff --git a/camofox_tools.py b/camofox_tools.py
+index 2563a95..ab3a789 100644
+--- a/camofox_tools.py
++++ b/camofox_tools.py
+@@ -480,9 +480,18 @@ def headed_mode() -> bool:
+     return policy._truthy(policy._browser_cfg("headed"))
+ 
+ 
+-def cleanup_task(task_id: Optional[str]) -> None:
++def cleanup_task(task_id: Optional[str], *, final: bool = True) -> None:
+     """End-of-session cleanup: managed identities keep their server-side profile, ephemeral
+-    sessions are deleted on the server."""
++    sessions are deleted on the server. hyperhermes: when the task really ends (``final``: its
++    subagent's or cron run's turn ended) a context the task owns (its task context, a residential
++    one) is deleted with its persisted state. A top-level session's turn end keeps them (same uid
++    per session, so a cleared bot check survives a re-switch next turn); finalize does not delete
++    them either: the server closes idle ones and its task-contexts plugin drops stale saved state."""
++    session = client.peek_session(task_id)
++    if session is not None and final:
++        warning = client.close_owned_contexts(session)
++        if warning:
++            logger.debug("Camofox task context close for task %s: %s", task_id, warning)
+     if not client.soft_cleanup(task_id):
+         warning = client.close_session(task_id)
+         if warning:
+diff --git a/plugin.yaml b/plugin.yaml
+index 0673f1f..5d24223 100644
+--- a/plugin.yaml
++++ b/plugin.yaml
+@@ -28,6 +28,7 @@ provides_tools:
+   - browser_downloads
+   - browser_solve_captcha
+   - browser_residential
++  - browser_context
+ provides_hooks:
+   - on_session_end
+   - on_session_finalize

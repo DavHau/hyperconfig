@@ -19,7 +19,10 @@ terminal for web pages.
    for interactive pages, forms and logins. A navigation waits up to ~30 s
    for a Cloudflare or Turnstile interstitial to clear and ticks its
    checkbox. Cookies persist per agent, so a check cleared once carries
-   over. `browser_snapshot` with `full=true` returns the whole page text;
+   over. Subagents and scheduled jobs browse in a context of their own
+   (no saved logins, nothing shared with parallel tasks);
+   `browser_context` with `shared` joins the agent's saved logins when a
+   task needs one. `browser_snapshot` with `full=true` returns the whole page text;
    `browser_vision` shows a screenshot; `browser_console` with
    `expression` evaluates JavaScript in the page.
 

@@ -577,6 +577,9 @@ in
     # web_search's SearXNG at upstream master (flake input `searxng`):
     # nixpkgs' snapshot lags weeks behind the engine fixes.
     searxng.source = inputs.searxng;
+    # All agents' browsers together (each up to 2.5 GB with its subagents'
+    # contexts): at most 24 GB of som's 60.
+    limits.totalMemoryMaxMB = 24576;
   };
   # searx through the tunnel (./configuration.nix) reaches, off it, only
   # its own listener 127.0.0.1:8890 (replies to the agents) and the

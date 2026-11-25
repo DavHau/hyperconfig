@@ -42,9 +42,11 @@ _DOWNLOAD_POLL_SECONDS = 1.0
 
 
 def _session_downloads(session: dict[str, Any]) -> Optional[list[dict[str, Any]]]:
-    """Every download record of the session's userId, oldest first, each tagged with its tab;
-    None when the userId has no tab at all."""
+    """Every download record of this task's tabs (its session key; popups carry it too), oldest
+    first, each tagged with its tab; None when the task has no tab at all. Other tasks sharing the
+    userId (parallel sessions on the profile's context) keep theirs."""
     tabs = client.get("/tabs", params=client.user_params(session)).get("tabs") or []
+    tabs = [t for t in tabs if isinstance(t, dict) and t.get("listItemId") in (None, session.get("session_key"))]
     if not tabs:
         return None
     items: list[dict[str, Any]] = []
@@ -309,13 +311,24 @@ def handle_solve_captcha(args: dict, **kw: Any) -> str:
 
 # ---- Residential proxy ----
 # The camofox-browser's residential plugin (../camofox-browser/residential-plugin) gives a userId
-# ending in `-residential-<cc>` a browser context through the host's residential proxy. This tool
-# moves the task's session onto such a userId (its own context and storage per country: no cookie
-# of the direct session goes along) and back. Offered only when the host has the proxy (RESIDENTIAL_PROXY_URL).
+# ending in `-residential-<cc>` a browser context through the host's residential proxy, on a sticky
+# exit of its own (the proxy session derived from the userId). This tool moves the task's session
+# onto such a userId and back. The userId is per TASK (client.task_user_id), so parallel children
+# and sessions each get their own residential context, cookies and exit IP, and one task's 'off'
+# closes only its own. Offered only when the host has the proxy (RESIDENTIAL_PROXY_URL).
 
 def residential_available() -> bool:
     import re
     return bool(re.fullmatch(r"http://127\.0\.0\.1:[0-9]+", os.environ.get("RESIDENTIAL_PROXY_URL", "")))
+
+
+def _drop_residential(session: dict[str, Any]) -> None:
+    uid = session["user_id"]
+    if "-residential-" in uid:
+        try:
+            client.delete_context(uid)
+        except Exception:
+            pass
 
 
 def browser_residential(country: Optional[str], task_id: Optional[str] = None) -> str:
@@ -325,32 +338,85 @@ def browser_residential(country: Optional[str], task_id: Optional[str] = None) -
         direct = session.get("direct_user_id") or session["user_id"]
         want = (country or "").strip().lower()
         if want in ("", "off", "direct", "none"):
-            if session["user_id"] != direct:
-                try:
-                    client.delete(f"/sessions/{session['user_id']}")
-                except Exception:
-                    pass
+            _drop_residential(session)
             session.update(user_id=direct, tab_id=None)
             session.pop("direct_user_id", None)
             return json.dumps({"success": True, "residential": False,
                                "note": "Back on this host's own egress. Call browser_navigate again."})
         if not re.fullmatch(r"[a-z]{2}", want):
             return _fail("country must be a two-letter ISO code (e.g. sg, us, de) or 'off'")
-        if session["user_id"] != direct:
-            try:
-                client.delete(f"/sessions/{session['user_id']}")
-            except Exception:
-                pass
-        session.update(user_id=f"{direct}-residential-{want}", tab_id=None, direct_user_id=direct)
+        _drop_residential(session)
+        base = direct if client.TASK_CONTEXT_MARK in direct else client.task_user_id(direct, task_id)
+        session.update(user_id=f"{base}-residential-{want}", tab_id=None, direct_user_id=direct)
         return json.dumps({"success": True, "residential": True, "country": want.upper(),
                            "note": ("This task's browser now leaves through a residential IP in "
-                                    f"{want.upper()} (paid traffic), in a separate browser profile without "
-                                    "the usual cookies. Call browser_navigate to load the page. "
-                                    "browser_residential with country 'off' switches back.")})
+                                    f"{want.upper()} (paid traffic), in a separate browser profile of this task "
+                                    "only, without the usual cookies, on an exit IP that stays the same for "
+                                    "this task (other tasks get their own). Call browser_navigate to load the "
+                                    "page. browser_residential with country 'off' switches back.")})
     except requests.ConnectionError:
         return _fail(client.connection_error_message())
     except Exception as e:
         return _fail(str(e))
+
+
+# ---- Browser context per task ----
+# client.get_session gives delegate_task children and cron runs a context of their own; this tool
+# is the explicit switch: 'shared' joins the profile's persistent context (its saved logins, shared
+# with the agent's other sessions), 'own' a context of this task only (deleted at task end).
+
+def browser_context(context: Optional[str], task_id: Optional[str] = None) -> str:
+    try:
+        want = (context or "").strip().lower()
+        if want not in ("own", "shared"):
+            return _fail("context must be 'own' or 'shared'")
+        session = client.get_session(task_id)
+        profile = session.get("profile_user_id")
+        if not session.get("managed") or not profile:
+            return _fail("This browser has no persistent profile context; every task already has its own.")
+        _drop_residential(session)
+        current = session.get("direct_user_id") or session["user_id"]
+        target = profile if want == "shared" else client.task_user_id(profile, task_id)
+        if current != target and client.owned_context(current):
+            try:
+                client.delete_context(current)
+            except Exception:
+                pass
+        session.update(user_id=target, tab_id=None)
+        session.pop("direct_user_id", None)
+        note = ("This task now browses in the agent's shared profile: its saved logins and cookies, also "
+                "used by the agent's other sessions. Changes here (logins, logouts) reach them too."
+                if want == "shared" else
+                "This task now browses in a context of its own: no saved logins, nothing shared with other "
+                "tasks; it is deleted when the task ends.")
+        return json.dumps({"success": True, "context": want, "note": note + " Call browser_navigate again."})
+    except requests.ConnectionError:
+        return _fail(client.connection_error_message())
+    except Exception as e:
+        return _fail(str(e))
+
+
+BROWSER_CONTEXT = {
+    "name": "browser_context",
+    "description": (
+        "Choose this task's browser context. Subagents and scheduled jobs start in a context of their "
+        "own (no saved logins, nothing shared with parallel tasks). 'shared' joins the agent's persistent "
+        "browser profile with its saved logins (use it only when the task needs one of those logins; "
+        "other sessions using it see the same cookies). 'own' switches to a private context. Open tabs "
+        "of the old context are left; call browser_navigate afterwards."),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "context": {"type": "string", "enum": ["own", "shared"],
+                        "description": "'own' (private to this task) or 'shared' (the agent's saved logins)."}
+        },
+        "required": ["context"]
+    }
+}
+
+
+def handle_context(args: dict, **kw: Any) -> str:
+    return browser_context(args.get("context"), task_id=kw.get("task_id"))
 
 
 BROWSER_RESIDENTIAL = {

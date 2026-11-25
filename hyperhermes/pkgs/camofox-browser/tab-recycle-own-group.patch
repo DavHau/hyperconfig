@@ -1,0 +1,49 @@
+At MAX_TABS_PER_SESSION camofox-browser recycles the least-used tab of the
+whole userId, whichever task (sessionKey group) holds it: with several
+hermes tasks on one context (parallel sessions on the agent's shared
+profile), one task opening tabs closed another's page mid-work. The
+requesting task's own group goes first; only a task without a tab of its
+own still recycles another's (the cap holds either way).
+Targets camofox-browser 1.18.1 after ./challenge-wait.patch and
+./plugin-tab-access.patch.
+
+diff --git a/server.js b/server.js
+index 292c27e..1a18be2 100644
+--- a/server.js
++++ b/server.js
+@@ -1724,12 +1724,15 @@ async function destroyTimedOutTab(session, tabId, reason, userId) {
+  * Closes the old tab's page and removes it from its group.
+  * Returns { recycledTabId, recycledFromGroup } or null if no tab to recycle.
+  */
+-async function recycleOldestTab(session, reqId, userId) {
++async function recycleOldestTab(session, reqId, userId, preferGroupKey = null) {
+   let oldestTab = null;
+   let oldestGroup = null;
+   let oldestGroupKey = null;
+   let oldestTabId = null;
+-  for (const [gKey, group] of session.tabGroups) {
++  // hyperhermes (tab-recycle-own-group.patch): the requesting task's own
++  // group first, so one task at the cap does not close a parallel task's tab.
++  const own = preferGroupKey != null && session.tabGroups.get(preferGroupKey)?.size ? [[preferGroupKey, session.tabGroups.get(preferGroupKey)]] : null;
++  for (const [gKey, group] of own || session.tabGroups) {
+     for (const [tid, ts] of group) {
+       if (!oldestTab || ts.toolCalls < oldestTab.toolCalls) {
+         oldestTab = ts;
+@@ -3090,7 +3093,7 @@ app.post('/tabs', async (req, res) => {
+       
+       // Recycle oldest tab when limits are reached instead of rejecting
+       if (totalTabs >= MAX_TABS_PER_SESSION || getTotalTabCount() >= MAX_TABS_GLOBAL) {
+-        const recycled = await recycleOldestTab(session, req.reqId, userId);
++        const recycled = await recycleOldestTab(session, req.reqId, userId, resolvedSessionKey);
+         if (!recycled) {
+           throw Object.assign(new Error('Maximum tabs per session reached'), { statusCode: 429 });
+         }
+@@ -6537,7 +6540,7 @@ app.post('/tabs/open', async (req, res) => {
+     let totalTabs = 0;
+     for (const g of session.tabGroups.values()) totalTabs += g.size;
+     if (totalTabs >= MAX_TABS_PER_SESSION || getTotalTabCount() >= MAX_TABS_GLOBAL) {
+-      const recycled = await recycleOldestTab(session, req.reqId, userId);
++      const recycled = await recycleOldestTab(session, req.reqId, userId, listItemId);
+       if (!recycled) {
+         return res.status(429).json({ error: 'Maximum tabs per session reached' });
+       }

@@ -122,6 +122,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - services.hyperhermes.androidApps: hyperhermes/modules/android-apps.nix
 - services.hyperhermes.browser: hyperhermes/modules/browser/options.nix
 - services.hyperhermes.browser.extraServers: hyperhermes/modules/browser/camofox.nix
+- services.hyperhermes.browser.limits: hyperhermes/modules/browser/camofox.nix
 - services.hyperhermes.browser.residentialProxy: hyperhermes/modules/browser/residential-proxy.nix
 - services.hyperhermes.claudeAuth: hyperhermes/modules/claude-auth/default.nix
 - services.hyperhermes.dashboards: hyperhermes/modules/dashboards/default.nix

@@ -274,6 +274,11 @@ pkgs.testers.runNixOSTest {
         r = extract("alice", "http://site.example/", "jp")
         assert "45.0.0.10" in r.get("content", ""), r
         assert "10.64.0.2 JP - site.example:80" in provider_log(), provider_log()
+        # with a task's session id (web_extract_residential passes one per
+        # task): a sticky exit, so parallel subagents keep separate IPs
+        r = extract("alice", "http://site.example/", "jp abc123def0")
+        assert "45.0.0.10" in r.get("content", ""), r
+        assert "10.64.0.2 JP abc123def0 site.example:80" in provider_log(), provider_log()
 
     with subtest("bad usernames are refused before the provider"):
         before = len(provider_log())

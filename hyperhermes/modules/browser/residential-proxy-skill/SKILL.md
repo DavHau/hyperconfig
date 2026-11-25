@@ -28,17 +28,24 @@ and it runs out. So:
 ## Tools
 
 - `web_extract_residential(urls, country?)`: `web_extract` through the
-  proxy (the same extraction, browser retry included). `country` is an
-  ISO two-letter code (`SG` default, `US`, `DE`, `JP`, ...).
+  proxy (the same extraction, browser retry included), on an exit IP of
+  this task's own. `country` is an ISO two-letter code (`SG` default,
+  `US`, `DE`, `JP`, ...).
 - `browser_residential(country)`: puts this task's browser onto the
   proxy, then `browser_navigate` as usual. It is a separate browser profile
-  per country: none of the usual cookies or logins go along. `browser_residential`
-  with `country: "off"` switches back; do that once the blocked page is
-  done.
-- Terminal: `curl -x "$RESIDENTIAL_PROXY_URL" -U sg: <url>` (the proxy
-  username is the country: `sg`, `us`, ...; `us-session-ab12cd34` keeps
-  the same exit IP for about 30 minutes; the password is ignored). Only
-  for APIs or files, never with a spoofed browser User-Agent.
+  of this task and country: none of the usual cookies or logins go along,
+  and it keeps one exit IP for the task. Subagents running in parallel each
+  get their own profile and exit IP; switching one off leaves the others.
+  `browser_residential` with `country: "off"` switches back; do that once
+  the blocked page is done.
+- Terminal: `curl -x "$RESIDENTIAL_PROXY_URL" -U sg-session-<id>: <url>`
+  (the proxy username is the country, `sg`, `us`, ...; with
+  `-session-<id>`, 6-10 letters/digits, the exit IP stays the same for
+  about 30 minutes; the password is ignored). Pick a random id per task
+  (`id=$(head -c5 /dev/urandom | od -An -tx1 | tr -d ' \n')`) and reuse it:
+  without one every connection may leave from another IP, and a subagent
+  reusing another's id shares its exit. Only for APIs or files, never with
+  a spoofed browser User-Agent.
 
 Pick the country the site expects: the site's own country for regional
 services, otherwise the default.
