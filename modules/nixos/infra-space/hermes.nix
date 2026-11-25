@@ -468,6 +468,12 @@ in
             # Background subagents of all sessions share this cap (default 10,
             # which the infra session's fan-outs hit); as on som's agents.
             delegation.max_concurrent_children = 20;
+            # Total subagents per one-shot run (hermes' default 2; interactive
+            # and gateway sessions are never charged): the nightly bump
+            # (./nixpkgs-bump.nix runs as this agent) needs the SearXNG
+            # review, an implementer, the change and the security review,
+            # plus a fresh reviewer after a rejection. Decisions D30/D37.
+            delegation.oneshot_max_children = 6;
           };
         };
 
@@ -485,6 +491,12 @@ in
             agent.disabled_toolsets = disabledToolsets ++ [ "skills" "camofox" ];
             checkpoints.enabled = false;
             delegation.max_concurrent_children = 4;
+            # The security jobs (./security-jobs.nix) are one-shot runs too:
+            # a separate triage-confirm subagent, an implementer and an
+            # independent reviewer per fix, a fresh one after a rejection
+            # (security-jobs/common.md, policy.md): hermes' default 2
+            # does not cover one rejected fix.
+            delegation.oneshot_max_children = 6;
           };
         };
       };
