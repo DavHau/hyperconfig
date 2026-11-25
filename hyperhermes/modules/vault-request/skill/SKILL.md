@@ -1,6 +1,6 @@
 ---
 name: vault-request
-description: "Use when a task needs a card, login or address the vault lacks. Send the user a one-time vault link, never ask in chat."
+description: "Use when a task needs a card, login or address the vault lacks, or the user asks where their stored logins are. One-time link; never in chat."
 ---
 
 # Asking the user for a missing vault item
@@ -52,8 +52,23 @@ themselves.
    user confirms that fill. Declined: stop and ask them, do not retry.
    `expired`, `cancelled` or `error`: ask whether to send a new link.
 
+## Where the user sees what the vault holds
+
+The user sees every item of your vault (label, kind, site, login name; a
+card's brand and last 4 digits), shows and copies a login's password and
+deletes items on their vault page, behind their usual sign-in. Get its
+address from `vault_request action=where` and give exactly that address.
+Tell the user about it when you
+created a login with a generated password (`browser_vault create_login`)
+and they may want to sign in themselves. If `where` returns no page, there
+is none on this host: say so, do not invent one.
+
 ## Never
 
+- Name a page, URL, menu or setting to the user that you have not seen
+  exist: from a tool result (`vault_request where`, a link `create`
+  returned) or by opening it yourself. If you are not sure where something
+  is, say so.
 - Ask for, accept, repeat or store a card number, CVC, password or address
   from chat. If the user pastes one, do not use it: say it is safer through
   the link and send one.

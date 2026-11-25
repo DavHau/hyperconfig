@@ -14,6 +14,12 @@ Who may do what (SO_PEERCRED, checked on every request, never the socket's mode)
     request, and the connecting process pinned with a pidfd so a recycled pid cannot pass. A
     terminal command, a script, a kernel, a cron worker is another process and is refused.
   - no operation returns the key or exports the store.
+  - owner_list, owner_reveal, owner_remove (the owner's vault page, ../vault-request/owner.py):
+    only the main process of BROKER_OWNER_UNIT (a unit of its own with a dynamic uid, behind the
+    front door's sign-in), checked and pinned like a fill. Never any process of the agent. The
+    list shows metadata and a card's brand and last 4 only; a reveal gives a login's name and
+    password, nothing of a card or address; every reveal and remove is an audit line in this
+    unit's journal (ids, never a value), and reveals are capped per hour.
 
 `home` names whose vault: the agent's home (BROKER_AGENT_HOME), one of its profiles/<name>, or
 another home of the account (kept apart, at most MAX_HOMES). The store per home is hermes' own
@@ -45,9 +51,11 @@ AGENT = os.environ["BROKER_AGENT"]
 AGENT_UID = int(os.environ["BROKER_AGENT_UID"])
 AGENT_HOME = os.path.normpath(os.environ["BROKER_AGENT_HOME"])
 FILL_UNITS = [u for u in os.environ.get("BROKER_FILL_UNITS", "").split() if u]
+OWNER_UNIT = os.environ.get("BROKER_OWNER_UNIT", "").strip()
 SYSTEMCTL = os.environ.get("BROKER_SYSTEMCTL", "systemctl")
 LIMITS = {"login": int(os.environ.get("BROKER_LOGIN_RESOLVES_PER_HOUR", "60")),
-          "card": int(os.environ.get("BROKER_CARD_RESOLVES_PER_HOUR", "30"))}
+          "card": int(os.environ.get("BROKER_CARD_RESOLVES_PER_HOUR", "30")),
+          "owner": int(os.environ.get("BROKER_OWNER_REVEALS_PER_HOUR", "30"))}
 MAX_REQUEST = 64 * 1024
 MAX_IMPORT = 8 * 1024 * 1024  # root's migration request
 MAX_SECRET = 8 * 1024
@@ -63,6 +71,9 @@ PROFILE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 os.environ["HERMES_HOME"] = str(STATE / "config-home")
 
 from agent.vault_store import VaultError, VaultStore  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import vault_items  # noqa: E402
 
 
 class Refused(Exception):
@@ -120,38 +131,45 @@ def pidfd_pid(fd: int) -> int:
     return -1
 
 
-def filling_unit(conn: socket.socket, pid: int) -> str:
-    """The unit whose main process this peer is, or Refused. Pinned by a pidfd taken from the
-    connection: the pid is compared with systemd's MainPID, then the pidfd must still name that
-    pid (the connecting process is alive, so the pid was not recycled in between)."""
+def main_process_of(conn: socket.socket, pid: int, units: list[str], refusal: str) -> str:
+    """The unit (of `units`) whose main process this peer is, or Refused(refusal). Pinned by a
+    pidfd taken from the connection: the pid is compared with systemd's MainPID, then the pidfd
+    must still name that pid (the connecting process is alive, so the pid was not recycled in
+    between)."""
     try:
         pidfd = struct.unpack("i", conn.getsockopt(socket.SOL_SOCKET, SO_PEERPIDFD, 4))[0]
     except OSError:
         raise Refused("this kernel gives no peer pidfd; values are not handed out") from None
     try:
-        units = [f"hermes-agent-{AGENT}.service", f"hermes-dashboard-{AGENT}.service", *FILL_UNITS]
-        unit = next((u for u in units if pid > 0 and main_pid(u) == pid), None)
+        unit = next((u for u in units if u and pid > 0 and main_pid(u) == pid), None)
         if unit is None or pidfd_pid(pidfd) != pid:
-            raise Refused("values go only to the agent's gateway or dashboard process, for a fill; "
-                          "not to a terminal command, a script or a worker")
+            raise Refused(refusal)
         return unit
     finally:
         os.close(pidfd)
 
 
+def filling_unit(conn: socket.socket, pid: int) -> str:
+    return main_process_of(
+        conn, pid, [f"hermes-agent-{AGENT}.service", f"hermes-dashboard-{AGENT}.service", *FILL_UNITS],
+        "values go only to the agent's gateway or dashboard process, for a fill; "
+        "not to a terminal command, a script or a worker")
+
+
 _rate_lock = threading.Lock()
-_resolves: dict[str, collections.deque] = {"login": collections.deque(), "card": collections.deque()}
+_resolves: dict[str, collections.deque] = {g: collections.deque() for g in LIMITS}
 
 
-def take_resolve(kind: str) -> None:
-    group = "login" if kind == "login" else "card"
+def take_resolve(kind: str, group: str | None = None) -> None:
+    group = group or ("login" if kind == "login" else "card")
     now = time.monotonic()
     with _rate_lock:
         q = _resolves[group]
         while q and now - q[0] > 3600:
             q.popleft()
         if len(q) >= LIMITS[group]:
-            raise Refused(f"too many {group} fills this hour ({LIMITS[group]}); try again later")
+            what = "password reveals" if group == "owner" else f"{group} fills"
+            raise Refused(f"too many {what} this hour ({LIMITS[group]}); try again later")
         q.append(now)
 
 
@@ -177,11 +195,82 @@ def import_items(key: str, store: VaultStore, items: object) -> list[str]:
     return held
 
 
+def owner_store(key: object) -> tuple[str, VaultStore]:
+    """An existing store by its key (`home`, `profiles/<p>`, `other/<digest>`); never makes one."""
+    key = str(key or "")
+    if not vault_items.STORE_RE.match(key) or key not in vault_items.store_keys(STATE):
+        raise Refused("no such vault")
+    return key, VaultStore(base_dir=STATE / key / "vault", direct=True)
+
+
+def owner_record(store: VaultStore, item_id: str) -> dict:
+    with store._locked():
+        rec = next((r for r in store._read_all() if r.get("id") == item_id), None)
+    if rec is None:
+        raise Refused(f"no vault item with id {item_id!r}")
+    return rec
+
+
+def handle_owner(conn: socket.socket, req: dict, pid: int) -> object:
+    """The owner page's operations (the header). The peer is checked before anything is read."""
+    op = req["op"]
+    main_process_of(conn, pid, [OWNER_UNIT], "only the owner's vault page may do this")
+    account = str(req.get("account") or "")
+    if not vault_items.ACCOUNT_RE.match(account):
+        raise Refused("the owner's account is missing")
+    if op == "owner_list":
+        out = []
+        for key in vault_items.store_keys(STATE):
+            store = VaultStore(base_dir=STATE / key / "vault", direct=True)
+            entry = {"store": key, "title": vault_items.store_title(key), "items": []}
+            try:
+                with store._locked():
+                    records = store._read_all()
+            except VaultError:  # one broken store hides no other
+                log(f"owner-list store={key}: could not be read", 4)
+                out.append(entry | {"error": "could not be read"})
+                continue
+            for r in records:
+                meta = VaultStore._meta(r)
+                entry["items"].append(vault_items.owner_view(
+                    meta.to_dict() | {"identifier_type": meta.identifier_type}, r))
+            out.append(entry)
+        return out
+    key, store = owner_store(req.get("store"))
+    item_id = str(req.get("item_id", ""))
+    rec = owner_record(store, item_id)
+    kind = str(rec.get("kind", ""))
+    if op == "owner_reveal":
+        if kind != "login":
+            raise Refused("only a login's password can be shown; a card shows its last 4 digits only")
+        take_resolve(kind, "owner")
+        log(vault_items.audit_line("reveal", item_id, kind, key, account, "page"), 5)
+        meta = VaultStore._meta(rec)
+        return {"id": item_id, "label": meta.label, "origin": meta.origin, "identifier": meta.identifier,
+                "identifier_type": meta.identifier_type,
+                "password": str((rec.get("secret") or {}).get("password") or "")}
+    # owner_remove
+    removed = store.remove_item(item_id)
+    log(vault_items.audit_line("delete", item_id, kind, key, account, "page") + f" removed={removed}", 5)
+    return removed
+
+
 def handle(conn: socket.socket, req: dict, pid: int, uid: int) -> object:
     op = req.get("op")
     if uid == 0 and op == "import":
         key, store = store_for(str(req.get("home") or ""))
         return import_items(key, store, req.get("items"))
+    if op in ("owner_list", "owner_reveal", "owner_remove"):
+        try:
+            if not OWNER_UNIT or uid in (AGENT_UID, 0):
+                raise Refused("only the owner's vault page may do this")
+            return handle_owner(conn, req, pid)
+        except Refused as e:
+            global _owner_refusal_logged
+            if str(e).startswith("only the owner's") and time.monotonic() - _owner_refusal_logged > 10:
+                _owner_refusal_logged = time.monotonic()  # at most one line per 10 s
+                log(f"REFUSED {op} uid={uid} pid={pid} (not the owner's vault page)", 4)
+            raise
     if uid != AGENT_UID:
         raise Refused("this vault belongs to another account")
     key, store = store_for(str(req.get("home") or ""))
@@ -200,12 +289,12 @@ def handle(conn: socket.socket, req: dict, pid: int, uid: int) -> object:
             raise Refused(f"the vault holds {MAX_ITEMS} items; remove some first")
         meta = store.add_item(str(req.get("kind", "")), str(req.get("label", "")), secret,
                               origin=req.get("origin") or None)
-        log(f"add {meta.id} kind={meta.kind} label={meta.label!r} home={key} pid={pid}")
+        log(f"add {meta.id} kind={meta.kind} label={vault_items.safe(meta.label)} home={key} pid={pid}")
         return meta.to_dict() | {"identifier_type": meta.identifier_type}
     if op == "remove_item":
         item_id = str(req.get("item_id", ""))
         removed = store.remove_item(item_id)
-        log(f"remove {item_id} home={key} pid={pid} removed={removed}")
+        log(f"remove {vault_items.safe(item_id)} home={key} pid={pid} removed={removed}")
         return removed
     if op == "resolve_secret":
         item_id = str(req.get("item_id", ""))
@@ -215,13 +304,13 @@ def handle(conn: socket.socket, req: dict, pid: int, uid: int) -> object:
             global _refusal_logged
             if time.monotonic() - _refusal_logged > 10:  # at most one line per 10 s
                 _refusal_logged = time.monotonic()
-                log(f"REFUSED resolve {item_id} home={key} pid={pid} (not the gateway or dashboard)", 4)
+                log(f"REFUSED resolve {vault_items.safe(item_id)} home={key} pid={pid} (not the gateway or dashboard)", 4)
             raise
         meta = store.get_meta(item_id)
         if meta is None:
             raise Refused(f"no vault item with id {item_id!r}")
         take_resolve(meta.kind)
-        log(f"resolve {item_id} kind={meta.kind} label={meta.label!r} home={key} unit={unit}")
+        log(f"resolve {vault_items.safe(item_id)} kind={vault_items.safe(meta.kind)} label={vault_items.safe(meta.label)} home={key} unit={unit}")
         return store.resolve_secret(item_id)
     raise Refused("unknown operation")
 
@@ -229,6 +318,7 @@ def handle(conn: socket.socket, req: dict, pid: int, uid: int) -> object:
 _per_pid: collections.Counter = collections.Counter()
 _per_pid_lock = threading.Lock()
 _refusal_logged = 0.0
+_owner_refusal_logged = 0.0
 
 
 def serve_one(conn: socket.socket, slots: threading.Semaphore) -> None:

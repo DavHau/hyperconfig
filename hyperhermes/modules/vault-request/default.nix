@@ -36,7 +36,12 @@
 #     dashboard's members reach it: hermes checks the token's audience
 #     (hermes-<agent>) and the group (hermes-<agent>), and its __Host-
 #     cookies reach no other agent's host.
-#   - the `vault-request` skill: when to send a link and what to say.
+#   - the `vault-request` skill: when to send a link and what to say, and
+#     where the owner sees what is stored (https://<dashboard>/vault, a
+#     redirect to the owner's vault page, ./owner.nix).
+#   - the owner's vault page (./owner.nix): every item listed, a login's
+#     password on an explicit click, delete; on the front door, served by a
+#     uid of its own, never by the agent's.
 #
 # Card data at rest: the agent's vault broker (../core/vault-broker.nix),
 # out of the agent's uid's reach; the page (another process of that uid)
@@ -94,6 +99,9 @@ let
   active = dashboards.enable && enabled != { };
 in
 {
+  # The owner's vault page, https://<front door>/vault/<agent>/ (./owner.nix).
+  imports = [ ./owner.nix ];
+
   options.services.hyperhermes.agents = lib.mkOption {
     type = lib.types.attrsOf (
       lib.types.submodule (

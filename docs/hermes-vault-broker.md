@@ -141,6 +141,63 @@ Residual, by design:
   vault (it left HERMES_HOME); a renamed profile loses access to its items
   (they stay in the broker under the old name).
 
+## The owner's view: page and root CLI
+
+The agent can't read its vault, so before this its owner couldn't either,
+short of a terminal on the host. Two ways in now:
+
+- **Owner vault page** (hyperhermes `modules/vault-request/owner.nix`,
+  `owner.py`): `https://<front door>/vault/<agent>/`;
+  `https://<dashboard>/vault` (and `/vault/`) answers 302 there, and the
+  agents give that address (`vault_request action=where`, the
+  vault-request skill). It lists every item of every home of the agent
+  (label, kind, site, login name, created; a card's brand and last 4 only),
+  reveals a login's name and password on an explicit POST (in that
+  response only, no-store, with a copy button) and deletes items after a
+  confirmation.
+  - Why the front door and not the dashboard's host: the dashboard is the
+    agent's own process, and its `/api/auth/me` (the request page's auth
+    subrequest) is answered by code the agent controls. A page that hands
+    out passwords trusts only the front door's oauth2-proxy (root:nginx
+    socket, `__Host-hermes` cookie never sent to an agent host); nginx
+    passes the vouched account in `X-Hermes-Account` (always overwritten),
+    and the page admits only `sso.accounts.<agent>`.
+  - Isolation from the agent: the page runs as `hermes-vault-owner-<a>`,
+    a `DynamicUser` (never the agent's uid), socket root:nginx 0660. The
+    broker answers `owner_list`/`owner_reveal`/`owner_remove` only for
+    that unit's MainPID (`BROKER_OWNER_UNIT`, pinned by SO_PEERPIDFD as
+    fills are), refuses them outright for the agent's uid and root, and
+    never returns a card number, CVC, expiry or address field through them.
+  - Audit: every reveal and delete is one line in the broker's journal
+    (`owner-reveal|owner-delete <id> kind= store= account= via=page`, no
+    value; `journalctl -u hermes-vault-<agent> | grep '^owner-'`). Every
+    agent-chosen field the broker logs is reduced to `[A-Za-z0-9._@+/-]`,
+    so a label can't forge such a line; the agent can't delete lines, but
+    can flood the journal into rotation (retention isn't guaranteed).
+    Refused owner ops are logged (`REFUSED owner_*`, uid, pid). Reveals:
+    30 an hour per agent.
+  - CSRF: Fetch Metadata gate at nginx, the page's own same-origin check,
+    an HMAC form token per account (2 h). Values never in a URL or log;
+    nginx buffers the response in memory (`proxy_max_temp_file_size 0`).
+  - Hosts without a front door get no page; `where` then says there is
+    none, and the agent must not name one.
+- **Root CLI** `hermes-vault <agent> [--profile P] list|show <label-or-id>`
+  (`modules/core/vault-cli.py`, on every host with a broker): hermes'
+  `VaultStore(direct=True)` on the broker's store with the broker's
+  python, root only. `show` prints a login's name and password, of a card
+  its brand and last 4; a login's `show` writes the same audit line
+  (`via=cli`, `journalctl -t hermes-vault-<agent> _UID=0`: any uid can log
+  under a tag, so trust the kernel's `_UID`; the page's lines are
+  `journalctl -u hermes-vault-<agent>`). It never creates a file in the
+  store (a missing store lists as empty), drops root's `HERMES_*` variables,
+  and prints agent-written fields without control bytes.
+
+Deploying a broker change restarts only the broker
+(`stopIfChanged = false`): stopped and started, the switch would also stop
+its socket and every unit requiring it (the agent's gateway and
+dashboard). A change to the agents' environment (this one adds
+`HERMES_VAULT_OWNER_PAGE`) still restarts every gateway and dashboard.
+
 ## Review
 
 Implementation security review: request changes, then fixed: the agent

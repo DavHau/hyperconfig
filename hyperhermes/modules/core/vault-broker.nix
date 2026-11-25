@@ -32,6 +32,15 @@
 #     /root/hermes-vault-backup/<agent>/ (0600), merged into the broker
 #     (ids kept), and removed once the broker holds every id; anything
 #     doubtful stays where it was.
+#   - `hermes-vault <agent> [--profile P] list|show <label-or-id>`
+#     (./vault-cli.py), root only: the items of a vault, read from the
+#     broker's store with the broker's code; `show` prints a login's name
+#     and password, of a card its brand and last 4 digits only, and writes
+#     the owner page's audit line (journalctl -t hermes-vault-<agent>
+#     _UID=0).
+#   - the owner's vault page (../vault-request/owner.nix) gets owner_list,
+#     owner_reveal, owner_remove from the broker, for its own unit's main
+#     process only (BROKER_OWNER_UNIT), never for the agent's uid.
 #   - LimitCORE=0 on the gateway and dashboard units: systemd-coredump gives
 #     the owner a read ACL on its processes' cores, and the agent could
 #     SIGSEGV its own gateway right after a fill.
@@ -54,6 +63,23 @@ let
   # the agent units' HERMES_HOME (./agent-config.nix, runtime)
   homeOf = user: config.systemd.services."hermes-agent-${user}".environment.HERMES_HOME;
   python = "${cfg.package.hermesVenv}/bin/python3";
+  src = lib.fileset.toSource {
+    root = ./.;
+    fileset = lib.fileset.unions [
+      ./vault-broker.py
+      ./vault_items.py
+      ./vault-cli.py
+    ];
+  };
+  # Root's look into an agent's vault (./vault-cli.py): the broker's own
+  # store read with the broker's python, audited like the owner page.
+  cli = pkgs.writeShellScriptBin "hermes-vault" ''
+    if [ "$(${pkgs.coreutils}/bin/id -u)" != 0 ]; then
+      echo "hermes-vault: root only" >&2
+      exit 77
+    fi
+    exec ${python} ${src}/vault-cli.py "$@"
+  '';
   agentUnits = user: [
     "hermes-agent-${user}"
     "hermes-dashboard-${user}"
@@ -91,6 +117,8 @@ in
   };
 
   config = lib.mkIf (cfg.agents != { }) {
+    environment.systemPackages = lib.optional (enabled != { }) cli;
+
     systemd.tmpfiles.rules = [
       "d /run/hermes-vault 0755 root root - -"
     ]
@@ -123,6 +151,11 @@ in
         "hermes-vault-${user}" = {
           description = "Vault broker of ${user}";
           requires = [ "hermes-vault-${user}.socket" ];
+          # A changed broker is restarted alone at a switch. Stopped and
+          # started (the default), the switch would stop its socket too, and
+          # with it every unit that requires the socket: the agent's gateway
+          # and dashboard.
+          stopIfChanged = false;
           environment = {
             BROKER_AGENT = user;
             BROKER_AGENT_UID = toString a.uid;
@@ -133,7 +166,12 @@ in
             PYTHONUNBUFFERED = "1";
           };
           serviceConfig = {
-            ExecStart = "${python} ${./vault-broker.py}";
+            ExecStart = "${python} ${src}/vault-broker.py";
+            # the audit lines of the owner page (journalctl -u
+            # hermes-vault-<agent>) and of root's hermes-vault CLI
+            # (journalctl -t hermes-vault-<agent> _UID=0: any uid may log
+            # under a tag, the _UID field is the kernel's)
+            SyslogIdentifier = "hermes-vault-${user}";
             DynamicUser = true;
             StateDirectory = "hermes-vault/${user}";
             StateDirectoryMode = "0700";

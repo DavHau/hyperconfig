@@ -10,6 +10,7 @@ is plain text.
 from __future__ import annotations
 
 import json
+import os
 import time
 
 from . import common
@@ -25,14 +26,17 @@ SCHEMA = {
         "checkout needs a card and the vault has none). Actions: create (kind, label, origin for a login, reason) "
         "returns a one-time link valid 30 minutes: send it to the user with one sentence of what it is "
         "for and wait; wait (request_id) blocks until the user saved it (up to timeout_seconds) and "
-        "returns the item's handle for browser_vault fill; status (request_id); cancel (request_id). "
+        "returns the item's handle for browser_vault fill; status (request_id); cancel (request_id); "
+        "where: the page where the user sees, copies and deletes what your vault holds (e.g. a login you "
+        "created with a generated password); give the user that exact address, never one you have not "
+        "got from this tool. "
         "Never ask for or accept card numbers, CVCs or passwords in chat: if the user pastes one, tell "
         "them to use the link instead."
     ),
     "parameters": {
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["create", "wait", "status", "cancel"]},
+            "action": {"type": "string", "enum": ["create", "wait", "status", "cancel", "where"]},
             "kind": {"type": "string", "enum": list(common.KINDS),
                      "description": "create: payment (a card), login (site account) or address."},
             "label": {"type": "string",
@@ -109,10 +113,24 @@ def _cancel(rid: str) -> str:
     return _ok(**common.public_view(req))
 
 
+def _where() -> str:
+    page = os.environ.get("HERMES_VAULT_OWNER_PAGE", "").strip()
+    if page:
+        return _ok(owner_page=page, next=(
+            "Tell the user: at this address (signed in as usual) they see every item of your vault, can "
+            "show and copy a login's password and delete items; cards show only their last 4 digits. "
+            "Give exactly this address."))
+    return _ok(owner_page=None, next=(
+        "This host has no vault page for the user. Say so; do not name or guess a page, menu or command. "
+        "The host's administrator can look items up."))
+
+
 def handle(args: dict, **_kwargs) -> str:
     action = str(args.get("action") or "")
     rid = str(args.get("request_id") or "").strip().lower()
     try:
+        if action == "where":
+            return _where()
         if action == "create":
             return _create(args)
         if action in ("wait", "status", "cancel") and not common.ID_RE.match(rid):
@@ -128,7 +146,7 @@ def handle(args: dict, **_kwargs) -> str:
         return _fail(str(exc))
     except (TypeError, ValueError) as exc:
         return _fail(f"invalid argument: {exc}")
-    return _fail("action must be create, wait, status or cancel")
+    return _fail("action must be create, wait, status, cancel or where")
 
 
 def _available() -> bool:

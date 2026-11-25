@@ -19,7 +19,23 @@
 #    and stays outside the page; signed in to his own dashboard, alice's
 #    link on his host finds no request (requests are per agent), and his
 #    session replayed at alice's host is refused there;
-#  - an expired, a cancelled request; bob's own page socket is not alice's.
+#  - an expired, a cancelled request; bob's own page socket is not alice's;
+#  - the owner's vault page (modules/vault-request/owner.nix) on the front
+#    door: alice's dashboard's /vault sends the browser there; without a
+#    session it goes to the front door's sign-in; bob (signed in, not an
+#    owner of alice's agent) gets 403; alice sees the card as brand and last
+#    4 only and a login her agent made, reveals its password (no-store,
+#    that response only), cannot reveal the card, and deletes the login
+#    after a confirmation; cross-site and same-site posts and a wrong form
+#    token are refused; every reveal and delete is in the broker's journal,
+#    without a value;
+#  - alice's uid gets nothing through the new path: the broker refuses the
+#    owner operations to her (and to root), she cannot reach the page's
+#    socket; the agent's vault_request `where` names the page;
+#  - root's `hermes-vault` CLI lists (card: last 4) and shows a login,
+#    audited the same way; alice cannot run it;
+#  - no password or card number in nginx's logs, the journal or nginx's
+#    temp files.
 {
   pkgs,
   self,
@@ -36,6 +52,8 @@ let
     ps.requests
   ]);
   origin = agent: "http://${agent}.${domain}:${toString port}";
+  frontDoor = "front.localhost";
+  front = "http://${frontDoor}:${toString port}";
   aliceHome = "${hlib.stateDir "alice"}/.hermes";
   # The tool as alice's agent runs it (the environment its managed .env
   # sets), from the link in its plugins/.
@@ -43,6 +61,7 @@ let
     exec runuser -u alice -- env HERMES_HOME=${aliceHome} \
       HERMES_VAULT_REQUEST_DIR=${hlib.stateDir "alice"}/vault-requests \
       HERMES_VAULT_REQUEST_URL=${origin "alice"} \
+      HERMES_VAULT_OWNER_PAGE=${origin "alice"}/vault \
       ${hermesPackage.hermesVenv}/bin/python3 ${./tool.py} ${aliceHome}/plugins/vault-request "$1"
   '';
 in
@@ -73,9 +92,13 @@ pkgs.testers.runNixOSTest {
           alice = "alice";
           bob = "bob";
         };
-        clients = lib.genAttrs [ "hermes-alice" "hermes-bob" ] (id: {
+        clients = lib.genAttrs [ "hermes" "hermes-alice" "hermes-bob" ] (id: {
           secretFile = "${secrets}/${id}";
         });
+        frontDoor = {
+          host = frontDoor;
+          cookieSecretFile = "${secrets}/front-door-cookie";
+        };
         dex.users = lib.genAttrs [ "alice" "bob" ] (account: {
           passwordHashFile = "${secrets}/${account}.hash";
         });
@@ -89,17 +112,22 @@ pkgs.testers.runNixOSTest {
           wantedBy = [ "multi-user.target" ];
           before = [
             "dex.service"
+            "oauth2-proxy.service"
             "hermes-agent-alice.service"
             "hermes-agent-bob.service"
           ];
-          requiredBy = [ "dex.service" ];
+          requiredBy = [
+            "dex.service"
+            "oauth2-proxy.service"
+          ];
           serviceConfig = {
             Type = "oneshot";
             RemainAfterExit = true;
           };
           script = ''
             install -d -m 700 ${secrets}
-            for id in hermes-alice hermes-bob; do
+            echo -n 0123456789abcdef0123456789abcdef > ${secrets}/front-door-cookie
+            for id in hermes hermes-alice hermes-bob; do
               echo -n "client-secret-$id" > ${secrets}/$id
             done
             for user in alice bob; do
@@ -132,6 +160,19 @@ pkgs.testers.runNixOSTest {
 
     def tool(arg):
         return json.loads(machine.succeed(f"${tool} {shlex.quote(arg)}").strip().splitlines()[-1])
+
+    def owner(agent, account, mode, *extra):
+        out = machine.succeed(
+            f"${python}/bin/python3 ${./owner.py} ${front} http://{agent}.${domain}:${toString port} "
+            f"{agent} {account}@${domain} {account}-password {mode} {' '.join(extra)}"
+        )
+        print(out)
+        return json.loads(out.strip().splitlines()[-1])
+
+    def raw(user, request):
+        out = machine.succeed(f"runuser -u {user} -- ${hermesPackage.hermesVenv}/bin/python3 ${./tool.py} "
+                              f"/run/hermes-vault/alice.sock --raw={shlex.quote(json.dumps(request))}")
+        return json.loads(out.strip().splitlines()[-1])
 
     def call(args):
         out = tool(json.dumps(args))
@@ -218,6 +259,91 @@ pkgs.testers.runNixOSTest {
         assert call({"action": "status", "request_id": late["request_id"]})["state"] == "expired"
         code = machine.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' --unix-socket /run/hermes-vault-request/alice.sock http://x/vault/{late['request_id']}")
         assert code == "410", code
+
+    login_id = tool("--add-login")["id"]
+    password = "Gen3rated-Pa55word-x9"
+
+    with subtest("the agent learns the owner page's address, and gets nothing through its path"):
+        where = call({"action": "where"})
+        assert where["owner_page"] == "${origin "alice"}/vault", where
+        # a host without the page: the tool names none
+        none = json.loads(machine.succeed(
+            "runuser -u alice -- env HERMES_HOME=${aliceHome} ${hermesPackage.hermesVenv}/bin/python3 ${./tool.py} "
+            f"${aliceHome}/plugins/vault-request {shlex.quote(json.dumps({'action': 'where'}))}").strip().splitlines()[-1])
+        assert none["owner_page"] is None and "do not name or guess" in none["next"], none
+        assert "HERMES_VAULT_OWNER_PAGE=${origin "alice"}/vault" in env, env
+        for op in ("owner_list", "owner_reveal", "owner_remove"):
+            req = {"op": op, "account": "alice", "store": "home", "item_id": login_id}
+            for user in ("alice", "root"):
+                out = raw(user, req) if user == "alice" else json.loads(machine.succeed(
+                    f"${hermesPackage.hermesVenv}/bin/python3 ${./tool.py} /run/hermes-vault/alice.sock "
+                    f"--raw={shlex.quote(json.dumps(req))}").strip().splitlines()[-1])
+                assert out == {"ok": False, "error": "only the owner's vault page may do this"}, (user, op, out)
+        # the login is still there: the remove above was refused
+        assert login_id in [i["id"] for i in tool("--vault")]
+        machine.succeed("stat -c '%U %G %a' /run/hermes-vault-owner/alice.sock | grep -qx 'root nginx 660'")
+        machine.fail("runuser -u alice -- curl -s --unix-socket /run/hermes-vault-owner/alice.sock http://x/vault/alice/")
+        # the page runs under a uid of its own
+        machine.succeed("systemctl start hermes-vault-owner-alice.socket")
+        machine.succeed("curl -s -H 'X-Hermes-Account: alice' --unix-socket /run/hermes-vault-owner/alice.sock http://x/vault/alice/ >/dev/null")
+        pid = machine.succeed("systemctl show -P MainPID hermes-vault-owner-alice").strip()
+        uid = machine.succeed(f"stat -c %u /proc/{pid}").strip()
+        assert uid not in ("0", machine.succeed("id -u alice").strip(), machine.succeed("id -u bob").strip()), uid
+        assert "REFUSED" not in machine.succeed("journalctl -u hermes-vault-alice -o cat | grep owner- || true")
+
+    with subtest("root's hermes-vault lists and shows, audited; alice cannot run it"):
+        listed = machine.succeed("hermes-vault alice list")
+        print(listed)
+        assert "Visa ****1111" in listed and "4111111111111111" not in listed and "alice@shop.example.com" in listed, listed
+        assert password not in listed
+        shown = machine.succeed("hermes-vault alice show 'Shop account'")
+        assert f"password: {password}" in shown and "alice@shop.example.com" in shown, shown
+        card = machine.succeed("hermes-vault alice show 'Test card'")
+        assert "Visa ****1111" in card and "4111111111111111" not in card, card
+        machine.wait_until_succeeds(f"journalctl -t hermes-vault-alice _UID=0 -o cat | grep -q 'owner-reveal {login_id} kind=login store=home account=root via=cli'")
+        # a card's show prints nothing secret: no audit line
+        assert "owner-reveal" not in machine.succeed("journalctl -t hermes-vault-alice -o cat | grep kind=payment || true")
+        machine.fail("runuser -u alice -- hermes-vault alice list")
+        machine.fail("hermes-vault alice --profile Bad.Name list")
+        assert "no items in profile nope" in machine.succeed("hermes-vault alice --profile nope list")
+        # an agent-chosen label reaches neither root's terminal as an escape sequence nor the
+        # journal as a forged audit line
+        evil = raw("alice", {"op": "add_item", "home": "${aliceHome}", "kind": "login", "secret": {"password": "x", "identifier_type": "username", "identifier": "\x1b[2Jroot"}, "origin": "https://evil.example.com",
+                             "label": "\x1b]52;c;ZWNobyBwd24K\x07Evil\nowner-reveal vault_0 kind=login store=home account=dave via=page"})
+        assert evil["ok"], evil
+        # a lone surrogate would crash the listing (and blank the owner's page)
+        evil2 = raw("alice", {"op": "add_item", "home": "${aliceHome}", "kind": "login", "origin": "https://evil.example.com",
+                              "secret": {"password": "y", "identifier_type": "username", "identifier": "e"}, "label": "Evil2 \ud800\u202e"})
+        assert evil2["ok"], evil2
+        for cmd, code, want in (("list", 0, "Evil2"), ("show ZWNobyBwd24K", 0, "password: x"), ("show vil", 2, "Evil2")):
+            machine.succeed(f"rc=0; hermes-vault alice {cmd} > /tmp/o 2>&1 || rc=$?; test $rc = {code}")
+            text = machine.succeed("cat /tmp/o")
+            assert want in text, (cmd, text)
+            od = machine.succeed("od -An -c /tmp/o")
+            assert "033" not in od and "007" not in od and "342 200 256" not in od, (cmd, od)
+        for e in (evil, evil2):
+            assert raw("alice", {"op": "remove_item", "home": "${aliceHome}", "item_id": e["result"]["id"]})["result"] is True
+        assert "owner-reveal vault_0" not in machine.succeed("journalctl -u hermes-vault-alice -o cat | grep '^owner-' || true")
+        # the agent's refused owner ops above left a trace
+        machine.succeed(f"journalctl -u hermes-vault-alice -o cat | grep -q 'REFUSED owner_list uid={machine.succeed('id -u alice').strip()}'")
+        # it left no root-owned file in the broker's store
+        assert machine.succeed("find /var/lib/private/hermes-vault/alice -user root").strip() == ""
+
+    with subtest("the owner's vault page"):
+        owner("alice", "alice", "anonymous")
+        owner("alice", "bob", "outsider", login_id)
+        owner("alice", "alice", "owner", login_id)
+        journal = machine.succeed("journalctl -u hermes-vault-alice -o cat")
+        assert f"owner-reveal {login_id} kind=login store=home account=alice via=page" in journal, journal
+        assert f"owner-delete {login_id} kind=login store=home account=alice via=page removed=True" in journal, journal
+        assert login_id not in [i["id"] for i in tool("--vault")]
+        assert [i["label"] for i in tool("--vault")] == ["Test card"]
+
+    with subtest("no value in the logs"):
+        machine.succeed("journalctl -o cat > /tmp/journal")
+        for value in (password, "4111111111111111"):
+            machine.fail(f"grep -qF {value} /tmp/journal")
+            machine.fail(f"grep -rqF {value} /var/log/nginx /var/cache/nginx")
 
     with subtest("only nginx (and root) can connect to the page sockets"):
         machine.fail("runuser -u bob -- curl -s --unix-socket /run/hermes-vault-request/alice.sock http://x/")

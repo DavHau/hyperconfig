@@ -20,6 +20,12 @@
 #  - her gateway's main process gets the values (the card number matches);
 #    a child of it does not;
 #  - bob's uid is refused by alice's broker;
+#  - the owner operations (the owner's vault page, owner_*): only the main
+#    process of the unit the broker names (a stand-in, ./owner.py, a
+#    dynamic user as the real page) lists (a card as brand and last 4) and
+#    reveals a login's name and password, never a card; a child of it,
+#    alice's uid and root are refused; every reveal is audited without a
+#    value;
 #  - the gateway (and dashboard) units run with no core dumps.
 { pkgs, self }:
 let
@@ -59,6 +65,17 @@ pkgs.testers.runNixOSTest {
             ExecStart = lib.mkForce "${config.services.hyperhermes.package.hermesVenv}/bin/python3 ${./gateway.py}";
             Restart = lib.mkForce "no";
           };
+        };
+        # The owner page's stand-in (./owner.py), started by the test.
+        hermes-vault-alice.environment = {
+          BROKER_OWNER_UNIT = "vault-owner-standin.service";
+          # the stand-in reveals the home's login, then the finance profile's (none), then the
+          # login twice more: the third reveal is over the cap
+          BROKER_OWNER_REVEALS_PER_HOUR = "2";
+        };
+        vault-owner-standin.serviceConfig = {
+          ExecStart = "${pkgs.python3}/bin/python3 ${./owner.py}";
+          DynamicUser = true;
         };
         hermes-agent-bob.serviceConfig = {
           Type = lib.mkForce "oneshot";
@@ -122,7 +139,9 @@ pkgs.testers.runNixOSTest {
           machine.succeed("runuser -u alice -- ln ${aliceHome}/profiles/hardlink/vault/vault.json.enc ${aliceHome}/profiles/hardlink/copy")
           machine.succeed("runuser -u alice -- sh -c 'rm ${aliceHome}/profiles/fifo/vault/.vault.lock && mkfifo ${aliceHome}/profiles/fifo/vault/.vault.lock'")
           machine.succeed("systemd-run --unit=alice-holds-lock -p User=alice ${pkgs.util-linux}/bin/flock -x ${aliceHome}/profiles/held/vault/.vault.lock ${pkgs.coreutils}/bin/sleep 600")
-          machine.wait_until_succeeds("${pkgs.util-linux}/bin/lslocks | grep -q flock", timeout=30)
+          # Not `lslocks | grep -q`: the container lists the host's locks too, grep -q exits at the
+          # first match and lslocks' SIGPIPE fails the pipeline.
+          machine.wait_until_succeeds("${pkgs.util-linux}/bin/lslocks -n -o COMMAND,PATH > /tmp/locks && grep -q '^flock .*held/vault/.vault.lock$' /tmp/locks", timeout=30)
           machine.succeed("timeout 90 systemctl start hermes-agent-alice")
           machine.wait_for_unit("hermes-agent-alice.service")
           print(machine.succeed("journalctl -u hermes-vault-migrate-alice -o cat"))
@@ -194,7 +213,7 @@ pkgs.testers.runNixOSTest {
           out = fill(f"child:{card}", "${aliceHome}")
           assert out.startswith("child ") and "values go only to the agent's gateway" in out, out
           journal = machine.succeed("journalctl -u hermes-vault-alice -o cat")
-          assert f"resolve {card} kind=payment label='Nomad card' home=home unit=hermes-agent-alice.service" in journal, journal
+          assert f"resolve {card} kind=payment label=Nomad?card home=home unit=hermes-agent-alice.service" in journal, journal
           assert "4111111111111111" not in machine.succeed("journalctl -o cat")
 
       with subtest("quotas and deadlines: an oversized legacy record is not imported, a slow client is cut off"):
@@ -217,6 +236,41 @@ pkgs.testers.runNixOSTest {
           out = agent("bob", "raw", "/run/hermes-vault/alice.sock",
                       json.dumps({"op": "list_items", "home": "${aliceHome}"}))
           assert out == {"ok": False, "error": "this vault belongs to another account"}, out
+
+      with subtest("the owner operations: only the owner page's main process, never a card's number"):
+          for user in ("alice", "bob"):
+              out = agent(user, "raw", "/run/hermes-vault/alice.sock",
+                          json.dumps({"op": "owner_reveal", "account": "alice", "store": "home", "item_id": login}))
+              assert out == {"ok": False, "error": "only the owner's vault page may do this"}, (user, out)
+          out = json.loads(machine.succeed(
+              "${py} ${./agent.py} raw /run/hermes-vault/alice.sock "
+              + "'" + json.dumps({"op": "owner_list", "account": "alice"}) + "'").strip().splitlines()[-1])
+          assert out == {"ok": False, "error": "only the owner's vault page may do this"}, out
+          machine.succeed("systemctl start vault-owner-standin")
+          machine.wait_until_succeeds("journalctl -u vault-owner-standin -o cat | grep -q '^RESULT '", timeout=60)
+          result = json.loads(machine.succeed("journalctl -u vault-owner-standin -o cat | grep '^RESULT '").split(" ", 1)[1])
+          print(result)
+          assert result["list_ok"], result
+          home_items = {i["id"]: i for st in result["list"] if st["store"] == "home" for i in st["items"]}
+          assert home_items[card]["brand"] == "Visa" and home_items[card]["last4"] == "1111", home_items
+          assert "card_number" not in json.dumps(result["list"]) and "737" not in json.dumps(result["list"]), result
+          assert home_items[login]["identifier"] == "alice", home_items
+          assert result["items"][login] == {"ok": True, "identifier": "alice",
+                                            "password": hashlib.sha256(b"s3cret-legacy-pw").hexdigest()}, result
+          assert result["items"][card] == {"ok": False, "error":
+                                           "only a login's password can be shown; a card shows its last 4 digits only"}, result
+          assert result["child"] == {"ok": False, "error": "only the owner's vault page may do this"}, result
+          assert result["no_account"] == {"ok": False, "error": "the owner's account is missing"}, result
+          assert [r["ok"] for r in result["again"]] == [True, False], result
+          assert "too many password reveals this hour (2)" in result["again"][1]["error"], result
+          # the finance profile's store is listed too (a second store)
+          assert any(st["store"] == "profiles/finance" and [i["id"] for i in st["items"]] == [fcard]
+                     for st in result["list"]), result
+          journal = machine.succeed("journalctl -u hermes-vault-alice -o cat")
+          assert f"owner-reveal {login} kind=login store=home account=alice via=page" in journal, journal
+          assert f"owner-reveal {card}" not in journal, journal
+          everything = machine.succeed("journalctl -o cat")
+          assert "s3cret-legacy-pw" not in everything and "4111111111111111" not in everything
 
       with subtest("no core dumps of the gateway or dashboard"):
           # (the dashboard unit is off here; it gets the same setting)

@@ -510,7 +510,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyperhermes/modules/core/accounts.nix — The agents' login accounts. <- hyperhermes/modules/core/default.nix
 - hyperhermes/modules/core/agent-config.nix — What an agent runs with: config.yaml settings, PATH and the preStart scripts that seed the model and the credentials. .… <- hyperhermes/modules/core/agents.nix, hyperhermes/modules/core/locked-config.nix
 - hyperhermes/modules/core/agents.nix — The agent units and the `hermes` shim. <- hyperhermes/modules/core/default.nix
-- hyperhermes/modules/core/default.nix — Hermes agents (NousResearch hermes-agent) running natively on the host (`services.hyperhermes.agents`):
+- hyperhermes/modules/core/default.nix — Hermes agents (NousResearch hermes-agent) running natively on the host (`services.hyperhermes.agents`): <- hyperhermes/modules/core/vault-broker.nix
 - hyperhermes/modules/core/drop-env-keys.py — - <- hyperhermes/modules/core/agents.nix
 - hyperhermes/modules/core/firewall.nix — Owner-only loopback gates for every agent port: <- hyperhermes/modules/core/default.nix
 - hyperhermes/modules/core/forwards.nix — The root-held ports of every agent (services.hyperhermes.forwards: <- hyperhermes/modules/core/default.nix
@@ -526,7 +526,9 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyperhermes/modules/core/replay-memory-pending.py — Run in the hermes venv as the agent's user before its gateway unit starts (./agents.nix, preStart), once per HERMES_HOM… <- hyperhermes/modules/core/agents.nix
 - hyperhermes/modules/core/vault-broker.nix — The vault broker: an agent's hermes vault (saved logins, cards, addresses) out of the agent's own reach (docs/hermes-va… <- hyperhermes/modules/core/default.nix
 - hyperhermes/modules/core/vault-broker.py — - <- hyperhermes/modules/core/vault-broker.nix
+- hyperhermes/modules/core/vault-cli.py — - <- hyperhermes/modules/core/vault-broker.nix
 - hyperhermes/modules/core/vault-migrate.py — - <- hyperhermes/modules/core/vault-broker.nix
+- hyperhermes/modules/core/vault_items.py — - <- hyperhermes/modules/core/vault-broker.nix
 - hyperhermes/modules/dashboards/default.nix — Every agent's hermes web dashboard at its own host name, <agent>.<domain> (exposure), with hermes' own OIDC login (sso)…
 - hyperhermes/modules/desktop/connections.py — - <- hyperhermes/modules/desktop/default.nix, m/space-gui/hermes-app.nix
 - hyperhermes/modules/desktop/default.nix — Hermes launchers on a workstation for the agents of a hyperhermes host (`services.hyperhermes.desktop`):
@@ -550,11 +552,13 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyperhermes/modules/slot/vars.nix — Tool-default overrides that move rebuildable downloads into ~/.cache (a non-snapshotted scratch dataset on hosts with e… <- hyperhermes/modules/slot/default.nix, m/toolchain-cache-dirs/default.nix
 - hyperhermes/modules/slots/SKILL.md — Your own NixOS container (slot) on this host, with @summary@. Use to run a server or service of your own, deploy a NixOS <- hyperhermes/modules/slots/default.nix
 - hyperhermes/modules/slots/default.nix — Agent slots: every agent with `agents.<name>.slot.enable` gets its own container slot (../container-slots.nix, which th…
-- hyperhermes/modules/vault-request/default.nix — vault-request: an agent asks its owner for a missing vault item (a payment card, a site login, an address) through a on…
+- hyperhermes/modules/vault-request/default.nix — vault-request: an agent asks its owner for a missing vault item (a payment card, a site login, an address) through a on… <- hyperhermes/modules/vault-request/owner.nix
+- hyperhermes/modules/vault-request/owner.nix — The owner's vault page: https://<front door>/vault/<agent>/, where an agent's owner sees what the agent keeps in its va… <- hyperhermes/modules/vault-request/default.nix
+- hyperhermes/modules/vault-request/owner.py — - <- hyperhermes/modules/vault-request/owner.nix
 - hyperhermes/modules/vault-request/service.py — - <- hyperhermes/modules/vault-request/default.nix
 - hyperhermes/modules/vault-request/plugin/__init__.py — - <- hyperhermes/modules/vault-request/default.nix
 - hyperhermes/modules/vault-request/plugin/common.py — - <- hyperhermes/modules/vault-request/default.nix
-- hyperhermes/modules/vault-request/skill/SKILL.md — "Use when a task needs a card, login or address the vault lacks. Send the user a one-time vault link, never ask in chat. <- hyperhermes/modules/vault-request/default.nix
+- hyperhermes/modules/vault-request/skill/SKILL.md — "Use when a task needs a card, login or address the vault lacks, or the user asks where their stored logins are. One-tim <- hyperhermes/modules/vault-request/default.nix
 - hyperhermes/modules/wallet/default.nix — One shared Bitcoin/Lightning wallet for the agents that opt in (services.hyperhermes.agents.<name>.wallet.enable):
 - hyperhermes/modules/wallet/phoenixd.nix — phoenixd 0.9.3 segfaults in ld.so (dl_main) before main: <- hyperhermes/modules/wallet/default.nix
 - hyperhermes/modules/wallet/skill/SKILL.md — Send and receive bitcoin over Lightning (invoices, Lightning addresses, offers, LNURL) or on-chain, check the balance an <- hyperhermes/modules/wallet/default.nix
