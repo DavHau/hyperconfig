@@ -7,12 +7,7 @@
 # and can write there as that user, the root quota stops writes in the
 # root only. --finalize drops the old tree; `slot reset --hard` empties
 # both datasets and the slot comes back with its binds. A fresh slot gets
-# its datasets at first start. A data path (its own dataset, quota and
-# reservation) that already holds data in the root (setgid dir, ACL and
-# default ACL, non-root guest owners) is migrated at the next start: a
-# failing copy blocks the start and leaves the root as it was; then the
-# guest sees the same content and ACLs and can write; a further start
-# copies nothing. The guest module (nixosModules.slot) on a
+# its datasets at first start. The guest module (nixosModules.slot) on a
 # plain VM: tool defaults, a cache user's ~/.cache bound from /scratch, a
 # non-empty one left alone.
 { pkgs, self }:
@@ -59,7 +54,6 @@ pkgs.testers.runNixOSTest {
           enable = true;
           rootParent = "tpool/slots";
           scratchParent = "tpool/nobackup/slots";
-          dataParent = "tpool/slot-data";
         };
         slots.alice.storage = {
           enable = true;
@@ -75,15 +69,7 @@ pkgs.testers.runNixOSTest {
           id = 5;
           mode = "isolated";
           autoStart = false;
-          storage = {
-            enable = true;
-            dataPaths."/var/lib/db" = {
-              quota = "64M";
-              uid = 1000;
-              gid = 992;
-              mode = "2770";
-            };
-          };
+          storage.enable = true;
         };
       };
 
@@ -135,8 +121,6 @@ pkgs.testers.runNixOSTest {
   };
 
   testScript = ''
-    import shlex
-
     def in_slot(name, cmd):
         leader = host.succeed(f"machinectl show {name} -p Leader --value").strip()
         return host.succeed(f"${pkgs.util-linux}/bin/nsenter -t {leader} -a {cmd}")
@@ -156,7 +140,7 @@ pkgs.testers.runNixOSTest {
     host.wait_for_unit("multi-user.target")
 
     with subtest("a pool like som's: snapshotted root, unsnapshotted nobackup"):
-        host.succeed("zpool create -O mountpoint=none -O acltype=posix -O xattr=sa -O com.sun:auto-snapshot=true tpool /dev/disk/by-id/virtio-tpool")
+        host.succeed("zpool create -O mountpoint=none -O acltype=posix -O xattr=sa tpool /dev/disk/by-id/virtio-tpool")
         host.succeed("zfs create -o com.sun:auto-snapshot=false tpool/nobackup")
 
     with subtest("a root that holds data stays a directory, without binds"):
@@ -236,110 +220,6 @@ pkgs.testers.runNixOSTest {
         assert host.succeed("zfs get -H -o value refquota tpool/slots/fresh").strip() == "20G"
         assert host.succeed("zfs get -H -o value quota tpool/nobackup/slots/fresh").strip() == "200G"
         assert guest_mount_source("fresh", "/var/cache") == "tpool/nobackup/slots/fresh[/var-cache]"
-        # its data path: an empty dataset, set up as declared
-        assert guest_mount_source("fresh", "/var/lib/db") == "tpool/slot-data/fresh/var-lib-db"
-        assert in_slot("fresh", stat + "/var/lib/db").strip() == "1000 992 2770"
-
-    dbset = "tpool/slot-data/fresh/var-lib-db"
-    db = "/var/lib/nixos-containers/fresh/var/lib/db"
-    dbmnt = "/var/lib/slot-data/fresh/var-lib-db"
-    getfacl = "${pkgs.acl}/bin/getfacl -n -c "
-    # per entry, sorted: path, owner, group, mode, size, links, ACL incl.
-    # default ACL (one line each); then the contents' checksums
-    listing = (
-        "export PATH=${
-          lib.makeBinPath [
-            pkgs.coreutils
-            pkgs.findutils
-            pkgs.acl
-          ]
-        }; "
-        + "find . -print0 | sort -z | while IFS= read -r -d \"\" f; do "
-        + "printf '%s %s ' \"$f\" \"$(stat -c '%u %g %a %s %h' \"$f\")\"; "
-        + "getfacl -n -c -- \"$f\" | paste -sd ,; done; sha256sum file sub/blob"
-    )
-
-    def migrations():
-        return int(host.succeed("journalctl -u container-slot-storage@fresh | grep -c '/var/lib/db verified (' || true").strip())
-
-    with subtest("data path: own dataset, quota, reservation, snapshotted like the root"):
-        assert host.succeed(f"zfs get -H -o value refquota,refreservation {dbset}").split() == ["64M", "64M"]
-        assert host.succeed(f"zfs get -H -o value,source com.sun:auto-snapshot {dbset}").split()[0] == "true"
-        assert host.succeed("zfs get -H -o value com.sun:auto-snapshot tpool/slots/fresh").strip() == "true"
-        assert host.succeed("stat -c %a /var/lib/slot-data /var/lib/slot-data/fresh").split() == ["700", "700"]
-
-    with subtest("data path: data already in the root, a failing copy blocks the start"):
-        host.succeed("systemctl stop container@fresh")
-        # the slot's data as an older slot left it in its root (guest ids
-        # on disk), the mountpoint dir standing in for it
-        host.succeed(
-            f"rmdir {db} && mkdir -p {db}/sub",
-            f"echo hello > {db}/file && head -c 3M /dev/urandom > {db}/sub/blob && ln {db}/file {db}/sub/link",
-            f"chown -R 1000:992 {db} && chmod 2770 {db} {db}/sub",
-            f"chown 1001:992 {db}/sub/blob",
-            f"${pkgs.acl}/bin/setfacl -m g:992:rwx,d:g:992:rwx {db} {db}/sub",
-        )
-        before = host.succeed(f"cd {db} && " + listing)
-        # a dataset that refuses writes: the copy fails
-        host.succeed(f"${pkgs.e2fsprogs}/bin/chattr +i {dbmnt}")
-        host.fail("systemctl start container@fresh")
-        host.succeed("journalctl -u container-slot-storage@fresh | grep -q 'copying /var/lib/nixos-containers/fresh/var/lib/db failed'")
-        host.fail("machinectl show fresh -p Leader --value")
-        host.succeed(f"${pkgs.e2fsprogs}/bin/chattr -i {dbmnt}")
-        assert host.succeed(f"cd {db} && " + listing) == before
-        host.fail(f"ls -d {db}.premigrate-*")
-        host.succeed(f"test -z \"$(ls -A {dbmnt})\"")
-
-    with subtest("data path: migrated at the next start, same content and ACLs in the guest"):
-        host.succeed("systemctl reset-failed container@fresh container-slot-storage@fresh || true")
-        host.succeed("systemctl start container@fresh")
-        host.wait_until_succeeds("machinectl show fresh -p Leader --value", timeout=90)
-        assert migrations() == 1
-        host.succeed(f"ls -d {db}.premigrate-*/sub/blob")
-        assert host.succeed(f"ls -A {db}").strip() == ""
-        assert host.succeed(f"stat -c '%u %g %a' {db}").strip() == "1000 992 2770"
-        assert host.succeed(f"{getfacl} {db}") == host.succeed(f"{getfacl} {db}.premigrate-*")
-        assert guest_mount_source("fresh", "/var/lib/db") == dbset
-        in_guest = in_slot("fresh", "${pkgs.bash}/bin/bash -c " + shlex.quote("cd /var/lib/db && " + listing))
-        assert in_guest == before, (in_guest, before)
-
-    with subtest("data path: the guest writes through the group ACL, within the quota"):
-        as_member = "${pkgs.util-linux}/bin/setpriv --reuid=1002 --regid=992 --clear-groups "
-        in_slot("fresh", as_member + "${pkgs.coreutils}/bin/touch /var/lib/db/sub/new")
-        assert in_slot("fresh", stat + "/var/lib/db/sub/new").strip().startswith("1002 992")
-        assert "group:992:rwx" in in_slot("fresh", getfacl + "/var/lib/db/sub/new")
-        assert host.succeed(f"stat -c '%u %g' {dbmnt}/sub/new").strip() == "1002 992"
-        in_slot_fail("fresh", "${pkgs.coreutils}/bin/dd if=/dev/urandom of=/var/lib/db/big bs=1M count=100")
-        in_slot("fresh", "${pkgs.coreutils}/bin/rm -f /var/lib/db/big")
-
-    with subtest("data path: a further start copies nothing"):
-        host.succeed("systemctl restart container@fresh")
-        host.wait_until_succeeds("machinectl show fresh -p Leader --value", timeout=90)
-        assert migrations() == 1
-        assert host.succeed(f"ls -d {db}.premigrate-* | wc -l").strip() == "1"
-        in_slot("fresh", "${pkgs.coreutils}/bin/test -e /var/lib/db/sub/new")
-        # the hard link survived the copy
-        ino = host.succeed(f"stat -c %i {dbmnt}/file {dbmnt}/sub/link").split()
-        assert ino[0] == ino[1], ino
-
-    with subtest("data path: data on both sides, or an unconfigured data dataset, blocks the start"):
-        host.succeed("systemctl stop container@fresh")
-        host.succeed(f"touch {db}/stray")
-        host.fail("systemctl start container@fresh")
-        host.succeed("journalctl -u container-slot-storage@fresh | grep -q 'hold data. After an interrupted migration'")
-        host.fail("machinectl show fresh -p Leader --value")
-        host.succeed(f"test -e {db}/stray && test -e {dbmnt}/sub/new")
-        host.succeed(f"rm {db}/stray")
-        host.succeed("zfs create -o mountpoint=none tpool/slot-data/fresh/var-lib-gone")
-        host.succeed("systemctl reset-failed container@fresh container-slot-storage@fresh || true")
-        host.fail("systemctl start container@fresh")
-        host.succeed("journalctl -u container-slot-storage@fresh | grep -q 'var-lib-gone is no configured data path'")
-        host.fail("machinectl show fresh -p Leader --value")
-        host.succeed("zfs destroy tpool/slot-data/fresh/var-lib-gone")
-        host.succeed("systemctl reset-failed container@fresh container-slot-storage@fresh || true")
-        host.succeed("systemctl start container@fresh")
-        host.wait_until_succeeds("machinectl show fresh -p Leader --value", timeout=90)
-        assert migrations() == 1
 
     with subtest("guest module: tool defaults and a cache user's ~/.cache on /scratch"):
         guest.wait_for_unit("multi-user.target")

@@ -32,35 +32,6 @@
 # file that overrides EXTRA_NSPAWN_FLAGS for the start script, or removes
 # it.
 #
-# Data paths (`dataPaths`): guest paths that get a dataset of their own,
-#
-#   <dataParent>/<slot>/<dir>  at /var/lib/slot-data/<slot>/<dir> (0700
-#                              parents, like scratch), bound over the guest
-#                              path with `:idmap`; snapshotted like the
-#                              root (dataParent sits beside rootParent and
-#                              inherits the same com.sun:auto-snapshot),
-#                              refquota `quota` and refreservation
-#                              `reservation` (default: quota), so neither
-#                              the root nor the pool can eat its budget.
-#
-# prepare migrates them itself, with the slot stopped: when a data dataset
-# is new or empty and the guest path in the root holds data, it copies the
-# directory in (rsync -aHAXS: owners, mode, ACLs incl. default ACLs,
-# xattrs), verifies it (rsync --checksum dry run must find no difference),
-# renames the old directory to <path>.premigrate-<UTC time> in the root
-# (never deleted automatically) and puts an empty directory with the old
-# owner, mode and ACL in its place. A failing copy or verify empties the
-# dataset again, leaves the root as it was and fails the unit, so the
-# slot does not start. A dataset that holds data is only ever bound over
-# an empty or absent directory; both holding data fails the start. The
-# next start finds the dataset populated and just binds. Data paths need
-# the root on its dataset (they are skipped, the data left in the root,
-# until then). The old directory counts against rootQuota until deleted by
-# hand. A data dataset whose entry is removed or renamed fails the start
-# until it is restored, renamed or destroyed by hand: never a silently
-# empty path. `slot reset --hard` (../slots) leaves data paths alone. No
-# off-host backup (the slots' roots have none either), snapshots only.
-#
 # Settings live in /etc/container-slots/storage.json, read at runtime, so a
 # changed quota or path list does not restart a slot: quotas apply at
 # switch (container-slots-storage.service), paths at the slot's next start.
@@ -91,7 +62,6 @@ let
   inherit (lib) mkOption types;
 
   scratchDir = "/var/lib/slot-scratch";
-  dataDir = "/var/lib/slot-data";
   zfs = config.boot.zfs.package;
 
   # a guest path's subdirectory of the scratch dataset (as share names in
@@ -124,9 +94,6 @@ let
     ) defaultPaths
     // slot.storage.scratchPaths;
 
-  # Two guest paths overlap when one is the other or lies below it.
-  overlaps = a: b: a == b || lib.hasPrefix "${a}/" b || lib.hasPrefix "${b}/" a;
-
   slotJson = name: slot: {
     root = "/var/lib/nixos-containers/${name}";
     rootDataset = "${scfg.rootParent}/${name}";
@@ -145,21 +112,11 @@ let
       group = p.gid;
       inherit (p) mode;
     }) (pathOf slot);
-    dataBase = "${scfg.dataParent}/${name}";
-    dataDir = "${dataDir}/${name}";
-    data = lib.mapAttrsToList (path: d: {
-      inherit path;
-      inherit (d) quota reservation mode;
-      dataset = "${scfg.dataParent}/${name}/${dirName path}";
-      mnt = "${dataDir}/${name}/${dirName path}";
-      owner = d.uid;
-      group = d.gid;
-    }) slot.storage.dataPaths;
   };
 
   conf = pkgs.writeText "container-slots-storage.json" (
     builtins.toJSON {
-      inherit (scfg) rootParent scratchParent dataParent;
+      inherit (scfg) rootParent scratchParent;
       slots = lib.mapAttrs slotJson participating;
     }
   );
@@ -174,10 +131,7 @@ let
 
   storageTool = pkgs.writeShellApplication {
     name = "container-slot-storage";
-    runtimeInputs = runtimeInputs ++ [
-      pkgs.rsync
-      pkgs.acl
-    ];
+    inherit runtimeInputs;
     text = builtins.readFile ./storage.sh;
   };
 
@@ -190,25 +144,6 @@ let
     ];
     text = builtins.readFile ./migrate.sh;
   };
-
-  dataOptions =
-    { config, ... }:
-    {
-      imports = [ pathOptions ];
-      options = {
-        quota = mkOption {
-          type = types.strMatching "[0-9]+[KMGT]?";
-          example = "20G";
-          description = "refquota of the path's dataset: its live data (snapshots do not count, as for rootQuota).";
-        };
-        reservation = mkOption {
-          type = types.nullOr (types.strMatching "[0-9]+[KMGT]?");
-          default = config.quota;
-          defaultText = lib.literalExpression "quota";
-          description = "refreservation of the path's dataset: pool space held for its live data whatever the root or other datasets use; null: none.";
-        };
-      };
-    };
 
   pathOptions = {
     options = {
@@ -249,17 +184,6 @@ in
         type = types.str;
         default = "zroot/root/nobackup/slots";
         description = "Parent of the slots' scratch datasets (created canmount=off, mountpoint=none if missing); its parent must exist and have com.sun:auto-snapshot=false.";
-      };
-      dataParent = mkOption {
-        type = types.str;
-        default = "zroot/root/slot-data";
-        description = "Parent of the slots' data path datasets (<dataParent>/<slot>/<dir>; created canmount=off, mountpoint=none if missing); snapshotted like its own parent, so keep it beside rootParent.";
-      };
-      dataDir = mkOption {
-        type = types.str;
-        readOnly = true;
-        default = dataDir;
-        description = "Where the data path datasets are mounted: <dataDir>/<slot>/<dir>.";
       };
       scratchDir = mkOption {
         type = types.str;
@@ -306,25 +230,6 @@ in
                 them). Owner and group are ids inside the slot.
               '';
             };
-            dataPaths = mkOption {
-              type = types.attrsOf (types.submodule dataOptions);
-              default = { };
-              example = {
-                "/var/lib/db" = {
-                  quota = "20G";
-                  uid = 1000;
-                  gid = 1000;
-                  mode = "2770";
-                };
-              };
-              description = ''
-                Guest paths with a dataset of their own (snapshotted like
-                the root, own refquota and refreservation), bound over the
-                path; data already there is migrated in at the slot's next
-                start (see the module header). Owner, group and mode are
-                ids inside the slot, applied to a new empty dataset only.
-              '';
-            };
           };
         }
       );
@@ -332,61 +237,17 @@ in
   };
 
   config = lib.mkIf (cfg.enable && active) {
-    assertions =
-      lib.mapAttrsToList (name: slot: {
-        assertion =
-          let
-            dirs = map dirName (lib.attrNames (pathOf slot));
-          in
-          lib.length dirs == lib.length (lib.unique dirs)
-          && lib.all (p: lib.hasPrefix "/" p && !lib.hasInfix ".." p && !lib.hasInfix "//" p) (
-            lib.attrNames (pathOf slot)
-          );
-        message = "services.container-slots.slots.${name}.storage.scratchPaths: paths must be absolute, without '..' or '//', and distinct after '/' -> '-'";
-      }) participating
-      ++ lib.mapAttrsToList (
-        name: slot:
+    assertions = lib.mapAttrsToList (name: slot: {
+      assertion =
         let
-          data = lib.attrNames slot.storage.dataPaths;
-          # the scratch paths, shares, and what the host binds or mounts
-          # in itself
-          others =
-            lib.attrNames (pathOf slot)
-            ++ lib.attrNames slot.shares
-            ++ [
-              "/tmp"
-              "/nix"
-              "/var/lib/container-slot"
-              "/var/log/journal"
-              "/proc"
-              "/sys"
-              "/dev"
-              "/run"
-              "/etc"
-            ];
-          pairs = lib.concatMap (
-            a:
-            map (b: [
-              a
-              b
-            ]) others
-          ) data;
-          dataPairs = lib.concatMap (
-            a:
-            map (b: [
-              a
-              b
-            ]) (lib.remove a data)
-          ) data;
+          dirs = map dirName (lib.attrNames (pathOf slot));
         in
-        {
-          assertion =
-            lib.all (p: builtins.match "(/[A-Za-z0-9_][A-Za-z0-9._-]*)+" p != null) data
-            && lib.length (map dirName data) == lib.length (lib.unique (map dirName data))
-            && !lib.any (pr: overlaps (lib.elemAt pr 0) (lib.elemAt pr 1)) (pairs ++ dataPairs);
-          message = "services.container-slots.slots.${name}.storage.dataPaths: paths must be absolute, of [A-Za-z0-9._-] components not starting with '.' or '-', distinct after '/' -> '-', and neither equal to nor nested in each other, a scratch path, a share, /tmp, /nix, /var/lib/container-slot, /var/log/journal, /proc, /sys, /dev, /run or /etc";
-        }
-      ) participating;
+        lib.length dirs == lib.length (lib.unique dirs)
+        && lib.all (p: lib.hasPrefix "/" p && !lib.hasInfix ".." p && !lib.hasInfix "//" p) (
+          lib.attrNames (pathOf slot)
+        );
+      message = "services.container-slots.slots.${name}.storage.scratchPaths: paths must be absolute, without '..' or '//', and distinct after '/' -> '-'";
+    }) participating;
 
     boot.supportedFilesystems = [ "zfs" ];
     environment.etc."container-slots/storage.json".source = conf;

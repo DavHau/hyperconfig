@@ -475,7 +475,8 @@ in
     willi.storage.enable = true;
     thaiger.storage.enable = true;
     mm.storage.enable = true;
-    # The agent's ~/.cache (sccache, rust targets) goes to scratch.
+    # ~38G stays backed up (workspaces, notes-cache, nmm, ...); the
+    # agent's ~/.cache (sccache, rust targets, ~22G) goes to scratch.
     asof-agents.storage = {
       enable = true;
       rootQuota = "60G";
@@ -484,8 +485,6 @@ in
         gid = 993;
         mode = "0755";
       };
-      # its database keeps its own budget, whatever the root uses
-      dataPaths."/var/lib/swarm" = { quota = "20G"; uid = 1000; gid = 992; mode = "2770"; };
     };
     # The slot's data stays backed up; only caches go to scratch.
     asof.storage = {
