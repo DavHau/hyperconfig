@@ -1,0 +1,239 @@
+What an agent needs to finish a card checkout on the Camofox tab.
+
+Symptoms (a hosted card form, Stripe-style): browser_vision showed the
+vault-filled card fields in plain text; the captcha sat in a nested
+cross-origin frame no ref reached and there was no way to click a point;
+16 k-char snapshots of the same page were re-read five times.
+
+- browser_vision: a 409 from the server (camofox-browser's vault mask cannot
+  mask a filled field, ../camofox-browser/vault-frames-plugin/mask.js) is
+  reported as capture_refused with what to do instead, never retried around;
+  the result carries the viewport (X-Camofox-Viewport) and how to click a
+  point of it.
+- browser_click: x and y instead of a ref click that point of the viewport
+  (POST /tabs/<id>/click-at, ../camofox-browser/captcha-plugin), whatever
+  frame is there. A ref already reaches controls inside iframes.
+- browser_snapshot: `scope` keeps the subtrees whose line contains the text
+  (a frame, a form), `diff` only the lines changed since this task's last
+  snapshot of the same page and scope. Both are cut from the same redacted,
+  masked snapshot.
+Not upstream (hermes-official-plugins).
+
+diff --git a/camofox_schemas.py b/camofox_schemas.py
+index a70c810..6f3118c 100644
+--- a/camofox_schemas.py
++++ b/camofox_schemas.py
+@@ -24,22 +24,27 @@ BROWSER_NAVIGATE = {
+ 
+ BROWSER_SNAPSHOT = {
+     "name": "browser_snapshot",
+-    "description": "Get a text-based snapshot of the current page's accessibility tree. Returns interactive elements with ref IDs (like @e1, @e2) for browser_click and browser_type. Snapshots over 15000 chars are truncated; when that happens the complete snapshot is saved to a file and the output includes its path so you can page through the rest with read_file. Requires browser_navigate first. Note: browser_navigate already returns a snapshot — use this to refresh after interactions that change the page.",
+-    "parameters": {"type": "object", "properties": {}, "required": []}
++    "description": "Get a text-based snapshot of the current page's accessibility tree. Returns interactive elements with ref IDs (like @e1, @e2) for browser_click and browser_type. Snapshots over 15000 chars are truncated; when that happens the complete snapshot is saved to a file and the output includes its path so you can page through the rest with read_file. Requires browser_navigate first. Note: browser_navigate already returns a snapshot — use this to refresh after interactions that change the page. To keep it small: scope returns only the subtrees whose line contains that text (e.g. 'iframe', a form or dialog name), diff=true only the lines changed since your last snapshot of this page (same scope). Fields the vault filled show as ••••.",
++    "parameters": {"type": "object", "properties": {
++        "scope": {"type": "string", "description": "Only the subtrees whose heading line contains this text (case-insensitive), e.g. 'iframe' or 'Payment'."},
++        "diff": {"type": "boolean", "description": "Only the lines changed since your last snapshot of this page and scope."}
++    }, "required": []}
+ }
+ 
+ BROWSER_CLICK = {
+     "name": "browser_click",
+-    "description": "Click on an element identified by its ref ID from the snapshot (e.g., '@e5'). The ref IDs are shown in square brackets in the snapshot output. Requires browser_navigate and browser_snapshot to be called first.",
++    "description": "Click on an element identified by its ref ID from the snapshot (e.g., '@e5'), elements inside iframes included. The ref IDs are shown in square brackets in the snapshot output. Requires browser_navigate and browser_snapshot to be called first. When no ref reaches the control (a widget in a nested frame, a canvas), give x and y instead of ref: a point of the viewport in CSS pixels, as browser_vision's viewport (width x height) maps the screenshot.",
+     "parameters": {
+         "type": "object",
+         "properties": {
+             "ref": {
+                 "type": "string",
+                 "description": "The element reference from the snapshot (e.g., '@e5', '@e12')"
+-            }
++            },
++            "x": {"type": "number", "description": "Without ref: CSS pixels from the viewport's left (browser_vision's viewport)."},
++            "y": {"type": "number", "description": "Without ref: CSS pixels from the viewport's top (browser_vision's viewport)."}
+         },
+-        "required": ["ref"]
++        "required": []
+     }
+ }
+ 
+@@ -104,7 +109,7 @@ BROWSER_GET_IMAGES = {
+ 
+ BROWSER_VISION = {
+     "name": "browser_vision",
+-    "description": "Take a screenshot of the current page so you can inspect it visually. Use this when you need to understand what the page looks like - especially for CAPTCHAs, visual verification challenges, complex layouts, or cases where the text snapshot misses important visual information. An auxiliary vision model analyzes the screenshot and returns a text answer to your question. Includes a screenshot_path that you can share with the user by including MEDIA:<screenshot_path> in your response. Requires browser_navigate to be called first.",
++    "description": "Take a screenshot of the current page so you can inspect it visually. Use this when you need to understand what the page looks like - especially for CAPTCHAs, visual verification challenges, complex layouts, or cases where the text snapshot misses important visual information. An auxiliary vision model analyzes the screenshot and returns a text answer to your question. Includes a screenshot_path that you can share with the user by including MEDIA:<screenshot_path> in your response. Fields the vault filled are masked; the result's viewport is the grid of browser_click's x and y. Requires browser_navigate to be called first.",
+     "parameters": {
+         "type": "object",
+         "properties": {
+diff --git a/camofox_tools.py b/camofox_tools.py
+index 9127275..a7f8efb 100644
+--- a/camofox_tools.py
++++ b/camofox_tools.py
+@@ -180,14 +180,84 @@ def browser_navigate(url: str, task_id: Optional[str] = None) -> str:
+         return _fail(str(e))
+ 
+ 
+-def browser_snapshot(task_id: Optional[str] = None) -> str:
++def _scope_snapshot(snapshot: str, scope: str) -> Optional[str]:
++    """hyperhermes: the subtrees of ``snapshot`` whose heading line contains ``scope`` (case-insensitive:
++    a role, a name, a frame label like ``iframe "js.stripe.com"``), each with everything indented below
++    it; None when no line matches."""
++    lines, needle, out, i = snapshot.split("\n"), scope.lower(), [], 0
++    while i < len(lines):
++        if needle in lines[i].lower():
++            depth = len(lines[i]) - len(lines[i].lstrip())
++            j = i + 1
++            while j < len(lines) and (not lines[j].strip() or len(lines[j]) - len(lines[j].lstrip()) > depth):
++                j += 1
++            out.extend(lines[i:j])
++            i = j
++        else:
++            i += 1
++    return "\n".join(out) if out else None
++
++
++def _snapshot_diff(before: str, after: str) -> str:
++    """hyperhermes: the lines of ``after`` that changed since ``before`` (unified diff, no context),
++    ``(unchanged)`` when none did."""
++    import difflib
++    diff = [line for line in difflib.unified_diff(before.split("\n"), after.split("\n"), lineterm="", n=0)
++            if not line.startswith(("---", "+++"))]
++    return "\n".join(diff) if diff else "(unchanged)"
++
++
++def browser_snapshot(task_id: Optional[str] = None, scope: Optional[str] = None, diff: bool = False) -> str:
++    """hyperhermes: ``scope`` keeps only the matching subtrees (a frame, a form, a dialog), ``diff`` only
++    the lines changed since this task's last snapshot of the same page and scope. Both come from the same
++    (redacted, masked) snapshot, so they show nothing a full one would not."""
+     def body(session):
+-        snapshot, refs_count = _fetch_snapshot(session)
+-        return _dumps({"success": True, "snapshot": snapshot, "element_count": refs_count})
++        data = _snapshot_data(session)
++        full = policy.redact_text(data.get("snapshot", ""))
++        refs_count = data.get("refsCount", 0)
++        text = full
++        out: dict[str, Any] = {"success": True}
++        if scope:
++            scoped = _scope_snapshot(full, scope)
++            if scoped is None:
++                return _dumps({"success": False, "error": f"No snapshot line matches scope {scope!r}. "
++                                                          "Call browser_snapshot without scope to see the page."})
++            text, out["scope"] = scoped, scope
++        key = (str(data.get("url") or ""), scope or "")
++        kept = session.setdefault("last_snapshots", {})
++        last = kept.pop(key, None)
++        kept[key] = text
++        while len(kept) > 8:
++            kept.pop(next(iter(kept)))
++        if diff:
++            if last is not None:
++                text, out["diff"] = _snapshot_diff(last, text), True
++            else:
++                out["diff"], out["note"] = False, "No earlier snapshot of this page and scope: the whole one."
++        threshold = policy.snapshot_threshold()
++        if len(text) > threshold:
++            text = policy.truncate_snapshot(text, max_chars=threshold)
++        out.update(snapshot=text, element_count=refs_count)
++        return _dumps(out)
+     return _with_tab(task_id, body, read_only=True)
+ 
+ 
+-def browser_click(ref: str, task_id: Optional[str] = None) -> str:
++def browser_click(ref: str = "", task_id: Optional[str] = None, x: Any = None, y: Any = None) -> str:
++    """Click ``ref``; hyperhermes: or, without a ref, the point ``(x, y)`` of the viewport in CSS pixels
++    (browser_vision's ``viewport``) (camofox-browser's captcha plugin, POST /tabs/<id>/click-at), whatever frame
++    is there: the fallback for a control no ref reaches."""
++    if not ref and x is not None and y is not None:
++        try:
++            px, py = float(x), float(y)
++        except (TypeError, ValueError):
++            return _fail("x and y must be numbers: CSS pixels of the viewport (browser_vision's viewport)")
++        try:
++            return _tab_action(task_id, "click-at", {"x": px, "y": py},
++                               lambda data: {"success": True, "clicked_at": [px, py], "url": data.get("url", "")})
++        except Exception as e:  # pragma: no cover -- _tab_action already returns failures as JSON
++            return _fail(str(e))
++    if not ref:
++        return _fail("Give a ref from the snapshot (e.g. '@e5'), or x and y from a browser_vision screenshot.")
+     clean_ref = ref.lstrip("@")  # tool convention prefixes refs with @; Camofox wants the bare ref
+     return _tab_action(task_id, "click", {"ref": clean_ref},
+                        lambda data: {"success": True, "clicked": clean_ref, "url": data.get("url", "")})
+@@ -347,15 +417,49 @@ def _native_screenshot(screenshot_path: str, question: str) -> Optional[dict[str
+                         {"type": "image_url", "image_url": {"url": data_url}}]}
+ 
+ 
++def _viewport(resp: Any) -> Optional[dict[str, int]]:
++    """The ``X-Camofox-Viewport`` header (capture-guard.patch): width, height, scrollX, scrollY."""
++    try:
++        w, h, *_ = (int(v) for v in str(getattr(resp, "headers", {}).get("X-Camofox-Viewport") or "").split(","))
++        return {"width": w, "height": h} if w > 0 and h > 0 else None
++    except Exception:  # health: allow BLE001 -- a hint only; a server without it just gives none
++        return None
++
++
++def _click_hint(viewport: dict[str, int]) -> str:
++    return (f" To click a point that has no ref, call browser_click with x and y in a {viewport['width']}x"
++            f"{viewport['height']} grid over this screenshot (x from the left, y from the top), whatever size "
++            "the image reaches you in.")
++
++
+ def browser_vision(question: str, task_id: Optional[str] = None, *, llm: Any = None) -> Any:
+     """Screenshot the tab and answer ``question`` with the auxiliary vision model (``ctx.llm``,
+     task ``camofox_vision``, which inherits ``auxiliary.vision``); hyperhermes: a main model with
+     native vision gets the screenshot itself (``_native_screenshot``)."""
+     def body(session):
+-        resp = client.get_raw(client.tab_path(session, "screenshot"), params=client.user_params(session))
++        try:
++            resp = client.get_raw(client.tab_path(session, "screenshot"), params=client.user_params(session))
++        except requests.HTTPError as e:
++            # hyperhermes: the server refuses a screenshot it cannot mask vault-filled fields in
++            # (camofox-browser's vault mask, capture-guard.patch): say so, never retry around it.
++            if e.response is not None and e.response.status_code == 409:
++                try:
++                    why = str(e.response.json().get("error") or "")[:300]
++                except Exception:  # health: allow BLE001 -- the reason is a hint only
++                    why = ""
++                return _dumps({"success": False, "error_type": "capture_refused", "error": (
++                    "The browser refused the screenshot so that no field the vault filled is shown"
++                    + (f" ({why})" if why else "") + ". Nothing was sent. Try browser_snapshot (filled fields "
++                    "show as ••••); if it is refused too, carry on with the refs you have or finish the form.")})
++            raise
+         screenshot_path = _save_screenshot(resp.content)
++        # hyperhermes: the viewport the screenshot shows (CSS pixels), the space of browser_click's x, y.
++        viewport = _viewport(resp)
+         native = _native_screenshot(screenshot_path, question)
+         if native is not None:
++            if viewport:
++                native["meta"]["viewport"] = viewport
++                native["content"][0]["text"] += _click_hint(viewport)
+             return native
+         img_b64 = base64.b64encode(resp.content).decode("utf-8")
+         timeout, temperature = _vision_settings()
+@@ -373,7 +477,10 @@ def browser_vision(question: str, task_id: Optional[str] = None, *, llm: Any = N
+                                    "You can still share it via MEDIA:<path>."})
+         analysis = (result.text or "").strip() or "Vision analysis returned no content."
+         # Secrets the vision model read off the page never reach the conversation.
+-        return _dumps({"success": True, "analysis": policy.redact_text(analysis), "screenshot_path": screenshot_path})
++        out = {"success": True, "analysis": policy.redact_text(analysis), "screenshot_path": screenshot_path}
++        if viewport:
++            out["viewport"], out["click_hint"] = viewport, _click_hint(viewport).strip()
++        return _dumps(out)
+     return _with_tab(task_id, body, read_only=True)
+ 
+ 
+@@ -509,11 +616,13 @@ def handle_navigate(args: dict, **kw: Any) -> str:
+ 
+ 
+ def handle_snapshot(args: dict, **kw: Any) -> str:
+-    return browser_snapshot(task_id=_kw_task(kw))
++    scope = args.get("scope")
++    return browser_snapshot(task_id=_kw_task(kw), scope=str(scope) if scope else None,
++                            diff=bool(args.get("diff", False)))
+ 
+ 
+ def handle_click(args: dict, **kw: Any) -> str:
+-    return browser_click(str(args.get("ref", "")), task_id=_kw_task(kw))
++    return browser_click(str(args.get("ref") or ""), task_id=_kw_task(kw), x=args.get("x"), y=args.get("y"))
+ 
+ 
+ def handle_type(args: dict, **kw: Any) -> str:

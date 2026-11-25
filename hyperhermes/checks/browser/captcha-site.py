@@ -4,12 +4,15 @@
                  CaptchaKraken detects): tiles 1, 5 and 9 hold a red circle. Verify with exactly
                  those selected hides the widget and shows "Verification Success"; anything else
                  shows "wrong: <tiles>" and clears the selection.
+  /captcha-tall  the same widget, 4000 px tall: no viewport screenshot holds it.
   /plain         a page without a captcha.
   /v1/...        a stand-in for the captcha model (OpenAI-compatible chat completions). It answers
                  the grid question with cells [1, 5, 9] and the pixel question with the centres of
                  tiles 1, 5 and 9, but only to a request that carries an image, names the expected
                  model and offers no tools; anything else gets a 400.
   /log           what the model stand-in was asked: one entry per request.
+  /state         {"result": "Verification Success"} once a page solved the grid since the last
+                 read (it POSTs /solved), else "pending"; reading clears it.
 """
 import base64
 import json
@@ -57,6 +60,7 @@ document.getElementById('v').onclick = () => {{
   if (got === want.join(',')) {{
     document.getElementById('w').style.display = 'none';
     document.getElementById('result').textContent = 'Verification Success';
+    fetch('/solved', {{ method: 'POST' }});
   }} else {{
     document.getElementById('result').textContent = 'wrong: ' + got;
     sel.clear();
@@ -76,6 +80,7 @@ def tile_point(n):
 
 
 LOG = []
+SOLVED = False
 
 
 def answer(req):
@@ -119,8 +124,16 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/captcha":
             self._send(200, CAPTCHA, "text/html")
+        elif self.path == "/captcha-tall":
+            # The widget taller than any viewport: the driver would photograph the element itself.
+            self._send(200, CAPTCHA.replace(b"height: " + str(HEIGHT).encode() + b"px", b"height: 4000px"), "text/html")
         elif self.path == "/plain":
             self._send(200, PLAIN, "text/html")
+        elif self.path == "/state":
+            # read and clear: each solve is seen once
+            global SOLVED
+            state, SOLVED = SOLVED, False
+            self._send(200, json.dumps({"result": "Verification Success" if state else "pending"}).encode())
         elif self.path == "/log":
             self._send(200, json.dumps(LOG).encode())
         elif self.path in ("/health", "/v1/models"):
@@ -130,6 +143,10 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        if self.path == "/solved":
+            global SOLVED
+            SOLVED = True
+            return self._send(204, b"")
         if self.path != "/v1/chat/completions":
             return self.send_error(404)
         status, content = answer(json.loads(body))

@@ -46,7 +46,7 @@ pkgs.runCommand "hyperhermes-vault-payment-frames-check" { nativeBuildInputs = [
   for t in test_browser_vault_origin_guard test_bot_desktop_browser_fence test_browser_vault_page_backend; do
     mkdir -p tests/tools && cp ${hermesSrc}/tests/tools/$t.py tests/tools/ && chmod u+w tests/tools/$t.py
   done
-  for p in hermes-vault-payment-consent-needs-card hermes-vault-payment-iframe-fill hermes-vault-payment-iframe-page-backend hermes-vault-fill-isolated-world hermes-vault-payment-any-site hermes-vault-broker-client; do
+  for p in hermes-vault-payment-consent-needs-card hermes-vault-payment-iframe-fill hermes-vault-payment-iframe-page-backend hermes-vault-fill-isolated-world hermes-vault-payment-any-site hermes-vault-broker-client hermes-vault-payment-confirm-unanswered; do
     filterdiff -p1 -i 'tests/*' -x 'tests/tools/test_browser_vault.py' ${patches}/$p.patch | patch -p1 -F0
   done
   PYTHONPATH=${pytestPath} ${py} -m pytest -q -p no:cacheprovider \

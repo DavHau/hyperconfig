@@ -22,9 +22,16 @@ terminal for web pages.
    over. Subagents and scheduled jobs browse in a context of their own
    (no saved logins, nothing shared with parallel tasks);
    `browser_context` with `shared` joins the agent's saved logins when a
-   task needs one. `browser_snapshot` with `full=true` returns the whole page text;
-   `browser_vision` shows a screenshot; `browser_console` with
-   `expression` evaluates JavaScript in the page.
+   task needs one. `browser_snapshot` returns the page's elements with
+   refs (those inside iframes too); on a big page pass `scope` (e.g.
+   `iframe` or a form's name) or `diff=true` (only what changed since your
+   last snapshot) instead of re-reading it whole. `browser_vision` shows a
+   screenshot; `browser_click` with `x` and `y` clicks a point of it when
+   no ref reaches the control; `browser_console` with `expression`
+   evaluates JavaScript in the page.
+   Fields the vault filled show as `••••` in snapshots and as grey boxes in
+   screenshots; if the browser refuses a screenshot (`capture_refused`),
+   use `browser_snapshot` and carry on.
 
 If the first navigation answers HTTP 500 or times out, the browser was
 starting cold: retry once, not more.
@@ -37,7 +44,8 @@ passes without a challenge when clicked in the browser: click through
 When an image CAPTCHA blocks the page (a reCAPTCHA checkbox or image
 grid, hCaptcha, GeeTest, a slider or distorted text), call
 `browser_solve_captcha`: the browser ticks the box and solves the
-challenge itself (up to 2 min). On `solved`, submit the page's form. On
+challenge itself (up to 2 min), also inside nested frames (a payment
+form's hCaptcha). On `solved`, submit the page's form. On
 `failed`, call it once more; after a second failure report the CAPTCHA
 as the blocker. Do not click grid tiles yourself.
 

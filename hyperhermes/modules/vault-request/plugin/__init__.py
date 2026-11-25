@@ -27,6 +27,8 @@ SCHEMA = {
         "returns a one-time link valid 30 minutes: send it to the user with one sentence of what it is "
         "for and wait; wait (request_id) blocks until the user saved it (up to timeout_seconds) and "
         "returns the item's handle for browser_vault fill; status (request_id); cancel (request_id); "
+        "renew (request_id) gives the same link another 30 minutes, also after it expired unused "
+        "(the user keeps the link they have); "
         "where: the page where the user sees, copies and deletes what your vault holds (e.g. a login you "
         "created with a generated password); give the user that exact address, never one you have not "
         "got from this tool. "
@@ -36,7 +38,7 @@ SCHEMA = {
     "parameters": {
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["create", "wait", "status", "cancel", "where"]},
+            "action": {"type": "string", "enum": ["create", "wait", "status", "cancel", "renew", "where"]},
             "kind": {"type": "string", "enum": list(common.KINDS),
                      "description": "create: payment (a card), login (site account) or address."},
             "label": {"type": "string",
@@ -47,7 +49,7 @@ SCHEMA = {
                                       "site, the user confirms each fill."},
             "reason": {"type": "string",
                        "description": "create: one line the page shows the user: why you need it."},
-            "request_id": {"type": "string", "description": "wait / status / cancel: the id create returned."},
+            "request_id": {"type": "string", "description": "wait / status / cancel / renew: the id create returned."},
             "timeout_seconds": {"type": "integer",
                                 "description": f"wait: how long to wait (default 300, at most {MAX_WAIT})."},
         },
@@ -92,10 +94,16 @@ def _wait(rid: str, timeout: int) -> str:
             view["hint"] = "Still waiting for the user. Call wait again, or ask them whether the link worked."
             break
         time.sleep(1)
+    if view["state"] == "pending" and view.get("expires_in_seconds", 0) < 300:
+        view["hint"] = (view.get("hint", "") + " The link expires soon: call vault_request action=renew with "
+                        "this request_id to keep it valid (same link).").strip()
     if view["state"] == "done":
         view["next"] = ("Use browser_vault fill with this handle: a login on its site; a card or address "
                         "on the checkout page, after the user confirms that fill.")
-    elif view["state"] in ("expired", "error", "cancelled"):
+    elif view["state"] == "expired":
+        view["next"] = ("The link expired unused. Call vault_request action=renew with this request_id: the user's "
+                        "link works again for 30 minutes, no new link needed.")
+    elif view["state"] in ("error", "cancelled"):
         view["next"] = "Create a new request if the user still wants to add it."
     return _ok(**view)
 
@@ -133,7 +141,7 @@ def handle(args: dict, **_kwargs) -> str:
             return _where()
         if action == "create":
             return _create(args)
-        if action in ("wait", "status", "cancel") and not common.ID_RE.match(rid):
+        if action in ("wait", "status", "cancel", "renew") and not common.ID_RE.match(rid):
             return _fail("request_id: the 32-character id create returned")
         if action == "wait":
             return _wait(rid, int(args.get("timeout_seconds") or 300))
@@ -142,11 +150,15 @@ def handle(args: dict, **_kwargs) -> str:
             return _ok(**common.public_view(req)) if req else _fail("no such request")
         if action == "cancel":
             return _cancel(rid)
+        if action == "renew":
+            req = common.renew(rid)
+            return _ok(**common.public_view(req), link=common.link(req),
+                       next="The same link works again; tell the user if they had given up on it, then wait.")
     except common.RequestError as exc:
         return _fail(str(exc))
     except (TypeError, ValueError) as exc:
         return _fail(f"invalid argument: {exc}")
-    return _fail("action must be create, wait, status, cancel or where")
+    return _fail("action must be create, wait, status, cancel, renew or where")
 
 
 def _available() -> bool:

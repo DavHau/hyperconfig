@@ -3,13 +3,17 @@
 # Nix Camoufox (CAMOUFOX_EXECUTABLE), the default uBlock addon is excluded
 # by the caller, and no install script runs.
 #
-# Two plugins are added: ./captcha-plugin (POST /tabs/:tabId/solve-captcha),
+# Plugins added: ./captcha-plugin (POST /tabs/:tabId/solve-captcha, in nested
+# frames too, and POST /tabs/:tabId/click-at),
 # CaptchaKraken's driver on a tab's live page, with its engine from
 # pkgs/captchakraken; it answers only when the unit sets VLLM_BASE_URL.
 # ./vault-frames-plugin (POST /tabs/:tabId/vault-frames[/:frameId/evaluate],
 # /tabs/:tabId/vault-evaluate): the tab's direct child iframes for
 # browser_vault's hosted card-field fill, and every vault script, run only in
-# Camoufox's isolated world (pkgs/hermes-camofox-plugin/vault-frames.patch).
+# Camoufox's isolated world (pkgs/hermes-camofox-plugin/vault-frames.patch);
+# the fields a vault script filled are masked in every screenshot and
+# snapshot the server returns (./vault-frames-plugin/mask.js, through the
+# core's capture guards: ./capture-guard.patch), or the capture is refused.
 # ./residential-plugin: a userId ending in `-residential-<cc>` browses through
 # the host's residential proxy (RESIDENTIAL_PROXY_URL) on a sticky exit of
 # its own, for hermes' browser_residential. ./task-contexts-plugin removes the
@@ -42,6 +46,7 @@ buildNpmPackage (finalAttrs: {
     ./challenge-wait.patch
     ./plugin-tab-access.patch
     ./tab-recycle-own-group.patch
+    ./capture-guard.patch
   ];
 
   # Crash reports go to a public relay unless opted out: off unless opted
@@ -65,6 +70,8 @@ buildNpmPackage (finalAttrs: {
     mkdir plugins/captcha plugins/vault-frames plugins/residential plugins/task-contexts
     cp ${./captcha-plugin/index.js} plugins/captcha/index.js
     cp ${./vault-frames-plugin/index.js} plugins/vault-frames/index.js
+    cp ${./vault-frames-plugin/mask.js} plugins/vault-frames/mask.js
+    cp ${./vault-frames-plugin/png.js} plugins/vault-frames/png.js
     cp ${./residential-plugin/index.js} plugins/residential/index.js
     cp ${./task-contexts-plugin/index.js} plugins/task-contexts/index.js
     substituteInPlace server.js --replace-fail \
@@ -77,7 +84,7 @@ buildNpmPackage (finalAttrs: {
       const p = JSON.parse(fs.readFileSync("package.json"));
       delete p.overrides;
       delete p.devDependencies;
-      p.files.push("plugins/captcha/index.js", "plugins/vault-frames/index.js", "plugins/residential/index.js", "plugins/task-contexts/index.js");
+      p.files.push("plugins/captcha/index.js", "plugins/vault-frames/index.js", "plugins/vault-frames/mask.js", "plugins/vault-frames/png.js", "plugins/residential/index.js", "plugins/task-contexts/index.js");
       fs.writeFileSync("package.json", JSON.stringify(p, null, 2));
       const l = JSON.parse(fs.readFileSync("package-lock.json"));
       delete l.packages[""].devDependencies;

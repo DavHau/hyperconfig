@@ -41,6 +41,21 @@
 # navigates to a hostile page right after the vault's value-free check gets
 # nothing.
 #
+# A whole card purchase (./checkout.py, the vault mask of
+# pkgs/camofox-browser/vault-frames-plugin/mask.js and capture-guard.patch,
+# the captcha plugin's frame solve and click-at, the plugin's
+# checkout-tools.patch): a shop embeds a processor card frame that embeds two
+# more cross-origin frames (a confirm button, the captcha). The vault fills
+# the test card; browser_snapshot (whole, scoped, diff) shows the fields as
+# the mask; browser_vision's image has no card value (OCR, with an OCR
+# control on the same page, and the field's pixels are the mask's); a
+# re-created field holding the value is masked too; a ref click and a
+# coordinate click reach the nested frame, the captcha two frames down is
+# solved (a widget too tall for a guarded screenshot is refused), Pay posts the
+# real values to the processor; after back/forward nothing shows either. A page
+# that strips the mask's style during the capture gets no screenshot
+# (capture_refused).
+#
 # Residential proxy (modules/browser/residential-proxy.nix): with
 # browser.residentialProxy.url set, browser_residential is offered; the
 # browser goes direct by default and through the proxy (a stand-in that
@@ -84,7 +99,7 @@ let
     hermes: script: user: args:
     "systemd-run --quiet --wait --pipe --collect --unit=hermes-vault-driver -p User=${user} -p Group=users "
     + "${pkgs.runtimeShell} -c 'set -a; . ${hlib.stateDir user}/.hermes/.env; set +a; "
-    + "export HERMES_HOME=/home/${user}/hermes-test TERMINAL_CWD=${hlib.workspace user} CAMOFOX_PLUGIN=${plugin} CAMOFOX_PLUGIN_RECORD=${plugin.installRecord}; "
+    + "export HERMES_HOME=/home/${user}/hermes-test TERMINAL_CWD=${hlib.workspace user} CAMOFOX_PLUGIN=${plugin} CAMOFOX_PLUGIN_RECORD=${plugin.installRecord} TESSERACT=${lib.getExe pkgs.tesseract}; "
     + "exec ${hermes.hermesVenv}/bin/python3 ${script} ${args}' 2>&1";
   privateTmp = "/tmp/systemd-private-*-hermes-camofox-alice.service-*/tmp";
   agents = [
@@ -180,6 +195,7 @@ pkgs.testers.runNixOSTest {
       vaultDriver = vaultDriverScript hermes ./vault.py;
       residentialDriver = driverOf ./residential.py;
       concurrencyDriver = driverOf ./concurrency.py;
+      checkoutDriver = vaultDriverScript hermes ./checkout.py;
     in
     ''
     import hashlib
@@ -274,6 +290,13 @@ pkgs.testers.runNixOSTest {
 
     with subtest("page code that hooks the built-ins never sees the password or the card, nor after a frame hijack"):
         out = machine.succeed("${vaultDriver "alice" "hostile http://127.0.0.1:8765 http://localhost:8767"}")
+        print(out)
+        assert "ALL PASSED" in out
+        assert "4242424242424242" not in machine.succeed("journalctl -u hermes-camofox-alice --no-pager")
+
+    with subtest("a whole card purchase: masked screenshots and snapshots, nested-frame clicks and captcha, real values posted"):
+        machine.wait_for_unit("captcha-site.service")
+        out = machine.succeed("${checkoutDriver "alice" "checkout http://127.0.0.1:8765 http://localhost:8767"}")
         print(out)
         assert "ALL PASSED" in out
         assert "4242424242424242" not in machine.succeed("journalctl -u hermes-camofox-alice --no-pager")

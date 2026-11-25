@@ -19,6 +19,10 @@
 # ../camofox-browser/vault-frames-plugin). ./task-contexts.patch: subagents
 # and cron runs browse in a context of their own (cookies, storage), not the
 # agent's shared profile; browser_context switches explicitly.
+# ./checkout-tools.patch: what a card checkout needs: browser_vision says why
+# the server refused a screenshot it could not mask (vault-filled fields),
+# browser_click takes x/y for a point no ref reaches, browser_snapshot takes
+# a scope and diff=true.
 #
 # The plugin needs `requests` only, which the hermes venv has. hermes
 # imports it as a package from $HERMES_HOME/plugins/camofox (the browser
@@ -80,4 +84,5 @@ runCommand "hermes-camofox-plugin-1.1.0"
     patch -p1 < ${./native-vision.patch}
     patch -p1 < ${./vault-frames.patch}
     patch -p1 < ${./task-contexts.patch}
+    patch -p1 < ${./checkout-tools.patch}
   ''

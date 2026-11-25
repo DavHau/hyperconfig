@@ -15,6 +15,13 @@ JSON.stringify, Object.keys, Function.prototype.call/toString, Array.prototype.*
 methods) and walking fn.caller from each hook; /checkout-hostile embeds it from the
 processor origin, /login-hostile is the login form with the same hooks. Each hook hit
 is sent to /leak on the serving origin; GET /leaks returns them (JSON) and clears them.
+A hosted checkout for the whole purchase (checkout.py): /checkout-hosted on the shop embeds
+/hosted-card from the processor origin (Stripe-style card fields, a card preview that mirrors
+the number as the page's own text, and a Pay button that POSTs them to /pay on the processor), which itself embeds two cross-origin frames: /agree from
+http://127.0.0.1:<card port> (an "I agree" button and a "Confirm" button at a fixed spot, for a
+ref click and a coordinate click) and the captcha (http://127.0.0.1:8766/captcha). Fixed layout:
+the Confirm button's centre is at (200, 220) of the viewport. Every action lands in GET /events
+(JSON, cleared on read) on the origin that served it; /pay records the posted fields.
 
 Files are deterministic bytes; `site.py --sha <name>` prints a file's sha256.
 """
@@ -141,6 +148,57 @@ HOOKS = br"""<script>
 CARD_HOSTILE = CARD.replace(b"<head>", b"<head>" + HOOKS)
 LOGIN_HOSTILE = LOGIN.replace(b"<head>", b"<head>" + HOOKS)
 LEAKS: list[str] = []
+EVENTS: list[dict] = []
+CAPTCHA_URL = "http://127.0.0.1:8766/captcha"
+
+CHECKOUT_HOSTED = """<!doctype html><html><head><title>hosted checkout</title><style>
+body {{ margin: 0; font-family: sans-serif; }}
+/* a root narrower than the viewport: the mask's screenshot scale must not be read off it */
+html {{ max-width: 1000px; }}
+#ref {{ position: absolute; left: 720px; top: 10px; width: 300px; font-size: 22px; }}
+#card {{ position: absolute; left: 0; top: 60px; width: 700px; height: 680px; border: 0; }}
+</style></head><body>
+<label>Reference <input id="ref" name="reference"></label>
+<iframe id="card" src="{card}"></iframe>
+</body></html>"""
+
+HOSTED_CARD = """<!doctype html><html><head><title>card</title><style>
+body {{ margin: 0; font-family: sans-serif; }}
+input {{ font-size: 22px; width: 220px; }}
+#agree {{ position: absolute; left: 0; top: 100px; width: 300px; height: 100px; border: 0; }}
+#cap {{ position: absolute; left: 0; top: 200px; width: 400px; height: 470px; border: 0; }}
+</style></head><body>
+<div id="preview" style="position: absolute; left: 320px; top: 60px; font-size: 22px;">•••• •••• •••• ••••</div>
+<div id="groups" style="position: absolute; left: 320px; top: 100px; font-size: 22px;"></div>
+<form method="post" action="/pay">
+<input id="number" name="cardnumber" autocomplete="cc-number" inputmode="numeric" aria-label="Card number"
+  oninput="document.getElementById('preview').textContent = this.value.replace(/(\\d{{4}})(?=\\d)/g, '$1 ');
+           document.getElementById('groups').innerHTML = (this.value.match(/\\d{{1,4}}/g) || []).map((g) => '<span>' + g + '</span>').join(' ')">
+<input id="expiry" name="exp-date" autocomplete="cc-exp" aria-label="Expiry">
+<input id="cvc" name="cvc" autocomplete="cc-csc" aria-label="CVC">
+<button type="submit">Pay</button>
+</form>
+<iframe id="agree" src="{agree}"></iframe>
+<iframe id="cap" src="{captcha}"></iframe>
+<script>
+// hostile page code (checkout.py's fail-closed step): strip the mask's style whenever it is set
+window.stripMask = () => {{
+  const n = document.getElementById('number');
+  new MutationObserver(() => {{ if (n.hasAttribute('data-hermes-vault-mask')) n.removeAttribute('style'); }})
+    .observe(n, {{ attributes: true }});
+  return 1;
+}};
+</script>
+</body></html>"""
+
+AGREE = b"""<!doctype html><html><head><title>agree</title><style>
+body { margin: 0; font-family: sans-serif; }
+#ok { position: absolute; left: 0; top: 0; }
+#confirm { position: absolute; left: 150px; top: 40px; width: 100px; height: 40px; }
+</style></head><body>
+<button id="ok" onclick="fetch('/event?e=agreed')">I agree</button>
+<button id="confirm" tabindex="-1" aria-hidden="true" onclick="fetch('/event?e=confirmed')"></button>
+</body></html>"""
 
 
 def checkout(frame_url: str) -> bytes:
@@ -188,6 +246,27 @@ class H(BaseHTTPRequestHandler):
             LEAKS.append(parse_qs(urlsplit(self.path).query).get("d", [""])[0])
             self.send_response(204)
             self.end_headers()
+        elif self.path.startswith("/event?"):
+            from urllib.parse import parse_qs, urlsplit
+            EVENTS.append({"event": parse_qs(urlsplit(self.path).query).get("e", [""])[0]})
+            self.send_response(204)
+            self.end_headers()
+        elif self.path in ("/events", "/checkout-hosted", "/hosted-card", "/agree"):
+            port = self.server.server_address[1]
+            if self.path == "/events":
+                page, ctype = json.dumps(EVENTS).encode(), "application/json"
+                EVENTS.clear()
+            else:
+                ctype = "text/html"
+                page = {"/checkout-hosted": lambda: CHECKOUT_HOSTED.format(card=f"http://localhost:{CARD_PORT}/hosted-card").encode(),
+                        "/hosted-card": lambda: HOSTED_CARD.format(agree=f"http://127.0.0.1:{port}/agree",
+                                                                   captcha=CAPTCHA_URL).encode(),
+                        "/agree": lambda: AGREE}[self.path]()
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(page)))
+            self.end_headers()
+            self.wfile.write(page)
         elif self.path == "/leaks":
             body = json.dumps(LEAKS).encode()
             LEAKS.clear()
@@ -225,7 +304,16 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(length)
-        if self.path == "/submit-redirect" and b"token=abc123" in body:
+        if self.path == "/pay":
+            from urllib.parse import parse_qs
+            EVENTS.append({"event": "paid", "fields": {k: v[0] for k, v in parse_qs(body.decode()).items()}})
+            page = b"<!doctype html><html><body><p>Payment received</p></body></html>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(page)))
+            self.end_headers()
+            self.wfile.write(page)
+        elif self.path == "/submit-redirect" and b"token=abc123" in body:
             # Like APKSum: the POST answers 302 to a file on another origin.
             port = self.server.server_address[1]
             self.send_response(302)

@@ -44,6 +44,8 @@
 
 import crypto from 'node:crypto';
 
+import { guard, trackFill } from './mask.js';
+
 // Per page: frameId -> Frame, for the frames last listed.
 const frameIds = new WeakMap();
 
@@ -78,7 +80,10 @@ export function camouConfigIsolated(env) {
   return !UNSAFE_CAMOU_KEYS.some((k) => config && config[k]);
 }
 
-async function evaluateIsolated(frame, expression) {
+let maskingReady = false;
+
+async function evaluateIsolated(page, frame, expression) {
+  if (!maskingReady) throw new IsolationError('filled fields cannot be masked on this server');
   if (!launchOptions || !camouConfigIsolated(launchOptions.env)) {
     throw new IsolationError('the browser was not seen launching with isolated worlds');
   }
@@ -89,7 +94,8 @@ async function evaluateIsolated(frame, expression) {
   if (xray !== true) {
     throw new IsolationError('this browser evaluates in the page\'s own world');
   }
-  return frame.evaluate(expression);
+  // The controls the script changes are the vault-filled ones: masked in every capture (./mask.js).
+  return trackFill(page, frame, () => frame.evaluate(expression));
 }
 
 function directChildren(page) {
@@ -101,7 +107,17 @@ export async function register(app, ctx) {
   const {
     sessions, log, normalizeUserId, withUserLimit,
     findTab, withTabLock, destroyTimedOutTab, tabNotFoundResponse, handleRouteError,
+    registerCaptureGuard,
   } = ctx;
+  // The vault mask (./mask.js): fields a vault script filled are covered in every screenshot and
+  // snapshot the server returns. Without the core's capture guard (capture-guard.patch) no vault
+  // script runs at all: a fill would then show in plain text.
+  const masking = typeof registerCaptureGuard === 'function';
+  if (masking) {
+    registerCaptureGuard(guard);
+    maskingReady = true;
+  }
+  else log('error', 'vault scripts disabled: this server has no capture guard to mask filled fields');
   // Every (re)launch: are its evaluate worlds isolated? (See the header.)
   ctx.events.on('browser:launching', ({ options }) => {
     launchOptions = options || {};
@@ -126,6 +142,12 @@ export async function register(app, ctx) {
       return null;
     }
     session.lastAccess = Date.now();
+    // A traced session writes DOM snapshots and screencast frames (input values included) to disk,
+    // past every capture guard: no vault script runs in one.
+    if (session.tracePath) {
+      res.status(409).json({ error: 'this browser session is traced: vault fills are refused' });
+      return null;
+    }
     return { userId, session, tabState: found.tabState };
   }
 
@@ -174,7 +196,7 @@ export async function register(app, ctx) {
           if (!frame || frame.isDetached() || frame.parentFrame() !== page.mainFrame()) {
             return { gone: true };
           }
-          return { value: await evaluateIsolated(frame, expression) };
+          return { value: await evaluateIsolated(page, frame, expression) };
         },
         timeoutMs(),
         () => destroyTimedOutTab(t.session, tabId, 'operation_timeout', t.userId),
@@ -208,7 +230,7 @@ export async function register(app, ctx) {
       if (!t) return;
       const value = await withUserLimit(t.userId, () => withTabLock(
         tabId,
-        () => evaluateIsolated(t.tabState.page.mainFrame(), expression),
+        () => evaluateIsolated(t.tabState.page, t.tabState.page.mainFrame(), expression),
         timeoutMs(),
         () => destroyTimedOutTab(t.session, tabId, 'operation_timeout', t.userId),
       ));

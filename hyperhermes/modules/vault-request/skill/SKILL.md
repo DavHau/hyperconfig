@@ -49,8 +49,12 @@ themselves.
 3. `vault_request action=wait request_id=<id>` (up to 600 s per call; call
    again while the state is `pending`). On `done` you get a `handle`.
 4. `browser_vault action=fill handle=<handle>` on the checkout page; the
-   user confirms that fill. Declined: stop and ask them, do not retry.
-   `expired`, `cancelled` or `error`: ask whether to send a new link.
+   user confirms that fill. Declined: stop and ask them, do not retry. Not
+   answered in time (`payment_unanswered`): tell the user, then call fill
+   again once they are back; nothing was written.
+   `expired` (unused): `vault_request action=renew request_id=<id>` makes
+   the same link work for another 30 minutes, tell the user it works again.
+   `cancelled` or `error`: ask whether to send a new link.
 
 ## Where the user sees what the vault holds
 

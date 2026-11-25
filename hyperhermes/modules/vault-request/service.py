@@ -269,7 +269,7 @@ class Handler(BaseHTTPRequestHandler):
     def _gone(self, state: str) -> None:
         self._message(410 if state != "missing" else 404, {
             "done": "This request was answered already: the item is saved. You can close this page.",
-            "expired": "This link has expired. Ask your agent for a new one.",
+            "expired": "This link has expired. Ask your agent to renew it, then reload this page.",
             "cancelled": "Your agent cancelled this request.",
             "saving": "This request is being saved right now.",
             "error": "This request failed. Ask your agent for a new one.",

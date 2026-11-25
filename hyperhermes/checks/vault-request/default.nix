@@ -259,6 +259,19 @@ pkgs.testers.runNixOSTest {
         assert call({"action": "status", "request_id": late["request_id"]})["state"] == "expired"
         code = machine.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' --unix-socket /run/hermes-vault-request/alice.sock http://x/vault/{late['request_id']}")
         assert code == "410", code
+        # renew: the same link works again for another 30 minutes; a cancelled one is not revived.
+        renewed = call({"action": "renew", "request_id": late["request_id"]})
+        assert renewed["success"] and renewed["state"] == "pending" and renewed["expires_in_seconds"] > 1700, renewed
+        assert renewed["link"].endswith("/vault/" + late["request_id"]), renewed
+        code = machine.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' --unix-socket /run/hermes-vault-request/alice.sock http://x/vault/{late['request_id']}")
+        assert code != "410", code
+        assert not call({"action": "renew", "request_id": gone["request_id"]})["success"]
+        assert call({"action": "status", "request_id": gone["request_id"]})["state"] == "cancelled"
+        # too old to renew: past a day since it was created
+        machine.succeed(f"runuser -u alice -- ${pkgs.jq}/bin/jq '.created = 1 | .expires = 1' {path} > /tmp/old.json")
+        machine.succeed(f"runuser -u alice -- cp /tmp/old.json {path}")
+        old = call({"action": "renew", "request_id": late["request_id"]})
+        assert not old["success"] and "too old" in old["error"], old
 
     login_id = tool("--add-login")["id"]
     password = "Gen3rated-Pa55word-x9"

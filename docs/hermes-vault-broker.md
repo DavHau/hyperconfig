@@ -125,7 +125,42 @@ Residual, by design:
 - The browser runs as the agent's uid (Camofox key in its `.env`): after a
   fill the agent can read the filled field back. A login fill needs no
   human consent, so every saved password stays readable one at a time this
-  way; a card only after Dave confirmed that fill.
+  way; a card only after Dave confirmed that fill. What the browser tools
+  hand the model by themselves no longer shows filled values: the vault
+  mask (below) covers them in every screenshot and snapshot.
+
+## Vault mask (screenshots and snapshots)
+
+A `browser_vision` screenshot after a card fill showed the card in plain
+text, and the image went to the provider and into the session. Now
+camofox-browser's vault-frames plugin records the controls each vault script
+changed (diff of the frame's form controls before and after the script, in
+the same isolated world; per page, the processor's nested cross-origin frame
+included), plus the values written (in the server's memory only, the tab's last
+64). Every screenshot and accessibility
+snapshot / page structure the server returns passes the core's capture guards
+(`pkgs/camofox-browser/capture-guard.patch`): filled controls, and any control
+anywhere on the page holding a filled value (re-created, regrouped), get
+`-webkit-text-security: disc` and a transparent colour for the capture and their
+boxes painted over in the PNG; so are controls holding a filled value (3+
+characters) and elements whose own text or attributes (or, for a small element,
+its whole text: a number in group spans) mirror a filled card number or a filled
+value of 8+ characters (a card preview), which get the transparent colour too. The
+image scale comes from a fixed probe of the viewport, not from page-styled boxes;
+a transformed or zoomed root is refused. In text every filled value becomes `••••`
+(a card number whatever its grouping, also split over snapshot lines). Fail closed: a control that cannot be read,
+a fill whose diff failed or that is still running, a field that moved or lost its
+style during the capture, refuses the capture (409 `capture_refused`,
+`browser_vision` says why); a page that keeps failing is refused until it
+navigates. The captcha solver photographs only through the guarded viewport
+screenshot (a widget too big for it is a failed solve). Vault fills are refused in
+a traced browser session. Residual: the mask covers accidental exposure; a page
+hostile to its own user can still draw a value into a canvas or image, or mirror a
+value under 8 characters (a CVC) as text outside a form control. Check: `browser` (`checkout.py`: OCR
+and pixels of `browser_vision`'s image with an OCR control, masked snapshots, a
+mirrored card preview, whole and in group spans, on a root narrower than the
+viewport, re-created fields, back/forward, a page stripping the mask refused; the
+real values still reach the processor on submit).
 - Consent is enforced in the gateway, not the broker.
 - Root reads everything (backups included).
 - The OLD key and ciphertext stay readable by the agent in som's ZFS

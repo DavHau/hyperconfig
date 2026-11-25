@@ -68,6 +68,9 @@ let
     # The vault through the host's vault broker (vault-broker.nix): the
     # agent's uid cannot read it.
     ./patches/hermes-vault-broker-client.patch
+    # After the any-site patch: an unanswered card or address confirmation
+    # tells the agent how to ask again instead of reading as a refusal.
+    ./patches/hermes-vault-payment-confirm-unanswered.patch
     # Last: extends the resume patches' shutdown drain, startup resume and
     # per-turn notes, and the busy-yield and notice patches' registry code.
     ./patches/hermes-background-jobs-survive-restart.patch

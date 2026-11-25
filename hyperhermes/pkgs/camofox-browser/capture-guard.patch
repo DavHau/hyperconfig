@@ -1,0 +1,204 @@
+Capture guards: every screenshot and snapshot text the server hands out passes
+through the guards plugins register, so a plugin can keep what must not leave
+the browser out of all of them (the vault-frames plugin masks the fields a
+vault fill wrote, ./vault-frames-plugin/mask.js). A guard that throws refuses
+the capture: the route answers 409 capture_refused, never the unguarded data.
+
+- every page.screenshot of a route (screenshot, snapshot includeScreenshot,
+  the legacy /snapshot) goes through captureScreenshot, never to a file;
+- the accessibility snapshot (iframes included), the Google SERP text and the
+  page structure go through captureText before they are cached or returned;
+- GET /tabs/:id/screenshot also answers X-Camofox-Viewport (CSS width,
+  height, scrollX, scrollY) for a coordinate click on what it shows;
+- plugins get registerCaptureGuard, captureScreenshot and CaptureRefusedError.
+
+Not upstream.
+
+diff --git a/server.js b/server.js
+index 1a18be2..a308c64 100644
+--- a/server.js
++++ b/server.js
+@@ -106,6 +106,51 @@ reporter.startWatchdog(30_000, () => {
+ // --- Plugin event bus ---
+ const pluginEvents = createPluginEvents();
+ 
++// hyperhermes: capture guards. Every screenshot (page.screenshot, any route) and every accessibility
++// snapshot / page structure text this server returns goes through them, so a plugin can keep what it
++// knows must not leave the browser out of all of them: the vault-frames plugin masks the fields a
++// vault fill wrote (plugins/vault-frames). A guard that throws refuses the capture (fail closed):
++// the route answers 409 code capture_refused, never the unguarded image or text.
++const captureGuards = [];
++class CaptureRefusedError extends Error {
++  constructor(message) { super(message); this.statusCode = 409; this.code = 'capture_refused'; }
++}
++function registerCaptureGuard(guard) { captureGuards.push(guard); }
++async function captureScreenshot(page, options = {}) {
++  // Never to a file: Playwright would write the unguarded image before a guard could cover it.
++  const { path: _path, ...rest } = options || {};
++  options = rest;
++  let take = (opts) => page.screenshot(opts);
++  for (const guard of captureGuards) {
++    if (!guard.screenshot) continue;
++    const inner = take;
++    take = async (opts) => {
++      try { return await guard.screenshot(page, opts, inner); } catch (err) {
++        if (err instanceof CaptureRefusedError) throw err;
++        throw new CaptureRefusedError(`screenshot refused: ${err.message}`);
++      }
++    };
++  }
++  return take(options);
++}
++async function captureText(page, text) {
++  let out = text;
++  for (const guard of captureGuards) {
++    if (!guard.text || typeof out !== 'string' || !out) continue;
++    try { out = await guard.text(page, out); } catch (err) {
++      throw new CaptureRefusedError(`snapshot refused: ${err.message}`);
++    }
++  }
++  return out;
++}
++async function captureStructure(page, structure) {
++  if (!structure || !captureGuards.some((g) => g.text)) return structure;
++  const text = await captureText(page, JSON.stringify(structure));
++  try { return JSON.parse(text); } catch {
++    throw new CaptureRefusedError('snapshot refused: the page structure could not be masked');
++  }
++}
++
+ // --- Shared auth middleware ---
+ const authMiddleware = () => requireAuth(CONFIG);
+ 
+@@ -1547,6 +1592,10 @@ function handleRouteError(err, req, res, extraFields = {}) {
+   if (tabId) {
+     pluginEvents.emit('tab:error', { userId, tabId, error: err, ...sentryContext });
+   }
++  // hyperhermes: a refused capture says why (its message names no page content), not "Internal server error".
++  if (err instanceof CaptureRefusedError) {
++    return res.status(409).json({ error: err.message, code: err.code, retryable: false, ...extraFields });
++  }
+   if (isPageCrashedError(err)) {
+     if (foundForContext) destroyTab(sessions.get(normalizeUserId(userId)), tabId, 'page_crashed', userId);
+     return res.status(410).json({ error: 'Page crashed. Open a new tab.', code: 'page_crashed', retryable: true, recovery: 'create_new_tab', ...extraFields });
+@@ -3742,7 +3791,7 @@ app.get('/tabs/:tabId/snapshot', async (req, res) => {
+       const win = windowSnapshot(tabState.lastSnapshot, offset);
+       const response = { url: tabState.page.url(), snapshot: win.text, structure: tabState.lastStructure, refsCount: tabState.refs.size, truncated: win.truncated, totalChars: win.totalChars, hasMore: win.hasMore, nextOffset: win.nextOffset };
+       if (req.query.includeScreenshot === 'true') {
+-        const pngBuffer = await tabState.page.screenshot({ type: 'png' });
++        const pngBuffer = await captureScreenshot(tabState.page, { type: 'png' });
+         response.screenshot = { data: pngBuffer.toString('base64'), mimeType: 'image/png' };
+       }
+       log('info', 'snapshot (cached offset)', { reqId: req.reqId, tabId: req.params.tabId, offset, totalChars: win.totalChars });
+@@ -3773,7 +3822,8 @@ app.get('/tabs/:tabId/snapshot', async (req, res) => {
+       
+       // Google SERP fast path -- DOM extraction instead of ariaSnapshot
+       if (isGoogleSerp(pageUrl)) {
+-        const { refs: googleRefs, snapshot: googleSnapshot } = await extractGoogleSerp(tabState.page);
++        const { refs: googleRefs, snapshot: googleSerpText } = await extractGoogleSerp(tabState.page);
++        const googleSnapshot = await captureText(tabState.page, googleSerpText);
+         tabState.refs = googleRefs;
+         tabState.lastSnapshot = googleSnapshot;
+         snapshotBytes.labels('google_serp').observe(Buffer.byteLength(googleSnapshot, 'utf8'));
+@@ -3789,15 +3839,15 @@ app.get('/tabs/:tabId/snapshot', async (req, res) => {
+           nextOffset: win.nextOffset,
+         };
+         if (req.query.includeScreenshot === 'true') {
+-          const pngBuffer = await tabState.page.screenshot({ type: 'png' });
++          const pngBuffer = await captureScreenshot(tabState.page, { type: 'png' });
+           response.screenshot = { data: pngBuffer.toString('base64'), mimeType: 'image/png' };
+         }
+         return response;
+       }
+       
+       tabState.refs = await refreshTabRefs(tabState, { reason: 'snapshot' });
+-      const ariaYaml = await getAriaSnapshot(tabState.page);
+-      const structure = attachStructureRefs(await extractPageStructure(tabState.page), tabState.refs);
++      const ariaYaml = await captureText(tabState.page, await getAriaSnapshot(tabState.page));
++      const structure = attachStructureRefs(await captureStructure(tabState.page, await extractPageStructure(tabState.page)), tabState.refs);
+       let annotatedYaml = ariaYaml || '';
+       if (annotatedYaml && tabState.refs.size > 0) {
+         const refsByKey = new Map();
+@@ -3848,7 +3898,7 @@ app.get('/tabs/:tabId/snapshot', async (req, res) => {
+       };
+ 
+       if (req.query.includeScreenshot === 'true') {
+-        const pngBuffer = await tabState.page.screenshot({ type: 'png' });
++        const pngBuffer = await captureScreenshot(tabState.page, { type: 'png' });
+         response.screenshot = { data: pngBuffer.toString('base64'), mimeType: 'image/png' };
+       }
+ 
+@@ -5477,9 +5527,12 @@ app.get('/tabs/:tabId/screenshot', async (req, res) => {
+     session.lastAccess = Date.now();
+     
+     const { tabState } = found;
+-    const buffer = await tabState.page.screenshot({ type: 'png', fullPage });
++    const buffer = await captureScreenshot(tabState.page, { type: 'png', fullPage });
+     pluginEvents.emit('tab:screenshot', { userId, tabId: req.params.tabId, buffer });
+     res.set('Content-Type', 'image/png');
++    // hyperhermes: the viewport in CSS pixels, for a coordinate click on what this image shows.
++    const viewport = await tabState.page.evaluate('[window.innerWidth, window.innerHeight, window.scrollX, window.scrollY]').catch(() => null);
++    if (Array.isArray(viewport)) res.set('X-Camofox-Viewport', viewport.map((v) => Math.round(Number(v) || 0)).join(','));
+     res.send(buffer);
+   } catch (err) {
+     log('error', 'screenshot failed', { reqId: req.reqId, error: err.message });
+@@ -6853,7 +6906,7 @@ app.get('/snapshot', async (req, res) => {
+       const win = windowSnapshot(tabState.lastSnapshot, offset);
+       const response = { ok: true, format: 'aria', targetId, url: tabState.page.url(), snapshot: win.text, structure: tabState.lastStructure, refsCount: tabState.refs.size, truncated: win.truncated, totalChars: win.totalChars, hasMore: win.hasMore, nextOffset: win.nextOffset };
+       if (req.query.includeScreenshot === 'true') {
+-        const pngBuffer = await tabState.page.screenshot({ type: 'png' });
++        const pngBuffer = await captureScreenshot(tabState.page, { type: 'png' });
+         response.screenshot = { data: pngBuffer.toString('base64'), mimeType: 'image/png' };
+       }
+       return res.json(response);
+@@ -6863,7 +6916,8 @@ app.get('/snapshot', async (req, res) => {
+     
+     // Google SERP fast path
+     if (isGoogleSerp(pageUrl)) {
+-      const { refs: googleRefs, snapshot: googleSnapshot } = await extractGoogleSerp(tabState.page);
++      const { refs: googleRefs, snapshot: googleSerpText } = await extractGoogleSerp(tabState.page);
++      const googleSnapshot = await captureText(tabState.page, googleSerpText);
+       tabState.refs = googleRefs;
+       tabState.lastSnapshot = googleSnapshot;
+       tabState.lastStructure = null;
+@@ -6877,7 +6931,7 @@ app.get('/snapshot', async (req, res) => {
+         hasMore: win.hasMore, nextOffset: win.nextOffset,
+       };
+       if (req.query.includeScreenshot === 'true') {
+-        const pngBuffer = await tabState.page.screenshot({ type: 'png' });
++        const pngBuffer = await captureScreenshot(tabState.page, { type: 'png' });
+         response.screenshot = { data: pngBuffer.toString('base64'), mimeType: 'image/png' };
+       }
+       return res.json(response);
+@@ -6885,8 +6939,8 @@ app.get('/snapshot', async (req, res) => {
+     
+     tabState.refs = await buildRefs(tabState.page);
+     
+-    const ariaYaml = await getAriaSnapshot(tabState.page);
+-    const structure = attachStructureRefs(await extractPageStructure(tabState.page), tabState.refs);
++    const ariaYaml = await captureText(tabState.page, await getAriaSnapshot(tabState.page));
++    const structure = attachStructureRefs(await captureStructure(tabState.page, await extractPageStructure(tabState.page)), tabState.refs);
+     let annotatedYaml = ariaYaml || '';
+     if (annotatedYaml && tabState.refs.size > 0) {
+       const refsByKey = new Map();
+@@ -6930,7 +6984,7 @@ app.get('/snapshot', async (req, res) => {
+     };
+ 
+     if (req.query.includeScreenshot === 'true') {
+-      const pngBuffer = await tabState.page.screenshot({ type: 'png' });
++      const pngBuffer = await captureScreenshot(tabState.page, { type: 'png' });
+       response.screenshot = { data: pngBuffer.toString('base64'), mimeType: 'image/png' };
+     }
+ 
+@@ -7309,6 +7363,11 @@ const pluginCtx = {
+   destroyTimedOutTab,
+   tabNotFoundResponse,
+   handleRouteError,
++  // hyperhermes: capture guards (see registerCaptureGuard) and the guarded screenshot itself, for
++  // plugins that photograph a page (plugins/captcha).
++  registerCaptureGuard,
++  captureScreenshot,
++  CaptureRefusedError,
+   safePageClose,
+   createLeasedPage,
+   closeLeasedPage,

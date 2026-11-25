@@ -25,6 +25,9 @@ from pathlib import Path
 
 KINDS = ("payment", "login", "address")
 TTL = 30 * 60
+# A pending or expired (never used) request may be renewed: the same link for another TTL, at most
+# this long after it was created.
+MAX_LIFETIME = 24 * 3600
 MAX_PENDING = 10
 MAX_ATTEMPTS = 5
 MAX_LABEL = 80
@@ -163,13 +166,7 @@ def create(kind: str, label: str, origin: str, reason: str, hermes_home: str) ->
     d = request_dir()
     d.mkdir(mode=0o700, exist_ok=True)
     prune()
-    pending = 0
-    for p in d.glob("*.json"):
-        try:
-            if state_of(json.loads(p.read_text(encoding="utf-8"))) == "pending":
-                pending += 1
-        except (OSError, ValueError, TypeError):
-            pass
+    pending = pending_count()
     if pending >= MAX_PENDING:
         raise RequestError(f"{pending} vault requests are pending already; cancel some or wait for them")
     now = time.time()
@@ -189,6 +186,41 @@ def create(kind: str, label: str, origin: str, reason: str, hermes_home: str) ->
         "attempts": 0,
     }
     save(req)
+    return req
+
+
+def pending_count(exclude: str = "") -> int:
+    """The pending requests in the agent's request directory (``exclude``: an id not to count)."""
+    pending = 0
+    for p in request_dir().glob("*.json"):
+        try:
+            if p.stem != exclude and state_of(json.loads(p.read_text(encoding="utf-8"))) == "pending":
+                pending += 1
+        except (OSError, ValueError, TypeError):
+            pass
+    return pending
+
+
+def renew(rid: str) -> dict:
+    """The same link for another TTL: a pending request, or one that expired unused. Under the
+    request's lock, so a renewal never revives a link the user just used or the agent cancelled.
+    The failed-attempt count is kept (its cap holds across renewals)."""
+    with locked(rid):
+        req = load(rid)
+        if req is None:
+            raise RequestError("no such request")
+        state = state_of(req)
+        if state not in ("pending", "expired"):
+            raise RequestError(f"a {state} request cannot be renewed; create a new one if still needed")
+        now = time.time()
+        created = float(req.get("created", now))
+        if now + TTL > created + MAX_LIFETIME:
+            raise RequestError("this link is too old to renew; create a new request")
+        if state == "expired" and pending_count(exclude=rid) >= MAX_PENDING:
+            raise RequestError(f"{MAX_PENDING} vault requests are pending already; cancel some or wait for them")
+        req["state"] = "pending"
+        req["expires"] = now + TTL
+        save(req)
     return req
 
 

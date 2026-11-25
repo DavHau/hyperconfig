@@ -1,0 +1,119 @@
+A card or address fill whose confirmation nobody answered says how to ask again.
+
+Symptom: the user did not see the fill confirmation within approvals.timeout
+(300 s); browser_vault fill then answered payment_declined, "The user did not
+confirm filling this payment card. Nothing was written. Do not retry; ask
+them instead.", the same text as an explicit refusal. The agent took the
+timeout for a refusal and gave up on the purchase.
+
+Fix (hyperhermes): `_confirm_payment_fill` returns the decision
+(accept/decline/cancel); a `cancel` (request_elicitation_consent's "nobody
+answered": timeout, or the prompt withdrawn) answers payment_unanswered,
+naming the timeout, that nothing was written, and that a fill with the same
+handle once the user is back asks anew. A refusal stays payment_declined with
+"Do not retry". The timeout itself stays approvals.timeout (300 s default;
+the gateway's prompt holds the turn that long, and a fill ask is one tap).
+Not upstream.
+
+diff --git a/tests/tools/test_browser_vault_payment_consent.py b/tests/tools/test_browser_vault_payment_consent.py
+index 8fc4b0d..aee0064 100644
+--- a/tests/tools/test_browser_vault_payment_consent.py
++++ b/tests/tools/test_browser_vault_payment_consent.py
+@@ -127,11 +127,25 @@ def test_a_card_declined_on_an_unseen_site_writes_nothing(card):
+     assert page.events == ["inspect", "amount", "prompt"]
+ 
+ 
+-@pytest.mark.parametrize("decision", ["cancel", "decline"])
++@pytest.mark.parametrize("decision", ["cancel", "decline", "deny", ""])
+ def test_no_answer_is_no_consent(card, decision):
+     page = _FakePage("https://shop.example/checkout", _CARD_CONTROLS)
+     out = _fill(card, page, decision=decision)
+-    assert out["error_type"] == "payment_declined" and page.writes == []
++    # hyperhermes: an unanswered prompt (cancel: approvals.timeout ran out) is told apart from a refusal.
++    want = "payment_unanswered" if decision == "cancel" else "payment_declined"
++    assert out["error_type"] == want and page.writes == []
++
++
++def test_an_unanswered_confirmation_says_how_to_ask_again(card):
++    """hyperhermes: a timeout is not a refusal: the agent is told nothing was written, that the user must
++    approve, and to call fill again with the same handle (which asks anew); a refusal still says do not retry."""
++    page = _FakePage("https://shop.example/checkout", _CARD_CONTROLS)
++    out = _fill(card, page, decision="cancel")
++    assert "Nothing was written" in out["error"] and "action=fill" in out["error"] and "again" in out["error"]
++    assert "Do not retry" not in out["error"]
++    out = _fill(card, page, decision="decline")
++    assert "Do not retry" in out["error"]
++    assert _fill(card, page)["success"] is True and len(page.writes) == 1
+ 
+ 
+ def test_consent_is_asked_for_every_fill_never_remembered(card):
+diff --git a/tools/browser_vault_tool.py b/tools/browser_vault_tool.py
+index c82a8bd..4c2de18 100644
+--- a/tools/browser_vault_tool.py
++++ b/tools/browser_vault_tool.py
+@@ -910,8 +910,17 @@ def browser_vault_fill(handle: str, task_id: Optional[str] = None) -> str:
+             return json.dumps(inspected)
+         consented_frames = sorted({t[1] for t in inspected[2]})
+         amount = _page_amount(effective_task_id) if meta.kind == "payment" else None
+-        if not _confirm_payment_fill(meta.label, page_origin, consented_frames, kind=meta.kind,
+-                                     saved_for=saved_origins(meta), amount=amount):
++        decision = _confirm_payment_fill(meta.label, page_origin, consented_frames, kind=meta.kind,
++                                         saved_for=saved_origins(meta), amount=amount)
++        if decision == "cancel":
++            # Nobody answered in time (approvals.timeout) or the prompt was withdrawn: not a refusal.
++            what = "payment card" if meta.kind == "payment" else "address"
++            return json.dumps({"success": False, "error_type": "payment_unanswered",
++                               "error": (f"Nobody answered the confirmation to fill this {what} in time "
++                                         f"({_approval_timeout_text()}). Nothing was written; the page is unchanged. "
++                                         "Tell the user you need them to approve the fill, and once they reply, "
++                                         "call browser_vault action=fill with the same handle again: it asks anew.")})
++        if decision != "accept":
+             return json.dumps({"success": False, "error_type": "payment_declined",
+                                "error": (f"The user did not confirm filling this {'payment card' if meta.kind == 'payment' else 'address'}. "
+                                          "Nothing was written. Do not retry; ask them instead.")})
+@@ -1178,8 +1187,17 @@ def _run_fill_writes(task_id: str, writes: list[tuple[str, Optional[str], str, s
+     return filled, None
+ 
+ 
++def _approval_timeout_text() -> str:
++    try:
++        from tools.approval_context import _get_approval_timeout
++        seconds = int(_get_approval_timeout())
++    except Exception:  # health: allow BLE001 -- a hint only
++        return "the confirmation timed out"
++    return f"it waits {seconds // 60} min" if seconds >= 120 else f"it waits {seconds} s"
++
++
+ def _confirm_payment_fill(label: str, origin: str, frame_origins: Optional[list[str]] = None, *, kind: str = "payment",
+-                          saved_for: Optional[list[str]] = None, amount: Optional[str] = None) -> bool:
++                          saved_for: Optional[list[str]] = None, amount: Optional[str] = None) -> str:
+     """Human confirmation before a card (or address) is written into a page: a prompt injection that reaches
+     a checkout must not be able to spend. Routes through the approval surface of the active session (gateway
+     button round-trip or CLI panel); headless sessions cannot confirm and the fill is refused. Names the payment
+@@ -1188,7 +1206,10 @@ def _confirm_payment_fill(label: str, origin: str, frame_origins: Optional[list[
+     hyperhermes: a card or address fills on any site, so this prompt is the only gate: it names the exact page
+     origin the write is pinned to, the origin the item was saved for when that differs (a hint only), and the
+     amount the page shows (best effort, page-controlled, never trusted). One call, one fill: no remember_key,
+-    so no "session"/"always" choice exists and no consent carries to another fill or origin."""
++    so no "session"/"always" choice exists and no consent carries to another fill or origin.
++
++    hyperhermes: returns the decision, ``"accept"``, ``"decline"`` or ``"cancel"`` (nobody answered before
++    ``approvals.timeout``, or the prompt was withdrawn), so the caller can tell the agent to ask again."""
+     from tools.approval_prompt import request_elicitation_consent
+ 
+     frames = (" Card fields go into the payment processor's frame from " + ", ".join(frame_origins) + "."
+@@ -1210,12 +1231,12 @@ def _confirm_payment_fill(label: str, origin: str, frame_origins: Optional[list[
+             f"Give {site} your address? ({_one_line(label)}){tag}",
+             f"The agent wants to enter your saved address into a form on {origin}." + hint
+             + " Approve only if you want to give this site your address.",
+-            surface="vault-payment", title="Confirm address fill?") == "accept"
++            surface="vault-payment", title="Confirm address fill?")
+     return request_elicitation_consent(
+         f"Pay on {site}? Card: {_one_line(label)}{tag}",
+         f"The agent wants to enter your saved card details into the checkout on {origin}." + frames + hint + shown
+         + " The card number and CVC never enter the conversation. Approve only if you intend to pay this site.",
+-        surface="vault-payment", title="Confirm payment card fill?") == "accept"
++        surface="vault-payment", title="Confirm payment card fill?")
+ 
+ 
+ def _site_for_title(origin: str, limit: int = 60) -> str:
