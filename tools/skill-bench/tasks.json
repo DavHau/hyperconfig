@@ -86,12 +86,11 @@
       }
     },
     {
-      "id": "bump-denylist",
-      "prompt": "Where is the denylist of paths that the nightly nixpkgs bump must never change? Give the file and the shell variable name(s), and name the related flake check that tests it.",
+      "id": "bump-lock-guard",
+      "prompt": "Where is the nightly nixpkgs bump's pre-push lock-integrity check implemented, and which flake check tests it?",
       "grade": {
         "all": [
           "modules/nixos/infra-space/nixpkgs-bump/guard\\.sh",
-          "denied_paths",
           "nixpkgs-bump-guard"
         ]
       }

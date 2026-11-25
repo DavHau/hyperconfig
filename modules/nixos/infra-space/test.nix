@@ -817,53 +817,17 @@ pkgs.testers.runNixOSTest {
           assert "hermes-agent-infra.service" in deps.split("After=")[1], deps
           unit = guest_root(memberA, "systemctl cat nixpkgs-bump.service")
           assert "X-RestartIfChanged=false" in unit, unit
-          # the pre-push guard is on infra's PATH (the agent's terminal),
-          # and refuses outside a bump workspace (its offline test is the
-          # nixpkgs-bump-guard check)
-          assert guest(memberA, "command -v nixpkgs-bump-guard").strip() == "/run/current-system/sw/bin/nixpkgs-bump-guard"
-          assert guest(memberA, "command -v nixpkgs-bump-workspace").strip() == "/run/current-system/sw/bin/nixpkgs-bump-workspace"
-          code, out = guest(memberA, "cd /home/infra && nixpkgs-bump-guard 2>&1", check=False)
-          assert code != 0 and "not in a bump workspace" in out, (code, out)
-          # an earlier night's leftover workspace never stops a run: the
-          # production helper (repository /home/infra/hyperconfig, here a
-          # clone of a local origin) takes a stale one over, keeps its
-          # unpushed fix as a bookmark and carries it onto main@origin
-          # without its flake.lock change; a live one (changed just now)
-          # is refused, touching nothing
-          ids = "export JJ_USER=t JJ_EMAIL=t@t; "
-          guest(memberA, "git init --quiet --bare --initial-branch=main /tmp/bump-origin.git && "
-                         "git clone --quiet /tmp/bump-origin.git /tmp/bump-seed 2>/dev/null && cd /tmp/bump-seed && "
-                         "echo '{}' > flake.nix && echo lock0 > flake.lock && git add -A && "
-                         "git -c user.name=t -c user.email=t@t commit --quiet -m init && git push --quiet origin main && "
-                         "jj git clone --colocate /tmp/bump-origin.git /home/infra/hyperconfig >/dev/null 2>&1")
-          old_name = "hyperconfig-nixpkgs-bump-2026-11-14"
-          old = f"/home/infra/{old_name}"
-          code, out = guest(memberA, ids + "exec 2>&1; set -x; "
-                               f"ws=$(nixpkgs-bump-workspace create {old_name}) && cd $ws && "
-                               "echo lock1 > flake.lock && jj describe -m lock && jj new && "
-                               "echo fix > fix.nix && jj describe -m fix && jj new && "
-                               f"mkdir -p /home/infra/nixpkgs-bump && echo r > /home/infra/nixpkgs-bump/{old_name}.old-rev", check=False)
-          assert code == 0, (code, out)
-          code, out = guest(memberA, ids + "nixpkgs-bump-workspace create hyperconfig-nixpkgs-bump-2026-11-15 2>&1", check=False)
-          assert code != 0 and "is in use" in out, (code, out)
-          guest(memberA, f"test -d {old} && test ! -e /home/infra/hyperconfig-nixpkgs-bump-2026-11-15")
-          # dead: nothing changed in it, and its liveness stamp is old
-          guest(memberA, f"test -f /home/infra/nixpkgs-bump/{old_name}.alive")
-          # nixpkgs-bump-nix run in the workspace refreshes the stamp
-          guest(memberA, f"touch -d '3 hours ago' /home/infra/nixpkgs-bump/{old_name}.alive && "
-                         f"cd {old} && nixpkgs-bump-nix --version >/dev/null && "
-                         f"test -n \"$(find /home/infra/nixpkgs-bump/{old_name}.alive -mmin -5)\"")
-          guest(memberA, f"cd ~ && find {old} /home/infra/nixpkgs-bump/{old_name}.alive -exec touch -h -d '2 days ago' {{}} +")
-          code, out = guest(memberA, ids + "nixpkgs-bump-workspace create hyperconfig-nixpkgs-bump-2026-11-15 2>/tmp/err; cat /tmp/err >&2", check=False)
-          err = guest(memberA, "cat /tmp/err")
-          assert code == 0 and out.strip() == "/home/infra/hyperconfig-nixpkgs-bump-2026-11-15", (code, out, err)
-          assert "archived as nixpkgs-bump-archive/hyperconfig-nixpkgs-bump-2026-11-14" in err, err
-          assert "CARRIED: " in err, err
-          guest(memberA, f"test ! -e {old} && test ! -e /home/infra/nixpkgs-bump/hyperconfig-nixpkgs-bump-2026-11-14.old-rev")
-          new = "/home/infra/hyperconfig-nixpkgs-bump-2026-11-15"
-          assert guest(memberA, f"cd {new} && jj log --no-graph --reversed -r 'main@origin..@-' -T 'description.first_line()'").strip() == "fix"
-          assert guest(memberA, f"cat {new}/fix.nix {new}/flake.lock").split() == ["fix", "lock0"]
-          guest(memberA, f"rm -rf {new} /home/infra/hyperconfig /home/infra/nixpkgs-bump /tmp/bump-origin.git /tmp/bump-seed /tmp/err")
+          # the bump's tools are on infra's PATH (the agent's terminal); the
+          # guard refuses outside a jj workspace (its own test is the
+          # nixpkgs-bump-guard check, the no-overlap check's
+          # nixpkgs-bump-busy)
+          for tool in ["nixpkgs-bump-guard", "nixpkgs-bump-nix", "nixpkgs-bump-eval", "nixpkgs-bump-searxng-canary", "nixpkgs-bump-busy"]:
+              assert guest(memberA, f"command -v {tool}").strip() == f"/run/current-system/sw/bin/{tool}", tool
+          code, out = guest(memberA, "cd /tmp && nixpkgs-bump-guard 2>&1", check=False)
+          assert code != 0 and "not in a jj workspace" in out, (code, out)
+          # no bump turn in the gateway: not busy
+          code, out = guest(memberA, "nixpkgs-bump-busy 2>&1", check=False)
+          assert code == 1 and "cannot read" not in out, (code, out)
           # the verdict is the log's last non-empty line, exactly (hermes
           # -Q's trailing `session_id:` line aside)
           for text, ok in [("x\\nNIXPKGS-BUMP: merged\\n\\nsession_id: 20261110_013000_abc\\n", True),
@@ -893,13 +857,14 @@ pkgs.testers.runNixOSTest {
           assert int(guest_root(memberA, "cat ${llmRecord} | wc -l").strip()) == before
           guest_root(memberA, "systemctl reset-failed nixpkgs-bump.service")
           # the stub's answer has no verdict as its last line: failed
-          # (asked by hand to build cm-pi: the flag file reaches the prompt)
-          guest(memberA, "touch /home/infra/nixpkgs-bump/build-cm-pi")
+          # (asked by hand to build cm-pi and for a dry run: the flag
+          # files reach the prompt)
+          guest(memberA, "touch /home/infra/nixpkgs-bump/build-cm-pi /home/infra/nixpkgs-bump/dry-run")
           code, _ = memberA.execute("nixos-container run infra-space -- systemctl start nixpkgs-bump.service")
           assert code != 0, code
           prompt = guest(memberA, "cat /home/infra/nixpkgs-bump/last-prompt")
-          assert prompt.rstrip().endswith("CM_PI_BUILD=1"), prompt
-          guest(memberA, "test ! -e /home/infra/nixpkgs-bump/build-cm-pi")
+          assert prompt.rstrip().endswith("DRY_RUN=1\nCM_PI_BUILD=1"), prompt
+          guest(memberA, "test ! -e /home/infra/nixpkgs-bump/build-cm-pi && test ! -e /home/infra/nixpkgs-bump/dry-run")
           report = guest(memberA, "cat /home/infra/nixpkgs-bump/*.log")
           assert "locked-pong" in report, report
           assert int(guest_root(memberA, "cat ${llmRecord} | wc -l").strip()) > before

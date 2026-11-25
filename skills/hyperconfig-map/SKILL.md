@@ -118,8 +118,10 @@ the named owner and leave the copies to their unification.
   `modules/nixos/scan-trigger/` -> `/vault/misc/scans/`); desktops' queue
   `modules/nixos/home-printer.nix` (amy vit joy); `docs/home-printer.md`.
 - substituters, ncro, nix-cache keys: `modules/clan/nix-cache/default.nix`.
-- nightly bump: `modules/nixos/infra-space/nixpkgs-bump{.nix,/}` (guard.sh
-  denylists `denied_paths`/`denied_opts`; check `nixpkgs-bump-guard`).
+- nightly bump: `modules/nixos/infra-space/nixpkgs-bump{.nix,/}` (skill
+  `SKILL.md`; lock check `guard.sh`, check `nixpkgs-bump-guard`; no-overlap
+  `busy.sh`, check `nixpkgs-bump-busy`; per-attribute eval gate
+  `nixpkgs-bump-eval` in `nixpkgs-bump.nix`).
   Timer/unit/verdict runner shared by all agent jobs: `infra-space/agent-job.nix`.
 - security jobs (cve-watch daily 02:30, hygiene-report Sat 03:30,
   security-audit Sun 03:30, Asia/Bangkok; all wait for the bump's lock):

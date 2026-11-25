@@ -468,13 +468,13 @@
         # for GitHub and the prefetch (no network).
         nixpkgs-bump-guard = import ./modules/nixos/infra-space/nixpkgs-bump/guard-test.nix {
           pkgs = nixpkgs.legacyPackages.x86_64-linux;
-          # the review parts' read check runs the hermes infra-space runs
-          inherit (self.nixosConfigurations.som.config.containers.infra-space.config.services.hyperhermes.package)
-            hermesVenv
-            ;
         };
-        # The bump's workspace helper: create and remove twice, overlap,
-        # self-cleanup on a failed create (local origin, no network).
+        # The bump's no-overlap check against a scratch state.db.
+        nixpkgs-bump-busy = import ./modules/nixos/infra-space/nixpkgs-bump/busy-test.nix {
+          pkgs = nixpkgs.legacyPackages.x86_64-linux;
+        };
+        # The security jobs' workspace helper: create and remove twice,
+        # overlap, self-cleanup on a failed create (local origin, no network).
         nixpkgs-bump-workspace = import ./modules/nixos/infra-space/nixpkgs-bump/workspace-test.nix {
           pkgs = nixpkgs.legacyPackages.x86_64-linux;
         };

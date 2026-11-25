@@ -17,6 +17,13 @@
     prompt       text of the query
     promptHook   shell run before the query is written; may append lines
                  to "$query" (the bump's CM_PI_BUILD)
+    busyCheck    shell run first (after the client lock): exit 0 means an
+                 earlier run is still going, and this one starts nothing.
+                 It writes a log ending `<verdictTag>: skipped` (put
+                 `skipped` in okVerdicts) and exits 0 the first time; skipped again the next run
+                 (the earlier one hangs), the unit fails, so the brief and
+                 OnFailure= say so. The bump's: an earlier run's turn still
+                 in the gateway
     verdictTag   the report's last line is `<verdictTag>: <word>`
     okVerdicts   words that count as a good run (anything else fails)
     quietVerdicts  good words that mean "nothing to tell Dave": the run's
@@ -76,6 +83,7 @@
   calendar,
   prompt,
   promptHook ? "",
+  busyCheck ? null,
   verdictTag,
   okVerdicts,
   quietVerdicts ? [ ],
@@ -215,6 +223,18 @@ let
       echo "${name}: another run holds ${logDir}/.lock" >&2
       exit 1
     fi
+    ${lib.optionalString (busyCheck != null) ''
+      if why=$(${pkgs.writeShellScript "${name}-busy" busyCheck}); then
+        echo "${name}: an earlier run is still going ($why): not starting" >&2
+        prev=$(ls -1t ${logDir}/*.log 2>/dev/null | head -n 1)
+        printf '%s\n%s\n' "an earlier run is still going: $why" "${verdictTag}: skipped" >${logDir}/$(date -u +%FT%H%MZ).log
+        if [ -n "$prev" ] && grep -qx '${verdictTag}: skipped' "$prev"; then
+          echo "${name}: skipped twice in a row: the earlier run looks stuck" >&2
+          exit 1
+        fi
+        exit 0
+      fi
+    ''}
     busy=
     ${lib.concatMapStrings (u: ''
       # ${u}: when its timer is due within 20 min (missed nights: both

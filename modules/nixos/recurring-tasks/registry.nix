@@ -71,7 +71,7 @@ in
     runSlo = d 7 + h 14;
   };
 
-  # Moved by the bump (its SearXNG steps), no unit of its own yet.
+  # Moved to upstream master's tip by every nightly bump.
   searxng-pin = infraSpace // {
     result = {
       command = lockAge "searxng";

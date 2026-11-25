@@ -468,13 +468,15 @@ in
             # Background subagents of all sessions share this cap (default 10,
             # which the infra session's fan-outs hit); as on som's agents.
             delegation.max_concurrent_children = 20;
-            # Total subagents per one-shot run (hermes' default 2; interactive
-            # and gateway sessions are never charged): the nightly bump
-            # (./nixpkgs-bump.nix runs as this agent) needs the SearXNG
-            # review, implementers and reviews per fix round, and fixes of
-            # whatever blocks it; as many as max_concurrent_children (Dave).
-            # Decisions D30/D37.
-            delegation.oneshot_max_children = 20;
+            # Total subagents per one-shot run (hermes' default 2; 0 = no
+            # cap; interactive and gateway sessions are never charged): the
+            # nightly bump (./nixpkgs-bump.nix runs as this agent) starts as
+            # many implementers and fresh reviewers as it needs (Dave,
+            # 2026-11-24: no subagent limits). max_concurrent_children
+            # above still bounds how many run at once. This agent's other
+            # one-shot runs (decisions-curate, no delegation toolset) are
+            # not affected; the security jobs are infra-jobs' (below).
+            delegation.oneshot_max_children = 0;
           };
         };
 

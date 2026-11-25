@@ -16,7 +16,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - clan.core.state: modules/nixos/atproto-pds/test.nix
 - clan.core.vars: modules/nixos/clan-vars-restart-units-test.nix
 - clan.core.vars.generators: modules/nixos/atproto-pds/test.nix, modules/nixos/clan-secrets-mirror-test.nix, modules/nixos/infra-space/test-clan-stub.nix, modules/nixos/ipv4-forward-slots-test/default.nix, modules/nixos/owntracks/test.nix, modules/nixos/porkbun-records/test.nix, modules/nixos/spaces/test.nix, modules/nixos/storagebox-test.nix
-- clanSecretsMirror.url: modules/nixos/clan-secrets-mirror.nix, modules/nixos/infra-space/nixpkgs-bump/guard-test.nix
+- clanSecretsMirror.url: modules/nixos/clan-secrets-mirror.nix
 - clients: modules/clan/oidc/default.nix
 - containerSlot.cacheUsers: hyperhermes/modules/slot/default.nix
 - controller: modules/clan/wireguard/default.nix
@@ -198,7 +198,6 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - voices-oauth2-proxy: modules/nixos/wyoming-local-speech/voices-sso.nix
 - wifi-parasit: modules/nixos/role-parasit.nix
 - wireguard-network-${instanceName}: modules/clan/wireguard/default.nix
-- x: modules/nixos/infra-space/nixpkgs-bump/guard-test.nix
 - zfs-key: machines/nas/automount/default.nix, modules/nixos/zfs-remote-unlock/default.nix
 - zfs-passphrase: machines/nas/automount/default.nix
 - zfs-tang: machines/nas/automount/default.nix, modules/nixos/zfs-remote-unlock/default.nix

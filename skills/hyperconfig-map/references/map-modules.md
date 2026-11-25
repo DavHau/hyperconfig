@@ -239,19 +239,16 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/infra-space/fleet-bump/fleet-bump.sh — fleet-bump: the deterministic nightly nixpkgs bump (./default.nix says where it runs and why). No agent: fetch main, mo… <- m/infra-space/fleet-bump/default.nix
 - modules/nixos/infra-space/fleet-bump/test.nix — ./fleet-bump.sh in a VM, offline: <- flake.nix
 - modules/nixos/infra-space/hermes-skill/SKILL.md — Manage Dave's NixOS fleet from infra-space - change hyperconfig, push it, deploy machines with clan, reach the other inf <- m/infra-space/agent-tools.nix, m/infra-space/guest.nix, m/infra-space/hermes.nix
-- modules/nixos/infra-space/nixpkgs-bump/SKILL.md — The nightly nixpkgs-unstable bump of hyperconfig - update nixpkgs, build every machine, fix, review, guard, merge to mai <- m/infra-space/hermes.nix, m/infra-space/nixpkgs-bump.nix
+- modules/nixos/infra-space/nixpkgs-bump/SKILL.md — The nightly nixpkgs-unstable bump of hyperconfig - move nixpkgs and searxng, make every machine build and every check ev <- m/infra-space/hermes.nix, m/infra-space/nixpkgs-bump.nix
+- modules/nixos/infra-space/nixpkgs-bump/busy-test.nix — ./busy.sh against a scratch state.db with hermes' two tables (only the columns it reads): <- flake.nix
+- modules/nixos/infra-space/nixpkgs-bump/busy.nix — nixpkgs-bump-busy (./busy.sh), for ../nixpkgs-bump.nix (the unit's no-overlap check) and ./busy-test.nix. <- m/infra-space/nixpkgs-bump.nix, m/infra-space/nixpkgs-bump/busy-test.nix
+- modules/nixos/infra-space/nixpkgs-bump/busy.sh — nixpkgs-bump-busy: is an earlier nightly bump still going? The unit is only a client; the run is a turn in the gateway… <- m/infra-space/nixpkgs-bump/busy.nix
 - modules/nixos/infra-space/nixpkgs-bump/guard-test.nix — ./guard.sh against a scratch repository, without network: <- flake.nix
 - modules/nixos/infra-space/nixpkgs-bump/guard.nix — nixpkgs-bump-guard (./guard.sh), for ../nixpkgs-bump.nix (the guest's PATH) and ./guard-test.nix (which passes stubs as… <- m/infra-space/nixpkgs-bump.nix, m/infra-space/nixpkgs-bump/guard-test.nix
-- modules/nixos/infra-space/nixpkgs-bump/guard.sh — nixpkgs-bump-guard: the nightly bump's last check before it pushes (../nixpkgs-bump/SKILL.md step 6), run in the bump w… <- m/infra-space/nixpkgs-bump/guard.nix
-- modules/nixos/infra-space/nixpkgs-bump/searxng-diff.nix — nixpkgs-bump-searxng-diff (./searxng-diff.sh): <- m/infra-space/nixpkgs-bump/guard-test.nix, m/infra-space/nixpkgs-bump/searxng.nix
-- modules/nixos/infra-space/nixpkgs-bump/searxng-diff.sh — nixpkgs-bump-searxng-diff OLD NEW OUT [LABEL]: <- m/infra-space/nixpkgs-bump/searxng-diff.nix
-- modules/nixos/infra-space/nixpkgs-bump/searxng-readcheck.py — searxng-readcheck PART...: <- m/infra-space/nixpkgs-bump/searxng-diff.nix
-- modules/nixos/infra-space/nixpkgs-bump/searxng-text.py — searxng-text: the character rules of the review file (./searxng-diff.sh). <- m/infra-space/nixpkgs-bump/searxng-diff.nix
-- modules/nixos/infra-space/nixpkgs-bump/searxng.nix — nixpkgs-bump-searxng (./searxng.sh), for ../nixpkgs-bump.nix (the guest's PATH). <- m/infra-space/nixpkgs-bump.nix, m/infra-space/nixpkgs-bump/guard-test.nix
-- modules/nixos/infra-space/nixpkgs-bump/searxng.sh — nixpkgs-bump-searxng: the nightly bump's steps for web_search's SearXNG (the root flake input `searxng`, upstream maste… <- m/infra-space/nixpkgs-bump/searxng.nix
+- modules/nixos/infra-space/nixpkgs-bump/guard.sh — nixpkgs-bump-guard: the nightly bump's lock-integrity check, run at the bump workspace's root right before the push (..… <- m/infra-space/nixpkgs-bump.nix, m/infra-space/nixpkgs-bump/guard.nix
 - modules/nixos/infra-space/nixpkgs-bump/workspace-test.nix — ./workspace.sh against a scratch colocated repository with a local origin (no network): <- flake.nix
-- modules/nixos/infra-space/nixpkgs-bump/workspace.nix — nixpkgs-bump-workspace (./workspace.sh), for ../nixpkgs-bump.nix (the guest's PATH) and ./workspace-test.nix. <- m/infra-space/nixpkgs-bump.nix, m/infra-space/nixpkgs-bump/workspace-test.nix, m/infra-space/security-jobs.nix
-- modules/nixos/infra-space/nixpkgs-bump/workspace.sh — nixpkgs-bump-workspace: creates and removes the nightly bump's jj workspace (../nixpkgs-bump/SKILL.md steps 1 and 6), s… <- m/infra-space/nixpkgs-bump.nix, m/infra-space/nixpkgs-bump/workspace.nix
+- modules/nixos/infra-space/nixpkgs-bump/workspace.nix — nixpkgs-bump-workspace (./workspace.sh), the security jobs' workspace helper (../security-jobs.nix builds it under thei… <- m/infra-space/nixpkgs-bump/workspace-test.nix, m/infra-space/security-jobs.nix
+- modules/nixos/infra-space/nixpkgs-bump/workspace.sh — nixpkgs-bump-workspace: creates and removes an unattended job's jj workspace, so the run never parses jj's output to de… <- m/infra-space/nixpkgs-bump/workspace.nix
 - modules/nixos/infra-space/secret-prompt/clan-secret-prompt.py — - <- m/infra-space/secret-prompt/default.nix
 - modules/nixos/infra-space/secret-prompt/default.nix — clan-secret-prompt (./clan-secret-prompt.py): <- m/infra-space/dashboard.nix, m/infra-space/guest.nix
 - modules/nixos/infra-space/security-jobs/collect.sh — sec-collect: the security jobs' read-only collectors, run as infra through sudo. RUN is validated and output goes under… <- m/infra-space/security-jobs.nix
@@ -323,7 +320,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/porkbun-records/stub.py — A stand-in for porkbun's JSON API v3, for the VM tests: <- m/porkbun-records/test.nix
 - modules/nixos/porkbun-records/sync.sh — porkbun-records-sync [--dry-run] <config.json> <- m/porkbun-records/default.nix
 - modules/nixos/porkbun-records/test.nix — ./default.nix against ./stub.py (porkbun's API on 127.0.0.1:8053): <- flake.nix
-- modules/nixos/recurring-tasks/default.nix — Freshness of the fleet's recurring tasks: <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/decisions.nix, m/infra-space/nixpkgs-bump.nix, m/recurring-tasks/test.nix, m/telegram-send/default.nix
+- modules/nixos/recurring-tasks/default.nix — Freshness of the fleet's recurring tasks: <- modules/flake-parts/nixosConfigurations.nix, m/infra-space/decisions.nix, m/recurring-tasks/test.nix, m/telegram-send/default.nix
 - modules/nixos/recurring-tasks/promql.nix — The recurring-task SLO checks as PromQL, shared by the Grafana rules (../monitoring-alerts.nix) and the VM test (./test… <- m/monitoring-alerts.nix, m/recurring-tasks/default.nix, m/recurring-tasks/test.nix
 - modules/nixos/recurring-tasks/recurring_tasks.py — - <- m/recurring-tasks/default.nix
 - modules/nixos/recurring-tasks/registry.nix — The fleet's recurring tasks, as data: <- m/infra-space/agent-job.nix, m/monitoring-alerts.nix, m/recurring-tasks/default.nix
@@ -346,7 +343,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/scan-trigger/scan_trigger.py — - <- m/scan-trigger/default.nix
 - modules/nixos/scan-trigger/test.nix — The home printer/scanner stack against a fake USB MFP: <- flake.nix
 - modules/nixos/searxng-canary/canary.py — - <- m/searxng-canary/package.nix
-- modules/nixos/searxng-canary/candidate.nix — searxng-candidate: the nightly bump's scratch SearXNG, run on this host in a sandbox instead of in the infra-space gues… <- m/searxng-canary/default.nix
+- modules/nixos/searxng-canary/candidate.nix — searxng-candidate: the nightly bump's scratch SearXNG, run on this host in a sandbox instead of in the infra-space gues… <- m/infra-space/nixpkgs-bump.nix, m/searxng-canary/default.nix
 - modules/nixos/searxng-canary/default.nix — searxng-canary: is web_search's SearXNG (../../../hyperhermes/modules/ browser/searxng.nix, 127.0.0.1:8890) still answe… <- machines/som/hermes-agents.nix
 - modules/nixos/searxng-canary/package.nix — The canary script (./canary.py) as a command, for ./default.nix (som's 10-min timer) and ./candidate.nix (the nightly b… <- m/searxng-canary/candidate.nix, m/searxng-canary/default.nix, m/searxng-canary/test.nix
 - modules/nixos/searxng-canary/test.nix — The canary's verdict on recorded SearXNG answers (no network), the flake check `searxng-canary`: <- flake.nix

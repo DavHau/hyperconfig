@@ -15,7 +15,6 @@ sshkey modules/nixos/storagebox.nix                 # Hetzner Storage Box host k
 sshkey modules/nixos/spaces/slots.nix               # container slots' host keys (asof-agents), pinned for Dave's desktops and dave-hermes
 sshkey machines/nas/users.nix                       # nas' own root and the old grmpf-nix backup client
 sshkey hyperhermes/checks/*                         # test keys
-sshkey *-test.nix                                   # test keys
 
 # dangling: fixture paths inside tests, sibling checkouts named in comments.
 dangling modules/nixos/infra-space/nixpkgs-bump/*-test.nix   # paths inside the test's scratch repo
@@ -40,7 +39,6 @@ dangling machines/som/hermes-agents.nix ./hyperhermes        # the repo's hyperh
 
 # generators: names that guard existing secrets; renaming means moving the
 # secret (CONVENTIONS.md: never rename a var that guards a disk).
-generator modules/nixos/infra-space/nixpkgs-bump/guard-test.nix x  # test fixture
 sshkey modules/nixos/agent-user.nix                 # defines the agent@amy key (the fleet `agent` user's registry)
 
 # dangling: paths in other repos, named with their repo.

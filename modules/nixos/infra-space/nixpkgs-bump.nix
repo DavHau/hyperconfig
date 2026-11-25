@@ -1,77 +1,45 @@
 /*
   The nightly nixpkgs-unstable bump, run by the infra-space agent itself
-  (./nixpkgs-bump/SKILL.md says what it does: bump, build every machine,
-  fix, change and security review, guard, merge to main, never deploy). A
-  guest module of ./hermes.nix, so it exists only where the agent runs
-  (som): one bumper, as the instances share no lock.
+  (./nixpkgs-bump/SKILL.md says what it does: move nixpkgs and searxng,
+  make every machine build and every check evaluate, two independent
+  reviews, the lock check, merge to main, never deploy). A guest module of
+  ./hermes.nix, so it exists only where the agent runs (som).
 
-  A systemd timer, not hermes' cron. hermes keeps cron jobs in
-  ~/.hermes/cron/jobs.json (v0.22.5 cron/jobs.py:2,89), the agent's own
-  mutable state (core's locked-config.nix leaves cron jobs the agent's);
-  there is no declared job in config.yaml (hermes_cli/config_defaults.py
-  `cron` holds scheduler settings only). Seeding that file would leave the
-  schedule editable by the agent, and creating jobs needs the cronjob
-  toolset, which stays in ./hermes.nix's disabled cap. A timer is Nix's
-  alone; the agent cannot add, move or drop it.
+  A systemd timer, not hermes' cron: cron jobs are the agent's own mutable
+  state (~/.hermes/cron/jobs.json) and need the cronjob toolset, which
+  stays off; a timer is Nix's alone. The unit and its log, verdict and
+  OnFailure= notice are ./agent-job.nix's, shared with the security jobs.
 
-  The unit is only the trigger: `hermes chat -q` (one-shot; -Q prints
-  the final answer only) through the agent's `hermes` shim, which admits
-  the run to the running gateway (hermes_cli/gateway_chat.py: no local
-  fallback). The agent's tools run there, with the gateway's hardening,
-  allowlist and cap; `oneshot` is a cli surface (gateway/session_policy.py
-  SURFACES), so the run gets the same toolsets as Dave's cli sessions,
-  delegation included. The skill comes preloaded (-s).
+  The unit is only a client: `hermes chat -Q` through the agent's shim,
+  whose turn runs in the gateway and goes on when the client dies (a
+  timeout, a lost websocket; ./agent-job-follow.sh then follows the
+  session). So "is a run still going" is the gateway's answer, not the
+  unit's: `nixpkgs-bump-busy` (below) asks the agent's state.db whether a
+  bump session still has a turn queued or running, and if so the new run
+  exits before it starts anything (no overlap; its log says
+  `NIXPKGS-BUMP: skipped`, and a second skip in a row fails the unit, so
+  a stuck run shows in the brief). Otherwise it starts fresh on
+  main@origin; an earlier night's workspace is dropped by the skill.
 
-  The unit does not own the run. Stopping it, or TimeoutStartSec, kills
-  the client only: the turn goes on in the gateway and may still push
-  hours later (gateway_client.py:1 "Closing a viewer never stops its
-  authority"; gateway_chat.py:394 "accepted work continues at the
-  gateway"; hermes has no CLI interrupt). So a client that loses its
-  websocket (a keepalive timeout under load, a gateway restart) does not
-  end the run either: the unit then follows the session in the agent's
-  state.db until its turn ends, and resumes it when a restart cut it off
-  (./agent-job-follow.sh, run by ./agent-job.nix). Ending the run means stopping this unit first (or
-  the follower resumes the session), then ending the turn in the
-  gateway (the dashboard, or restarting hermes-agent-infra, which this
-  unit no longer follows, see below). What keeps a stray turn
-  from merging over a newer run is the skill: step 1 refuses to start
-  while a bump workspace is in use (its liveness stamp, refreshed at each
-  step and by nixpkgs-bump-nix, younger than 2 h; a file changed in the
-  last 30 minutes; or a process in it), and nixpkgs-bump-guard (below) fails a push once
-  someone else bumped. A dead earlier night's workspace never stops a
-  run: step 1 takes it over, archives its work as a local bookmark and
-  carries its fixes forward (./nixpkgs-bump/workspace.sh).
-
-  Failures surface three ways: the report (the agent's last message) in
-  ~/nixpkgs-bump/<UTC date and time>.log, the unit failing (its journal;
-  `systemctl --failed` in the guest) unless the log's last line is
-  `NIXPKGS-BUMP: merged` or `unchanged` (hermes' trailing `session_id:`
-  line aside), and nothing on main.
-
-  A failed unit shows as a stale recurring task (../recurring-tasks reads
-  the guest's units from som's host), OnFailure= files a notice for the
-  09:00 brief, and the brief says when the last run failed
-  (./agent-job.nix).
-
-  The run's toolsets are `-t terminal,file,todo,delegation,no_mcp`
-  (./agent-job.nix): no skill or memory tools and no MCP servers. Its
-  terminal can still write files as the infra user; this narrows, not
-  forbids, persistence into later sessions. The session's cwd
-  is ~/nixpkgs-bump (agent-job.nix's `--in`, the job's log dir), no
-  longer ~.
-
-  Resources: the run's nix commands go through `nixpkgs-bump-nix`, nix
-  with the bump's own max-jobs and cores, so som's nix.settings and
-  everyone else's builds keep theirs. Flags, not the unit: the commands
-  run in the gateway, whose environment is the shim's `env -i` allowlist
-  (no NIX_CONFIG from here), and systemd limits on this unit would bind
-  only the shim, never the host daemon's builders. The daemon takes both
-  from untrusted clients too: they are fixed fields of the client's
-  wopSetOptions, applied before the trusted-users check that guards the
-  other overrides (nix 2.35 src/libstore/daemon.cc ClientSettings::apply);
-  `--option max-jobs` would go there and be ignored for infra, which is
-  not, and must not be, a trusted user. The guard keeps plain nix: its
-  only nix command is `nix flake prefetch`, a download, no build.
+  What stays, and why (the rest of the old fence went, Dave 2026-11-24):
+  - nixpkgs-bump-nix: nix with the bump's own --max-jobs and --cores, so
+    som's services and other agents keep their share. The daemon honours
+    both from the untrusted infra client (nix's ClientSettings::apply);
+    `--option max-jobs` would be ignored, and systemd limits on this unit
+    bind only the shim, never the daemon's builders.
+  - nixpkgs-bump-eval: the flake-check gate, one nix process per check,
+    package, app, devShell and machine. One `nix flake check` held every
+    machine and VM test at once (~33 GB) and was OOM-killed on som, whose
+    services use ~38 of its 60 GB; per attribute the peak is one machine
+    (~7 GB, som's).
+  - nixpkgs-bump-guard: the lock-integrity check before the push
+    (./nixpkgs-bump/guard.sh), tested by ./nixpkgs-bump/guard-test.nix.
+  - nixpkgs-bump-searxng-canary: the moved SearXNG run in som's sandbox
+    (../searxng-canary/candidate.nix) with the search canary; one build
+    the som gate makes anyway plus a few minutes.
+  - the run's toolsets (-t terminal,file,todo,delegation, no MCP;
+    ./agent-job.nix): no skill or memory tools, so text an injected run
+    reads cannot rewrite skills or memory through them.
 */
 {
   config,
@@ -83,95 +51,118 @@
 let
   user = "infra";
   home = "/home/${user}";
-  # Only the repository: the run never works in it (the skill adds its own
-  # jj workspace beside it).
-  checkout = "${home}/hyperconfig";
   logDir = "${home}/nixpkgs-bump";
 
-  prompt = pkgs.writeText "nixpkgs-bump-prompt" ''
+  prompt = ''
     This is the nightly nixpkgs bump of hyperconfig, started by
     nixpkgs-bump.timer on ${config.infraSpace.member}; nobody is watching.
-    Follow the nixpkgs-bump skill from step 1 to the report. Never deploy.
-    Once merged, root the merged systems on the host with
-    infra-space-gcroot (the skill's step 6).
+    Follow the nixpkgs-bump skill to the end and do whatever it takes to
+    get main onto the new nixpkgs tonight. Never deploy.
     End with the skill's NIXPKGS-BUMP line.
   '';
-  # cm-pi's toolchain is built from source (the skill's step 3.2): only
-  # once a week, Saturday's run (01:30 at Dave's, `date +%u` = 6 in +07;
-  # the guest itself runs on UTC), or when Dave
-  # asks for it with ${cmPiFlag} before starting the unit by hand (the
-  # run consumes the file). The skill reads the decision from the
-  # prompt's CM_PI_BUILD line.
+  # cm-pi's toolchain is built from source (~6 h): only on Saturday's run
+  # (01:30 at Dave's, `date +%u` = 6 in +07; the guest runs on UTC), or
+  # when ${cmPiFlag} exists (the run consumes it). A dry run (no push)
+  # when ${dryRunFlag} exists. The skill reads both from the prompt.
   cmPiFlag = "${logDir}/build-cm-pi";
+  dryRunFlag = "${logDir}/dry-run";
 
-  # The skill's last check before a push (./nixpkgs-bump/guard.sh says
-  # what it checks). On the guest's PATH, so the agent's terminal finds it
-  # (/run/current-system/sw/bin), and tested without network by
-  # ./nixpkgs-bump/guard-test.nix.
   guard = import ./nixpkgs-bump/guard.nix {
-    inherit pkgs logDir;
+    inherit pkgs;
     nix = config.nix.package;
   };
 
-  # Steps 2a-2c: web_search's SearXNG (flake input `searxng`, upstream
-  # master) moves with nixpkgs, but only to a master tip we first saw at
-  # least 72 h ago (our own record, ~/nixpkgs-bump/searxng-tips.jsonl),
-  # after a code review of its diff and a search canary on som's sandbox
-  # (./nixpkgs-bump/searxng.sh says how; the guard wants both for a moved
-  # pin).
-  searxng = import ./nixpkgs-bump/searxng.nix {
-    inherit pkgs logDir bumpNix;
-    # the review's parts are read through this agent's own hermes
-    inherit (config.services.hyperhermes.package) hermesVenv;
-  };
-
-  # Steps 1 and 6's workspace: created and verified by facts, removed
-  # with its git worktree (./nixpkgs-bump/workspace.sh says why), tested
-  # by ./nixpkgs-bump/workspace-test.nix.
-  workspace = import ./nixpkgs-bump/workspace.nix {
-    inherit pkgs logDir;
-    repo = checkout;
-  };
-
-  # som has 32 threads: at most two builds of eight cores each, half the
-  # machine. Plain nix sends the guest's own (max-jobs auto = 32, cores 0:
-  # all); the daemon's nix.conf values never apply to daemon clients.
+  # som has 32 threads: at most two builds of eight cores each.
   maxJobs = 2;
   cores = 8;
-  # Run in a bump workspace, it also keeps that run's liveness stamp fresh
-  # (nixpkgs-bump-workspace alive, every 10 minutes while nix runs: a
-  # mass rebuild is one command for hours).
   bumpNix = pkgs.writeShellScriptBin "nixpkgs-bump-nix" ''
-    nix=${config.nix.package}/bin/nix
-    case "$PWD" in
-      ${home}/hyperconfig-nixpkgs-bump-*) ;;
-      *) exec $nix --max-jobs ${toString maxJobs} --cores ${toString cores} "$@" ;;
-    esac
-    name=''${PWD#${home}/}
-    name=''${name%%/*}
-    alive() { ${lib.getExe workspace} alive "$name" >/dev/null 2>&1; }
-    alive
-    self=$$
-    (while sleep 600; do kill -0 "$self" 2>/dev/null || exit 0; alive; done) </dev/null >/dev/null 2>&1 &
-    toucher=$!
-    $nix --max-jobs ${toString maxJobs} --cores ${toString cores} "$@"
-    rc=$?
-    kill "$toucher" 2>/dev/null
-    exit $rc
+    exec ${config.nix.package}/bin/nix --max-jobs ${toString maxJobs} --cores ${toString cores} "$@"
   '';
 
-  # The timer, unit, log and verdict (`nixpkgs-bump-verdict`, on the
-  # guest's PATH for ./test.nix): ./agent-job.nix, shared with the security
-  # jobs (./security-jobs.nix). The log of the last 60 runs is kept.
+  evalGate = pkgs.writeShellApplication {
+    name = "nixpkgs-bump-eval";
+    runtimeInputs = [
+      bumpNix
+      pkgs.coreutils
+      pkgs.jq
+    ];
+    bashOptions = [
+      "nounset"
+      "pipefail"
+    ];
+    text = ''
+      # nixpkgs-bump-eval LOGDIR, at the flake's root: what `nix flake
+      # check --no-build` evaluates on x86_64-linux, one nix process per
+      # attribute (this module's header says why). One line per
+      # attribute, `ok` or `FAIL` with its log; exit 1 if any failed.
+      [ $# = 1 ] || { echo "usage: nixpkgs-bump-eval LOGDIR" >&2; exit 2; }
+      logs=$1
+      mkdir -p "$logs"
+      failed=0
+      one() { # label attrpath
+        if nixpkgs-bump-nix eval --raw ".#$2" >"$logs/$1.log" 2>&1; then
+          echo "ok   $1"
+        else
+          echo "FAIL $1 ($logs/$1.log)"
+          failed=$((failed + 1))
+        fi
+      }
+      names() { nixpkgs-bump-nix eval --json ".#$1" --apply builtins.attrNames 2>"$logs/$1.names.log" | jq -r '.[]'; }
+      for out in checks packages devShells apps nixosConfigurations; do
+        attr=$out.x86_64-linux
+        [ "$out" != nixosConfigurations ] || attr=$out
+        list=$(names "$attr") || { echo "FAIL $attr (cannot list: $logs/$attr.names.log)"; failed=$((failed + 1)); continue; }
+        for n in $list; do
+          case $out in
+            apps) one "$attr.$n" "$attr.\"$n\".program" ;;
+            nixosConfigurations) one "$attr.$n" "$attr.\"$n\".config.system.build.toplevel.drvPath" ;;
+            *) one "$attr.$n" "$attr.\"$n\".drvPath" ;;
+          esac
+        done
+      done
+      echo "nixpkgs-bump-eval: $failed failed"
+      [ "$failed" = 0 ]
+    '';
+  };
+
+  canary = pkgs.writeShellApplication {
+    name = "nixpkgs-bump-searxng-canary";
+    runtimeInputs = [
+      bumpNix
+      pkgs.coreutils
+      pkgs.jq
+      pkgs.socat
+    ];
+    text = ''
+      # nixpkgs-bump-searxng-canary, at the flake's root: builds som's
+      # SearXNG from this tree and has som run it in its sandbox
+      # (../searxng-canary/candidate.nix: own uid, Mullvad egress, no
+      # secrets) with the search canary. Last line PASS or FAIL.
+      socket=/run/searxng-candidate/socket
+      [ -S "$socket" ] || { echo "no $socket"; echo FAIL; exit 1; }
+      rev=$(jq -r '.nodes[.nodes.root.inputs.searxng].locked.rev' flake.lock)
+      pkg=$(nixpkgs-bump-nix build --no-link --print-out-paths \
+        .#nixosConfigurations.som.config.services.searx.package | head -n 1) || { echo FAIL; exit 1; }
+      reply=$(printf '%s %s\n' "$pkg" "$rev" | socat -t 960 -T 960 - "UNIX-CONNECT:$socket")
+      echo "$reply"
+      if [ "$(tail -n 1 <<<"$reply")" = "searxng-candidate: PASS" ]; then echo PASS; else echo FAIL; exit 1; fi
+    '';
+  };
+
+  # No overlap (./nixpkgs-bump/busy.sh, tested by ./nixpkgs-bump/busy-test.nix).
+  busy = import ./nixpkgs-bump/busy.nix {
+    inherit pkgs;
+    stateDb = "${inputs.hyperhermes.lib.lockedHermesHome user}/state.db";
+    cwd = logDir;
+  };
+
   job = import ./agent-job.nix { inherit config inputs lib pkgs; } {
     name = "nixpkgs-bump";
     description = "Nightly nixpkgs-unstable bump of hyperconfig by the infra agent";
-    # 01:30 at Dave's (+07): the guest has no time zone of its own (UTC),
-    # so the calendar names it; systemd reads the zone from tzdata.
-    # nixpkgs-unstable has usually advanced by then, and the run is done
-    # by morning.
+    # 01:30 at Dave's (+07); the guest itself has no zone (UTC).
     calendar = "*-*-* 01:30:00 Asia/Bangkok";
-    prompt = builtins.readFile prompt;
+    inherit prompt;
+    busyCheck = "exec ${lib.getExe busy}";
     promptHook = ''
       cm_pi=0
       if [ "$(TZDIR=${pkgs.tzdata}/share/zoneinfo TZ=Asia/Bangkok date +%u)" = 6 ]; then
@@ -181,34 +172,41 @@ let
         cm_pi=1
         rm -f ${cmPiFlag}
       fi
+      dry=0
+      if [ -e ${dryRunFlag} ]; then
+        dry=1
+        rm -f ${dryRunFlag}
+      fi
+      echo "DRY_RUN=$dry" >>"$query"
       echo "CM_PI_BUILD=$cm_pi" >>"$query"
     '';
     verdictTag = "NIXPKGS-BUMP";
     okVerdicts = [
       "merged"
       "unchanged"
+      "dry-run"
+      # an earlier run was still going (busyCheck); twice in a row fails
+      "skipped"
     ];
     # A mass rebuild of every machine takes hours; past this the client
-    # gives up. The turn itself goes on in the gateway (see above).
+    # gives up and the turn goes on in the gateway (see above).
     timeout = "16h";
-    # Hours of polling a mass rebuild outlast hermes' default of 500 tool
-    # calls per turn.
     maxTurns = 3000;
     sharedLock = "/run/agent-jobs/nixpkgs-bump.lock";
-    # the follower's continue message (./agent-job-follow.sh)
     resumeNote = " Never deploy.";
   };
 in
 lib.mkMerge [
   {
-    # On the system PATH, which the gateway's commands (and subagents) end in.
-    # The security jobs (./security-jobs.nix) wait for this run's shared
-    # /run/agent-jobs/nixpkgs-bump.lock before they start, so builds never overlap.
+    # On the system PATH, which the gateway's commands (and subagents) end
+    # in. The security jobs (./security-jobs.nix) wait for this run's
+    # /run/agent-jobs/nixpkgs-bump.lock, so builds never overlap.
     environment.systemPackages = [
       guard
-      workspace
       bumpNix
-      searxng
+      evalGate
+      canary
+      busy
     ];
   }
   job

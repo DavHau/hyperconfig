@@ -34,10 +34,16 @@
   switches. `inventory.machines.<m>.deploy` in nixosConfigurations.nix.
 
 ## Nightly nixpkgs bump: `modules/nixos/infra-space/nixpkgs-bump.nix`
-Timer + skill `nixpkgs-bump/SKILL.md`; pre-push guard
-`nixpkgs-bump/guard.sh` (denylists `denied_paths` for files,
-`denied_opts` for option words), its test `nixpkgs-bump/guard-test.nix`
-(`checks...nixpkgs-bump-guard`), wrapper `nixpkgs-bump/guard.nix`.
+Timer + skill `nixpkgs-bump/SKILL.md` (any file may change; two
+independent reviews, the lock check, never deploys); lock-integrity
+guard `nixpkgs-bump/guard.sh` (nixpkgs/searxng on their branch, real
+narHash, no other input's source changed unless a commit names it), its
+test `nixpkgs-bump/guard-test.nix` (`checks...nixpkgs-bump-guard`);
+no-overlap `nixpkgs-bump/busy.sh` (`checks...nixpkgs-bump-busy`); the
+eval gate `nixpkgs-bump-eval` (one nix process per attribute: a single
+`nix flake check` OOMs som). Start one by hand: `systemctl start
+--no-block nixpkgs-bump.service` in the guest (`touch
+~/nixpkgs-bump/dry-run` first for a run that pushes nothing).
 
 
 ## Security jobs: `modules/nixos/infra-space/security-jobs.nix`

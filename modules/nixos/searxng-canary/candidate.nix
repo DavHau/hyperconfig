@@ -1,7 +1,7 @@
 # searxng-candidate: the nightly bump's scratch SearXNG, run on this host
 # in a sandbox instead of in the infra-space guest (a host module; the
-# guest's client is the nightly bump's `nixpkgs-bump-searxng canary`,
-# in infra-space's nixpkgs-bump).
+# guest's client is the nightly bump's `nixpkgs-bump-searxng-canary`,
+# ../infra-space/nixpkgs-bump.nix).
 #
 # Why not in the guest: the candidate is unreviewed upstream master code.
 # In the guest it would run as `infra`, next to the fleet push key, the

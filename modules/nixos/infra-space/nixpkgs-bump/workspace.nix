@@ -1,5 +1,7 @@
-# nixpkgs-bump-workspace (./workspace.sh), for ../nixpkgs-bump.nix (the
-# guest's PATH) and ./workspace-test.nix. `repo` is fixed at build time
+# nixpkgs-bump-workspace (./workspace.sh), the security jobs' workspace
+# helper (../security-jobs.nix builds it under their names and prefixes;
+# the nightly bump itself no longer uses it, its defaults are only the
+# test's) and ./workspace-test.nix. `repo` is fixed at build time
 # (no flag): the test builds its own variant.
 {
   pkgs,

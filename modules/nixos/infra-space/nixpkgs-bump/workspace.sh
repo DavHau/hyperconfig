@@ -1,8 +1,9 @@
-# nixpkgs-bump-workspace: creates and removes the nightly bump's jj
-# workspace (../nixpkgs-bump/SKILL.md steps 1 and 6), so the run never
-# parses jj's output to decide whether it has one. The security jobs
-# (../security-jobs.nix) build the same helper under their own name and
-# prefix (workspace.nix's `name` and `prefix`; its defaults are the bump's).
+# nixpkgs-bump-workspace: creates and removes an unattended job's jj
+# workspace, so the run never parses jj's output to decide whether it has
+# one. Used by the security jobs (../security-jobs.nix builds it under
+# their own name and prefix); the nightly bump no longer uses it (it
+# starts fresh each night, ../nixpkgs-bump/SKILL.md), the defaults below
+# keep its old names for ./workspace-test.nix.
 #
 #   nixpkgs-bump-workspace create [NAME]
 #   nixpkgs-bump-workspace alive NAME

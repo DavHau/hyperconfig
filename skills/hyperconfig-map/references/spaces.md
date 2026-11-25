@@ -43,7 +43,7 @@ Fleet-admin container on `members.nix` (som, amy; sshPort 2223).
 `~/clan-secrets`), `hermes.nix` its hermes (toolsets, `nixSkills`:
 infra-space + nixpkgs-bump + hyperconfig-map; skills disabled list),
 `hermes-skill/SKILL.md` the orchestrator skill, `nixpkgs-bump.nix` +
-`nixpkgs-bump/` (SKILL.md, guard.sh), `dashboard.nix` (som),
+`nixpkgs-bump/` (SKILL.md, guard.sh, busy.sh), `dashboard.nix` (som),
 `fleet-access.nix` (its root key on every machine), `age-recipients.nix`,
 `gcroots.nix`, `test.nix`
 (`checks...infra-space`).

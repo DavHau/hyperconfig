@@ -4,15 +4,11 @@
   pkgs,
   nix ? pkgs.nix,
   curl ? pkgs.curl,
-  logDir ? "/home/infra/nixpkgs-bump",
-  # ./searxng.nix's age gate
-  minAgeHours ? 72,
 }:
 pkgs.writeShellApplication {
   name = "nixpkgs-bump-guard";
   runtimeInputs = [
     pkgs.coreutils
-    pkgs.findutils
     curl
     pkgs.git
     pkgs.gnugrep
@@ -20,7 +16,5 @@ pkgs.writeShellApplication {
     pkgs.jujutsu
     nix
   ];
-  text = builtins.replaceStrings [ "@logDir@" "@minAgeHours@" ] [ logDir (toString minAgeHours) ] (
-    builtins.readFile ./guard.sh
-  );
+  text = builtins.readFile ./guard.sh;
 }
