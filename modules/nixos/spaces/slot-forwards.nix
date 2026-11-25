@@ -16,8 +16,11 @@
   slot's LAN address, since the hop to this host's own mesh address is
   local. They still need a key the slot authorizes. The slot sees every
   such login come from this host's address.
+
+  Only where container-slots is imported (som): a host without it (the
+  spaces VM test's) gets nothing from this file.
 */
-{ config, lib, ... }:
+{ config, options, lib, ... }:
 let
   machine = config.clan.core.settings.machine.name;
   container-slots = config.services.container-slots;
@@ -28,8 +31,9 @@ in
 {
   config = lib.mkMerge (
     # Over every slot, each behind mkIf: the list's shape must not depend
-    # on config (the machine's name), or the module system recurses.
-    lib.mapAttrsToList (name: s: lib.mkIf (s.machine == machine) {
+    # on config (the machine's name), or the module system recurses; the
+    # option tree (`options`) is safe to ask.
+    lib.optionals (options.services ? container-slots) (lib.mapAttrsToList (name: s: lib.mkIf (s.machine == machine) {
       systemd.sockets."slot-${name}-ssh" = {
         description = "${name} slot's sshd on the mesh address";
         wantedBy = [ "sockets.target" ];
@@ -53,6 +57,6 @@ in
         };
       };
       networking.firewall.interfaces.ygg.allowedTCPPorts = [ s.sshPort ];
-    }) (import ./slots.nix)
+    }) (import ./slots.nix))
   );
 }
