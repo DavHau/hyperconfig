@@ -471,9 +471,10 @@ in
             # Total subagents per one-shot run (hermes' default 2; interactive
             # and gateway sessions are never charged): the nightly bump
             # (./nixpkgs-bump.nix runs as this agent) needs the SearXNG
-            # review, an implementer, the change and the security review,
-            # plus a fresh reviewer after a rejection. Decisions D30/D37.
-            delegation.oneshot_max_children = 6;
+            # review, implementers and reviews per fix round, and fixes of
+            # whatever blocks it; as many as max_concurrent_children (Dave).
+            # Decisions D30/D37.
+            delegation.oneshot_max_children = 20;
           };
         };
 
