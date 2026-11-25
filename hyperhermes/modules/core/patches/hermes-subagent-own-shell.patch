@@ -1,0 +1,158 @@
+hermes v0.23.0: a delegate_task subagent gets a local shell of its own.
+
+Symptom: parallel subagents (and their parent) on the local terminal
+backend clobber each other's shell state. An `export X` in one child
+shows up in a sibling; a child's `unset` is undone by a sibling's command
+that finishes later; a leaked `export HOME=...` breaks the parent.
+
+Cause: every delegated child resolves to the parent's environment key
+(`session:<key>` / `default`), so all share ONE LocalEnvironment and its
+bash snapshot file, which each command re-dumps with `export -p` when it
+ends: the last writer wins.
+
+Fix: on the local backend a child (delegated_child_context) runs in an
+environment of its own, keyed `<parent key>::child::<task id>`, whose
+snapshot starts as a copy of the top-level session's (same env, functions,
+aliases). cwd was already per task. The child's environment is released when
+the child finishes (release_child_env; a timed-out worker's once it is
+done), otherwise by the idle reaper; its background jobs are unaffected.
+File tools keep running in the parent's environment (paths from the
+child's own cwd record), so they do not see a child's exports.
+Container backends keep the shared sandbox (#16177). Check:
+hyperhermes/checks/subagent-shell.
+
+diff --git a/tools/delegate_tool_child_run.py b/tools/delegate_tool_child_run.py
+index af968024..66b11721 100644
+--- a/tools/delegate_tool_child_run.py
++++ b/tools/delegate_tool_child_run.py
+@@ -1041,6 +1041,14 @@ class _ChildRun:
+         close_deferred = is_timeout and not future.done()
+         if close_deferred:
+             _defer_close_after_timeout(child, future)
++            # hyperhermes (hermes-subagent-own-shell.patch): its own shell once the worker is done.
++            _child_task_id = self.child_task_id
++
++            def _release_shell(_done: Any) -> None:
++                with _quiet("child shell release failed: %s"):
++                    from tools.terminal_tool import release_child_env
++                    release_child_env(_child_task_id)
++            future.add_done_callback(_release_shell)
+         return None, _error_entry, close_deferred
+ 
+     def append_sibling_write_reminder(self, entry: dict[str, Any]) -> None:
+@@ -1133,6 +1141,13 @@ class _ChildRun:
+         if self.subagent_id:
+             _unregister_subagent(self.subagent_id, agent=child)
+ 
++        # hyperhermes (hermes-subagent-own-shell.patch): the child's own local shell goes with it; a
++        # timed-out worker still unwinding keeps it until its future is done.
++        if not close_deferred:
++            with _quiet("child shell release failed: %s"):
++                from tools.terminal_tool import release_child_env
++                release_child_env(self.child_task_id)
++
+         if child_pool is not None and leased_cred_id is not None:
+             with _quiet("Failed to release credential lease: %s"):
+                 child_pool.release_lease(leased_cred_id)
+diff --git a/tools/terminal_tool.py b/tools/terminal_tool.py
+index d99296ba..2d4d7d61 100644
+--- a/tools/terminal_tool.py
++++ b/tools/terminal_tool.py
+@@ -21,6 +21,7 @@ import/patch target): ``terminal_tool_config`` (TERMINAL_* reads, ``_quiet``),
+ 
+ import json
+ import logging
++import contextlib
+ import os
+ import sys
+ import time
+@@ -663,6 +664,71 @@ def _lookup_active_env(effective_task_id: str, task_id: Optional[str]):
+     return None
+ 
+ 
++# hyperhermes (hermes-subagent-own-shell.patch): on the local backend a delegate_task child shared
++# its parent's LocalEnvironment, i.e. ONE bash snapshot that every command re-dumps with `export -p`
++# when it ends. Parallel children (and the parent) clobbered each other's shell state: an `export` or
++# `unset` in one landed in, or was undone by, a sibling's command finishing later. A child now runs
++# in an environment of its own, keyed ``<parent key>::child::<task id>``, whose snapshot starts as a
++# copy of the top-level session's (same env, functions, aliases; a grandchild's too); cwd was already
++# per task. Released with the child (``release_child_env``) and otherwise by the idle reaper.
++# Container backends keep sharing the parent's sandbox (#16177): only the local shell state is split.
++# File tools (read_file, patch, search) still run in the parent's environment: paths resolve from the
++# child's own cwd record, but they do not see the child's exports.
++_CHILD_ENV_MARK = "::child::"
++
++
++def _child_env_key(effective_task_id: str, task_id: Optional[str], env_type: str) -> str:
++    if env_type != "local" or not task_id or _CHILD_ENV_MARK in effective_task_id:
++        return effective_task_id
++    try:
++        from agent.delegation_context import is_delegated_child_context
++        if not is_delegated_child_context():
++            return effective_task_id
++    except Exception:
++        return effective_task_id
++    if task_id == effective_task_id:  # an isolation-override key (RL rollouts): already its own env
++        return effective_task_id
++    return f"{effective_task_id}{_CHILD_ENV_MARK}{task_id}"
++
++
++def _seed_child_env(new_env: Any, parent_key: str) -> None:
++    """Start the child's shell snapshot from the parent's, when the parent has one."""
++    with _env_lock:
++        parent = _active_environments.get(parent_key)
++    src = getattr(parent, "_snapshot_path", None)
++    dst = getattr(new_env, "_snapshot_path", None)
++    if not (src and dst and getattr(parent, "_snapshot_ready", False) and os.path.isfile(src)):
++        return
++    tmp = f"{dst}.tmp.seed{os.getpid()}"  # .tmp.*: LocalEnvironment.cleanup sweeps leftovers
++    try:
++        with open(src, "rb") as f_in:
++            data = f_in.read()
++        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
++        with os.fdopen(fd, "wb") as f_out:
++            f_out.write(data)
++        os.replace(tmp, dst)
++        new_env._snapshot_ready = True
++    except OSError:
++        logger.debug("Could not seed child shell snapshot from %s", src, exc_info=True)
++        with contextlib.suppress(OSError):
++            os.unlink(tmp)
++
++
++def release_child_env(task_id: Optional[str]) -> None:
++    """Drop the child environments created for *task_id* (``::child::<task_id>`` keys)."""
++    if not task_id:
++        return
++    suffix = f"{_CHILD_ENV_MARK}{task_id}"
++    with _env_lock:
++        keys = [k for k in _active_environments if k.endswith(suffix)]
++    from tools.terminal_tool_lifecycle import cleanup_vm
++    for key in keys:
++        try:
++            cleanup_vm(key)
++        except Exception:
++            logger.debug("child env release failed for %s", key, exc_info=True)
++
++
+ def _resolve_task_host_cwd(config: dict[str, Any], task_id: Optional[str]) -> Optional[str]:
+     """Host directory to bind into *task_id*'s container.
+ 
+@@ -1209,6 +1275,8 @@ def _plan_execution(
+         # Control-plane children run beside this interpreter, never inside
+         # the configured Docker/SSH backend; keep their env cache separate.
+         effective_task_id = f"host-local-{effective_task_id}"
++    # hyperhermes: a delegate_task child's own local shell (see _child_env_key).
++    effective_task_id = _child_env_key(effective_task_id, task_id, env_type)
+ 
+     # Per-task overrides (RL/benchmark envs, ACP workspace cwd) win over
+     # the global env-var config; ``resolve_task_overrides`` reads the raw
+@@ -1325,6 +1393,8 @@ def _acquire_env(plan: _ExecPlan, task_id: Optional[str]) -> Any:
+                 _redact_terminal_error_text(f"Terminal tool disabled: environment creation failed ({e})"),
+                 status="disabled",
+             ))
++        if _CHILD_ENV_MARK in eff:
++            _seed_child_env(new_env, eff.split(_CHILD_ENV_MARK, 1)[0])
+ 
+         with _env_lock:
+             _active_environments[eff] = new_env

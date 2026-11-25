@@ -71,6 +71,8 @@ let
     # Last: extends the resume patches' shutdown drain, startup resume and
     # per-turn notes, and the busy-yield and notice patches' registry code.
     ./patches/hermes-background-jobs-survive-restart.patch
+    # A delegated child's own local shell (snapshot seeded from the parent's).
+    ./patches/hermes-subagent-own-shell.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {
