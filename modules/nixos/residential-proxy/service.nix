@@ -51,8 +51,11 @@ in
     };
     connectionsPerClient = lib.mkOption {
       type = lib.types.ints.positive;
-      default = 64;
-      description = "Concurrent connections one client uid may hold, so one agent cannot take every slot of the gateway (512).";
+      # One agent's uid carries its Camofox server, whose subagents and cron
+      # runs each browse in a residential context of their own (hyperhermes
+      # browser.limits.maxContexts, 10), at ~20 connections per loaded page.
+      default = 160;
+      description = "Concurrent connections one client uid may hold, so one agent cannot take every slot of the gateway (512, gateway.py MAX_CLIENTS).";
     };
     clients = lib.mkOption {
       type = lib.types.listOf lib.types.str;
