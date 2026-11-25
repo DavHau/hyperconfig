@@ -21,7 +21,10 @@
 # profile, one made later included, while a profile's own plugin
 # directory stays; a profileSkills skill is seeded once and never
 # rewritten, a managed one rewritten on every sync; the .env is sourceable
-# with a spaced value; alice's `remote` CLI lists her targets.
+# with a spaced value; alice's `remote` CLI lists her targets; one
+# config merge covers the home's and the profiles' config.yaml, drops an
+# MCP server whose store command is gone and keeps the owner's own, and
+# the unit's start timeout fits a fleet-wide restart.
 { pkgs, self }:
 let
   seededSkill = pkgs.writeTextDir "SKILL.md" "---\nname: notes\ndescription: seeded\n---\nseed v1\n";
@@ -233,6 +236,43 @@ pkgs.testers.runNixOSTest {
         out = as_alice(f"set -a; . {profiles}/fresh/.env; set +a; printf %s \"$HH_SPACED\"")
         assert out == "openid profile email", out
 
+    with subtest("one config merge: home and profiles, stale store MCP servers dropped"):
+        # The unit's start timeout fits a fleet-wide restart (agents.nix).
+        t = machine.succeed("systemctl show -p TimeoutStartUSec --value hermes-agent-alice.service").strip()
+        assert t == "10min", t
+        home_config = "${hlib.stateDir "alice"}/.hermes/config.yaml"
+        gone = "/nix/store/00000000000000000000000000000000-hermes-gone-mcp"
+        live = "${pkgs.coreutils}/bin/true"
+        servers = (
+            "mcp_servers:\n"
+            f"  stale:\n    command: {gone}\n    args: []\n"
+            "  mine:\n    command: /home/alice/bin/my-mcp\n"
+            "  remote:\n    url: http://127.0.0.1:9/mcp\n"
+            f"  live:\n    command: {live}\n"
+            f"  argonly:\n    command: /home/alice/bin/run\n    args: [{gone}/x]\n"
+        )
+        # The whole home config.yaml: the merge puts the Nix settings back.
+        write_as_alice(home_config, servers)
+        write_as_alice(f"{profiles}/fresh/config.yaml", "own_key: kept\n" + servers)
+        # A mode of the owner's own survives the rewrite.
+        as_alice(f"chmod 640 {profiles}/fresh/config.yaml")
+        # bare's config.yaml goes: a profile without one is left alone.
+        as_alice(f"rm {profiles}/bare/config.yaml")
+        machine.succeed("systemctl restart hermes-agent-alice.service")
+        for cfg in (home_config, f"{profiles}/fresh/config.yaml"):
+            text = machine.succeed(f"cat {cfg}")
+            assert gone + "\n" not in text and "stale:" not in text, (cfg, text)
+            for kept in ("mine:", "/home/alice/bin/my-mcp", "remote:", "http://127.0.0.1:9/mcp", "live:", live, "argonly:"):
+                assert kept in text, (cfg, kept, text)
+            # The Nix settings reached it (core sets the terminal's cwd).
+            assert "${hlib.workspace "alice"}" in text, (cfg, text)
+        assert "own_key: kept" in machine.succeed(f"cat {profiles}/fresh/config.yaml")
+        machine.fail(f"test -e {profiles}/bare/config.yaml")
+        machine.wait_until_succeeds("journalctl -u hermes-agent-alice.service | grep -c \"dropped MCP server 'stale'\"", timeout=10)
+        assert machine.succeed(f"stat -c '%a %U' {profiles}/fresh/config.yaml").strip() == "640 alice"
+        machine.succeed(f"test -z \"$(find ${hlib.stateDir "alice"}/.hermes {profiles}/fresh -maxdepth 1 -name '.config.yaml.*')\"")
+        as_alice(f"touch {profiles}/bare/config.yaml")
+
     with subtest("profiles get the home's store plugins and their record"):
         plugins = "${hlib.stateDir "alice"}/.hermes/plugins"
         as_alice(f"ln -sfn ${fakePlugin} {plugins}/hh-test")
@@ -351,6 +391,8 @@ pkgs.testers.runNixOSTest {
         assert int(after) <= int(restarts), (restarts, after)
         main = machine.succeed("systemctl show -p MainPID --value hermes-agent-alice.service").strip()
         assert gateway_pids() == [main], (gateway_pids(), main)
-        machine.succeed("journalctl -u hermes-agent-alice.service | grep -q 'taking over from a stray gateway'")
+        # grep -c, not -q: -q exits at the first match, and journalctl, still
+        # writing, then fails the pipe with SIGPIPE (exit 141).
+        machine.wait_until_succeeds("journalctl -u hermes-agent-alice.service | grep -c 'taking over from a stray gateway'", timeout=10)
   '';
 }

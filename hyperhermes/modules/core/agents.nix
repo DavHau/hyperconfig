@@ -26,7 +26,12 @@ let
 
   # Upstream's deep merge: Nix keys win, keys the user added through the
   # dashboard survive.
-  configMergeScript = pkgs.callPackage "${hermes-agent}/nix/configMergeScript.nix" { };
+  # (./config-merge.py: the same merge for the home and all its profiles
+  # in one process, and stale store-path MCP servers dropped.)
+  configMerge = pkgs.writers.writePython3 "hermes-config-merge" {
+    libraries = [ pkgs.python3Packages.ruamel-yaml ];
+    flakeIgnore = [ "E501" ];
+  } (builtins.readFile ./config-merge.py);
 
   # Hermes' managed scope (hermes_cli/managed_scope.py) for one agent:
   # config.yaml and .env in a directory the owner cannot write. Hermes
@@ -174,7 +179,7 @@ let
       # memory writes the background review staged for /memory approve,
       # once memory.background_consolidation is "auto"
       # (./replay-memory-pending.py). For the home and each named profile,
-      # 30 s for all of them together (the unit's start timeout is 90 s);
+      # 30 s for all of them together (the unit's TimeoutStartSec below);
       # a failure or timeout never blocks the start.
       replayMemoryHomes = pkgs.writeShellScript "hermes-replay-memory-pending" ''
         shopt -s nullglob
@@ -233,17 +238,15 @@ let
           ${hermesHome}/memories ${hermesHome}/plugins ${workspace}
         # The managed scope pins these keys and wins over this file. The
         # merge keeps them in the file the dashboard's raw editor shows.
-        ${configMergeScript} ${ac.settingsFile user ucfg} ${hermesHome}/config.yaml
         # Named profiles (profiles/<name>/config.yaml) get the same merge:
         # hermes overlays the managed scope on a profile's config too, but
         # its skills loader reads the profile's file alone
         # (agent/skill_utils.py, _load_raw_config), so without this a
         # profile never sees skills.external_dirs. A profile hermes has
-        # not written a config.yaml for yet is left alone.
-        for profile_config in ${hermesHome}/profiles/*/config.yaml; do
-          [ -f "$profile_config" ] || continue
-          ${configMergeScript} ${ac.settingsFile user ucfg} "$profile_config"
-        done
+        # not written a config.yaml for yet is left alone. All of them in
+        # one process (./config-merge.py).
+        ${configMerge} ${ac.settingsFile user ucfg} ${hermesHome}/config.yaml \
+          ${hermesHome}/profiles/*/config.yaml
         # The same keys as the managed .env. Hermes loads that file after
         # this one, so the managed values win; this copy lets the
         # dashboard list them. Strip, then append, like the credential
@@ -443,6 +446,16 @@ let
               lib.mapAttrsToList (name: path: "${name}:${path}") ucfg.secretEnv
             );
             ExecStart = "${withSession} ${ac.hermesPackage}/bin/hermes gateway";
+            # Covers the preStart. Warm it takes 2-8 s (several named
+            # profiles at the top), but a deploy that restarts every agent
+            # at once makes each start ~10x slower (som, 2026-11: a 2 s
+            # preStart took 20 s, a 7 s one hit systemd's default 90 s and
+            # failed the switch). Its slow steps are bounded on their own
+            # (stray gateways 30 s + kill, memory replay 30 s, profile sync
+            # 30 s); the rest is a few bash steps and one config merge.
+            # 10 min is far above that worst case, so a busy host never
+            # fails a deploy, while a start that really hangs still ends.
+            TimeoutStartSec = "10min";
             # `hermes gateway restart` SIGUSR1s this main process
             # (patches/hermes-gateway-restart-foreign-unit.patch). The
             # gateway drains and exits 75 (gateway/restart.py,
