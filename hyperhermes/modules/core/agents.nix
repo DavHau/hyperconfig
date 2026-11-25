@@ -197,7 +197,19 @@ let
       # As the agent, which owns all of these files. Not for lockedConfig:
       # its profiles/ is root's, immutable and empty (./locked-config.nix).
       # A profile's own keys win over the copied blocks (./profile-env.py).
-      syncProfiles = "${profileEnv} ${hermesHome}";
+      # It also links the home's store plugins into each profile and
+      # seeds or rewrites the profileSkills (options.nix).
+      profileSpec = pkgs.writeText "hermes-profile-spec-${user}.json" (
+        builtins.toJSON {
+          skills = lib.mapAttrs (
+            _: lib.mapAttrs (_: s: {
+              source = "${s.source}";
+              inherit (s) managed;
+            })
+          ) ucfg.profileSkills;
+        }
+      );
+      syncProfiles = "${profileEnv} ${hermesHome} ${profileSpec}";
       # Opt-in hardening of both units (options.nix, hardening).
       hardening = lib.optionalAttrs cfg.hardening.enable cfg.hardening.serviceConfig;
       mounts = [

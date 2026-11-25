@@ -11,7 +11,9 @@ static skill, only in a dedicated hermes profile; the login stays `agent`.
 |---|---|---|
 | ssh key `dave-hermes-nmm-ssh` (clan var, owner dave-hermes) | `machines/som/dave-hermes-nmm.nix` | landed, generated |
 | `ssh asof-agents` for dave-hermes (user agent, own key, guest host key pinned in the module, from som's stable `::c0de:ba5e`) | same file, ssh_config `Match` block | landed |
-| hermes profile `nmm` in dave-hermes with the static `nmm` skill (`dave-hermes-nmm/SKILL.md`) | same file, `dave-hermes-nmm-profile.service` | landed |
+| hermes profile `nmm` in dave-hermes | same file, `dave-hermes-nmm-profile.service` | landed |
+| skills `nmm` (seeded once, then the agent's) and `nmm-tools` (managed, rewritten) in profile `nmm` only | hyperhermes `profileSkills` (`hyperhermes/modules/core/profile-env.py`), sources `machines/som/dave-hermes-nmm/{nmm,nmm-tools}/` | landed, needs a som deploy |
+| `remote asof-agents run/put/get/ro/pane/steer/task-status` | hyperhermes `remotes` (`hyperhermes/modules/core/remotes.nix`), target in `machines/som/dave-hermes-nmm.nix` | landed, needs a som deploy |
 | key authorized for `agent` in asof-agents | nmm's flake | **waits: Dave adds the line below; the swarm deploys agents** |
 
 History: a first version exported afk's skills and nmm's trunk text from
@@ -22,13 +24,18 @@ nothing is read from the container any more.
 
 ## Using it
 
-The `nmm` skill lives only in the profile `nmm`; dave-hermes' default and
-other profiles (finance, questions, ...) don't see it. Dave picks the
+The `nmm` and `nmm-tools` skills live only in the profile `nmm`;
+dave-hermes' default and other profiles don't see them. `nmm` is seeded
+from hyperconfig once, when the profile has no `skills/nmm/`, and from
+then on belongs to the agent (and its background skill review), like any
+skill it writes; hyperconfig never rewrites it. `nmm-tools` documents the
+`remote` CLI and the swarm recipes and is rewritten on every profile sync
+(gateway start, profile change); the agent doesn't edit it. Dave picks the
 profile in the desktop/web app's profile picker, or on som with
 `hermes -p nmm` (as dave-hermes). The profile was created with `hermes
 profile create nmm` (same model as the agent, hermes' own layout, a SOUL
 line naming its purpose); after that it is Dave's: only
-`skills/nmm/SKILL.md` is rewritten on each switch.
+`skills/nmm-tools/` is rewritten.
 
 The ssh login itself is per account, not per profile: every profile and
 cron job of dave-hermes can run `ssh asof-agents`; only the skill's
@@ -74,7 +81,12 @@ commits it or files it as a swarm task; `swarm deploy agents` applies it
 ## Verify (after the som deploy)
 
     ssh som.d systemctl status dave-hermes-nmm-profile
-    ssh som.d "runuser -u dave-hermes -- hermes -p nmm skills list" | grep nmm   # present
+    ssh som.d "runuser -u dave-hermes -- hermes -p nmm skills list" | grep nmm   # nmm, nmm-tools
     ssh som.d "runuser -u dave-hermes -- hermes skills list" | grep -w nmm       # absent
+    # as dave-hermes (its unit PATH has `remote`):
+    remote asof-agents run -- jj st
+    remote asof-agents put /etc/hostname x && remote asof-agents get x
+    remote asof-agents ro df -h /
+    remote asof-agents task-status <task-id>; remote asof-agents pane <task-id> 20
     # after the nmm change:
     ssh som.d "runuser -u dave-hermes -- ssh asof-agents true"

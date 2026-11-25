@@ -210,6 +210,10 @@ in
 {
   config = lib.mkIf (lockedAgents != { }) {
     assertions = lib.mapAttrsToList (user: ucfg: {
+      assertion = ucfg.profileSkills == { };
+      message = "services.hyperhermes.agents.${user}: profileSkills goes into profiles/, which lockedConfig makes root's and empty.";
+    }) lockedAgents
+    ++ lib.mapAttrsToList (user: ucfg: {
       assertion = droppedKeysIn user ucfg == [ ];
       message = "services.hyperhermes.agents.${user}: lockedConfig pins one .env for the gateway and the dashboard, and it would carry ${lib.concatStringsSep ", " (droppedKeysIn user ucfg)}, which dashboardDropEnv (or core, for HERMES_MANAGED*) keeps from the dashboard. Drop them from environment/secretEnv.";
     }) lockedAgents;

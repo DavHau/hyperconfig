@@ -45,5 +45,6 @@ in
     ./firewall.nix
     ./locked-config.nix
     ./vault-broker.nix
+    ./remotes.nix
   ];
 }

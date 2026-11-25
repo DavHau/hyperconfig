@@ -361,6 +361,40 @@ in
                   plugins at runtime.
                 '';
               };
+              profileSkills = mkOption {
+                type = types.attrsOf (
+                  types.attrsOf (
+                    types.submodule {
+                      options = {
+                        source = mkOption {
+                          type = types.path;
+                          description = "The skill's directory (SKILL.md and any references/, scripts/).";
+                        };
+                        managed = mkOption {
+                          type = types.bool;
+                          default = false;
+                          description = ''
+                            false: seeded once, when profiles/<profile>/skills/<skill>
+                            does not exist; from then on the agent (and its background
+                            skill review) owns it like any skill it wrote. true: its
+                            files are rewritten from `source` whenever the profiles are
+                            synced (every gateway start and profile change); files the
+                            agent adds beside them stay.
+                          '';
+                        };
+                      };
+                    }
+                  )
+                );
+                default = { };
+                example = lib.literalExpression ''{ work.tools = { source = "''${myTools}/share/skills/tools"; managed = true; }; }'';
+                description = ''
+                  Skills of named profiles, by profile and skill name, for skills
+                  that must reach one profile only (a skillDir reaches every
+                  profile). Installed by the profile sync (./profile-env.py) into
+                  each existing profile of that name; a profile is not created.
+                '';
+              };
               sshKeyFile = mkOption {
                 type = types.nullOr types.str;
                 default = null;

@@ -25,6 +25,7 @@ import errno
 import fcntl
 import json
 import os
+import re
 import secrets
 import shutil
 import socket
@@ -40,6 +41,19 @@ RENAME_EXCHANGE = 2
 ATTEMPTS = 20
 
 libc = ctypes.CDLL(None, use_errno=True)
+
+
+def env_value(v):
+    """A .env value, single-quoted when it holds a space or another shell-special byte, so the file can be
+    sourced (surrounding whitespace dropped first, as dotenv does unquoted); as is when it holds ', \\,
+    $ or a line break, which the shell and python-dotenv would read differently quoted
+    (core's agent-config.nix envLine)."""
+    t = v.strip(b" \t\r\n\v\f")
+    if not t or re.search(rb"['\\$\n\r]", t):
+        return v
+    if re.fullmatch(rb"[A-Za-z0-9_@%+=:,./-]*", t):
+        return t
+    return b"'" + t + b"'"
 
 
 def renameat2(dfd, old, new, flags):
@@ -205,7 +219,7 @@ for name, entry in sorted(spec["entries"].items()):
         creds = os.environ.get("CREDENTIALS_DIRECTORY")
         for cred in sorted(os.listdir(creds)) if creds else []:
             with open(os.path.join(creds, cred), "rb") as f:
-                content += cred.encode() + b"=" + f.read().rstrip(b"\n") + b"\n"
+                content += cred.encode() + b"=" + env_value(f.read().rstrip(b"\n")) + b"\n"
     else:
         with open(entry["source"], "rb") as f:
             content = f.read()

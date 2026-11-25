@@ -16,9 +16,17 @@
 # while the other agent gets a reset, at the forward and at the backend
 # behind it; the hermes-native chain is in place and hooked into OUTPUT;
 # a `gateway run` beside alice's unit is refused, and the unit takes
-# over from a stray gateway of her home instead of exiting 75 forever.
+# over from a stray gateway of her home instead of exiting 75 forever;
+# the home's store plugin links (and their installer record) reach every
+# profile, one made later included, while a profile's own plugin
+# directory stays; a profileSkills skill is seeded once and never
+# rewritten, a managed one rewritten on every sync; the .env is sourceable
+# with a spaced value; alice's `remote` CLI lists her targets.
 { pkgs, self }:
 let
+  seededSkill = pkgs.writeTextDir "SKILL.md" "---\nname: notes\ndescription: seeded\n---\nseed v1\n";
+  managedSkill = pkgs.writeTextDir "SKILL.md" "---\nname: tools\ndescription: managed\n---\nmanaged v1\n";
+  fakePlugin = pkgs.writeTextDir "plugin.yaml" "name: hh-test-plugin\n";
   hlib = self.lib;
   secret = "/run/hh-secrets/alice-token";
   envOf = user: "${hlib.stateDir user}/.hermes/.env";
@@ -47,6 +55,24 @@ pkgs.testers.runNixOSTest {
         secretEnv.HH_TEST_TOKEN = secret;
         environment.ANTHROPIC_BASE_URL = baseUrl;
         dashboardDropEnv = [ "HH_DROP_ME" ];
+        environment.HH_SPACED = "openid profile email";
+        environment.HH_PADDED = " padded value ";
+        profileSkills.fresh = {
+          notes.source = seededSkill;
+          tools = {
+            source = managedSkill;
+            managed = true;
+          };
+        };
+        remotes.box = {
+          host = "alice@box.invalid";
+          description = "a test target";
+          scratch = "/scratch/alice";
+          commands.hello = {
+            prefix = [ "echo" ];
+            help = "says hello";
+          };
+        };
       };
       agents.bob.uid = 1002;
     };
@@ -198,6 +224,64 @@ pkgs.testers.runNixOSTest {
         machine.fail(f"test -e {profiles}/gone/.env")
         machine.fail("test -e /home/alice/elsewhere/.env")
         machine.fail(f"ls {profiles}/*/.env.hyperhermes-*")
+
+    with subtest("the .env is sourceable, spaced values quoted"):
+        machine.succeed("grep -qx \"HH_SPACED='openid profile email'\" ${envOf "alice"}")
+        out = as_alice("set -a; . ${envOf "alice"}; set +a; printf '%s|%s' \"$HH_SPACED\" \"$HH_TEST_TOKEN\"")
+        assert out == "openid profile email|second-secret", out
+        machine.succeed("grep -qx \"HH_PADDED='padded value'\" ${envOf "alice"}")
+        out = as_alice(f"set -a; . {profiles}/fresh/.env; set +a; printf %s \"$HH_SPACED\"")
+        assert out == "openid profile email", out
+
+    with subtest("profiles get the home's store plugins and their record"):
+        plugins = "${hlib.stateDir "alice"}/.hermes/plugins"
+        as_alice(f"ln -sfn ${fakePlugin} {plugins}/hh-test")
+        as_alice(f"printf '%s' '{{\"hh-test\": {{\"pinned\": true}}}}' > {plugins}/.install-metadata.json")
+        # bare has no plugins/; later holds its own install of the name.
+        as_alice(f"mkdir -p {profiles}/fresh/plugins/own && mkdir -p {profiles}/later/plugins/hh-test")
+        # A link of the profile's own (a dev checkout) stays, too.
+        as_alice(f"mkdir -p {profiles}/trigger/plugins && ln -s /home/alice/dev {profiles}/trigger/plugins/hh-test")
+        machine.succeed("systemctl restart hermes-agent-alice.service")
+        for p in ("fresh", "bare", "byhand"):
+            machine.succeed(f"test \"$(readlink {profiles}/{p}/plugins/hh-test)\" = ${fakePlugin}")
+            machine.succeed(f"${pkgs.jq}/bin/jq -e '.\"hh-test\".pinned' {profiles}/{p}/plugins/.install-metadata.json")
+        machine.succeed(f"test -d {profiles}/fresh/plugins/own")
+        machine.succeed(f"test -d {profiles}/later/plugins/hh-test -a ! -L {profiles}/later/plugins/hh-test")
+        machine.succeed(f"test \"$(readlink {profiles}/trigger/plugins/hh-test)\" = /home/alice/dev")
+        # A profile created afterwards (hermes profile create) gets them too.
+        publish_profile("newer")
+        machine.wait_until_succeeds(f"test \"$(readlink {profiles}/newer/plugins/hh-test)\" = ${fakePlugin}", timeout=10)
+        machine.fail(f"ls -A {profiles}/*/plugins/ | grep -q hyperhermes")
+
+    with subtest("profileSkills: seeded once, managed rewritten"):
+        skills = f"{profiles}/fresh/skills"
+        machine.succeed(f"grep -qx 'seed v1' {skills}/notes/SKILL.md")
+        machine.succeed(f"grep -qx 'managed v1' {skills}/tools/SKILL.md")
+        assert machine.succeed(f"stat -c '%a %U' {skills}/notes/SKILL.md").strip() == "600 alice"
+        # Only profile `fresh` gets them.
+        machine.fail(f"test -e {profiles}/bare/skills/notes")
+        # The agent's own edits and files.
+        write_as_alice(f"{skills}/notes/SKILL.md", "agent's lessons\n")
+        write_as_alice(f"{skills}/tools/SKILL.md", "agent's edit\n")
+        write_as_alice(f"{skills}/tools/extra.md", "agent's file\n")
+        machine.succeed("systemctl restart hermes-agent-alice.service")
+        assert machine.succeed(f"cat {skills}/notes/SKILL.md") == "agent's lessons\n"
+        machine.succeed(f"grep -qx 'managed v1' {skills}/tools/SKILL.md")
+        machine.succeed(f"grep -qx \"agent's file\" {skills}/tools/extra.md")
+        # A seeded skill the agent deleted is seeded again (absent = seed).
+        as_alice(f"rm -r {skills}/notes")
+        machine.succeed("systemctl restart hermes-agent-alice.service")
+        machine.succeed(f"grep -qx 'seed v1' {skills}/notes/SKILL.md")
+
+    with subtest("alice's remote CLI lists her targets"):
+        def unit_path(user):
+            env = machine.succeed(f"systemctl show -p Environment --value hermes-agent-{user}.service").split()
+            return next(e for e in env if e.startswith("PATH=")).split("=", 1)[1]
+        out = as_alice(f"PATH={unit_path('alice')} remote list")
+        assert "box\talice@box.invalid" in out and "commands: hello" in out, out
+        out = as_alice(f"PATH={unit_path('alice')} remote box help")
+        assert "says hello" in out, out
+        machine.fail(f"PATH={unit_path('bob')} command -v remote")
 
     with subtest("dashboardDropEnv keys are dropped before the dashboard starts"):
         machine.succeed("runuser -u alice -- sh -c 'echo HH_DROP_ME=x >> ${envOf "alice"}'")

@@ -81,9 +81,33 @@ rec {
     // {
       HERMES_SANDBOX = (runtime user home acfg).env.HERMES_SANDBOX;
     };
+  # One .env line. A value with a space or another shell-special character
+  # is single-quoted, so the file can be sourced (`set -a; . .env`) as well
+  # as read by hermes' python-dotenv, which takes a single-quoted value
+  # literally too. Surrounding whitespace goes first (dotenv strips it from
+  # an unquoted value). Values holding `'`, `\`, `$` or a line break stay as
+  # they were: the parsers would read any quoting of those differently.
+  envLine =
+    k: v:
+    let
+      t = lib.strings.trim v;
+    in
+    if
+      builtins.match "[-A-Za-z0-9_@%+=:,/.]*" t != null
+      || lib.any (c: lib.hasInfix c t) [
+        "'"
+        "\\"
+        "$"
+        "\n"
+        "\r"
+      ]
+    then
+      "${k}=${if builtins.match "[-A-Za-z0-9_@%+=:,/.]*" t != null then t else v}"
+    else
+      "${k}='${t}'";
   envBlock =
     user: home: acfg:
-    lib.concatStringsSep "\n" (lib.mapAttrsToList (k: v: "${k}=${v}") (agentEnv user home acfg));
+    lib.concatStringsSep "\n" (lib.mapAttrsToList envLine (agentEnv user home acfg));
 
   basePackages = with pkgs; [
     git
@@ -242,7 +266,14 @@ rec {
         echo "# BEGIN hermes-native credentials"
         for f in "$CREDENTIALS_DIRECTORY"/*; do
           [ -f "$f" ] || continue
-          printf '%s=%s\n' "$(basename "$f")" "$(cat "$f")"
+          v=$(cat "$f")
+          # Quoted as envLine above, so the file stays sourceable.
+          t=$(printf '%s' "$v" | ${pkgs.gnused}/bin/sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+          case $t in
+            *[\'\\\$]* | *$'\n'* | *$'\r'* | "") printf '%s=%s\n' "$(basename "$f")" "$v" ;;
+            *[!-A-Za-z0-9_@%+=:,/.]*) printf "%s='%s'\n" "$(basename "$f")" "$t" ;;
+            *) printf '%s=%s\n' "$(basename "$f")" "$t" ;;
+          esac
         done
         echo "# END hermes-native credentials"
       } >> "$env_file"

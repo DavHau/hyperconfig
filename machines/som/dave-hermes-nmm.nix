@@ -8,14 +8,18 @@
 #     guest's host key pinned here). The key is authorized for `agent` by
 #     nmm's own flake (deployed by the swarm, not from here): until that
 #     lands the login is refused.
-#   - skill: one static skill written here (./dave-hermes-nmm/SKILL.md, no
-#     text from the container), only in dave-hermes' profile `nmm`, so its
-#     other profiles never see it (a skillDir would reach all of them).
-#     hyperhermes can't declare profiles: dave-hermes-nmm-profile.service,
-#     as dave-hermes, creates the profile once (`hermes profile create`)
-#     and installs the skill file on every switch; nothing else of the
-#     profile is touched afterwards. dave-hermes runs without
-#     lockedConfig, so profiles/ is its own (no immutable pins).
+#   - skills, only in dave-hermes' profile `nmm` (a skillDir would reach
+#     all of its profiles), through hyperhermes' profileSkills: `nmm`
+#     (./dave-hermes-nmm/nmm, no text from the container) is seeded once
+#     and then the agent's own, like any skill it writes; `nmm-tools`
+#     (./dave-hermes-nmm/nmm-tools, the `remote` CLI's recipes) is ours
+#     and rewritten on every sync. hyperhermes can't declare profiles:
+#     dave-hermes-nmm-profile.service, as dave-hermes, creates the profile
+#     once (`hermes profile create`) and touches nothing afterwards.
+#   - `remote asof-agents run|put|get|ro|pane|steer|task-status`:
+#     hyperhermes' remote CLI (hyperhermes/modules/core/remotes.nix) with
+#     this target; the swarm commands run ./dave-hermes-nmm/swarm-task.py
+#     in the slot.
 #
 # Nothing here reads the container or restarts it.
 {
@@ -38,7 +42,6 @@ let
   '';
   hermesHome = "/var/lib/hermes/${agent}/state/.hermes";
   profile = "${hermesHome}/profiles/nmm";
-  skill = ./dave-hermes-nmm/SKILL.md;
 in
 {
   clan.core.vars.generators.dave-hermes-nmm-ssh = {
@@ -71,13 +74,92 @@ in
       ForwardX11 no
   '';
 
+  services.hyperhermes.agents.${agent} = {
+    profileSkills.nmm = {
+      nmm.source = ./dave-hermes-nmm/nmm;
+      nmm-tools = {
+        source = ./dave-hermes-nmm/nmm-tools;
+        managed = true;
+      };
+    };
+    remotes.asof-agents = {
+      description = "the nmm repo and its swarm (user agent)";
+      cwd = "nmm";
+      # The slot's unsnapshotted, never backed up scratch dataset.
+      scratch = "/scratch/hermes";
+      commands = {
+        ro = {
+          # The slot's `ssh asof` reaches the project's read-only account,
+          # a forced command that shlex-splits the one string it gets.
+          kind = "joined";
+          prefix = [
+            "ssh"
+            "-o"
+            "BatchMode=yes"
+            "asof"
+          ];
+          timeout = 310;
+          usage = "[timeout N] COMMAND [ARG...]";
+          help = ''
+            One command of the project's read-only account, words passed
+            exactly. No shell there: no pipes, ;, &&, redirections, globs.
+            Post-process with `run --script` (call `ssh asof ...` inside).
+            systemctl status|show|list-units|list-timers|is-active|is-failed
+              [-a -l -q --no-legend --plain --value --failed -p P -t T
+              --state S -n N -o O] [UNIT...]
+            journalctl [-u UNIT -t ID -g PATTERN -n N -p PRIO -o FMT -S SINCE
+              -U UNTIL -r -a -q -b -k --utc --output-fields F]  (no positionals)
+            df [-h -H -P -k -T -i -l -a --total --output=F] [/ABS/PATH...]
+              (one flag per word: -h -T, never -hT)
+            asof status
+            asof query --dataset D --as-of T [--from --to --columns
+              --visibility --limit --format] [--root /vault/parquet]
+              (no --url, --token, --out, --policy, no positionals; without
+              --root it asks the service, the only mode taking --as-of now)
+            cat|head|tail|ls /ABS/PATH... under the account's read prefixes
+              (/var/lib/asof* and the one its refusal names) only, no
+              secrets; head/tail -n N (never -20);
+              ls -l|-a|-la
+            each optionally after `timeout N` (N <= 300). A refusal prints
+            the account's allowlist: read it, don't retry blind.'';
+        };
+        pane = {
+          kind = "script";
+          prefix = [ "python3" ];
+          script = ./dave-hermes-nmm/swarm-task.py;
+          args = [ "pane" ];
+          timeout = 60;
+          usage = "TASK [LINES]";
+          help = "The swarm's herdr panes of TASK (session `swarm`, cwd ~/workspaces/TASK); with LINES, the live pane's last lines.";
+        };
+        steer = {
+          kind = "script";
+          prefix = [ "python3" ];
+          script = ./dave-hermes-nmm/swarm-task.py;
+          args = [ "steer" ];
+          timeout = 60;
+          usage = "TASK MESSAGE...";
+          help = "Prompt the running agent of TASK with MESSAGE (herdr agent prompt). For a running task; `swarm task edit` only works while it is ready.";
+        };
+        task-status = {
+          kind = "script";
+          prefix = [ "python3" ];
+          script = ./dave-hermes-nmm/swarm-task.py;
+          args = [ "status" ];
+          timeout = 60;
+          usage = "TASK...";
+          help = "One line per task: id, status, wait_for, updated, live pane, title.";
+        };
+      };
+    };
+  };
+
   systemd.services.dave-hermes-nmm-profile = {
-    description = "dave-hermes' hermes profile nmm and its nmm skill";
+    description = "dave-hermes' hermes profile nmm";
     wantedBy = [ "multi-user.target" ];
     # The `hermes` shim refuses to run while the agent's gateway is down.
     wants = [ "hermes-agent-${agent}.service" ];
     after = [ "hermes-agent-${agent}.service" ];
-    restartTriggers = [ skill ];
     path = [ pkgs.coreutils ];
     script = ''
       if [ ! -e ${profile} ]; then
@@ -86,10 +168,7 @@ in
           --description "Works on Dave's nmm/asof project over ssh asof-agents."
         printf '\n%s\n' "This profile works on Dave's nmm (asof) project in the asof-agents container over ssh; load the nmm skill first." >> ${profile}/SOUL.md
       fi
-      test -d ${profile}/skills
-      mkdir -p ${profile}/skills/nmm
-      install -m 0600 ${skill} ${profile}/skills/nmm/.SKILL.md.new
-      mv -f ${profile}/skills/nmm/.SKILL.md.new ${profile}/skills/nmm/SKILL.md
+      # Its skills come with hyperhermes' profile sync (profileSkills).
     '';
     serviceConfig = {
       Type = "oneshot";
