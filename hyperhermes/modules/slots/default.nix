@@ -60,7 +60,8 @@
 # (the contents of its dataset, if it has one), its scratch dataset, its
 # /tmp, its gc roots and every profile (/root, /var: everything the
 # guest wrote); only the host-side state stays (desired state, the key file
-# and the host key the host provides).
+# and the host key the host provides), and the slot's data path datasets
+# (storage.dataPaths), which are its data, not its system.
 #
 # Addresses (slot.id, fixed per agent; never renumber: router rules and
 # ports derive from it):
@@ -524,7 +525,12 @@ let
                  ${limit s.scratchQuota}: ${
                    toString (lib.unique (slotsCfg.storage.defaultScratchPaths ++ lib.attrNames s.scratchPaths))
                  }
-    '';
+    ''
+    + lib.concatStrings (
+      lib.mapAttrsToList (path: d: ''
+        data:      ${path}: own dataset, snapshotted like the root, at most ${d.quota}; survives reset --hard
+      '') s.dataPaths
+    );
 
   # One case arm of `slot`, its lines two spaces in.
   infoArm =
