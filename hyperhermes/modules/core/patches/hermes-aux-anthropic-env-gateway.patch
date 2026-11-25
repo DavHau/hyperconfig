@@ -1,0 +1,54 @@
+hermes v0.22.5 (hyperhermes): an auxiliary call handed the main runtime's
+Anthropic endpoint refuses it when that endpoint is a gateway the
+environment pairs with the credential (ANTHROPIC_TOKEN + ANTHROPIC_BASE_URL,
+e.g. TeamClaude).
+
+Symptom: context compaction on such an agent yields no LLM summary. With
+the `auto` compression route every compaction fell back to the
+deterministic summary (sessions.compression_failure_error "no auxiliary LLM
+provider configured"); with an explicit auxiliary.compression model
+(hyperhermes core compactionModel), the one-shot fallback to the session's
+main model after a 5xx/529/401 from that model fails the same way, and the
+compaction aborts without a summary. Log line: "Auxiliary client: refusing
+anthropic explicit base_url 'https://<gateway>' — not an Anthropic-compatible
+host".
+
+Cause: agent/auxiliary_client.py _try_anthropic refuses any explicit
+base_url that is not api.anthropic.com or a `/anthropic` path (#121359,
+which guards against sending a credential to a host the caller did not ask
+for). The auto route (_resolve_auto_route) and compression's main-model
+fallback (context_compressor_summary._apply_summary_route) pass the main
+runtime's base_url explicitly, which on a gateway is exactly the
+ANTHROPIC_BASE_URL the credential already goes to.
+
+Fix: an explicit base_url equal to ANTHROPIC_BASE_URL (read through the
+secret scope, hermes-anthropic-env-base-url.patch's anthropic_env_base_url)
+is accepted too. Every other foreign host is still refused, so the
+#121359 guard holds: no credential reaches a destination it was not
+already paired with.
+
+Upstream status: not reported upstream.
+
+Test: hyperhermes checks.compaction (Opus 429, 529 and 401 fall back to the
+main model through the gateway; without this patch 529 and 401 abort).
+
+diff --git a/agent/auxiliary_client.py b/agent/auxiliary_client.py
+index 691f99be..1c65f5a7 100644
+--- a/agent/auxiliary_client.py
++++ b/agent/auxiliary_client.py
+@@ -3032,9 +3032,14 @@ def _try_anthropic(explicit_api_key: Optional[str | Callable[[], str]] = None,
+     # primary path applies. A foreign host is REFUSED outright rather than silently demoted to
+     # the canonical host: continuing would send the explicit credential to a target the caller
+     # did not ask for (#121359).
++    # The gateway the environment pairs the Anthropic credential with (ANTHROPIC_BASE_URL, e.g.
++    # TeamClaude) is no foreign host: the main runtime already sends this credential there, and
++    # an auxiliary call handed the main runtime's endpoint (auto route, compression's main-model
++    # fallback) must reach it too.
+     override_url = (explicit_base_url or "").strip().rstrip("/")
+     if override_url:
+-        if not _is_anthropic_compatible_host(override_url):
++        env_url = anthropic_env_base_url()
++        if not (_is_anthropic_compatible_host(override_url) or (env_url and override_url == env_url)):
+             logger.warning(
+                 "Auxiliary client: refusing anthropic explicit base_url %r — not an "
+                 "Anthropic-compatible host; no client built and no request sent.",

@@ -106,6 +106,37 @@ in
         '';
       };
 
+      compactionModel = mkOption {
+        type = types.nullOr types.str;
+        default = "claude-opus-5-5";
+        description = ''
+          Anthropic model that writes the context-compaction summaries
+          (auxiliary.compression) of every agent with an Anthropic
+          credential declared in Nix (ANTHROPIC_TOKEN, ANTHROPIC_API_KEY or
+          CLAUDE_CODE_OAUTH_TOKEN in its environment or secretEnv, e.g.
+          TeamClaude), in its home and
+          in every profile, including profiles created later: the route
+          rides the agent's managed config, which hermes overlays on each
+          profile's. Being managed, the agent side (dashboard, CLI, a
+          profile's config.yaml) cannot change it; set
+          settings.auxiliary.compression (host or agent) instead, which
+          replaces this default as a whole. When that model fails (rate
+          limit, overload, outage, auth), hermes retries the summary on the
+          session's own main model (through the gateway:
+          patches/hermes-aux-anthropic-env-gateway.patch). Agents without
+          such a credential (also ones with only a runtime `hermes auth`
+          login) keep hermes' `auto` route, the session's own main model.
+          Null: no default.
+
+          Why a route at all: without one, hermes' `auto` route for an
+          anthropic main model refused a gateway base_url (TeamClaude) as
+          "not an Anthropic-compatible host", so every compaction fell
+          back to an almost empty deterministic summary ("no auxiliary LLM
+          provider configured"); the patch above fixes that refusal, the
+          route makes the summarizer Opus rather than the main model.
+        '';
+      };
+
       perUserTmp = mkOption {
         type = types.bool;
         default = false;

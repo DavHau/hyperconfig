@@ -73,6 +73,10 @@ let
     ./patches/hermes-background-jobs-survive-restart.patch
     # A delegated child's own local shell (snapshot seeded from the parent's).
     ./patches/hermes-subagent-own-shell.patch
+    # After the env-base-url patch (uses its anthropic_env_base_url): an
+    # auxiliary call (compaction's main-model fallback, the auto route)
+    # reaches the TeamClaude gateway the credential is paired with.
+    ./patches/hermes-aux-anthropic-env-gateway.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {

@@ -173,6 +173,37 @@ let
     sys: name: lib.any (p: (p.pname or p.name or "") == name) sys.config.environment.systemPackages;
   agentCfg = sys: name: sys.config.services.hyperhermes.agents.${name};
 
+  # core's compaction route (options.nix compactionModel): an agent's
+  # effective settings, as its managed config.yaml holds them.
+  settingsOf =
+    sys: name:
+    (import ../../modules/core/agent-config.nix {
+      inherit lib pkgs;
+      hlib = self.lib;
+      cfg = sys.config.services.hyperhermes;
+    }).settingsFor
+      (agentCfg sys name);
+  compactionOf = sys: name: (settingsOf sys name).auxiliary.compression or null;
+  compactionOverride = evalWith [
+    self.nixosModules.core
+    withAgents
+    self.nixosModules.teamclaude
+    {
+      services.hyperhermes = {
+        teamclaude.gatewayUrl = gateway;
+        agents.alice = {
+          teamclaude = {
+            enable = true;
+            keyFile = agentsKey;
+          };
+          settings.auxiliary.compression.provider = "p0";
+        };
+        agents.bob.secretEnv.ANTHROPIC_API_KEY = "/run/keys/bob-anthropic";
+        settings.auxiliary.compression.timeout = 600;
+      };
+    }
+  ];
+
   expectations = {
     teamclaude-evaluates = evaluates teamclaude && failedAssertions teamclaude == [ ];
     teamclaude-token-from-keyFile = (agentCfg teamclaude "alice").secretEnv.ANTHROPIC_TOKEN == agentsKey;
@@ -180,6 +211,18 @@ let
     teamclaude-other-agent-untouched =
       !((agentCfg teamclaude "bob").secretEnv ? ANTHROPIC_TOKEN)
       && !((agentCfg teamclaude "bob").environment ? ANTHROPIC_BASE_URL);
+    compaction-opus-with-anthropic = compactionOf teamclaude "alice" == {
+      provider = "anthropic";
+      model = "claude-opus-5-5";
+    };
+    compaction-auto-without-anthropic = compactionOf teamclaude "bob" == null;
+    # An own auxiliary.compression (agent or host) replaces the default
+    # whole: no claude-opus-5-5 model leaf left under another provider.
+    compaction-agent-override-whole = compactionOf compactionOverride "alice" == {
+      provider = "p0";
+      timeout = 600;
+    };
+    compaction-host-override-whole = compactionOf compactionOverride "bob" == { timeout = 600; };
     teamclaude-needs-key-and-gateway = lib.length (failedAssertions teamclaudeNoKey) == 2;
     teamclaude-refuses-path-literal = refused (agentCfg teamclaudePathKey "alice").teamclaude.keyFile;
 

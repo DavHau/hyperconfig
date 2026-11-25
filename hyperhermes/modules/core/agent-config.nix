@@ -18,10 +18,34 @@ rec {
   # (host-wide and per-agent features both list their plugins).
   # `lib.recursiveUpdate` replaces lists, so one list would otherwise drop
   # the others.
+  #
+  # Under both: the compaction summary route (options.nix,
+  # compactionModel) for an agent that holds an Anthropic credential;
+  # host or agent settings override it.
+  hasAnthropicCredential =
+    acfg:
+    lib.any (k: lib.elem k [ "ANTHROPIC_TOKEN" "ANTHROPIC_API_KEY" "CLAUDE_CODE_OAUTH_TOKEN" ]) (
+      lib.attrNames (cfg.environment // acfg.environment // acfg.secretEnv)
+    );
+  compactionDefaults =
+    acfg:
+    lib.optionalAttrs
+      (
+        cfg.compactionModel != null
+        && hasAnthropicCredential acfg
+        && !(cfg.settings ? auxiliary.compression)
+        && !(acfg.settings ? auxiliary.compression)
+      )
+      {
+        auxiliary.compression = {
+          provider = "anthropic";
+          model = cfg.compactionModel;
+        };
+      };
   settingsFor =
     acfg:
     let
-      merged = lib.recursiveUpdate cfg.settings acfg.settings;
+      merged = lib.recursiveUpdate (lib.recursiveUpdate (compactionDefaults acfg) cfg.settings) acfg.settings;
       plugins = lib.unique ((cfg.settings.plugins.enabled or [ ]) ++ (acfg.settings.plugins.enabled or [ ]));
     in
     lib.recursiveUpdate merged (
