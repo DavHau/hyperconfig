@@ -161,6 +161,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - agent-ssh: modules/nixos/agent-user.nix
 - cctl-${instanceName}: modules/clan/cctl/default.nix
 - clan-secrets-pull: modules/nixos/clan-secrets-mirror.nix
+- dave-hermes-nmm-root-ssh: machines/som/dave-hermes-nmm.nix
 - dave-hermes-nmm-ssh: machines/som/dave-hermes-nmm.nix
 - evomi-account: modules/nixos/residential-proxy/default.nix
 - evomi-proxy: modules/nixos/residential-proxy/default.nix

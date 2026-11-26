@@ -1,6 +1,6 @@
 ---
 name: nmm-tools
-description: "Use for every command in the asof-agents slot: the remote CLI, swarm steering, waiting without sleeps."
+description: "Use for every command in the asof-agents or asof slot (agent or root): remote CLI, owner cards, swarm steering."
 ---
 
 # Tools for nmm (asof-agents)
@@ -31,6 +31,36 @@ prints: read or `search_files` that file instead of re-running with
   (unsnapshotted, never backed up, yours to clean), never `/tmp` (shared
   with the swarm, cleaned daily); then pass the path, e.g.
   `run -- swarm task new ... --body-file /scratch/hermes/body.md`.
+
+## Root in the swarm's slots: `remote asof-agents-root`, `remote asof-root`
+
+Full root shells (own key, only from som), for what `agent` can't do:
+owner cards, placing keys into asof, anything that needs root. Same
+`run`/`put`/`get` as above; cwd is /root, put/get scratch
+`/root/.cache/hermes-remote` (root-only; `put` writes 0600). Raw `ssh asof-agents-root` / `ssh asof-root` work
+too (pty allowed), but prefer `remote`.
+
+    remote asof-agents-root run -- swarm owner list
+    remote asof-agents-root run -- swarm owner show c-some-card
+    remote asof-agents-root run -- swarm owner approve c-some-card --text "..."
+    remote asof-agents-root run -- swarm owner answer|done|dismiss|reject c-some-card --text "..."
+
+- Owner cards: approve, answer, reject, done or dismiss only a card that
+  comes from Dave's own chat request (he asked for exactly that work, or
+  names the card); anything else: show it to Dave and ask. `swarm owner
+  list|show` is always fine.
+- Placing a key into asof: only a key Dave asks you to place (the
+  project's own secret flow comes first), its value from his vault or a
+  file he points to, never through the chat. `put` it (lands 0600 in the
+  root-only scratch), then `run -- install -m 0600 -o root -g root
+  /root/.cache/hermes-remote/F /final/path` and `run -- rm
+  /root/.cache/hermes-remote/F`; confirm only by name, size or hash.
+- Root in asof also reaches that slot's own account secrets (env files,
+  keys under /var/lib/...): never print, cat, grep, copy, move or send
+  them into the chat, logs or another slot; list key NAMES only (`sed -E
+  's/=.*/=<set>/'`). Don't change files you don't own a task for, and
+  never restart asof's services or the slot unless Dave asks.
+- Root commands don't go through the swarm's review: say what you ran.
 
 ## The project's read-only account: `remote asof-agents ro`
 

@@ -176,11 +176,15 @@ cmd_put() {
   local src=$1 dest
   [ -e "$src" ] || die "put: no $src"
   dest=$(resolve "${2:-$(basename -- "$src")}")
-  local cmd
+  local cmd prep
+  # New files 0600/dirs 0700, and the scratch dir must be the remote
+  # user's own real directory: one another user there pre-created (or a
+  # link) would let them read or redirect what is written.
+  prep="{ mkdir -p -m 0700 -- $(q "$SCRATCH") && [ -d $(q "$SCRATCH") ] && [ ! -L $(q "$SCRATCH") ] && [ -O $(q "$SCRATCH") ] && chmod 0700 -- $(q "$SCRATCH") || { echo 'remote: the scratch dir is not this user'\''s own directory' >&2; exit 3; }; }"
   if [ -d "$src" ]; then
-    cmd=$(wrap "mkdir -p -m 0700 -- $(q "$SCRATCH") && mkdir -p -- $(q "$dest") && tar -C $(q "$dest") -xf -") || exit 2
+    cmd=$(wrap "umask 077 && $prep && mkdir -p -- $(q "$dest") && tar --no-same-owner --no-same-permissions -C $(q "$dest") -xf -") || exit 2
   else
-    cmd=$(wrap "mkdir -p -m 0700 -- $(q "$SCRATCH") && mkdir -p -- \"\$(dirname -- $(q "$dest"))\" && cat > $(q "$dest.part") && mv -f -- $(q "$dest.part") $(q "$dest")") || exit 2
+    cmd=$(wrap "umask 077 && $prep && mkdir -p -- \"\$(dirname -- $(q "$dest"))\" && cat > $(q "$dest.part") && mv -f -- $(q "$dest.part") $(q "$dest")") || exit 2
   fi
   connect
   if [ -d "$src" ]; then

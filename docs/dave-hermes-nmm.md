@@ -15,6 +15,7 @@ static skill, only in a dedicated hermes profile; the login stays `agent`.
 | skills `nmm` (seeded once, then the agent's) and `nmm-tools` (managed, rewritten) in profile `nmm` only | hyperhermes `profileSkills` (`hyperhermes/modules/core/profile-env.py`), sources `machines/som/dave-hermes-nmm/{nmm,nmm-tools}/` | landed, needs a som deploy |
 | `remote asof-agents run/put/get/ro/pane/steer/task-status` | hyperhermes `remotes` (`hyperhermes/modules/core/remotes.nix`), target in `machines/som/dave-hermes-nmm.nix` | landed, needs a som deploy |
 | key authorized for `agent` in asof-agents | nmm's flake | **waits: Dave adds the line below; the swarm deploys agents** |
+| root in asof-agents and asof (Dave, 2026-11-26): key `dave-hermes-nmm-root-ssh` (clan var, owner dave-hermes, 0400, som only), `from=` som's `::c0de:ba5e`, no other restriction; aliases `asof-agents-root`/`asof-root`, `remote` targets of the same names (cwd /root) | `machines/som/dave-hermes-nmm.nix`; keys placed by container-slots' `rootKeys` (`container-slot-<slot>-root-keys.service`, a marked block in the guest's `/root/.ssh/authorized_keys`, no slot restart); asof's host key `machines/som/slot-host-keys.nix` | landed; needs `clan vars generate som --generator dave-hermes-nmm-root-ssh` and a som deploy |
 
 History: a first version exported afk's skills and nmm's trunk text from
 the container into a global skill dir (aa7d5309). Its security review found
@@ -53,6 +54,15 @@ commits it or files it as a swarm task; `swarm deploy agents` applies it
 (a switch, no container restart).
 
 ## Remaining risks (accepted by Dave)
+
+- **Root in both swarm slots.** dave-hermes (and every profile and cron
+  job of it, and whatever injects text into it) has full root in
+  asof-agents and asof: the owner signing key, the swarm db, and asof's
+  own account secrets. The skill forbids printing or moving secrets and
+  limits owner-card answers to cards from Dave's own requests; nothing
+  enforces it. Revoke: set `rootKeys = [ ]` for those slots and deploy
+  som; the block is emptied on the switch. Removing the setting instead
+  (null) leaves the last block in place.
 
 - **Owner powers.** `agent` is the swarm owner: `swarm owner
   approve|reject|answer`, `approve-change`, `pause`/`resume`, `trial

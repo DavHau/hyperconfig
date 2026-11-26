@@ -20,6 +20,17 @@
 #     hyperhermes' remote CLI (hyperhermes/modules/core/remotes.nix) with
 #     this target; the swarm commands run ./dave-hermes-nmm/swarm-task.py
 #     in the slot.
+#   - root in both swarm slots (Dave's call: owner cards, placing keys,
+#     anything needing root): a second key (clan var
+#     dave-hermes-nmm-root-ssh, owner dave-hermes, 0400, only on som, never
+#     in a slot), authorized for root in asof-agents and asof with only
+#     `from=` som's stable address (a full root shell, pty allowed), through
+#     container-slots' `rootKeys` (a marked block of the guest's
+#     /root/.ssh/authorized_keys, rewritten after each slot start and on a
+#     change; no slot restart). `ssh asof-agents-root` / `ssh asof-root`
+#     and `remote asof-agents-root|asof-root` (cwd /root, put/get under /root/.cache/hermes-remote). Root in asof
+#     reaches that slot's own account secrets: the nmm-tools skill forbids
+#     printing or moving them.
 #
 # Nothing here reads the container or restarts it.
 {
@@ -35,11 +46,35 @@ let
   address = "${slot.ipv6Prefix}::5107:${lib.toLower (lib.toHexString slot.slots.asof-agents.id)}";
   somAddress = "${slot.ipv6Prefix}${config.networking.publicIPv6.token}";
   key = config.clan.core.vars.generators.dave-hermes-nmm-ssh.files.key.path;
-  # The guest's ed25519 host key, pinned in ../../modules/nixos/spaces/slots.nix
-  # (also for Dave's desktops). If it changes, the login fails closed.
+  rootGen = config.clan.core.vars.generators.dave-hermes-nmm-root-ssh;
+  # The swarm's slots dave-hermes reaches as root (alias <slot>-root).
+  rootSlots = [
+    "asof-agents"
+    "asof"
+  ];
+  slotAddress = name: "${slot.ipv6Prefix}::5107:${lib.toLower (lib.toHexString slot.slots.${name}.id)}";
+  # The guests' ed25519 host keys: asof-agents' pinned in
+  # ../../modules/nixos/spaces/slots.nix (also for Dave's desktops), asof's
+  # in ./slot-host-keys.nix. If one changes, the login fails closed.
+  hostKeyOf = {
+    asof-agents = (import ../../modules/nixos/spaces/slots.nix).asof-agents.hostKey;
+    inherit (import ./slot-host-keys.nix) asof;
+  };
   knownHosts = pkgs.writeText "asof-agents-known-hosts" ''
-    asof-agents ${(import ../../modules/nixos/spaces/slots.nix).asof-agents.hostKey}
+    asof-agents ${hostKeyOf.asof-agents}
   '';
+  rootKnownHosts = pkgs.writeText "swarm-slots-root-known-hosts" (
+    lib.concatMapStrings (n: "${n} ${hostKeyOf.${n}}\n") rootSlots
+  );
+  rootTarget = n: {
+    host = "${n}-root";
+    description = "root in the ${n} slot (full shell; never print secrets)";
+    cwd = ".";
+    # root-only (0700 /root/.cache, on the slot's unsnapshotted scratch
+    # dataset), never under the world-writable /scratch: another slot user
+    # could pre-create it and steer root's writes.
+    scratch = "/root/.cache/hermes-remote";
+  };
   hermesHome = "/var/lib/hermes/${agent}/state/.hermes";
   profile = "${hermesHome}/profiles/nmm";
 in
@@ -55,6 +90,35 @@ in
       ssh-keygen -q -t ed25519 -N "" -C "${agent}-nmm@som" -f "$out"/key
     '';
   };
+
+  # Root in the swarm's slots: its own key, so it can be revoked alone. To
+  # revoke, set the slots' rootKeys = [ ] and deploy FIRST (empties the
+  # block in both guests); only then remove this: dropping the setting
+  # (null) leaves the last block in place.
+  clan.core.vars.generators.dave-hermes-nmm-root-ssh = {
+    files.key = {
+      secret = true;
+      owner = agent;
+      mode = "0400";
+    };
+    files."key.pub".secret = false;
+    runtimeInputs = [ pkgs.openssh ];
+    script = ''
+      ssh-keygen -q -t ed25519 -N "" -C "${agent}-nmm-root@som" -f "$out"/key
+    '';
+  };
+  # The root key only from som's stable address, in exactly these slots.
+  assertions = [
+    {
+      assertion = lib.all (
+        n: lib.all (l: lib.hasPrefix ''from="${somAddress}" ssh-'' l) slot.slots.${n}.rootKeys
+      ) rootSlots;
+      message = "dave-hermes-nmm: every root key line in ${toString rootSlots} must start with from=\"${somAddress}\"";
+    }
+  ];
+  services.container-slots.slots = lib.genAttrs rootSlots (_: {
+    rootKeys = lib.optional rootGen.files."key.pub".exists ''from="${somAddress}" ${lib.trim rootGen.files."key.pub".value}'';
+  });
 
   # `ssh asof-agents`, for dave-hermes only. From som's stable public
   # address (networking.publicIPv6), not a rotating temporary one, so nmm
@@ -72,9 +136,26 @@ in
       BindAddress ${somAddress}
       ForwardAgent no
       ForwardX11 no
-  '';
+  ''
+  + lib.concatMapStrings (n: ''
+    Match host ${n}-root localuser ${agent}
+      HostName ${slotAddress n}
+      User root
+      IdentityFile ${rootGen.files.key.path}
+      IdentitiesOnly yes
+      StrictHostKeyChecking yes
+      UserKnownHostsFile ${rootKnownHosts}
+      GlobalKnownHostsFile /dev/null
+      HostKeyAlias ${n}
+      BindAddress ${somAddress}
+      ForwardAgent no
+      ForwardX11 no
+  '') rootSlots;
 
   services.hyperhermes.agents.${agent} = {
+    # `remote asof-agents-root|asof-root`, cwd root's home (/root).
+    remotes.asof-agents-root = rootTarget "asof-agents";
+    remotes.asof-root = rootTarget "asof";
     profileSkills.nmm = {
       nmm.source = ./dave-hermes-nmm/nmm;
       nmm-tools = {

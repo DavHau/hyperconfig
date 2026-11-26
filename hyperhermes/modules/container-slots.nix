@@ -74,6 +74,16 @@
 #     (`hostKeysDir`). The bootstrap's sshd uses it; a deployed guest
 #     keeps it through nixosModules.slot (`services.openssh.hostKeys`,
 #     mkDefault), or clients that pin it refuse the slot.
+#   - root keys in a deployed guest: a guest whose own sshd config does not
+#     read the file above still gets the slot's `rootKeys` (unless null):
+#     container-slot-<slot>-root-keys.service, after every start of the
+#     slot and every change of the list, runs a store script inside the
+#     running slot as the slot's own root (systemd-run -M: no more rights
+#     than that root, so a link the guest plants only misleads the guest)
+#     that rewrites one marked block of /root/.ssh/authorized_keys. The
+#     rest of the file and the guest stay untouched; `[ ]` empties the block
+#     (revocation; null leaves it as it was). No slot restart. The guest's root can drop the block; it
+#     comes back at the next slot start or list change.
 #   - start: `autoStart` (default on) starts the slot at boot; off, the
 #     unit container@<slot> exists and something else starts it
 #     (./slots).
@@ -304,6 +314,42 @@ let
   shareUnit = name: path: "container-slot-${name}-${shareName path}";
   containerRoot = name: "/var/lib/nixos-containers/${name}";
 
+  # rootKeys (see the module header): run inside the slot as its root.
+  # Rewrites only the marked block, atomically (temp file + rename in
+  # /root/.ssh), and keeps every other line as it was.
+  rootKeysBegin = "# BEGIN container-slots rootKeys (host-managed, rewritten)";
+  rootKeysEnd = "# END container-slots rootKeys";
+  rootKeysScript =
+    name: keys:
+    pkgs.writeShellScript "container-slot-${name}-root-keys" ''
+      set -eu
+      PATH=${lib.makeBinPath [ pkgs.coreutils pkgs.gawk ]}
+      umask 077
+      d=/root/.ssh
+      f=$d/authorized_keys
+      install -d -m 0700 -o 0 -g 0 "$d"
+      tmp=$(mktemp "$d/.authorized_keys.XXXXXX")
+      trap 'rm -f "$tmp"' EXIT
+      if [ -f "$f" ]; then
+        awk -v b=${lib.escapeShellArg rootKeysBegin} -v e=${lib.escapeShellArg rootKeysEnd} '
+          $0 == b { skip = 1; next }
+          $0 == e { skip = 0; next }
+          !skip
+        ' "$f" >"$tmp"
+      fi
+      ${lib.optionalString (keys != [ ]) ''
+        cat ${
+          pkgs.writeText "container-slot-${name}-root-keys" (
+            lib.concatLines ([ rootKeysBegin ] ++ keys ++ [ rootKeysEnd ])
+          )
+        } >>"$tmp"
+      ''}
+      chmod 0600 "$tmp"
+      mv -f "$tmp" "$f"
+      trap - EXIT
+    '';
+  rootKeysUnit = name: "container-slot-${name}-root-keys";
+
   # Before the slot starts, as host root, with the slot stopped: refuse a
   # root tree with planted symlinks (see "the root tree" above), create the
   # share mount points (owned by the share's account, which fusermount
@@ -477,6 +523,18 @@ let
         };
         description = "Host directories served into the slot, keyed by their path inside it (see the module header).";
       };
+      rootKeys = mkOption {
+        type = types.nullOr (types.listOf types.str);
+        default = null;
+        example = [ ''from="2001:db8::1" ssh-ed25519 AAAA... someone@host'' ];
+        description = ''
+          authorized_keys lines (options included) kept in a marked block of
+          the running guest's /root/.ssh/authorized_keys, for a deployed
+          guest whose sshd ignores the host-provided keys file (see the
+          module header). `[ ]` empties the block (revoke that way); null
+          never touches it, so going back to null leaves the last block.
+        '';
+      };
       credentials = mkOption {
         # IDs checked in the assertions (attrsOf cannot type its names).
         type = types.attrsOf types.str;
@@ -629,6 +687,16 @@ in
       ++ lib.mapAttrsToList (name: slot: {
         assertion = lib.count (s: s.id == slot.id) (lib.attrValues cfg.slots) == 1;
         message = "services.container-slots.slots.${name}: id ${toString slot.id} is not unique";
+      }) cfg.slots
+      ++ lib.mapAttrsToList (name: slot: {
+        # one physical line each, never a marker: a newline would smuggle
+        # in a further key line past whatever checked the entry
+        assertion =
+          slot.rootKeys == null
+          || lib.all (
+            l: builtins.match "[^\n\r]+" l != null && l != rootKeysBegin && l != rootKeysEnd
+          ) slot.rootKeys;
+        message = "services.container-slots.slots.${name}.rootKeys: each entry is one non-empty line (no newline, not a block marker)";
       }) cfg.slots
       ++ lib.mapAttrsToList (name: slot: {
         assertion = slot.publicIPv4Ports == [ ] || (slot.mode == "isolated" && cfg.publicIPv4Interface != null);
@@ -927,6 +995,48 @@ in
           }
         ) slot.shares
       ) cfg.slots)
+
+      (lib.mapAttrs' (
+        name: slot:
+        lib.nameValuePair (rootKeysUnit name) {
+          description = "Root's host-managed ssh keys in slot ${name}";
+          # Started with the slot (each start: stopping the slot stops this
+          # too) and by multi-user.target, so a switch starts it when new and
+          # restarts it when its key list changed, while the slot runs. A
+          # stopped slot is skipped (ExecCondition), never started; the slot
+          # itself is never restarted for this.
+          wantedBy = [
+            "container@${name}.service"
+            "multi-user.target"
+          ];
+          partOf = [ "container@${name}.service" ];
+          after = [ "container@${name}.service" ];
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+            TimeoutStartSec = "5min";
+            ExecCondition = "${config.systemd.package}/bin/systemctl is-active --quiet container@${name}.service";
+          };
+          # The guest's systemd answers once its init is up; wait for it
+          # (polling, 1 s steps), then run the script there as its root.
+          script = ''
+            for _ in $(seq 1 240); do
+              if ${config.systemd.package}/bin/systemd-run -M ${name} --quiet --wait --collect \
+                ${pkgs.coreutils}/bin/true </dev/null >/dev/null 2>&1; then
+                # No --pipe: the guest gets none of this unit's fds (its
+                # output stays in the guest's journal); --wait still
+                # returns the script's result.
+                exec ${config.systemd.package}/bin/systemd-run -M ${name} --quiet --wait --collect \
+                  --unit=container-slot-root-keys ${rootKeysScript name slot.rootKeys} </dev/null
+              fi
+              sleep 1
+            done
+            echo "container-slots: ${name}: the slot's systemd never answered; root keys not updated" >&2
+            exit 1
+          '';
+          path = [ pkgs.coreutils ];
+        }
+      ) (lib.filterAttrs (_: s: s.rootKeys != null) cfg.slots))
     ];
 
     programs.fuse.userAllowOther = lib.mkIf (lib.any (s: s.shares != { }) (
