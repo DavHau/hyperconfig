@@ -167,6 +167,9 @@
         # A dashboard restart drains, keeps the interrupted chat turn and
         # continues it without a client; a user Stop is not continued.
         resume = import ./checks/resume { inherit pkgs self; };
+        # Root's hermes-notify: a message from another agent into a chat
+        # session, steered or as a new turn, never as the owner's.
+        agent-notify = import ./checks/agent-notify { inherit pkgs self; };
         # Every agent and later profile gets a real compaction summary:
         # Opus 5.5 with an Anthropic credential, else the main model.
         compaction = import ./checks/compaction { inherit pkgs self; };

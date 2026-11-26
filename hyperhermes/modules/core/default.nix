@@ -21,7 +21,9 @@
 #     Nix-generated, out of the agent's reach (locked-config.nix),
 #   - the vault (saved logins, cards) in a broker the agent's uid cannot
 #     read; values only to its gateway and dashboard processes for a fill
-#     (vault-broker.nix).
+#     (vault-broker.nix),
+#   - messages from another agent into a chat session only from root, framed
+#     as never the owner's (agent-notify.nix).
 #
 # `hermes-agent` is this flake's input: the package source and its
 # config merge script.
@@ -46,5 +48,6 @@ in
     ./locked-config.nix
     ./vault-broker.nix
     ./remotes.nix
+    ./agent-notify.nix
   ];
 }

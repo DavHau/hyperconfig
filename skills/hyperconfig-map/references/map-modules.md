@@ -509,6 +509,8 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyperhermes/modules/container-slots-storage/storage.sh — container-slot-storage prepare <slot> / quotas <- hyperhermes/modules/container-slots-storage/default.nix
 - hyperhermes/modules/core/accounts.nix — The agents' login accounts. <- hyperhermes/modules/core/default.nix
 - hyperhermes/modules/core/agent-config.nix — What an agent runs with: config.yaml settings, PATH and the preStart scripts that seed the model and the credentials. .… <- hyperhermes/modules/core/agents.nix, hyperhermes/modules/core/locked-config.nix
+- hyperhermes/modules/core/agent-notify-cli.py — - <- hyperhermes/modules/core/agent-notify.nix
+- hyperhermes/modules/core/agent-notify.nix — Messages from another agent into an agent's chat session: <- hyperhermes/modules/core/default.nix
 - hyperhermes/modules/core/agents.nix — The agent units and the `hermes` shim. <- hyperhermes/modules/core/default.nix
 - hyperhermes/modules/core/config-merge.py — - <- hyperhermes/modules/core/agents.nix
 - hyperhermes/modules/core/default.nix — Hermes agents (NousResearch hermes-agent) running natively on the host (`services.hyperhermes.agents`): <- hyperhermes/modules/core/vault-broker.nix

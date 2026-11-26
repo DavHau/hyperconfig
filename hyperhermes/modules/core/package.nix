@@ -80,6 +80,9 @@ let
     # auxiliary call (compaction's main-model fallback, the auto route)
     # reaches the TeamClaude gateway the credential is paired with.
     ./patches/hermes-aux-anthropic-env-gateway.patch
+    # Last: a message from another agent into a chat session
+    # (./agent-notify.nix); extends the resume patches' startup hook.
+    ./patches/hermes-agent-notify.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {
