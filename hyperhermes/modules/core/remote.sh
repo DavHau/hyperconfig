@@ -82,13 +82,33 @@ load_target() {
 
 # The master, once (under a lock, so parallel calls don't race); if it
 # can't start, plain connections follow and show the real error.
+# Never leak a connection: an ssh master that can't bind the control
+# socket (a stale or busy one) keeps running as a plain idle connection
+# forever, and enough of them exhaust the target's sshd (MaxConnections:
+# every later login is reset). So a socket no master answers on is
+# removed first, and the ssh we start is killed unless the master
+# answers -O check within 30 s. ($! is only the pre-detach ssh: with
+# ControlPersist the real master daemonizes itself once it holds the
+# socket, which is what we want; a bind-failed ssh never detaches and is
+# exactly the one killed.) ServerAlive ends the master on a dead link.
 connect() {
   mkdir -p "$CM_DIR" && chmod 0700 "$CM_DIR"
   (
     flock 9
     if ! ssh -o "ControlPath=$CM_PATH" -O check "$HOST" >/dev/null 2>&1; then
-      timeout 30 ssh -o BatchMode=yes -o ControlMaster=yes -o "ControlPath=$CM_PATH" \
-        -o "ControlPersist=$PERSIST" -f -N "$HOST" </dev/null >/dev/null 2>&1 || true
+      # A socket no master answers on is stale: remove it so ours can bind.
+      sock=$(ssh -G -o "ControlPath=$CM_PATH" "$HOST" 2>/dev/null | awk '$1 == "controlpath" {print $2; exit}') || sock=
+      if [ -n "$sock" ]; then rm -f -- "$sock" || true; fi
+      ssh -o BatchMode=yes -o ControlMaster=yes -o "ControlPath=$CM_PATH" \
+        -o "ControlPersist=$PERSIST" -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+        -N "$HOST" </dev/null >/dev/null 2>&1 9>&- &
+      pid=$!
+      for _ in $(seq 1 150); do
+        ssh -o "ControlPath=$CM_PATH" -O check "$HOST" >/dev/null 2>&1 && break
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 0.2
+      done
+      ssh -o "ControlPath=$CM_PATH" -O check "$HOST" >/dev/null 2>&1 || kill "$pid" 2>/dev/null || true
     fi
   ) 9>"$CM_DIR/remote-cm.lock"
   ssh -o "ControlPath=$CM_PATH" -O check "$HOST" >/dev/null 2>&1 ||
