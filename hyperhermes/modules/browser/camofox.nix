@@ -149,6 +149,9 @@ let
         # An idle context closes after 10 minutes (its storage is saved; a
         # task's own is deleted at task end or by the task-contexts plugin).
         SESSION_TIMEOUT_MS = "600000";
+        # A tab idle that long closes too (upstream: 5 minutes, shorter than
+        # a user takes to answer a question or approve a payment mid-task).
+        TAB_INACTIVITY_MS = "600000";
         # Firefox closes after 5 idle minutes; the server stays.
         BROWSER_IDLE_TIMEOUT_MS = "300000";
         # Restarting Firefox drops every task's pages: well under MemoryMax,
@@ -216,6 +219,11 @@ in
               cloud_provider = lib.mkDefault "camofox";
               # A stable per-agent userId: Camofox keeps that profile's cookies.
               camofox.managed_persistence = lib.mkDefault true;
+              # The turn-end cleanup forgets the task's tab id; the next turn of
+              # the same session takes its still-open tab back (its own session
+              # key only) instead of "No browser session" and a fresh tab that
+              # lost the page's state (an open dialog, a filled form).
+              camofox.adopt_existing_tab = lib.mkDefault true;
               # Tab creation, which carries the first navigation, may take its
               # route budget (60 s with the challenge wait) before it answers.
               command_timeout = lib.mkDefault 65;

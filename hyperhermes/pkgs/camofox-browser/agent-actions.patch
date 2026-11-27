@@ -1,0 +1,166 @@
+What the agent-action tools need from the server (hermes' camofox plugin,
+../hermes-camofox-plugin/action-feedback.patch).
+
+- POST /tabs/:tabId/click takes `text` (with `exact`, `nth`) besides ref and
+  selector: the visible element showing that text (Playwright getByText,
+  visible only), in the page first, then its frames. More than one match
+  without nth, or none, is a 422 text_not_matched that lists the matches.
+- POST /tabs/:tabId/wait takes `text`: polls (250 ms) until the text is
+  visible in the page or a frame, at most `timeout` (cap 60 s); answers
+  found and waitedMs.
+- POST /tabs/:tabId/evaluate: a navigation that destroyed the page's
+  context is a 409 navigation_race saying so (the expression's click
+  probably worked), an error thrown by the expression a 400 script_error
+  with its first line; both were "Internal server error".
+- In production, a 4xx error (stale ref, element not actionable, bad
+  selector, no text match) carries its first line instead of "Internal
+  server error"; 5xx stay opaque.
+Not upstream.
+
+diff --git a/server.js b/server.js
+index a308c64..d15d30d 100644
+--- a/server.js
++++ b/server.js
+@@ -329,6 +329,14 @@ async function fillLocator(locator, text) {
+ function safeError(err) {
+   if (CONFIG.nodeEnv === 'production') {
+     log('error', 'internal error', { error: err.message, stack: err.stack });
++    // hyperhermes (agent-actions.patch): a caller error (4xx: a stale ref, an element that cannot be
++    // clicked, a bad selector, no text match) says what to fix, its first line only (no stack, no
++    // Playwright call log); a server fault stays opaque.
++    const status = browserErrorStatus(err) || 500;
++    if (status >= 400 && status < 500) {
++      const first = String(err?.message || '').split('\n')[0].trim().slice(0, 400);
++      if (first) return first;
++    }
+     return 'Internal server error';
+   }
+   return err.message;
+@@ -2750,6 +2758,47 @@ async function getAriaSnapshot(page) {
+   return mainYaml;
+ }
+ 
++// hyperhermes (agent-actions.patch): click by visible text, for controls no ref reaches (a div with a
++// click handler has no role, so no ref). The smallest visible elements showing `text` (Playwright's
++// getByText; `exact` for the whole text), in the page first, then in its frames; with more than one
++// match `nth` (0-based) picks one, else the error lists them so the caller can.
++class TextMatchError extends Error {
++  constructor(message) {
++    super(message);
++    this.name = 'TextMatchError';
++    this.code = 'text_not_matched';
++    this.statusCode = 422;
++  }
++}
++
++async function locateByText(page, text, { exact = false, nth } = {}) {
++  const needle = String(text).trim().slice(0, 500);
++  for (const frame of [page.mainFrame(), ...page.frames().filter(f => f !== page.mainFrame())]) {
++    if (frame.isDetached()) continue;
++    const all = frame.getByText(needle, { exact: Boolean(exact) }).filter({ visible: true });
++    const count = await all.count().catch(() => 0);
++    if (count === 0) continue;
++    if (nth !== undefined && nth !== null) {
++      const i = Number(nth);
++      if (!Number.isInteger(i) || i < -count || i >= count) {
++        throw new TextMatchError(`nth ${nth} is out of range: ${count} visible elements show ${JSON.stringify(needle)} (nth 0..${count - 1}, -1 the last).`);
++      }
++      return all.nth(i);
++    }
++    if (count === 1) return all.first();
++    const shown = [];
++    for (let i = 0; i < Math.min(count, 6); i++) {
++      const el = all.nth(i);
++      const tag = await el.evaluate(e => e.tagName.toLowerCase() + (e.getAttribute('role') ? `[role=${e.getAttribute('role')}]` : '')).catch(() => '?');
++      const label = ((await el.innerText({ timeout: 500 }).catch(() => '')) || '').replace(/\s+/g, ' ').slice(0, 60);
++      const box = await el.boundingBox({ timeout: 500 }).catch(() => null);
++      shown.push(`nth ${i}: ${tag} ${JSON.stringify(label)}${box ? ` at y ${Math.round(box.y)}` : ''}`);
++    }
++    throw new TextMatchError(`${count} visible elements show ${JSON.stringify(needle)}; pass nth (0-based, -1 the last) or exact text. ${shown.join('; ')}${count > 6 ? '; ...' : ''}`);
++  }
++  throw new TextMatchError(`No visible element shows ${JSON.stringify(needle)}${exact ? ' exactly' : ''}. Check the snapshot's wording, or scroll it into view.`);
++}
++
+ function refToLocator(page, ref, refs) {
+   const info = refs.get(ref);
+   if (!info) return null;
+@@ -3961,13 +4010,30 @@ app.get('/tabs/:tabId/snapshot', async (req, res) => {
+  */
+ app.post('/tabs/:tabId/wait', async (req, res) => {
+   try {
+-    const { userId, timeout = 10000, waitForNetwork = true, dismissConsent = false } = req.body;
++    const { userId, timeout = 10000, waitForNetwork = true, dismissConsent = false, text } = req.body;
+     const session = sessions.get(normalizeUserId(userId));
+     const found = session && findTab(session, req.params.tabId);
+     if (!found) return tabNotFoundResponse(res, req.params.tabId || req.body?.tabId);
+     session.lastAccess = Date.now();
+     
+     const { tabState } = found;
++    if (typeof text === 'string' && text.trim()) {
++      // hyperhermes (agent-actions.patch): until the text shows in the page or a frame (or the
++      // timeout, at most 60 s), instead of the caller sleeping and re-reading the page.
++      const started = Date.now();
++      const budget = Math.max(0, Math.min(Number(timeout) || 10000, 60000));
++      const needle = text.trim().slice(0, 500);
++      let seen = false;
++      while (!seen) {
++        for (const frame of tabState.page.frames()) {
++          if (frame.isDetached()) continue;
++          if (await frame.getByText(needle).filter({ visible: true }).count().catch(() => 0)) { seen = true; break; }
++        }
++        if (seen || Date.now() - started >= budget || tabState.page.isClosed()) break;
++        await new Promise(r => setTimeout(r, 250));
++      }
++      return res.json({ ok: true, ready: seen, found: seen, waitedMs: Date.now() - started, url: safePageUrl(tabState.page) });
++    }
+     const ready = await waitForPageReady(tabState.page, { timeout, waitForNetwork, dismissConsent });
+     
+     res.json({ ok: true, ready });
+@@ -4046,7 +4112,7 @@ app.post('/tabs/:tabId/click', async (req, res) => {
+   const tabId = req.params.tabId;
+   
+   try {
+-    const { userId, ref, selector } = req.body;
++    const { userId, ref, selector, text } = req.body;
+     if (!userId) return res.status(400).json({ error: 'userId required' });
+     const session = sessions.get(normalizeUserId(userId));
+     const found = session && findTab(session, tabId);
+@@ -4056,8 +4122,8 @@ app.post('/tabs/:tabId/click', async (req, res) => {
+     const { tabState } = found;
+     tabState.toolCalls++; tabState.consecutiveTimeouts = 0; tabState.consecutiveFailures = 0;
+     
+-    if (!ref && !selector) {
+-      return res.status(400).json({ error: 'ref or selector required' });
++    if (!ref && !selector && !(typeof text === 'string' && text.trim())) {
++      return res.status(400).json({ error: 'ref, selector or text required' });
+     }
+     const selectorErr = selectorValidationError(selector);
+     if (selectorErr) throw invalidSelectorError(selectorErr);
+@@ -4198,6 +4264,9 @@ app.post('/tabs/:tabId/click', async (req, res) => {
+           throw new StaleRefsError(ref, maxRef, tabState.refs.size);
+         }
+         await doClick(locator, true);
++      } else if (!selector) {
++        // hyperhermes (agent-actions.patch): the visible element showing this text, in the page or a frame.
++        await doClick(await locateByText(tabState.page, text, req.body), true);
+       } else {
+         await doClick(selector, false);
+       }
+@@ -5702,6 +5771,17 @@ app.post('/tabs/:tabId/evaluate', express.json({ limit: CONFIG.evaluateMaxBodySi
+     res.json({ ok: true, result });
+   } catch (err) {
+     log('error', 'evaluate failed', { reqId: req.reqId, tabId: req.params.tabId, error: err.message });
++    // hyperhermes (agent-actions.patch): say what happened instead of 'Internal server error'. The
++    // page's own script error is the caller's to fix (its first line: no stack, no server paths); a
++    // navigation that destroyed the context usually means the expression's click or submit worked.
++    const msg = String(err?.message || '');
++    if (msg.includes('Execution context was destroyed') || msg.includes('Cannot find context with specified id')) {
++      return res.status(409).json({ error: 'The page navigated while the expression ran (a click or submit in it probably worked); its result is lost. Take a snapshot to see the new page.', code: 'navigation_race', retryable: false, recovery: 'snapshot' });
++    }
++    if (msg.startsWith('page.evaluate: ') && !isDeadContextError(err) && !isTimeoutError(err) && !isPageCrashedError(err)) {
++      const first = msg.slice('page.evaluate: '.length).split('\n')[0].slice(0, 300);
++      return res.status(400).json({ error: `JavaScript error in the expression: ${first}`, code: 'script_error', retryable: false });
++    }
+     handleRouteError(err, req, res);
+   }
+ });

@@ -85,4 +85,5 @@ runCommand "hermes-camofox-plugin-1.1.0"
     patch -p1 < ${./vault-frames.patch}
     patch -p1 < ${./task-contexts.patch}
     patch -p1 < ${./checkout-tools.patch}
+    patch -p1 < ${./action-feedback.patch}
   ''

@@ -20,6 +20,8 @@
 # saved state of the per-task contexts hermes opens (children, cron runs,
 # residential) that their task never deleted. ./tab-recycle-own-group.patch:
 # at the tab cap a task recycles its own oldest tab before another task's.
+# ./agent-actions.patch: click by visible text, wait for a text, and errors
+# that say what to fix (for hermes' ../hermes-camofox-plugin/action-feedback.patch).
 {
   lib,
   buildNpmPackage,
@@ -47,6 +49,7 @@ buildNpmPackage (finalAttrs: {
     ./plugin-tab-access.patch
     ./tab-recycle-own-group.patch
     ./capture-guard.patch
+    ./agent-actions.patch
   ];
 
   # Crash reports go to a public relay unless opted out: off unless opted

@@ -56,6 +56,14 @@
 # that strips the mask's style during the capture gets no screenshot
 # (capture_refused).
 #
+# Agent actions (./actions.py, action-feedback.patch of the plugin,
+# agent-actions.patch of camofox-browser): a control without a ref is
+# clicked by its text (several matches are listed, nth picks one); a
+# click's result carries what it changed (a diff, or the new page);
+# browser_snapshot wait_for waits for a late text; browser_type without a
+# ref types into the focused box; script errors, a navigation during an
+# expression and a stale ref read as what happened.
+#
 # Residential proxy (modules/browser/residential-proxy.nix): with
 # browser.residentialProxy.url set, browser_residential is offered; the
 # browser goes direct by default and through the proxy (a stand-in that
@@ -196,6 +204,7 @@ pkgs.testers.runNixOSTest {
       residentialDriver = driverOf ./residential.py;
       concurrencyDriver = driverOf ./concurrency.py;
       checkoutDriver = vaultDriverScript hermes ./checkout.py;
+      actionsDriver = driverOf ./actions.py;
     in
     ''
     import hashlib
@@ -300,6 +309,11 @@ pkgs.testers.runNixOSTest {
         print(out)
         assert "ALL PASSED" in out
         assert "4242424242424242" not in machine.succeed("journalctl -u hermes-camofox-alice --no-pager")
+
+    with subtest("agent actions: click by text, what a click changed, wait for a text, type into focus, clear errors"):
+        out = machine.succeed("${actionsDriver "alice" "actions http://127.0.0.1:8765"}")
+        print(out)
+        assert "ALL PASSED" in out
 
     with subtest("browser_residential: direct by default, through the proxy only on request"):
         machine.wait_for_unit("residential-stub.service")

@@ -23,6 +23,9 @@ ref click and a coordinate click) and the captcha (http://127.0.0.1:8766/captcha
 the Confirm button's centre is at (200, 220) of the viewport. Every action lands in GET /events
 (JSON, cleared on read) on the origin that served it; /pay records the posted fields.
 
+/actions (actions.py): controls with no ref (divs with click handlers), two identical "Select"
+entries, a status that shows 1.5 s after a click, a one-time-code box and a button to /actions-done.
+
 Files are deterministic bytes; `site.py --sha <name>` prints a file's sha256.
 """
 import hashlib
@@ -201,6 +204,30 @@ body { margin: 0; font-family: sans-serif; }
 </body></html>"""
 
 
+# The agent-action tools (actions.py): controls without a role (divs with click handlers: no ref),
+# a list of identical "Select" entries, a status that appears 1.5 s after a click, a one-time-code
+# box, a button that navigates.
+ACTIONS = b"""<!doctype html><html><head><title>actions</title></head><body>
+<h1>Actions</h1>
+<div class="tab" onclick="document.getElementById('panel').textContent='Panel two open'">Second tab</div>
+<p id="panel">Panel one open</p>
+<ul>
+<li><span>Morning flight</span> <div class="pick" onclick="pick('morning')">Select</div></li>
+<li><span>Evening flight</span> <div class="pick" onclick="pick('evening')">Select</div></li>
+</ul>
+<p id="picked">nothing picked</p>
+<button onclick="setTimeout(() => { document.getElementById('late').textContent = 'Change confirmed'; }, 1500)">Confirm change</button>
+<p id="late"></p>
+<label>Code <input id="code" maxlength="6" autocomplete="one-time-code"></label>
+<button onclick="location.href='/actions-done'">Continue</button>
+<script>
+function pick(which) { document.getElementById('picked').textContent = 'picked ' + which; fetch('/event?e=picked-' + which); }
+</script>
+</body></html>"""
+
+ACTIONS_DONE = b"""<!doctype html><html><head><title>done</title></head><body><h1>All done</h1></body></html>"""
+
+
 def checkout(frame_url: str) -> bytes:
     return ('<!doctype html><html><head><title>checkout</title></head><body>\n'
             '<label>Email <input id="email" type="email" autocomplete="email"></label>\n'
@@ -234,6 +261,13 @@ class H(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(INDEX)))
             self.end_headers()
             self.wfile.write(INDEX)
+        elif self.path in ("/actions", "/actions-done"):
+            page = ACTIONS if self.path == "/actions" else ACTIONS_DONE
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(page)))
+            self.end_headers()
+            self.wfile.write(page)
         elif self.path in ("/login", "/signup"):
             page = LOGIN if self.path == "/login" else SIGNUP
             self.send_response(200)
