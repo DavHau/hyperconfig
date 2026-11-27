@@ -2024,11 +2024,11 @@
     "searxng": {
       "flake": false,
       "locked": {
-        "lastModified": 1795418123,
-        "narHash": "sha256-K4yuzOrj35+QVNfz46CUhjKijM84T4PJ9RbgzhFjHbY=",
+        "lastModified": 1795721203,
+        "narHash": "sha256-4hyyVh8hv/v9hNytFblFzZe+l9Bi52Di8tua5uWm5BY=",
         "owner": "searxng",
         "repo": "searxng",
-        "rev": "a7163d091037cae586c444b05f22ecca162bb492",
+        "rev": "b5605b8f2fa2591108ab8e3f4fc16e88f7d66fe4",
         "type": "github"
       },
       "original": {
