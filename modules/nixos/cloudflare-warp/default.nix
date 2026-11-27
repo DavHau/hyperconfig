@@ -11,7 +11,7 @@
 # `warp-toggle toggle` on click.
 #
 # Coexisting with the overlay VPNs (zerotier, yggdrasil, wireguard,
-# hyprspace, tailscale):
+# tailscale):
 # - Overlay address ranges WARP doesn't exclude by default (its defaults
 #   already cover RFC1918, 100.64/10, fc00::/7, ...) are added to the
 #   split-tunnel exclude list by cloudflare-warp-excludes, so overlay

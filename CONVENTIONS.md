@@ -48,7 +48,7 @@ of today's debt: new violations fail, old ones are paid down.
   `password`, `<x>.pub`. Generators are declared in modules, never in
   machine files.
   Legacy names (`openrouter`, `tang`, `porkbun`, `storagebox`, `nextcloud`,
-  `hyprspace`, `teamclaude-nmm`, `vault-key`) stay: a rename means moving
+  `teamclaude-nmm`, `vault-key`) stay: a rename means moving
   the secret in the same commit; **never rename or regenerate a var that
   guards a disk** (`zfs-key`, `luks-key`, `vault-key`, `*-tang`).
 - systemd units, users and groups: the module's name (`exec-usage.service`,

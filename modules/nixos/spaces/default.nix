@@ -18,7 +18,7 @@
   on this clan), the hyperconfig deploy keys, the clan-secrets key, this
   clan's age identity, the fleet's /etc/hosts names or CA. It is confined
   (./host.nix `confine`): its traffic to the mesh (yggdrasil),
-  to private and ULA ranges (the LANs, zerotier, hyprspace, the other
+  to private and ULA ranges (the LANs, zerotier, the other
   spaces and infra-space) and to every service of this host but DNS is
   refused. It reaches the internet, and through it what its own keys open.
 

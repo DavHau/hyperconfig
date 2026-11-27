@@ -60,12 +60,11 @@ let
   );
 
   # The mesh daemons the fleet runs (modules/flake-parts/nixosConfigurations.nix:
-  # zt-eu + common.nix's zerotier, yggdrasil, hyprspace; mycelium/tailscale
+  # zt-eu + common.nix's zerotier, yggdrasil; mycelium/tailscale
   # where a machine enables them).
   meshServices = {
     zerotierone = "zerotierone.service";
     yggdrasil = "yggdrasil.service";
-    hyprspace = "hyprspace.service";
     mycelium = "mycelium.service";
     tailscale = "tailscaled.service";
   };
@@ -199,7 +198,7 @@ in
     meshUnits = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = derivedMeshUnits;
-      defaultText = lib.literalMD "the units of the enabled mesh services (zerotierone, yggdrasil, hyprspace, mycelium, tailscale)";
+      defaultText = lib.literalMD "the units of the enabled mesh services (zerotierone, yggdrasil, mycelium, tailscale)";
       description = "Mesh daemons that must be active for the deploy health check.";
     };
 

@@ -14,7 +14,7 @@
 # network namespace (CLONE_NEWNET in linux-derivation-builder.cc, gated on
 # isSandboxed()), so a fetcher's sockets live in the host's namespace and
 # reach whatever som reaches: its own services on loopback and its
-# addresses, the LAN, the overlays (yggdrasil, zerotier, hyprspace,
+# addresses, the LAN, the overlays (yggdrasil, zerotier,
 # wg-vault). The output chain below leaves those builders the internet
 # only, mirroring the isolated slots' forward policy
 # (hyperhermes/modules/container-slots.nix, isolated-out). Substitution is
@@ -78,7 +78,7 @@ in
           )
         } reject with icmpx admin-prohibited
         # 200::/7 yggdrasil, fc00::/7 the ULA
-        # overlays (zerotier, hyprspace, wg-vault, Mullvad's own).
+        # overlays (zerotier, wg-vault, Mullvad's own).
         ip6 daddr ${
           set (
             [

@@ -16,6 +16,9 @@
 # Note: yggdrasil ignores point-to-point interfaces for multicast
 # (tailscale0, hyprspace, wg-*), so of the overlays only zerotier (zt*)
 # carries multicast peerings; the others are listed for completeness.
+# tailscale and hyprspace are no longer run on the fleet; their prefixes
+# stay as generic overlay names (dropping them would only move such an
+# interface into the underlay entry).
 { lib }:
 let
   overlays = [

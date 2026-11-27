@@ -6,7 +6,7 @@
 # fleet's multicast interfaces (./multicast-interfaces.nix).
 #
 # Why: yggdrasil is the fleet's one overlay ON TOP of the other VPNs
-# (zt-eu, wg-edi, wg-vault, tailscale, hyprspace, LAN multicast): one
+# (zt-eu, wg-edi, wg-vault, LAN multicast): one
 # stable address per machine, peered over every underlay, best link
 # picked with fallback. That full mesh also made a roaming laptop on a
 # 1 Mbit/s hotspot carry the fleet's traffic. yggdrasil 0.5.x has no

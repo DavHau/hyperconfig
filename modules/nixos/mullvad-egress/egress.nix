@@ -12,8 +12,8 @@
 # the kill switch: a listed user's packet to a public address leaves through
 # wg-mullvad or is refused, and its DNS (port 53/853) off the tunnel may
 # only go to ./dns.nix's 127.0.0.153. Residual: loopback resolvers on other
-# ports (hyprspace's 127.43.104.80:11355) stay reachable, which only
-# software pointed at them explicitly would use.
+# ports stay reachable, which only software pointed at them explicitly
+# would use.
 #
 # `sources` (interfaces, e.g. a container's host-side veth) do the same for
 # traffic this host forwards: the same two rules with `iif <interface>`

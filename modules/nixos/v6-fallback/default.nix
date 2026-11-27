@@ -20,7 +20,7 @@
 #     marked in prerouting (see `mark`).
 # So:
 #   - Overlay daemons never enter the tunnel: kernel WireGuard, zerotier,
-#     tailscale, hyprspace run as root and yggdrasil as a DynamicUser
+#     tailscale run as root and yggdrasil as a DynamicUser
 #     (uid >= 61184), outside the range. Their underlay traffic to public
 #     v6 endpoints keeps failing as before ("no route") instead of looping
 #     into a tunnel that itself rides yggdrasil (the loop that took amy

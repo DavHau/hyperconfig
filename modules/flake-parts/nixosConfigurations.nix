@@ -376,10 +376,6 @@ in {
               roles.default.settings.multicastInterfaces =
                 import ../nixos/yggdrasil/multicast-interfaces.nix { inherit lib; };
             };
-            hyprspace = {
-              module.input = "clan-community";
-              roles.default.tags = ["all"];
-            };
             wg-casa = {
               module.name = "wireguard";
               module.input = "self";

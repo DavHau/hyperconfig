@@ -24,7 +24,7 @@ one CLI `selfheal`), enabled on every machine but the installer by
 
 - deploy (part 1): sshd active, listening on each configured port (one
   item per port, `ss -ltn`), every mesh daemon the machine runs active (derived from
-  its config: zerotierone, yggdrasil, hyprspace; mycelium/tailscale where
+  its config: zerotierone, yggdrasil; mycelium/tailscale where
   enabled), and at least one anchor answering ICMP or TCP 22 within 2 s.
   Anchors: edi, sgp and bam (minus the machine itself) at every overlay
   address the repo knows (`<m>.d` = yggdrasil, `<m>.wg-edi`, `<m>.wg-vault`

@@ -84,7 +84,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/monitoring-server.nix — Local overrides for the clan-core monitoring server (Mimir + Loki). <- modules/flake-parts/nixosConfigurations.nix
 - modules/nixos/monitoring-zfs-pools.nix — Pushes ZFS pool health and capacity to Mimir for ./monitoring-alerts.nix. <- modules/flake-parts/nixosConfigurations.nix, m/recurring-tasks/default.nix
 - modules/nixos/nautilus.nix — Nautilus right-click "Open in Ghostty" (folder background and folder items), via the nautilus-open-any-terminal extensi… <- m/dave.nix
-- modules/nixos/networking-desktop.nix — Desktop networking: NetworkManager, tailscale, and the wired link-local address (./wired-link-local.nix). <- m/dave.nix
+- modules/nixos/networking-desktop.nix — Desktop networking: NetworkManager and the wired link-local address (./wired-link-local.nix). <- m/dave.nix
 - modules/nixos/networkmanager-restart-late.nix — Keep the network up through switch-to-configuration's daemon-reload. <- modules/flake-parts/nixosConfigurations.nix
 - modules/nixos/niri-float-rules.nix — Floating window rules layered on top of the spaces base niri config. <- m/dave.nix
 - modules/nixos/niri-layout-tweaks.nix — Host-local niri layout tweaks layered on top of the spaces base config. <- m/dave.nix

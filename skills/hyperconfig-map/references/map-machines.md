@@ -12,67 +12,67 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - own files: disko.nix
 - imports: m/dave.nix, m/laptop.nix, m/user-grmpf.nix, m/home-printer.nix, m/amdgpu.nix, m/llama-swap.nix, m/llama-swap-qwen36-amy.nix, m/llama-swap-k2-horizon-amy.nix, m/bluetooth-resume-fix.nix, m/noctalia-anthropic-usage/default.nix, m/fw-fanctrl.nix, m/amd-powersave-limits.nix, m/powersave-panel-refresh.nix, m/chores-on-ac.nix, m/vault-nfs-client.nix, m/router-ais.nix, m/router-cm-beryl.nix, m/router-playa-isp.nix, m/esphome-secrets.nix, m/agent-upload/default.nix, m/disk-hygiene/default.nix, m/rust-build-cache.nix, m/cloudflare-warp/default.nix, m/v6-fallback/default.nix, m/houses-grmpf.nix, m/kernel-latest-zfs.nix, m/oomd.nix, m/infra-space/default.nix, m/spaces/default.nix, m/user-dave.nix
 - input modules: home-manager.nixosModules.home-manager, nixos-hardware.nixosModules.framework-13-7040-amd, nixos-hardware.nixosModules.framework-amd-ai-300-series, nixos-hardware.nixosModules.lenovo-yoga-7-14ARH7-amdgpu, nixos-hardware.nixosModules.tuxedo-pulse-14-gen3
-- vars generated: agave-tunnel agent-upload-wolfgang-ssh borgbackup hyprspace infra-space-hostkey nix-cache-nix-cache openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh remote-building-remote-building space-geninf-space-hostkey state-version wireguard-keys-wg-edi wireguard-keys-wg-vault wireguard-network-wg-edi wireguard-network-wg-vault yggdrasil
+- vars generated: agave-tunnel agent-upload-wolfgang-ssh borgbackup infra-space-hostkey nix-cache-nix-cache openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh remote-building-remote-building space-geninf-space-hostkey state-version wireguard-keys-wg-edi wireguard-keys-wg-vault wireguard-network-wg-edi wireguard-network-wg-vault yggdrasil
 
 ### bam
 - header: -
 - own files: benchmark-filesystems.txt, disko-ext4.nix, disko-xfs.nix, disko-zfs-defaults.nix, disko-zfs-enc-lz4.nix, disko-zfs-enc-zstd.nix, disko-zfs-enc.nix, inference-handoff.md, inference-host.nix, inference-net.nix, inference-vm.nix, kv-offload-research-2026-07-27.md, nextcloud.nix, oc.txt, printer.nix, vikunja.nix, zfs.nix
 - imports: m/common.nix, m/common-tools.nix, m/sbox.nix, m/storagebox-sync.nix, m/vault-nfs-server.nix, m/rgb-off.nix
-- vars generated: agave-tunnel hyprspace nix-cache-nix-cache openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version wireguard-keys-wg-edi wireguard-keys-wg-vault wireguard-keys-wireguard wireguard-network-wg-edi wireguard-network-wg-vault wireguard-network-wireguard yggdrasil
+- vars generated: agave-tunnel nix-cache-nix-cache openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version wireguard-keys-wg-edi wireguard-keys-wg-vault wireguard-keys-wireguard wireguard-network-wg-edi wireguard-network-wg-vault wireguard-network-wireguard yggdrasil
 
 ### cm-pi
 - header: -
 - own files: esphome/.gitignore, esphome/aircon_bed_room.yaml, esphome/aircon_common.yaml, esphome/aircon_living_room.yaml, esphome/chris.yaml, esphome/misubishi.yaml, esphome/mitsubishi_1.yaml, esphome/mitsubishi_2.yaml, esphome/mitsubishi_3.yaml, esphome/mitsubishi_4.yaml, esphome/mitsubishi_5.yaml, esphome/mitsubishi_common.yaml, hardware-configuration.nix, home-assistant.nix, odoo.nix
 - imports: m/common.nix, m/common-tools.nix, m/sbox.nix, m/riscv64.nix, m/voice-gateway/cm-pi.nix, m/owntracks/home-assistant.nix
-- vars generated: agave-tunnel hyprspace openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version wireguard-keys-wg-edi wireguard-network-wg-edi yggdrasil
+- vars generated: agave-tunnel openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version wireguard-keys-wg-edi wireguard-network-wg-edi yggdrasil
 
 ### edi
 - header: -
 - own files: disko.nix, nginx-file-server.nix, reverse-proxy-maker.nix, reverse-proxy.nix, users.nix
 - imports: m/common-tools.nix, m/sbox.nix, m/common.nix, m/dyndns-porkbun.nix, m/nix-gc-server.nix, m/monitoring-grafana-sso.nix, m/wyoming-local-speech/voices-sso.nix, m/voice-gateway/edi.nix, m/owntracks/edi.nix
 - input modules: srvos.nixosModules.mixins-cloud-init
-- vars generated: agave-tunnel grafana-admin hyprspace openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version wireguard-keys-wg-edi wireguard-keys-wireguard wireguard-network-wg-edi wireguard-network-wireguard yggdrasil
+- vars generated: agave-tunnel grafana-admin openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version wireguard-keys-wg-edi wireguard-keys-wireguard wireguard-network-wg-edi wireguard-network-wireguard yggdrasil
 
 ### installer
 - header: -
 - own files: -
 - imports: -
 - input modules: nixos-images.nixosModules.kexec-installer
-- vars generated: hyprspace openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version wireguard-keys-wg-edi wireguard-network-wg-edi yggdrasil
+- vars generated: openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version wireguard-keys-wg-edi wireguard-network-wg-edi yggdrasil
 
 ### joy
 - header: -
 - own files: disko.nix, output-formats.nix, resize-luks.nix
 - imports: m/common.nix, m/common-tools.nix, m/sbox.nix, m/omp-joy.nix, m/home-printer.nix
 - input modules: nixos-hardware.nixosModules.framework-12-13th-gen-intel
-- vars generated: agave-tunnel hyprspace openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version wireguard-keys-wg-edi wireguard-network-wg-edi yggdrasil
+- vars generated: agave-tunnel openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version wireguard-keys-wg-edi wireguard-network-wg-edi yggdrasil
 
 ### nas
 - header: Edit this configuration file to define what should be installed on your system.
 - own files: automount/default.nix, automount/enc-guard.nix, automount/snapshots.nix, automount/tang-bind.nix, automount/test.nix, file-browser-roman.nix, firewall.nix, hardware-configuration.nix, notes.md, porkbun.nix, smokeping.nix, sync-from-manu.nix, users.nix
 - imports: m/common.nix, m/common-tools.nix, m/sbox.nix, m/role-parasit.nix, m/role-sshuttle-server/default.nix, m/role-iodine/default.nix
 - input modules: srvos.nixosModules.mixins-systemd-boot
-- vars generated: agave-tunnel hyprspace openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version wireguard-keys-wg-casa wireguard-keys-wg-edi wireguard-network-wg-casa wireguard-network-wg-edi yggdrasil zfs-tang
+- vars generated: agave-tunnel openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version wireguard-keys-wg-casa wireguard-keys-wg-edi wireguard-network-wg-casa wireguard-network-wg-edi yggdrasil zfs-tang
 
 ### sgp
 - header: Proxmox KVM guest in Singapore (provider search domain sgp3):
 - own files: disko.nix
 - imports: m/common.nix, m/common-tools.nix, m/ipv4-forward.nix
-- vars generated: agave-tunnel hyprspace ipv4-forward-wg openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version yggdrasil
+- vars generated: agave-tunnel ipv4-forward-wg openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version yggdrasil
 
 ### som
 - header: AM5 desktop, iGPU only. Hardware detail lives in ./facter.json.
 - own files: asof-api-skill/SKILL.md, asof-api.nix, atproto-pds.nix, dave-hermes-ha.nix, dave-hermes-nmm.nix, dave-hermes-nmm/nmm-tools/SKILL.md, dave-hermes-nmm/nmm/SKILL.md, dave-hermes-nmm/swarm-task.py, disko.nix, hermes-agents-data.nix, hermes-agents.nix, hermes-dashboards.nix, hermes-gpu-skill/SKILL.md, hermes-inference.nix, hermes-tv-camera-skill/SKILL.md, home-networks-agents.nix, home-networks-skill/SKILL.md, roman-esphome-skill/SKILL.md, roman-esphome.nix, roman-home-assistant.nix, self-heal.nix, slot-host-keys.nix, stefan-pq.nix, v6-fallback.nix
 - imports: m/porkbun-records/default.nix, m/dave.nix, m/user-dave.nix, m/amdgpu.nix, m/zfs-remote-unlock/default.nix, m/tang-server.nix, m/vault-nfs-client.nix, m/users/hsjobeki-vault.nix, m/voice-gateway/default.nix, m/acme-local-resolver.nix, m/public-ipv6-token.nix, m/linger-normal-users.nix, m/user-manager-restart/default.nix, m/rgb-off.nix, m/cooler-lcd/default.nix, m/ipv4-forward.nix, m/mullvad-egress/default.nix, m/zt-eu-lan-guard/default.nix, m/web-bench-mullvad.nix, m/zfs-ephemeral-tmp.nix, m/zfs-arc-max.nix, m/per-user-tmp/default.nix, m/git-lfs.nix, m/teamclaude-gateway/default.nix, m/nix-sandbox-strict.nix, m/toolchain-cache-dirs/default.nix, m/entity-storage/default.nix, m/rust-build-cache.nix, m/disk-hygiene/default.nix, m/infra-space/default.nix, m/spaces/default.nix, m/spaces/publish.nix, m/infra-space/dashboard-account.nix
 - input modules: hyperhermes.nixosModules.claude-auth, hyperhermes.nixosModules.mail, hyperhermes.nixosModules.slots, nixos-hardware.nixosModules.common-cpu-amd, nixos-hardware.nixosModules.common-cpu-amd-pstate, nixos-hardware.nixosModules.common-gpu-amd, nixos-hardware.nixosModules.common-pc-ssd
-- vars generated: agave-tunnel borgbackup dave-hermes-nmm-root-ssh dave-hermes-nmm-ssh hermes-agent-ssh-adam hermes-agent-ssh-anke hermes-agent-ssh-b3x hermes-agent-ssh-chris hermes-agent-ssh-daniel hermes-agent-ssh-daniel-meli hermes-agent-ssh-dave-hermes hermes-agent-ssh-domi hermes-agent-ssh-egg hermes-agent-ssh-fpv hermes-agent-ssh-j hermes-agent-ssh-janine hermes-agent-ssh-joe hermes-agent-ssh-momentum hermes-agent-ssh-pinpox hermes-agent-ssh-roman hermes-agent-ssh-rti hermes-agent-ssh-stefan hermes-agent-ssh-thaigersprint hermes-agent-ssh-voice hermes-agent-ssh-willi hermes-agent-ssh-wolfgang hyprspace infra-space-hostkey ipv4-forward-wg location-reader-dave-hermes location-reader-infra mullvad-egress nix-cache-nix-cache openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh space-agave-host-github space-agave-host-hostkey space-agave-host-tenant-ssh space-geninf-space-hostkey state-version tang wireguard-keys-wg-vault wireguard-network-wg-vault yggdrasil zfs-tang
+- vars generated: agave-tunnel borgbackup dave-hermes-nmm-root-ssh dave-hermes-nmm-ssh hermes-agent-ssh-adam hermes-agent-ssh-anke hermes-agent-ssh-b3x hermes-agent-ssh-chris hermes-agent-ssh-daniel hermes-agent-ssh-daniel-meli hermes-agent-ssh-dave-hermes hermes-agent-ssh-domi hermes-agent-ssh-egg hermes-agent-ssh-fpv hermes-agent-ssh-j hermes-agent-ssh-janine hermes-agent-ssh-joe hermes-agent-ssh-momentum hermes-agent-ssh-pinpox hermes-agent-ssh-roman hermes-agent-ssh-rti hermes-agent-ssh-stefan hermes-agent-ssh-thaigersprint hermes-agent-ssh-voice hermes-agent-ssh-willi hermes-agent-ssh-wolfgang infra-space-hostkey ipv4-forward-wg location-reader-dave-hermes location-reader-infra mullvad-egress nix-cache-nix-cache openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh space-agave-host-github space-agave-host-hostkey space-agave-host-tenant-ssh space-geninf-space-hostkey state-version tang wireguard-keys-wg-vault wireguard-network-wg-vault yggdrasil zfs-tang
 
 ### vit
 - header: -
 - own files: disko.nix
 - imports: m/dave.nix, m/laptop.nix, m/user-dave.nix, m/nvidia.nix, m/vault-nfs-client.nix, m/home-printer.nix, m/hermes-agents-gpu-host.nix, m/webcam-snap/default.nix, m/captchakraken-server.nix, m/ocr-server/default.nix, m/wyoming-local-speech/default.nix, m/users/stefan-vault.nix, m/tang-server.nix, m/luks-unlock/default.nix, m/initrd-wifi.nix, m/initrd-ssh.nix
 - input modules: nixos-hardware.nixosModules.asus-zephyrus-gu605cw
-- vars generated: agave-tunnel hyprspace initrd-ssh luks-tang nix-cache-nix-cache openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version tang wireguard-keys-wg-edi wireguard-keys-wg-vault wireguard-network-wg-edi wireguard-network-wg-vault yggdrasil
+- vars generated: agave-tunnel initrd-ssh luks-tang nix-cache-nix-cache openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version tang wireguard-keys-wg-edi wireguard-keys-wg-vault wireguard-network-wg-edi wireguard-network-wg-vault yggdrasil
 
 `m/` = modules/nixos/. Every inventory machine also gets what the clan
 inventory (modules/flake-parts/nixosConfigurations.nix) adds; modules it names:

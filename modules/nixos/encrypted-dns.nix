@@ -5,7 +5,7 @@
 #
 #   - resolved: the only global server is dnscrypt-proxy, routing domain
 #     `~.`, no FallbackDNS. Overlays that register their own per-link DNS
-#     with resolved (hyprspace, tailscale MagicDNS, the Mullvad app) keep
+#     with resolved (the Mullvad app) keep
 #     their routing domains.
 #   - `lan` names and 192.168.8.0/24 reverse lookups go to the home
 #     router's dnsmasq over zerotier (see homeRouter).
@@ -48,7 +48,7 @@ let
   slotsOn = hasSlots && slots.enable;
 
   # Destinations plaintext DNS may still go to: never routed to the
-  # internet. ULA (zerotier, hyprspace, wireguard, tailscale, Mullvad),
+  # internet. ULA (zerotier, wireguard, Mullvad), CGNAT 100.64/10,
   # link-local, yggdrasil.
   private4 = "10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10";
   private6 = "fc00::/7, fe80::/10, 200::/7";
@@ -201,8 +201,6 @@ in
               "ygg" # yggdrasil
               "wg-*" # clan wireguard (wg-edi, wg-vault, ...), mullvad-egress's wg-mullvad (10.64.0.1)
               "wg0-mullvad" # Mullvad app: its in-tunnel resolver 10.64.0.1 / fc00:bbbb:bbbb:bb01::1
-              "hyprspace" # its resolver itself listens on loopback (127.43.104.80:11355)
-              "tailscale0" # MagicDNS 100.100.100.100 / fd7a:115c:a1e0::53
             ];
           in
           ''
@@ -215,7 +213,7 @@ in
 
             chain dns {
               # Loopback, also covering the machine's own addresses:
-              # dnscrypt-proxy, resolved's stubs, hyprspace's resolver,
+              # dnscrypt-proxy, resolved's stubs,
               # mullvad-egress's unbound, WARP's DNS proxy.
               oifname "lo" accept
               # captive-browser's proxy, setgid ${captiveGroup}.
