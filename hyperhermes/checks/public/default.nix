@@ -317,6 +317,19 @@ pkgs.testers.runNixOSTest (
               "bob@example.test bob-password hermes-alice"
           ))
 
+      with subtest("a chat to revalidate through nginx's gzip (login.py --gzip)"):
+          env = server.succeed("systemctl show -P Environment hermes-dashboard-alice.service")
+          home = next(v.split("=", 1)[1] for v in env.split() if v.startswith("HERMES_HOME="))
+          user = server.succeed("systemctl show -P User hermes-dashboard-alice.service").strip()
+          server.succeed(
+              f"runuser -u {user} -- env HERMES_HOME={home} ${hermesPackage.hermesVenv}/bin/python3 -c "
+              "\"from hermes_state import SessionDB; from pathlib import Path; import os; "
+              "db = SessionDB(Path(os.environ['HERMES_HOME']) / 'state.db'); "
+              "db.create_session(session_id='etag-chat', source='desktop'); "
+              "db.append_messages_batch('etag-chat', [{'role': 'user', 'content': 'hello ' * 200}, "
+              "{'role': 'assistant', 'content': 'hi'}]); db.close()\""
+          )
+
       with subtest("the app's sign-in asks the issuer again; bob gets no code"):
           print(client.succeed(
               "${withRoot} ${python}/bin/python3 ${../local-sso/login.py} --native --gzip https://alice.${domain} "

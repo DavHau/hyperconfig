@@ -80,9 +80,13 @@ let
     # auxiliary call (compaction's main-model fallback, the auto route)
     # reaches the TeamClaude gateway the credential is paired with.
     ./patches/hermes-aux-anthropic-env-gateway.patch
-    # Last: a message from another agent into a chat session
+    # A message from another agent into a chat session
     # (./agent-notify.nix); extends the resume patches' startup hook.
     ./patches/hermes-agent-notify.patch
+    # The history page answers If-None-Match with 304 (an unchanged open
+    # chat is revalidated, not re-downloaded, on every sessions tick).
+    # Order-free: touches only sessions.py's messages route.
+    ./patches/hermes-dashboard-messages-etag.patch
   ];
   patchHermesWheel = _final: prev: {
     hermes-agent = prev.hermes-agent.overrideAttrs (old: {

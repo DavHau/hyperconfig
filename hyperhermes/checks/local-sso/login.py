@@ -15,7 +15,8 @@ Refused, the callback mints no code.
 
 --gzip: also check nginx's compression (the dashboards module): the session
 list and the sidebar slices come back gzipped, the session itself
-(/api/auth/me) never does.
+(/api/auth/me) never does; and the seeded chat etag-chat's history page
+revalidates through it (weak ETag, 304 without a body).
 """
 
 import base64
@@ -159,3 +160,21 @@ if check_gzip:
     me = s.get(f"{origin}/api/auth/me", headers={"Accept-Encoding": "gzip"})
     assert "Content-Encoding" not in me.headers, dict(me.headers)
     print("gzip: /api/sessions and the sidebar compressed, /api/auth/me not")
+    # The history page revalidates through the gzip: a weak ETag survives
+    # it, and If-None-Match with it gets a bodiless 304 (core's
+    # hermes-dashboard-messages-etag patch). The caller seeded etag-chat.
+    url = f"{origin}/api/sessions/etag-chat/messages?limit=120&order=latest&include_compacted=true"
+    page = s.get(url, headers={"Accept-Encoding": "gzip"})
+    assert page.status_code == 200, (page.status_code, page.text[:300])
+    assert page.headers.get("Content-Encoding") == "gzip", dict(page.headers)
+    tag = page.headers.get("ETag", "")
+    assert tag.startswith('W/"'), dict(page.headers)
+    assert len(page.json()["messages"]) == 2
+    for sent in (tag, tag[2:]):
+        again = s.get(url, headers={"Accept-Encoding": "gzip", "If-None-Match": sent}, stream=True)
+        raw = again.raw.read()
+        assert again.status_code == 304 and raw == b"", (sent, again.status_code, dict(again.headers), raw[:100])
+        assert again.headers.get("ETag") == tag, dict(again.headers)
+    other = s.get(url, headers={"Accept-Encoding": "gzip", "If-None-Match": 'W/"stale"'})
+    assert other.status_code == 200 and other.json() == page.json(), other.status_code
+    print("etag: history page 304 through gzip, weak and strong spelling")

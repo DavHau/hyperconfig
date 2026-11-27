@@ -223,6 +223,8 @@
         # Offline: memory.background_consolidation "auto" applies the
         # background review's patch/remove with a snapshot; "stage" stages.
         memory-consolidation = import ./checks/memory-consolidation { inherit pkgs hermesPackage; };
+        # Offline: the history page revalidates (ETag, 304 when unchanged).
+        messages-etag = import ./checks/messages-etag { inherit pkgs hermesPackage; };
         # Offline: browser_vault fills a card only into a known processor's
         # card frame embedded directly in the bound checkout (CDP and the
         # Camofox page backend), after consent.

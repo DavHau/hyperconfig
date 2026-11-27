@@ -119,6 +119,7 @@ let
       ./patches/desktop-links-external.patch
       ./patches/desktop-thread-reading-anchor.patch
       ./patches/desktop-gzip-json.patch
+      ./patches/desktop-messages-revalidate.patch
     ];
 
     buildPhase = ''
@@ -180,7 +181,8 @@ let
         # HERMES_PYTHON skips the project's interpreter lookup (unused here).
         HERMES_PYTHON=false node ../../node_modules/vitest/vitest.mjs run --project electron \
           electron/preview-guest-links-external.test.ts \
-          electron/api-transport-gzip.test.ts
+          electron/api-transport-gzip.test.ts \
+          electron/json-revalidation.test.ts
 
         # validate staged node-pty native binary is present.
         STAGED_PTY_NODE="./dist/node_modules/node-pty/build/Release/pty.node"

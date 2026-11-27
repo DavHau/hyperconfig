@@ -1,0 +1,241 @@
+hermes v0.23.0: GET /api/sessions/{id}/messages revalidates (ETag, 304).
+
+Upstream: the history page has no validator. Clients re-read an open
+chat's tail on every sessions.changed tick, which any write to the
+profile's state.db fires (other chats, cron, subagents), and get the
+same bytes again: Hermes Desktop pulled ~380 KB every ~10 s for a long
+chat that hadn't changed (124 MB of 189 MB in 5.5 h on Dave's laptop).
+
+This patch: the page carries `ETag: W/"<first 32 hex of the sha256 of
+the JSON body>"` and `Cache-Control: private, no-cache`; a request whose
+If-None-Match holds that tag (weak comparison, `*`, lists) gets a 304
+without a body. The tag is the body's own hash, so every change the
+page would show (appends, tool rows, in-place edits, rewinds,
+compaction, a rewritten notice) changes it and nothing else does: no
+stored marker to miss a write. Weak, because nginx's gzip re-encodes
+the body and weakens a strong tag. The server still reads and projects
+the page (the cost is the database read, not the transfer). Direct
+Python callers (no Request) get the dict as before.
+
+Tests: tests/hermes_cli/test_session_messages_etag.py.
+
+diff --git a/hermes_cli/web_routers/sessions.py b/hermes_cli/web_routers/sessions.py
+index df2fe80..bc0b347 100644
+--- a/hermes_cli/web_routers/sessions.py
++++ b/hermes_cli/web_routers/sessions.py
+@@ -7,6 +7,7 @@ helpers are reached via the late-binding seam so monkeypatching keeps working.
+ """
+ 
+ import asyncio
++import hashlib
+ import json
+ import re
+ import sqlite3
+@@ -16,7 +17,7 @@ from typing import Callable, List, Optional
+ 
+ from fastapi import APIRouter, HTTPException, Query, Request
+ from fastapi.encoders import jsonable_encoder
+-from fastapi.responses import StreamingResponse
++from fastapi.responses import JSONResponse, Response, StreamingResponse
+ 
+ from hermes_cli.session_listing import subagent_listing_scope
+ from hermes_cli.web_deps import late
+@@ -744,7 +745,8 @@ def _project_for_display(messages: list, *, home=None, inline_images: bool = Tru
+ async def get_session_messages(
+     session_id: str, profile: Optional[str] = None, limit: Optional[int] = Query(None, ge=0),
+     offset: int = Query(0, ge=0), order: Optional[str] = Query(None),
+-    include_compacted: bool = Query(False), inline_images: bool = Query(True)):
++    include_compacted: bool = Query(False), inline_images: bool = Query(True),
++    request: Request = None):
+     if order not in (None, "oldest", "latest"):
+         raise HTTPException(status_code=400, detail="order must be one of: oldest, latest")
+ 
+@@ -775,7 +777,7 @@ async def get_session_messages(
+     projected_messages = await asyncio.to_thread(
+         _project_for_display, messages, home=_history_profile_home(profile),
+         inline_images=inline_images)
+-    return {
++    page = {
+         "session_id": sid,
+         # The same stamp list rows carry, so the Desktop keys a page under the
+         # owner it already routes the session by.
+@@ -785,6 +787,39 @@ async def get_session_messages(
+             "limit": _limit, "offset": offset,
+             "order": order or ("latest" if limit is None else "oldest"),
+             "returned": len(projected_messages)}}
++    if request is None:  # called as a function, not over HTTP
++        return page
++    return _revalidated_json(page, request)
++
++
++def _revalidated_json(payload: dict, request: Request) -> Response:
++    """*payload* as JSON with a validator; 304 without a body when the client holds it.
++
++    Clients re-read an open chat's history page whenever any session of the
++    profile changes, mostly getting the same bytes again (~380 KB for a long
++    chat). The ETag is a hash of the body itself, so it changes with every
++    change the page shows (appends, edits, rewinds, compaction, a rewritten
++    notice) and with nothing else; no stored marker can miss a write. Weak
++    (W/): a compressing proxy re-encodes the bytes and would weaken a strong
++    tag anyway (nginx's gzip does), and weak comparison is what
++    If-None-Match uses. ``no-cache``: every read revalidates here.
++    """
++    response = JSONResponse(jsonable_encoder(payload))
++    etag = 'W/"' + hashlib.sha256(response.body).hexdigest()[:32] + '"'
++    validators = {"ETag": etag, "Cache-Control": "private, no-cache"}
++    if _etag_matches(request.headers.get("if-none-match", ""), etag):
++        return Response(status_code=304, headers=validators)
++    response.headers.update(validators)
++    return response
++
++
++def _etag_matches(if_none_match: str, etag: str) -> bool:
++    """RFC 9110 weak comparison of an If-None-Match list against *etag*."""
++    def opaque(tag: str) -> str:
++        tag = tag.strip()
++        return tag[2:] if tag.startswith("W/") else tag
++    tags = [opaque(tag) for tag in if_none_match.split(",") if tag.strip()]
++    return "*" in tags or opaque(etag) in tags
+ 
+ 
+ def _timeline_session_id(db, session_id: str, owner: str) -> str:
+diff --git a/tests/hermes_cli/test_session_messages_etag.py b/tests/hermes_cli/test_session_messages_etag.py
+new file mode 100644
+index 0000000..483ff1c
+--- /dev/null
++++ b/tests/hermes_cli/test_session_messages_etag.py
+@@ -0,0 +1,134 @@
++"""``GET /api/sessions/{id}/messages`` revalidates: an ETag of the page, 304 when unchanged.
++
++Clients re-read an open chat's history page on every sessions.changed tick of
++the profile, mostly getting the same bytes again. The page carries a weak ETag
++hashed from its own body and answers ``If-None-Match`` with a bodiless 304, so
++any change the page would show (append, tool row, edit, rewind, compaction)
++changes the tag and nothing else does.
++"""
++
++from pathlib import Path
++
++import pytest
++from fastapi import FastAPI
++from fastapi.testclient import TestClient
++
++URL = "/api/sessions/chat/messages?limit=120&order=latest&include_compacted=true"
++
++
++@pytest.fixture
++def env(tmp_path, monkeypatch):
++    from hermes_state import SessionDB
++
++    monkeypatch.setattr(Path, "home", lambda: tmp_path)
++    home = tmp_path / ".hermes"
++    home.mkdir(parents=True)
++    monkeypatch.setenv("HERMES_HOME", str(home))
++    monkeypatch.setattr("hermes_state.DEFAULT_DB_PATH", home / "state.db")
++
++    db = SessionDB(home / "state.db")
++    db.create_session(session_id="chat", source="desktop")
++    db.create_session(session_id="other", source="desktop")
++    db.append_messages_batch("chat", [
++        {"role": "user", "content": "hello"},
++        {"role": "assistant", "content": "hi there"},
++    ])
++
++    from hermes_cli.web_routers.sessions import manage_router
++
++    app = FastAPI()
++    app.include_router(manage_router)
++    with TestClient(app) as client:
++        yield client, db
++    db.close()
++
++
++def _tag(client, url=URL):
++    response = client.get(url)
++    assert response.status_code == 200
++    tag = response.headers["etag"]
++    assert tag.startswith('W/"') and tag.endswith('"')
++    assert "no-cache" in response.headers["cache-control"]
++    return tag, response.json()
++
++
++def _revalidate(client, tag, url=URL):
++    return client.get(url, headers={"If-None-Match": tag})
++
++
++def test_unchanged_page_is_a_bodiless_304(env):
++    client, _db = env
++    tag, page = _tag(client)
++    assert [m["content"] for m in page["messages"]] == ["hello", "hi there"]
++    response = _revalidate(client, tag)
++    assert response.status_code == 304
++    assert response.content == b""
++    assert response.headers["etag"] == tag
++
++
++def test_strong_spelling_and_lists_match_weakly(env):
++    # nginx's gzip weakens a strong tag, a client may echo either form.
++    client, _db = env
++    tag, _ = _tag(client)
++    strong = tag[2:]
++    assert _revalidate(client, strong).status_code == 304
++    assert _revalidate(client, f'W/"nope", {tag}').status_code == 304
++    assert _revalidate(client, "*").status_code == 304
++    assert _revalidate(client, 'W/"nope"').status_code == 200
++
++
++def test_another_sessions_write_keeps_the_tag(env):
++    client, db = env
++    tag, _ = _tag(client)
++    db.append_message("other", role="user", content="elsewhere")
++    assert _revalidate(client, tag).status_code == 304
++
++
++def test_append_and_tool_only_rows_change_the_tag(env):
++    client, db = env
++    tag, _ = _tag(client)
++    db.append_message("chat", role="assistant", content=None,
++                      tool_calls=[{"id": "c1", "type": "function",
++                                   "function": {"name": "terminal", "arguments": "{}"}}])
++    response = _revalidate(client, tag)
++    assert response.status_code == 200
++    tag2 = response.headers["etag"]
++    assert tag2 != tag
++    db.append_message("chat", role="tool", content="ok", tool_call_id="c1")
++    response = _revalidate(client, tag2)
++    assert response.status_code == 200
++    assert response.json()["messages"][-1]["role"] == "tool"
++
++
++def test_in_place_edit_changes_the_tag(env):
++    # Same row count and timestamps: only the content moved.
++    client, db = env
++    tag, page = _tag(client)
++    user_id = next(m["id"] for m in page["messages"] if m["role"] == "user")
++    db.set_user_message_content("chat", user_id, "hello, edited")
++    response = _revalidate(client, tag)
++    assert response.status_code == 200
++    assert "hello, edited" in [m["content"] for m in response.json()["messages"]]
++
++
++def test_rewrite_of_the_history_changes_the_tag(env):
++    # Compaction and rewinds replace the stored rows.
++    client, db = env
++    tag, _ = _tag(client)
++    db.replace_messages("chat", [{"role": "user", "content": "summary"}])
++    response = _revalidate(client, tag)
++    assert response.status_code == 200
++    assert [m["content"] for m in response.json()["messages"]] == ["summary"]
++
++
++def test_tag_depends_on_the_page_asked_for(env):
++    client, _db = env
++    tag, _ = _tag(client)
++    other_page = URL.replace("limit=120", "limit=1")
++    assert _revalidate(client, tag, other_page).status_code == 200
++
++
++def test_missing_session_is_still_404(env):
++    client, _db = env
++    response = client.get("/api/sessions/nope/messages", headers={"If-None-Match": "*"})
++    assert response.status_code == 404
