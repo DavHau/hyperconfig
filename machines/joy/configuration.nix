@@ -9,6 +9,8 @@
     ../../modules/nixos/sbox.nix
     ../../modules/nixos/omp-joy.nix
     ../../modules/nixos/home-printer.nix
+    # `bandwidth-saver on|off` (bar button on amy) for slow links.
+    ../../modules/nixos/bandwidth-saver
     ./output-formats.nix
   ];
 
@@ -44,4 +46,5 @@
   # Roaming laptop: carries no other machine's yggdrasil traffic
   # (../../modules/nixos/yggdrasil).
   hyper.yggdrasil.noTransit = true;
+  hyper.bandwidthSaver.enable = true;
 }

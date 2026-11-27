@@ -181,6 +181,9 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/atproto-pds/accounts.py — - <- m/atproto-pds/default.nix
 - modules/nixos/atproto-pds/default.nix — An atproto PDS (tranquil-pds, nixpkgs' services.tranquil-pds) for our own accounts: <- machines/som/atproto-pds.nix, m/atproto-pds/test.nix
 - modules/nixos/atproto-pds/test.nix — ./default.nix with som's names (../../../machines/som/atproto-pds.nix) in a NixOS container, nginx on plain http (no ce… <- flake.nix
+- modules/nixos/bandwidth-saver/apply.sh — bandwidth-saver-apply on/off, the root half of the bandwidth-saving mode: <- m/bandwidth-saver/default.nix
+- modules/nixos/bandwidth-saver/default.nix — Bandwidth-saving mode for a laptop on a slow link: <- amy, joy, m/bandwidth-saver/test.nix
+- modules/nixos/bandwidth-saver/test.nix — ./default.nix in a VM: a laptop peered over yggdrasil with `edi` (the kept machine, reached as edi.wg-edi like the flee… <- flake.nix
 - modules/nixos/clan-unlock/clan-unlock.sh — - <- m/clan-unlock/default.nix
 - modules/nixos/clan-unlock/default.nix — clan-unlock <machine>: feed a machine waiting for its disk passphrase, over ssh into its initrd. Where it is and which… <- m/dave.nix
 - modules/nixos/cloudflare-warp/default.nix — Cloudflare WARP client + noctalia bar icon toggling the tunnel. <- amy

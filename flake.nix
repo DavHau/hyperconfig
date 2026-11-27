@@ -400,6 +400,12 @@
           import ./modules/nixos/recurring-tasks/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
+        # The laptops' bandwidth-saving mode (units held, yggdrasil cut to
+        # edi and back).
+        bandwidth-saver =
+          import ./modules/nixos/bandwidth-saver/test.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          };
         # bam's storagebox automount errors out instead of hanging.
         storagebox =
           import ./modules/nixos/storagebox-test.nix {

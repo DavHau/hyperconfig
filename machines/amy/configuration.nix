@@ -35,6 +35,8 @@
     ../../modules/nixos/cloudflare-warp
     # IPv6 through som over yggdrasil on v4-only networks (WARP wins while on).
     ../../modules/nixos/v6-fallback
+    # `bandwidth-saver on|off` (bar button on amy) for slow links.
+    ../../modules/nixos/bandwidth-saver
     ../../modules/nixos/houses-grmpf.nix
     # nix-housing needs Landlock ABI 9 (Linux >= 7.1); 6.18 LTS only has ABI 7.
     ../../modules/nixos/kernel-latest-zfs.nix
@@ -74,6 +76,7 @@
   # Roaming laptop: carries no other machine's yggdrasil traffic
   # (../../modules/nixos/yggdrasil).
   hyper.yggdrasil.noTransit = true;
+  hyper.bandwidthSaver.enable = true;
   hyper.v6Fallback = { enable = true; role = "client"; };
   # amy forwards on purpose (infra-space's NAT), not only for the isolated
   # hermes apps.

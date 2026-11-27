@@ -10,7 +10,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 ### amy
 - header: -
 - own files: disko.nix
-- imports: m/dave.nix, m/laptop.nix, m/user-grmpf.nix, m/home-printer.nix, m/amdgpu.nix, m/llama-swap.nix, m/llama-swap-qwen36-amy.nix, m/llama-swap-k2-horizon-amy.nix, m/bluetooth-resume-fix.nix, m/noctalia-anthropic-usage/default.nix, m/fw-fanctrl.nix, m/amd-powersave-limits.nix, m/powersave-panel-refresh.nix, m/chores-on-ac.nix, m/vault-nfs-client.nix, m/router-ais.nix, m/router-cm-beryl.nix, m/router-playa-isp.nix, m/esphome-secrets.nix, m/agent-upload/default.nix, m/disk-hygiene/default.nix, m/rust-build-cache.nix, m/cloudflare-warp/default.nix, m/v6-fallback/default.nix, m/houses-grmpf.nix, m/kernel-latest-zfs.nix, m/oomd.nix, m/infra-space/default.nix, m/spaces/default.nix, m/user-dave.nix
+- imports: m/dave.nix, m/laptop.nix, m/user-grmpf.nix, m/home-printer.nix, m/amdgpu.nix, m/llama-swap.nix, m/llama-swap-qwen36-amy.nix, m/llama-swap-k2-horizon-amy.nix, m/bluetooth-resume-fix.nix, m/noctalia-anthropic-usage/default.nix, m/fw-fanctrl.nix, m/amd-powersave-limits.nix, m/powersave-panel-refresh.nix, m/chores-on-ac.nix, m/vault-nfs-client.nix, m/router-ais.nix, m/router-cm-beryl.nix, m/router-playa-isp.nix, m/esphome-secrets.nix, m/agent-upload/default.nix, m/disk-hygiene/default.nix, m/rust-build-cache.nix, m/cloudflare-warp/default.nix, m/v6-fallback/default.nix, m/bandwidth-saver/default.nix, m/houses-grmpf.nix, m/kernel-latest-zfs.nix, m/oomd.nix, m/infra-space/default.nix, m/spaces/default.nix, m/user-dave.nix
 - input modules: home-manager.nixosModules.home-manager, nixos-hardware.nixosModules.framework-13-7040-amd, nixos-hardware.nixosModules.framework-amd-ai-300-series, nixos-hardware.nixosModules.lenovo-yoga-7-14ARH7-amdgpu, nixos-hardware.nixosModules.tuxedo-pulse-14-gen3
 - vars generated: agave-tunnel agent-upload-wolfgang-ssh borgbackup infra-space-hostkey nix-cache-nix-cache openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh remote-building-remote-building space-geninf-space-hostkey state-version wireguard-keys-wg-edi wireguard-keys-wg-vault wireguard-network-wg-edi wireguard-network-wg-vault yggdrasil
 
@@ -43,7 +43,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 ### joy
 - header: -
 - own files: disko.nix, output-formats.nix, resize-luks.nix
-- imports: m/common.nix, m/common-tools.nix, m/sbox.nix, m/omp-joy.nix, m/home-printer.nix
+- imports: m/common.nix, m/common-tools.nix, m/sbox.nix, m/omp-joy.nix, m/home-printer.nix, m/bandwidth-saver/default.nix
 - input modules: nixos-hardware.nixosModules.framework-12-13th-gen-intel
 - vars generated: agave-tunnel openssh openssh-cert p2p-ssh-iroh-p2p-ssh-iroh state-version wireguard-keys-wg-edi wireguard-network-wg-edi yggdrasil
 
@@ -112,6 +112,7 @@ Shared vars generated (vars/shared): agave-geninf-ro clan-secrets-pull esphome-c
 - clan-vars-restart-units: modules/nixos/clan-vars-restart-units-test.nix
 - noctalia-anthropic-usage: modules/nixos/noctalia-anthropic-usage/test.nix
 - recurring-tasks: modules/nixos/recurring-tasks/test.nix
+- bandwidth-saver: modules/nixos/bandwidth-saver/test.nix
 - storagebox: modules/nixos/storagebox-test.nix
 - ipv4-forward-slots: modules/nixos/ipv4-forward-slots-test
 - hermes-vision: ${inputs.hyperhermes}/checks/vision

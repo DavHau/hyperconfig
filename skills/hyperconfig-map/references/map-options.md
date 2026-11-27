@@ -30,6 +30,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.agaveTunnel.reportRevision: modules/nixos/agave-tunnel.nix
 - hyper.agentUser.enable: modules/nixos/agent-user.nix
 - hyper.atprotoPds: modules/nixos/atproto-pds/default.nix
+- hyper.bandwidthSaver: modules/nixos/bandwidth-saver/default.nix
 - hyper.coolerLcd.usbPort: modules/nixos/cooler-lcd/default.nix
 - hyper.daveDesktop.hermesOne.package: modules/nixos/dave-desktop/hermes-one.nix
 - hyper.daveDesktop.restrictForwarding: modules/nixos/dave-desktop/isolated-apps.nix
