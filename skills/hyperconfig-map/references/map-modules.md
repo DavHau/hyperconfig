@@ -79,6 +79,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/locale.nix — Time zone, locale and console keymap for Dave's desktops. <- m/dave.nix
 - modules/nixos/low-battery-power-off.nix — - <- m/laptop.nix
 - modules/nixos/monitoring-alerts.nix — Fleet alerts: Grafana unified alerting on the monitoring server (edi), evaluated against the Mimir datasource the clan-… <- modules/flake-parts/nixosConfigurations.nix, m/recurring-tasks/default.nix, m/telegram-send/default.nix
+- modules/nixos/monitoring-client.nix — Local overrides for the clan-core monitoring client (Alloy -> Mimir/Loki). <- modules/flake-parts/nixosConfigurations.nix
 - modules/nixos/monitoring-exec-usage.nix — "Unused packages" dashboard on the monitoring server's Grafana (stats.davhau.com/d/exec-usage), fed by ./exec-usage on… <- modules/flake-parts/nixosConfigurations.nix
 - modules/nixos/monitoring-grafana-sso.nix — Grafana of the clan-core monitoring server, published at stats.davhau.com behind the clan's pocket-id (modules/clan/oid… <- edi
 - modules/nixos/monitoring-server.nix — Local overrides for the clan-core monitoring server (Mimir + Loki). <- modules/flake-parts/nixosConfigurations.nix
