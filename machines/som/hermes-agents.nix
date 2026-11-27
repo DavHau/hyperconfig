@@ -106,6 +106,8 @@ in
     # dave-hermes works on nmm in the asof-agents slot: `ssh asof-agents` as
     # `agent`, one static skill in its hermes profile `nmm`.
     ./dave-hermes-nmm.nix
+    # The vault readers' `asof` CLI and data-api skill (slot asof's API).
+    ./asof-api.nix
     # Dave's location (OwnTracks via cm-pi's HA) for infra and dave-hermes.
     ../../modules/nixos/owntracks/agents.nix
     inputs.hyperhermes.nixosModules.browser

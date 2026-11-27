@@ -74,6 +74,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.selfHeal.deployGuard: modules/nixos/self-heal/deploy-guard.nix
 - hyper.selfHeal.hardwareWatchdog: modules/nixos/self-heal/hardware-watchdog.nix
 - hyper.selfHeal.watchdog: modules/nixos/self-heal/watchdog.nix
+- hyper.slotApiClients: modules/nixos/slot-api-clients/default.nix
 - hyper.spaceGui: modules/nixos/space-gui/default.nix
 - hyper.spaces: modules/nixos/spaces/default.nix, modules/nixos/spaces/usb-ports.nix
 - hyper.spacesClient: modules/nixos/spaces/client.nix

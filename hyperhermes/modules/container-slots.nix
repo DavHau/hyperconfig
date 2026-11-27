@@ -84,6 +84,22 @@
 #     rest of the file and the guest stay untouched; `[ ]` empties the block
 #     (revocation; null leaves it as it was). No slot restart. The guest's root can drop the block; it
 #     comes back at the next slot start or list change.
+#   - managed files: `managedFiles.<name> = "<content>"` keeps public files
+#     (allowlists, hashes; the content is in the store, never a secret) at
+#     /var/lib/container-slot/managed/<name> in the running guest, mode
+#     0444, rewritten the same way as root keys
+#     (container-slot-<slot>-files.service, as the slot's own root, after
+#     every start and every change); files there that are no longer listed
+#     are removed. No slot restart; a guest service that reads one picks up
+#     a change by re-reading it.
+#   - published binaries: `publishBins = [ "<bin>" ]` makes the slot's
+#     current system's /run/current-system/sw/bin/<bin> available to this
+#     host's users as /run/container-slot-bins/<slot>/<bin>, a link into
+#     the store. Host root resolves it (container-slot-<slot>-bins.service,
+#     at every switch and whenever the slot's system profile changes) and
+#     takes only a target of the form /nix/store/<hash>-<name>/bin/<bin>,
+#     a regular file. The binary is the slot's code: whoever runs it here
+#     runs the slot's code with their own rights, so wrap it in a sandbox.
 #   - start: `autoStart` (default on) starts the slot at boot; off, the
 #     unit container@<slot> exists and something else starts it
 #     (./slots).
@@ -350,6 +366,110 @@ let
     '';
   rootKeysUnit = name: "container-slot-${name}-root-keys";
 
+  # managedFiles (see the module header): run inside the slot as its root.
+  # Each file via temp + rename; entries no longer listed are removed.
+  managedDir = "/var/lib/container-slot/managed";
+  managedFilesScript =
+    name: files:
+    pkgs.writeShellScript "container-slot-${name}-files" ''
+      set -eu
+      PATH=${lib.makeBinPath [ pkgs.coreutils pkgs.findutils ]}
+      d=${managedDir}
+      install -d -m 0755 -o 0 -g 0 /var/lib/container-slot
+      if [ -L "$d" ]; then rm -f "$d"; fi
+      install -d -m 0755 -o 0 -g 0 "$d"
+      ${lib.concatStrings (
+        lib.mapAttrsToList (file: content: ''
+          tmp=$(mktemp "$d/.${file}.XXXXXX")
+          cat ${pkgs.writeText "container-slot-${name}-${file}" content} >"$tmp"
+          chmod 0444 "$tmp"
+          mv -f "$tmp" "$d/"${lib.escapeShellArg file}
+        '') files
+      )}
+      find "$d" -mindepth 1 -maxdepth 1 ${
+        lib.concatMapStringsSep " " (f: "! -name ${lib.escapeShellArg f}") (lib.attrNames files)
+      } -exec rm -rf -- {} +
+    '';
+  filesUnit = name: "container-slot-${name}-files";
+
+  # publishBins (see the module header): host root resolves the slot's
+  # current system's sw/bin/<bin> and links it under binsDir, accepting only
+  # a regular file at /nix/store/<hash>-<name>/bin/<bin>.
+  binsDir = "/run/container-slot-bins";
+  binsUnit = name: "container-slot-${name}-bins";
+  binsScript =
+    name: bins:
+    pkgs.writeShellScript "container-slot-${name}-bins" ''
+      set -u
+      PATH=${lib.makeBinPath [ pkgs.coreutils ]}
+      out=${binsDir}/${name}
+      install -d -m 0755 "$out"
+      sys=$(timeout 10 readlink -f -- ${profileDir name}/system) || sys=
+      for b in ${lib.escapeShellArgs bins}; do
+        t=
+        if [ -n "$sys" ]; then
+          t=$(timeout 10 readlink -f -- "$sys/sw/bin/$b") || t=
+        fi
+        if [[ "$t" =~ ^/nix/store/[0-9a-z]{32}-[A-Za-z0-9+._?=-]+/bin/[A-Za-z0-9_.+-]+$ ]] \
+          && [ "''${t##*/}" = "$b" ] && [ -f "$t" ] && [ ! -L "$t" ]; then
+          ln -sfn -- "$t" "$out/.$b.new"
+          mv -Tf -- "$out/.$b.new" "$out/$b"
+        else
+          echo "container-slots: ${name}: no publishable $b in the slot's system (got '$t'); removing it" >&2
+          rm -f -- "$out/$b"
+        fi
+      done
+      for f in "$out"/* "$out"/.*; do
+        [ -e "$f" ] || [ -L "$f" ] || continue
+        case "''${f##*/}" in
+          . | ..${lib.concatMapStrings (b: " | ${lib.escapeShellArg b}") bins}) ;;
+          *) rm -f -- "$f" ;;
+        esac
+      done
+    '';
+
+  # A unit that runs `script` inside the running slot as its root, after
+  # every start of the slot and every change of the script (see root keys in
+  # the module header).
+  inSlotUnit = name: unit: description: what: script: {
+    description = "${description} in slot ${name}";
+    # Started with the slot (each start: stopping the slot stops this
+    # too) and by multi-user.target, so a switch starts it when new and
+    # restarts it when its content changed, while the slot runs. A
+    # stopped slot is skipped (ExecCondition), never started; the slot
+    # itself is never restarted for this.
+    wantedBy = [
+      "container@${name}.service"
+      "multi-user.target"
+    ];
+    partOf = [ "container@${name}.service" ];
+    after = [ "container@${name}.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      TimeoutStartSec = "5min";
+      ExecCondition = "${config.systemd.package}/bin/systemctl is-active --quiet container@${name}.service";
+    };
+    # The guest's systemd answers once its init is up; wait for it
+    # (polling, 1 s steps), then run the script there as its root.
+    script = ''
+      for _ in $(seq 1 240); do
+        if ${config.systemd.package}/bin/systemd-run -M ${name} --quiet --wait --collect \
+          ${pkgs.coreutils}/bin/true </dev/null >/dev/null 2>&1; then
+          # No --pipe: the guest gets none of this unit's fds (its
+          # output stays in the guest's journal); --wait still
+          # returns the script's result.
+          exec ${config.systemd.package}/bin/systemd-run -M ${name} --quiet --wait --collect \
+            --unit=${unit} ${script} </dev/null
+        fi
+        sleep 1
+      done
+      echo "container-slots: ${name}: the slot's systemd never answered; ${what} not updated" >&2
+      exit 1
+    '';
+    path = [ pkgs.coreutils ];
+  };
+
   # Before the slot starts, as host root, with the slot stopped: refuse a
   # root tree with planted symlinks (see "the root tree" above), create the
   # share mount points (owned by the share's account, which fusermount
@@ -533,6 +653,29 @@ let
           guest whose sshd ignores the host-provided keys file (see the
           module header). `[ ]` empties the block (revoke that way); null
           never touches it, so going back to null leaves the last block.
+        '';
+      };
+      managedFiles = mkOption {
+        # Names checked in the assertions (attrsOf cannot type its names).
+        type = types.attrsOf types.str;
+        default = { };
+        example = {
+          api-clients = "alice 6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b\n";
+        };
+        description = ''
+          Public files kept in the running guest at
+          ${managedDir}/<name> (file name -> content; see the module
+          header). The content lands in the Nix store: never a secret.
+        '';
+      };
+      publishBins = mkOption {
+        type = types.listOf (types.strMatching "[A-Za-z0-9_][A-Za-z0-9_.+-]*");
+        default = [ ];
+        example = [ "foo" ];
+        description = ''
+          Binaries of the slot's current system (sw/bin) published to this
+          host as ${binsDir}/<slot>/<bin> (see the module header). They
+          are the slot's code: run them sandboxed.
         '';
       };
       credentials = mkOption {
@@ -721,6 +864,15 @@ in
           )
         ) cfg.slots
       )
+      ++ lib.concatLists (
+        lib.mapAttrsToList (
+          name: slot:
+          map (file: {
+            assertion = builtins.match "[A-Za-z0-9_-][A-Za-z0-9_.-]*" file != null;
+            message = "services.container-slots.slots.${name}.managedFiles: '${file}' is not a plain file name ([A-Za-z0-9_.-], no leading dot)";
+          }) (lib.attrNames slot.managedFiles)
+        ) cfg.slots
+      )
       ++ (
         let
           all = lib.concatMap (s: s.publicIPv4Ports) (lib.attrValues cfg.slots);
@@ -850,7 +1002,9 @@ in
     ]
     ++ lib.mapAttrsToList (
       name: slot: "d ${slotTmp name} 1777 ${toString (uidBase slot)} ${toString (uidBase slot)} 1d"
-    ) cfg.slots;
+    ) cfg.slots
+    # publishBins' links (the bins unit may write only below it).
+    ++ lib.optional (lib.any (s: s.publishBins != [ ]) (lib.attrValues cfg.slots)) "d ${binsDir} 0755 root root -";
 
     containers = lib.mapAttrs (
       name: slot:
@@ -998,46 +1152,59 @@ in
 
       (lib.mapAttrs' (
         name: slot:
-        lib.nameValuePair (rootKeysUnit name) {
-          description = "Root's host-managed ssh keys in slot ${name}";
-          # Started with the slot (each start: stopping the slot stops this
-          # too) and by multi-user.target, so a switch starts it when new and
-          # restarts it when its key list changed, while the slot runs. A
-          # stopped slot is skipped (ExecCondition), never started; the slot
-          # itself is never restarted for this.
-          wantedBy = [
-            "container@${name}.service"
-            "multi-user.target"
-          ];
-          partOf = [ "container@${name}.service" ];
-          after = [ "container@${name}.service" ];
+        lib.nameValuePair (rootKeysUnit name) (
+          inSlotUnit name "container-slot-root-keys" "Root's host-managed ssh keys" "root keys" (
+            rootKeysScript name slot.rootKeys
+          )
+        )
+      ) (lib.filterAttrs (_: s: s.rootKeys != null) cfg.slots))
+
+      (lib.mapAttrs' (
+        name: slot:
+        lib.nameValuePair (filesUnit name) (
+          inSlotUnit name "container-slot-files" "Host-managed files" "managed files" (
+            managedFilesScript name slot.managedFiles
+          )
+        )
+      ) (lib.filterAttrs (_: s: s.managedFiles != { }) cfg.slots))
+
+      (lib.mapAttrs' (
+        name: slot:
+        lib.nameValuePair (binsUnit name) {
+          description = "Publish binaries of slot ${name} to this host";
+          wantedBy = [ "multi-user.target" ];
+          # Root, reading only links of the slot's profile; writes only
+          # under binsDir.
           serviceConfig = {
             Type = "oneshot";
-            RemainAfterExit = true;
-            TimeoutStartSec = "5min";
-            ExecCondition = "${config.systemd.package}/bin/systemctl is-active --quiet container@${name}.service";
+            ExecStart = binsScript name slot.publishBins;
+            TimeoutStartSec = "1min";
+            ProtectSystem = "strict";
+            ReadWritePaths = [ binsDir ];
+            PrivateNetwork = true;
+            NoNewPrivileges = true;
+            CapabilityBoundingSet = [ "CAP_DAC_READ_SEARCH" ];
           };
-          # The guest's systemd answers once its init is up; wait for it
-          # (polling, 1 s steps), then run the script there as its root.
-          script = ''
-            for _ in $(seq 1 240); do
-              if ${config.systemd.package}/bin/systemd-run -M ${name} --quiet --wait --collect \
-                ${pkgs.coreutils}/bin/true </dev/null >/dev/null 2>&1; then
-                # No --pipe: the guest gets none of this unit's fds (its
-                # output stays in the guest's journal); --wait still
-                # returns the script's result.
-                exec ${config.systemd.package}/bin/systemd-run -M ${name} --quiet --wait --collect \
-                  --unit=container-slot-root-keys ${rootKeysScript name slot.rootKeys} </dev/null
-              fi
-              sleep 1
-            done
-            echo "container-slots: ${name}: the slot's systemd never answered; root keys not updated" >&2
-            exit 1
-          '';
-          path = [ pkgs.coreutils ];
+          unitConfig.StartLimitIntervalSec = 0;
         }
-      ) (lib.filterAttrs (_: s: s.rootKeys != null) cfg.slots))
+      ) (lib.filterAttrs (_: s: s.publishBins != [ ]) cfg.slots))
     ];
+
+    # publishBins: re-resolve whenever the slot deploys a new system (the
+    # profile's links change) besides every switch of this host.
+    systemd.paths = lib.mapAttrs' (
+      name: _:
+      lib.nameValuePair (binsUnit name) {
+        wantedBy = [ "paths.target" ];
+        pathConfig = {
+          PathChanged = profileDir name;
+          Unit = "${binsUnit name}.service";
+          # A slot churning its profile must not push this into
+          # trigger-limit-hit (it would stop re-publishing until a switch).
+          TriggerLimitIntervalSec = 0;
+        };
+      }
+    ) (lib.filterAttrs (_: s: s.publishBins != [ ]) cfg.slots);
 
     programs.fuse.userAllowOther = lib.mkIf (lib.any (s: s.shares != { }) (
       lib.attrValues cfg.slots
