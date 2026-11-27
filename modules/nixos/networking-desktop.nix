@@ -1,4 +1,4 @@
-# Desktop networking: NetworkManager, tailscale, and the wired link-local
+# Desktop networking: NetworkManager and the wired link-local
 # address (./wired-link-local.nix).
 { ... }:
 {
@@ -7,5 +7,6 @@
   networking.networkmanager.enable = true;
   networking.dhcpcd.extraConfig = "nohook resolv.conf";
 
-  services.tailscale.enable = true;
+  # No tailscale (Dave, 2026-11-27: unused; the mesh is yggdrasil over
+  # zerotier/wireguard). Its idle traffic hurt amy on a weak 4G uplink.
 }
