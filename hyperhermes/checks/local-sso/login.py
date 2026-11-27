@@ -14,7 +14,8 @@ pair and a loopback redirect, the issuer asked for a fresh login
 Refused, the callback mints no code.
 
 --gzip: also check nginx's compression (the dashboards module): the session
-list comes back gzipped, the session itself (/api/auth/me) never does.
+list and the sidebar slices come back gzipped, the session itself
+(/api/auth/me) never does.
 """
 
 import base64
@@ -150,6 +151,11 @@ if check_gzip:
         "Accept-Encoding": "gzip", "Sec-Fetch-Site": "same-origin",
         "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"})
     assert same.status_code == 200 and same.headers.get("Content-Encoding") == "gzip", dict(same.headers)
+    # The sidebar slices the apps re-read on every reconnect.
+    sidebar = s.get(f"{origin}/api/profiles/sessions/sidebar?recents_limit=50", headers={"Accept-Encoding": "gzip"})
+    assert sidebar.status_code == 200, (sidebar.status_code, sidebar.text[:300])
+    assert sidebar.headers.get("Content-Encoding") == "gzip", dict(sidebar.headers)
+    sidebar.json()
     me = s.get(f"{origin}/api/auth/me", headers={"Accept-Encoding": "gzip"})
     assert "Content-Encoding" not in me.headers, dict(me.headers)
-    print("gzip: /api/sessions compressed, /api/auth/me not")
+    print("gzip: /api/sessions and the sidebar compressed, /api/auth/me not")

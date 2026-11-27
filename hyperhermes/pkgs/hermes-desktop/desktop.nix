@@ -23,6 +23,9 @@
 #     change, a finished turn is re-keyed in place instead of remounted,
 #     and PageUp/PageDown work from the composer
 #     (./patches/desktop-thread-reading-anchor.patch);
+#   - the Node REST client asks for and decodes gzip, so the dashboards'
+#     compressed JSON reaches the app 3-7x smaller on a slow link
+#     (./patches/desktop-gzip-json.patch);
 #   - the wrapper symlinks the renderer instead of copying it (below);
 #   - no extraEnv/extraRun: nothing here sets them.
 #
@@ -115,6 +118,7 @@ let
       ./patches/desktop-oauth-first-login.patch
       ./patches/desktop-links-external.patch
       ./patches/desktop-thread-reading-anchor.patch
+      ./patches/desktop-gzip-json.patch
     ];
 
     buildPhase = ''
@@ -175,7 +179,8 @@ let
         # ./patches/desktop-links-external.patch's guest-click rule. Setting
         # HERMES_PYTHON skips the project's interpreter lookup (unused here).
         HERMES_PYTHON=false node ../../node_modules/vitest/vitest.mjs run --project electron \
-          electron/preview-guest-links-external.test.ts
+          electron/preview-guest-links-external.test.ts \
+          electron/api-transport-gzip.test.ts
 
         # validate staged node-pty native binary is present.
         STAGED_PTY_NODE="./dist/node_modules/node-pty/build/Release/pty.node"

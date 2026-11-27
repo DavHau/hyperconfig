@@ -85,4 +85,26 @@ rec {
   camofoxPortFor = user: 23100 + lib.mod (identityHash user) 1000;
   camofoxBackendBase = 24000;
   camofoxDir = user: "${stateDir user}/camofox";
+
+  # The dashboard REST reads that are big and re-read on every reconnect
+  # or session change: a session's history pages, the session lists and the
+  # sidebar slices (100-450 KB of JSON each on a long-lived agent, 4-7x
+  # smaller gzipped). Anchored nginx regex; the dashboards' vhosts
+  # (../modules/dashboards) and infra-space's compress exactly these.
+  # SSE and websockets never match, so they stay unbuffered.
+  compressedJsonLocation = "~ ^/api/(sessions(/[^/]+/messages)?|profiles/sessions(/sidebar)?)$";
+  # Its nginx body: refuse other sites' fetches (the BREACH length oracle
+  # needs the victim's browser to fetch the body again and again on the
+  # attacker's cue, and a JSON endpoint is never a page) and gzip the JSON.
+  compressedJsonConfig = ''
+    if ($http_sec_fetch_site ~ "^(cross-site|same-site)$") {
+      return 403 "Refused: a request from another site.\n";
+    }
+    gzip on;
+    gzip_proxied any;
+    gzip_comp_level 5;
+    gzip_min_length 0;
+    gzip_types application/json;
+    gzip_vary on;
+  '';
 }

@@ -504,10 +504,11 @@ in
                     limit_conn_status 429;
                   '';
                   locations."/" = location;
-                  # The phone apps reload the open session's history (1-3 MB
-                  # of JSON, uncompressed from hermes) on every return to
-                  # the app, over mobile data. Compress just the transcript
-                  # and session list; SSE and websockets stay unbuffered.
+                  # The apps reload the open session's history (1-3 MB of
+                  # JSON, uncompressed from hermes) and the session lists
+                  # on every return or reconnect, over mobile data.
+                  # Compress just those (hlib.compressedJsonLocation); SSE
+                  # and websockets stay unbuffered.
                   # BREACH: no sign-in token or ticket is in these bodies,
                   # but a transcript can hold secrets the owner pasted or a
                   # tool printed, next to text an outsider got in (a mail,
@@ -518,18 +519,8 @@ in
                   # endpoint is never a page, so other sites' navigations
                   # to it are refused here too. Left: the apps' own reloads
                   # (no Sec-Fetch-Site), which only the owner triggers.
-                  locations."~ ^/api/sessions(/[^/]+/messages)?$" = location // {
-                    extraConfig = location.extraConfig + ''
-                      if ($http_sec_fetch_site ~ "^(cross-site|same-site)$") {
-                        return 403 "Refused: a request from another site.\n";
-                      }
-                      gzip on;
-                      gzip_proxied any;
-                      gzip_comp_level 5;
-                      gzip_min_length 0;
-                      gzip_types application/json;
-                      gzip_vary on;
-                    '';
+                  locations.${hlib.compressedJsonLocation} = location // {
+                    extraConfig = location.extraConfig + hlib.compressedJsonConfig;
                   };
                   locations."= /auth/login" = signIn;
                   # The app's sign-in always asks again (the header).

@@ -132,6 +132,14 @@ let
       limit_req_status 429;
     '';
   };
+  # History pages and session lists gzipped, as on the agents' dashboards
+  # (hyperhermes' lib.compressedJsonConfig, BREACH reasoning in its
+  # dashboards module; this vhost is behind the same Fetch Metadata gate):
+  # the infra agent's main session is the longest there is, and the apps
+  # re-read its tail and the lists on every reconnect over Dave's mobile link.
+  compressedJson = location // {
+    extraConfig = location.extraConfig + inputs.hyperhermes.lib.compressedJsonConfig;
+  };
 in
 {
   options.hyper.infraSpace.dashboard = {
@@ -262,6 +270,7 @@ in
           limit_conn_status 429;
         '';
         locations."/" = location;
+        locations.${inputs.hyperhermes.lib.compressedJsonLocation} = compressedJson;
         locations."= /auth/login" = signIn;
         # (no `{32}`: a brace would end nginx's location line; the service
         # takes exactly 32)

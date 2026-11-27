@@ -1,0 +1,200 @@
+What upstream lacks (hermes-agent, apps/desktop): the main process's Node REST
+client (bearer requests, the remote dashboards' native sign-in) sent no
+Accept-Encoding and could not decode a compressed body, so nginx's gzip on
+the dashboards never applied to the app. The phone apps got ~3x smaller
+history pages and 4-7x smaller session lists; the desktop did not (Dave's
+laptop on a 4G hotspot, 2026-11-27: 189 MB in 5.5 h, all uncompressed).
+
+This patch (Nix): fetchJson asks for gzip unless the caller named an
+encoding, and decodes a gzip/x-gzip body; any other encoding passes
+through unchanged. A corrupt body rejects once and drops the socket.
+
+Tests: electron/api-transport-gzip.test.ts.
+
+diff --git a/apps/desktop/electron/api-transport-gzip.test.ts b/apps/desktop/electron/api-transport-gzip.test.ts
+new file mode 100644
+index 0000000..1a458f5
+--- /dev/null
++++ b/apps/desktop/electron/api-transport-gzip.test.ts
+@@ -0,0 +1,77 @@
++import http from 'node:http'
++import type { AddressInfo } from 'node:net'
++import zlib from 'node:zlib'
++
++import { afterEach, describe, expect, it } from 'vitest'
++
++import { decodedResponseBody, withAcceptEncoding } from './api-transport'
++
++let server: http.Server | null = null
++
++afterEach(async () => {
++  await new Promise(resolve => (server ? server.close(resolve) : resolve(undefined)))
++  server = null
++})
++
++function serve(handler: http.RequestListener): Promise<string> {
++  server = http.createServer(handler)
++
++  return new Promise(resolve =>
++    server!.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${(server!.address() as AddressInfo).port}/`))
++  )
++}
++
++function read(url: string, headers: http.OutgoingHttpHeaders): Promise<{ text: string; seen: string }> {
++  return new Promise((resolve, reject) => {
++    const req = http.request(url, { headers: withAcceptEncoding(headers) }, res => {
++      const chunks: Buffer[] = []
++      const body = decodedResponseBody(res)
++      body.on('error', reject)
++      body.on('data', chunk => chunks.push(chunk))
++      body.on('end', () => resolve({ text: Buffer.concat(chunks).toString('utf8'), seen: String(res.headers['x-seen']) }))
++    })
++    req.on('error', reject)
++    req.end()
++  })
++}
++
++const payload = JSON.stringify({ messages: Array.from({ length: 200 }, (_, i) => ({ id: i, content: 'x'.repeat(50) })) })
++
++describe('compressed JSON transport', () => {
++  it('asks for gzip and decodes a gzipped body', async () => {
++    const url = await serve((req, res) => {
++      res.setHeader('x-seen', String(req.headers['accept-encoding']))
++      res.setHeader('content-encoding', 'gzip')
++      res.end(zlib.gzipSync(payload))
++    })
++
++    const { text, seen } = await read(url, {})
++
++    expect(seen).toBe('gzip')
++    expect(JSON.parse(text).messages).toHaveLength(200)
++  })
++
++  it('passes an uncompressed body through', async () => {
++    const url = await serve((_req, res) => res.end(payload))
++
++    expect((await read(url, {})).text).toBe(payload)
++  })
++
++  it("keeps a caller's own Accept-Encoding", async () => {
++    const url = await serve((req, res) => {
++      res.setHeader('x-seen', String(req.headers['accept-encoding']))
++      res.end(payload)
++    })
++
++    expect((await read(url, { 'accept-encoding': 'identity' })).seen).toBe('identity')
++  })
++
++  it('surfaces a corrupt gzip body as an error, not a hang', async () => {
++    const url = await serve((_req, res) => {
++      res.setHeader('content-encoding', 'gzip')
++      res.end(Buffer.from('not gzip at all'))
++    })
++
++    await expect(read(url, {})).rejects.toThrow()
++  })
++})
+diff --git a/apps/desktop/electron/api-transport.ts b/apps/desktop/electron/api-transport.ts
+index 4b59e28..49bcae4 100644
+--- a/apps/desktop/electron/api-transport.ts
++++ b/apps/desktop/electron/api-transport.ts
+@@ -35,6 +35,8 @@
+ 
+ import http from 'node:http'
+ import https from 'node:https'
++import type { Readable } from 'node:stream'
++import zlib from 'node:zlib'
+ 
+ // JSON pool: many small concurrent calls (session lists, config, prompts).
+ const HTTP_JSON_AGENT = new http.Agent({ keepAlive: true, maxSockets: 50 })
+@@ -268,7 +270,43 @@ function isSchemeOrSlashRedirect(requestUrl: string, location: null | string): b
+   }
+ }
+ 
++/**
++ * Compressed JSON over slow links. node:http neither asks for nor decodes a
++ * compressed body (Chromium's net does both), so the main process's REST
++ * reads came uncompressed even where the proxy gzips JSON: a long session's
++ * tail page is ~3x larger raw. Ask for gzip unless the caller set an
++ * encoding, and decode it here; any other encoding passes through as is.
++ */
++const JSON_ACCEPT_ENCODING = 'gzip'
++
++function withAcceptEncoding<T extends http.OutgoingHttpHeaders>(headers: T): T {
++  const named = Object.keys(headers).some(name => name.toLowerCase() === 'accept-encoding')
++
++  return named ? headers : { ...headers, 'Accept-Encoding': JSON_ACCEPT_ENCODING }
++}
++
++function decodedResponseBody(res: Readable & { headers?: Record<string, unknown> }): Readable {
++  const encoding = String(res.headers?.['content-encoding'] || '')
++    .trim()
++    .toLowerCase()
++
++  if (encoding !== 'gzip' && encoding !== 'x-gzip') {
++    return res
++  }
++
++  const gunzip = zlib.createGunzip()
++  // The caller listens on the stream it reads: forward the socket's errors.
++  res.on('error', error => gunzip.destroy(error))
++  // A corrupt body unpipes and leaves the response paused on a keep-alive
++  // socket: drop it instead of parking it until the request timeout.
++  gunzip.on('error', () => res.destroy())
++
++  return res.pipe(gunzip)
++}
++
+ export {
++  decodedResponseBody,
++  withAcceptEncoding,
+   destroyKeepaliveAgents,
+   downloadAgentFor,
+   htmlResponseError,
+diff --git a/apps/desktop/electron/main.ts b/apps/desktop/electron/main.ts
+index 4ed66b7..731c811 100644
+--- a/apps/desktop/electron/main.ts
++++ b/apps/desktop/electron/main.ts
+@@ -45,12 +45,14 @@ import type { Session } from 'electron'
+ import { type ActiveRuntimeState, classifyActiveRuntime } from './active-runtime-state'
+ import { HERMES_API_EXPECTED_404 } from './api-expected-404'
+ import {
++  decodedResponseBody,
+   destroyKeepaliveAgents,
+   htmlResponseError,
+   httpStatusError,
+   jsonAgentFor,
+   readJsonErrorBody,
+   readStatusCode,
++  withAcceptEncoding,
+   withRetry
+ } from './api-transport'
+ import { appIconCandidates, resolveAppIcon, shouldOverrideDockIcon } from './app-icon'
+@@ -5217,7 +5219,7 @@ function fetchJson(url, token, options: any = {}) {
+           {
+             agent,
+             method: options.method || 'GET',
+-            headers: {
++            headers: withAcceptEncoding({
+               ...headersForRemoteRequest(url),
+               ...(options.headers || {}),
+               'Content-Type': contentType,
+@@ -5229,13 +5231,14 @@ function fetchJson(url, token, options: any = {}) {
+               // no cookie involved.
+               ...(options.bearer ? { Authorization: `Bearer ${options.bearer}` } : {}),
+               ...(body ? { 'Content-Length': String(body.length) } : {})
+-            }
++            })
+           },
+           res => {
+             const chunks = []
+-            res.on('error', reject)
+-            res.on('data', chunk => chunks.push(chunk))
+-            res.on('end', () => {
++            const bodyStream = decodedResponseBody(res)
++            bodyStream.on('error', reject)
++            bodyStream.on('data', chunk => chunks.push(chunk))
++            bodyStream.on('end', () => {
+               const text = Buffer.concat(chunks).toString('utf8')
+ 
+               if ((res.statusCode || 500) >= 400) {
