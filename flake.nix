@@ -281,6 +281,11 @@
           import ./modules/nixos/yggdrasil/test.nix {
             pkgs = nixpkgs.legacyPackages.x86_64-linux;
           };
+        # Patched yggdrasil: peerings survive a lossy high-latency link.
+        yggdrasil-peer-timeout =
+          import ./modules/nixos/yggdrasil/test-peer-timeout.nix {
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          };
         # som's agents kept off Roman's site LANs.
         zt-eu-lan-guard =
           import ./modules/nixos/zt-eu-lan-guard/test.nix {

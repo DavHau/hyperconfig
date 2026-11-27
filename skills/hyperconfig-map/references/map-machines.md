@@ -91,6 +91,7 @@ Shared vars generated (vars/shared): agave-geninf-ro clan-secrets-pull esphome-c
 - residential-proxy: modules/nixos/residential-proxy/test.nix
 - v6-fallback: modules/nixos/v6-fallback/test.nix
 - yggdrasil-no-transit: modules/nixos/yggdrasil/test.nix
+- yggdrasil-peer-timeout: modules/nixos/yggdrasil/test-peer-timeout.nix
 - zt-eu-lan-guard: modules/nixos/zt-eu-lan-guard/test.nix
 - monitoring-teamclaude: modules/nixos/monitoring-teamclaude/test.nix
 - owntracks: modules/nixos/owntracks/test.nix

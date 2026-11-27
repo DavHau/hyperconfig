@@ -433,8 +433,9 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - modules/nixos/wyoming-local-speech/translate.py — -
 - modules/nixos/wyoming-local-speech/tts.py — -
 - modules/nixos/wyoming-local-speech/voices-sso.nix — vit's TTS voice picker (./tts.py's HTTP API: <- edi
-- modules/nixos/yggdrasil/default.nix — yggdrasil with a no-transit switch (`hyper.yggdrasil.noTransit`): <- modules/flake-parts/nixosConfigurations.nix, m/yggdrasil/test.nix
+- modules/nixos/yggdrasil/default.nix — yggdrasil patched with a no-transit switch (`hyper.yggdrasil.noTransit`) and a longer peer timeout (`hyper.yggdrasil.pe… <- modules/flake-parts/nixosConfigurations.nix, m/yggdrasil/test-peer-timeout.nix, m/yggdrasil/test.nix
 - modules/nixos/yggdrasil/multicast-interfaces.nix — The fleet's yggdrasil MulticastInterfaces (clan's yggdrasil service setting `multicastInterfaces`, set in modules/flake… <- modules/flake-parts/nixosConfigurations.nix
+- modules/nixos/yggdrasil/test-peer-timeout.nix — ./default.nix's `hyper.yggdrasil.peerTimeout` in VMs: <- flake.nix
 - modules/nixos/yggdrasil/test.nix — ./default.nix (patched yggdrasil, `hyper.yggdrasil.noTransit`) in VMs: <- flake.nix
 - modules/nixos/zfs-keylocation-sync/default.nix — Keep a ZFS encryption root's `keylocation` pointing at its current key file. <- machines/bam/zfs.nix, m/zfs-keylocation-sync/test.nix
 - modules/nixos/zfs-keylocation-sync/test.nix — An encrypted pool whose keylocation names a key file that no longer exists (the key moved, as clan's vars did on bam) s… <- flake.nix

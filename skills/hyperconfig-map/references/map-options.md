@@ -92,6 +92,7 @@ file, don't read it whole. `<-` = files/machines that reference the path.
 - hyper.wyomingLocalSpeech: modules/nixos/wyoming-local-speech/default.nix
 - hyper.wyomingLocalSpeech.btSpeaker: modules/nixos/wyoming-local-speech/bt-speaker.nix
 - hyper.yggdrasil.noTransit: modules/nixos/yggdrasil/default.nix
+- hyper.yggdrasil.peerTimeout: modules/nixos/yggdrasil/default.nix
 - hyper.zfsArcMax: modules/nixos/zfs-arc-max.nix
 - hyper.zfsEphemeralTmp.dataset: modules/nixos/zfs-ephemeral-tmp.nix
 - hyper.ztEuLanGuard: modules/nixos/zt-eu-lan-guard/default.nix
